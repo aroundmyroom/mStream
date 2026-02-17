@@ -21,7 +21,7 @@ jobs:
         with:
           path: website
           repository: IrosTheBeggar/mstream-website
-          token: ${{ secrets.github_token }}
+          token: ${{ secrets.WEBSITE_KEY }}
           ref: master
       - name: checkout mStream app code
         uses: actions/checkout@v6
