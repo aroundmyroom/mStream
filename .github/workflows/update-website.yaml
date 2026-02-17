@@ -18,14 +18,14 @@ jobs:
         with:
           path: website
           repository: IrosTheBeggar/mstream-website
-          token: ${{ secrets.github_token }}
+          # token: ${{ secrets.github_token }}
           ref: master
       - name: checkout mStream app code
         uses: actions/checkout@v6
         with:
           path: mstream
           repository: IrosTheBeggar/mStream
-          token: ${{ secrets.github_token }}
+          # token: ${{ secrets.github_token }}
           ref: master
       - run: ls
       - run: |
