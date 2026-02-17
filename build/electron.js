@@ -5,7 +5,8 @@ import { fileURLToPath } from 'url';
 import os from 'os';
 import { makeDirectory } from 'make-dir';
 import * as server from '../src/server.js';
-import { autoUpdater } from 'electron-updater';
+import pkg from 'electron-updater';
+const { autoUpdater } = pkg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
