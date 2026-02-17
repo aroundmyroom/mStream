@@ -50,7 +50,7 @@
       ],
       "category": "public.app-category.music",
       "binaries": [
-        "sync/syncthing-osx"
+        "bin/syncthing/syncthing-osx"
       ]
     },
     "win": {
