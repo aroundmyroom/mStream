@@ -21,14 +21,14 @@ jobs:
         with:
           path: website
           repository: IrosTheBeggar/mstream-website
-          token: ${{ secrets.WEBSITE_KEY }}
           ref: master
+          with:
+            ssh-private-key: ${{ secrets.WEBSITE_KEY }}
       - name: checkout mStream app code
         uses: actions/checkout@v6
         with:
           path: mstream
           repository: IrosTheBeggar/mStream
-          # token: ${{ secrets.github_token }}
           ref: master
       - run: ls
       - run: |
