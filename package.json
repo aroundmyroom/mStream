@@ -50,7 +50,6 @@
       ],
       "category": "public.app-category.music",
       "binaries": [
-        "frp/mstream-ddns-osx",
         "sync/syncthing-osx"
       ]
     },
