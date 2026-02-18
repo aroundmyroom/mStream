@@ -22,8 +22,7 @@ jobs:
           path: website
           repository: IrosTheBeggar/mstream-website
           ref: master
-          with:
-            ssh-private-key: ${{ secrets.WEBSITE_KEY }}
+          ssh-private-key: ${{ secrets.WEBSITE_KEY }}
       - name: checkout mStream app code
         uses: actions/checkout@v6
         with:
