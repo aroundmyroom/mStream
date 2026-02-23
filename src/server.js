@@ -155,6 +155,12 @@ export async function serveIt(configFile) {
   // Give access to public folder
   mstream.use('/', express.static(config.program.webAppDirectory));
 
+  // Serve browser-standard paths without auth
+  mstream.get('/favicon.ico', (_req, res) => res.redirect(301, '/assets/fav/favicon.ico'));
+  mstream.get('/robots.txt', (_req, res) => {
+    res.type('text/plain').send('User-agent: *\nDisallow: /\n');
+  });
+
   // Public APIs
   remoteApi.setupBeforeAuth(mstream, server);
   await sharedApi.setupBeforeSecurity(mstream);
@@ -209,7 +215,14 @@ export async function serveIt(configFile) {
 
   // error handling
   mstream.use((error, req, res, _next) => {
-    winston.error(`Server error on route ${req.originalUrl}`, { stack: error });
+    const status = error instanceof WebError ? error.status : 500;
+
+    if (status === 401 || status === 403) {
+      // Auth failures are normal operational noise – log at warn, not error
+      winston.warn(`Auth failure on route ${req.originalUrl} [${status}]`);
+    } else {
+      winston.error(`Server error on route ${req.originalUrl}: ${error.message}`, { stack: error });
+    }
 
     // Check for validation error
     if (error instanceof Joi.ValidationError) {
