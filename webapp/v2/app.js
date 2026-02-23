@@ -111,6 +111,14 @@ const Player = {
     S.djIgnore = [];
     this.playAt(0);
   },
+  // Add to queue; if nothing is playing yet, start immediately
+  queueAndPlay(song) {
+    if (!audioEl.src || audioEl.ended || S.queue.length === 0) {
+      this.playSingle(song);
+    } else {
+      this.addSong(song);
+    }
+  },
   addSong(song) {
     S.queue.push(song);
     toast('Added: ' + (song.title || song.filepath.split('/').pop()));
@@ -397,7 +405,7 @@ function attachSongListEvents(container, songs) {
     row.addEventListener('click', e => {
       if (e.target.closest('.add-btn') || e.target.closest('.ctx-btn') || e.target.closest('.row-stars')) return;
       const i = parseInt(row.dataset.ci);
-      if (songs[i]) Player.playSingle(songs[i]);
+      if (songs[i]) Player.queueAndPlay(songs[i]);
     });
   });
   container.querySelectorAll('.add-btn').forEach(btn => {
@@ -1074,7 +1082,7 @@ function renderFileExplorer(d) {
       const fp = el.dataset.fp;
       if (!fp) return;
       const found = dirSongs.find(s => s.filepath === fp);
-      if (found) Player.playSingle(found);
+      if (found) Player.queueAndPlay(found);
     });
   });
   body.querySelectorAll('.fe-play-btn').forEach(btn => {
