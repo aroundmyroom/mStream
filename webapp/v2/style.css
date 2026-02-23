@@ -251,6 +251,13 @@ a{color:inherit;text-decoration:none;}
 }
 .row-act-btn:hover{background:var(--raised);color:var(--t1);}
 
+/* ── MOST PLAYED ─────────────────────────────────────────── */
+.song-row.mp-row{grid-template-columns:36px 48px 1fr 108px auto auto;}
+.mp-count-cell{display:flex;align-items:center;gap:7px;flex-shrink:0;width:108px;}
+.mp-bar-track{flex:1;min-width:44px;height:3px;background:var(--raised);border-radius:2px;overflow:hidden;}
+.mp-bar-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--primary-g),var(--primary));}
+.mp-num{font-size:11px;color:var(--t3);white-space:nowrap;min-width:26px;text-align:right;}
+
 /* ── ALBUM GRID ────────────────────────────────────────────── */
 .album-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:20px;}
 .album-card{cursor:pointer;border-radius:var(--r2);overflow:hidden;background:var(--surface);transition:transform .18s,box-shadow .18s;}
@@ -609,8 +616,86 @@ a{color:inherit;text-decoration:none;}
   transition:background .18s,color .18s;cursor:pointer;
 }
 .np-viz-btn:hover{background:var(--primary);color:#fff;}
+
+/* ── EQUALIZER PANEL ───────────────────────────────────── */
+.eq-panel{
+  position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(14px);
+  width:min(700px,96vw);background:var(--surface);border:1px solid var(--border);
+  border-radius:16px;padding:16px 20px 20px;
+  box-shadow:0 -2px 40px rgba(0,0,0,.55);z-index:500;
+  opacity:0;transition:opacity .22s,transform .22s;pointer-events:none;
+}
+.eq-panel.open{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:all;}
+.eq-panel.hidden{display:none!important;}
+.eq-header{
+  display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;
+}
+.eq-title{
+  font-size:13px;font-weight:700;color:var(--t1);letter-spacing:.3px;white-space:nowrap;
+}
+.eq-presets{
+  display:flex;gap:5px;flex-wrap:wrap;flex:1;
+}
+.eq-preset-btn{
+  padding:4px 10px;border-radius:99px;font-size:11px;font-weight:600;
+  background:var(--raised);color:var(--t2);border:1px solid var(--border);
+  cursor:pointer;transition:background .14s,color .14s,border-color .14s;
+  white-space:nowrap;
+}
+.eq-preset-btn:hover{background:var(--hover);color:var(--t1);}
+.eq-preset-btn.active{background:var(--primary-d);color:var(--primary);border-color:var(--primary-g);}
+.eq-bypass-wrap{
+  display:flex;align-items:center;gap:6px;flex-shrink:0;cursor:pointer;margin-left:auto;
+}
+.eq-bypass-text{font-size:11px;color:var(--t3);white-space:nowrap;}
+.eq-bypass-track{
+  position:relative;width:30px;height:17px;border-radius:99px;flex-shrink:0;
+  background:var(--border2);border:1px solid var(--border2);transition:background .22s;
+}
+.eq-bypass-track.lit{background:var(--primary);border-color:var(--primary);}
+.eq-bypass-thumb{
+  position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.3);transition:transform .22s cubic-bezier(.34,1.56,.64,1);
+}
+.eq-bypass-track.lit .eq-bypass-thumb{transform:translateX(13px);}
+.eq-close-btn{
+  width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+  font-size:13px;color:var(--t3);background:transparent;transition:background .14s,color .14s;
+  flex-shrink:0;
+}
+.eq-close-btn:hover{background:var(--raised);color:var(--t1);}
+/* Sliders row */
+.eq-sliders{
+  display:flex;justify-content:space-between;gap:4px;
+}
+.eq-band{
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  flex:1;min-width:0;
+}
+.eq-db{
+  font-size:10px;font-weight:600;min-height:14px;white-space:nowrap;
+}
+.eq-slider-wrap{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  height:92px;
+}
+.eq-slider{
+  writing-mode:vertical-lr;direction:rtl;
+  -webkit-appearance:slider-vertical;appearance:slider-vertical;
+  width:22px;height:88px;cursor:pointer;accent-color:var(--primary);
+}
+.eq-freq{
+  font-size:10px;color:var(--t3);white-space:nowrap;
+}
+/* EQ button active state (non-flat settings applied) */
+.ctrl-btn.eq-active{color:var(--primary);}
+.ctrl-btn.eq-active svg{filter:drop-shadow(0 0 3px var(--primary-g));}
+
 /* Responsive: stack vertically on phones */
 @media(max-width:600px){
+  .song-row.mp-row{grid-template-columns:36px 48px 1fr auto auto auto;}
+  .mp-bar-track{display:none;}
+  .mp-count-cell{width:auto;}
   .np-modal-box{flex-direction:column;border-radius:16px;max-height:95vh;overflow-y:auto;}
   .np-left{width:100%;padding:28px 28px 20px;}
   .np-art{width:min(220px,55vw);margin:0 auto;}

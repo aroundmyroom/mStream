@@ -30,6 +30,7 @@ let scrobbleTimer = null;
 let audioCtx     = null;   // shared Web Audio context (initialised by VIZ.open)
 let analyserL    = null;   // left-channel analyser
 let analyserR    = null;   // right-channel analyser
+let eqFilters    = [];     // 8 BiquadFilterNodes – built on first play
 
 // ── HELPERS ──────────────────────────────────────────────────
 function esc(s) {
@@ -430,6 +431,60 @@ function renderSongRows(songs) {
   }).join('');
 }
 
+function renderMostPlayedRows(songs, maxPlays) {
+  return songs.map((s, i) => {
+    const title  = s.title  || s.filepath?.split('/').pop() || 'Unknown';
+    const artist = s.artist || '';
+    const album  = s.album  ? ` · ${s.album}` : '';
+    const stars  = starsHtml(s.rating || 0);
+    const art    = artUrl(s['album-art'], 's');
+    const plays  = s._playCount || 0;
+    const pct    = maxPlays > 0 ? Math.max(3, Math.round((plays / maxPlays) * 100)) : 0;
+    return `<div class="song-row mp-row" data-ci="${i}">
+      <div class="row-num">
+        <span class="num-val">${i + 1}</span>
+        <svg class="row-play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+      </div>
+      <div class="row-art">
+        ${art ? `<img src="${art}" loading="lazy" onerror="this.style.display='none'">` : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`}
+      </div>
+      <div class="song-info">
+        <div class="song-title">${esc(title)}</div>
+        <div class="song-sub">${esc(artist)}${esc(album)}</div>
+      </div>
+      <div class="mp-count-cell">
+        <div class="mp-bar-track"><div class="mp-bar-fill" style="width:${pct}%"></div></div>
+        <span class="mp-num">${plays}</span>
+      </div>
+      <div class="row-stars" data-ci="${i}">${stars}</div>
+      <div class="row-actions">
+        <button class="row-act-btn add-btn" data-ci="${i}" title="Add to queue">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button class="row-act-btn ctx-btn" data-ci="${i}" title="More options">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function showMostPlayed(songs) {
+  S.curSongs = songs;
+  document.getElementById('play-all-btn').onclick = () => {
+    if (songs.length) { Player.setQueue(songs, 0); toast(`Playing ${songs.length} songs`); }
+  };
+  document.getElementById('add-all-btn').onclick = () => {
+    if (songs.length) { Player.addAll(songs); }
+  };
+  if (!songs.length) { setBody('<div class="empty-state">No songs found</div>'); return; }
+  const maxPlays = Math.max(...songs.map(s => s._playCount || 0));
+  const body = document.getElementById('content-body');
+  body.innerHTML = `<div class="song-list">${renderMostPlayedRows(songs, maxPlays)}</div>`;
+  attachSongListEvents(body, songs);
+  highlightRow();
+}
+
 function attachSongListEvents(container, songs) {
   container.querySelectorAll('.song-row').forEach(row => {
     row.addEventListener('click', e => {
@@ -573,6 +628,26 @@ function hideNPModal() {
   document.getElementById('np-modal').classList.add('hidden');
 }
 
+// ── EQUALIZER CONFIG ──────────────────────────────────────────
+const EQ_BANDS = [
+  { freq:    60, type: 'lowshelf',  label: '60',   q: 1.0 },
+  { freq:   170, type: 'peaking',   label: '170',  q: 1.4 },
+  { freq:   310, type: 'peaking',   label: '310',  q: 1.4 },
+  { freq:   600, type: 'peaking',   label: '600',  q: 1.4 },
+  { freq:  1000, type: 'peaking',   label: '1k',   q: 1.4 },
+  { freq:  3000, type: 'peaking',   label: '3k',   q: 1.4 },
+  { freq:  6000, type: 'peaking',   label: '6k',   q: 1.4 },
+  { freq: 14000, type: 'highshelf', label: '14k',  q: 1.0 },
+];
+const EQ_PRESETS = {
+  'Flat':       [  0,  0,  0,  0,  0,  0,  0,  0],
+  'Bass Boost': [  6,  4,  2,  0,  0,  0,  0,  0],
+  'Classical':  [  0,  0,  0,  0,  0,  0, -2, -4],
+  'Vocal':      [ -2, -2,  0,  2,  4,  2,  0, -2],
+  'Electronic': [  4,  2,  0, -2,  0,  2,  4,  2],
+  'Rock':       [  2,  2,  0, -1,  0,  1,  3,  2],
+};
+
 // ── MINI SPECTRUM (player bar) ──────────────────────────────
 const MINI_SPEC = (() => {
   let rafId = null;
@@ -680,9 +755,23 @@ const VIZ = (() => {
     gain.gain.value = 1.25;
     const splitter = audioCtx.createChannelSplitter(2);
     const src      = audioCtx.createMediaElementSource(audioEl);
+    // Build 8-band EQ filter chain and apply saved settings
+    const _savedGains   = JSON.parse(localStorage.getItem('ms2_eq')    || 'null') || Array(8).fill(0);
+    const _savedEnabled = localStorage.getItem('ms2_eq_on') !== 'false';
+    eqFilters = EQ_BANDS.map((b, i) => {
+      const f = audioCtx.createBiquadFilter();
+      f.type = b.type;
+      f.frequency.value = b.freq;
+      if (b.type === 'peaking') f.Q.value = b.q;
+      f.gain.value = _savedEnabled ? (_savedGains[i] || 0) : 0;
+      return f;
+    });
+    // Wire: src → gain → eq[0..7] → analyserNode + splitter → destinations
     src.connect(gain);
-    gain.connect(analyserNode);       // butterchurn (mono mix)
-    gain.connect(splitter);           // split into L + R
+    let _node = gain;
+    for (const f of eqFilters) { _node.connect(f); _node = f; }
+    _node.connect(analyserNode);      // butterchurn (mono mix)
+    _node.connect(splitter);          // split into L + R
     splitter.connect(analyserL, 0);   // left  channel
     splitter.connect(analyserR, 1);   // right channel
     analyserNode.connect(audioCtx.destination);
@@ -1515,7 +1604,7 @@ async function viewMostPlayed() {
   try {
     const d = await api('POST', 'api/v1/db/stats/most-played', { limit: 100 });
     if (!d.length) { setBody('<div class="empty-state">No play history yet</div>'); return; }
-    showSongs(d.map(s => { const n = norm(s); n._playCount = s.metadata?.['play-count']; return n; }));
+    showMostPlayed(d.map(s => { const n = norm(s); n._playCount = s.metadata?.['play-count']; return n; }));
   } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
@@ -2033,6 +2122,114 @@ document.getElementById('player-stars').addEventListener('click', e => {
   document.getElementById('rate-panel').dataset.fp = cur.filepath;
 });
 
+// ── EQUALIZER ────────────────────────────────────────────────
+const EQ = (() => {
+  let gains   = JSON.parse(localStorage.getItem('ms2_eq')    || 'null') || Array(8).fill(0);
+  let enabled = localStorage.getItem('ms2_eq_on') !== 'false';
+
+  function save() {
+    localStorage.setItem('ms2_eq', JSON.stringify(gains));
+    localStorage.setItem('ms2_eq_on', enabled ? 'true' : 'false');
+  }
+
+  function applyToFilters() {
+    if (!eqFilters.length) return;
+    eqFilters.forEach((f, i) => { f.gain.value = enabled ? (gains[i] || 0) : 0; });
+  }
+
+  const dbLabel = v => (v > 0 ? '+' : '') + v;
+  const dbColor = v => v > 0 ? 'var(--primary)' : v < 0 ? 'var(--accent)' : 'var(--t3)';
+
+  function updateSliderUIs() {
+    EQ_BANDS.forEach((_, i) => {
+      const s = document.getElementById(`eq-s-${i}`);
+      const l = document.getElementById(`eq-db-${i}`);
+      if (s) s.value = gains[i];
+      if (l) { l.textContent = dbLabel(gains[i]); l.style.color = dbColor(gains[i]); }
+    });
+    updateActivePreset();
+  }
+
+  function updateActivePreset() {
+    document.querySelectorAll('.eq-preset-btn').forEach(btn => {
+      const p = EQ_PRESETS[btn.dataset.preset];
+      btn.classList.toggle('active', !!p && JSON.stringify(p) === JSON.stringify(gains));
+    });
+  }
+
+  function updateBypassUI() {
+    const track = document.getElementById('eq-bypass-track');
+    const lbl   = document.getElementById('eq-bypass-text');
+    if (track) track.classList.toggle('lit', enabled);
+    if (lbl)   lbl.textContent = enabled ? 'On' : 'Off';
+    document.getElementById('eq-btn')?.classList.toggle('eq-active', enabled && gains.some(g => g !== 0));
+  }
+
+  function renderSliders() {
+    const wrap = document.getElementById('eq-sliders');
+    if (!wrap) return;
+    wrap.innerHTML = EQ_BANDS.map((b, i) => `
+      <div class="eq-band">
+        <span class="eq-db" id="eq-db-${i}" style="color:${dbColor(gains[i])}">${dbLabel(gains[i])}</span>
+        <div class="eq-slider-wrap"><input type="range" class="eq-slider" id="eq-s-${i}"
+          min="-12" max="12" step="0.5" value="${gains[i]}" orient="vertical"></div>
+        <span class="eq-freq">${esc(b.label)}</span>
+      </div>`).join('');
+    EQ_BANDS.forEach((_, i) => {
+      document.getElementById(`eq-s-${i}`).addEventListener('input', e => {
+        const v = parseFloat(e.target.value);
+        gains[i] = v;
+        const l = document.getElementById(`eq-db-${i}`);
+        if (l) { l.textContent = dbLabel(v); l.style.color = dbColor(v); }
+        applyToFilters(); save(); updateActivePreset(); updateBypassUI();
+      });
+    });
+    document.querySelectorAll('.eq-preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const p = EQ_PRESETS[btn.dataset.preset];
+        if (!p) return;
+        gains = [...p];
+        applyToFilters(); save(); updateSliderUIs(); updateBypassUI();
+      });
+    });
+    updateActivePreset();
+  }
+
+  function open() {
+    const panel = document.getElementById('eq-panel');
+    panel.classList.remove('hidden');
+    requestAnimationFrame(() => panel.classList.add('open'));
+    renderSliders();
+    updateBypassUI();
+  }
+
+  function close() {
+    const panel = document.getElementById('eq-panel');
+    panel.classList.remove('open');
+    panel.addEventListener('transitionend', () => panel.classList.add('hidden'), { once: true });
+  }
+
+  function toggle() {
+    const panel = document.getElementById('eq-panel');
+    (panel.classList.contains('hidden') || !panel.classList.contains('open')) ? open() : close();
+  }
+
+  document.getElementById('eq-bypass-track').addEventListener('click', () => {
+    enabled = !enabled;
+    applyToFilters(); save(); updateBypassUI();
+  });
+  document.getElementById('eq-close-btn').addEventListener('click', close);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      const panel = document.getElementById('eq-panel');
+      if (panel && !panel.classList.contains('hidden')) close();
+    }
+  });
+
+  updateBypassUI();
+  return { toggle, open, close, applyToFilters };
+})();
+
 // Close ctx / rate panel on outside click
 document.addEventListener('click', e => {
   if (!e.target.closest('#ctx-menu') && !e.target.closest('.ctx-btn') && !e.target.closest('#rate-panel') && !e.target.closest('.row-stars') && !e.target.closest('#player-stars')) {
@@ -2104,6 +2301,7 @@ document.getElementById('viz-close-btn').addEventListener('click', () => VIZ.clo
 document.getElementById('viz-prev-btn').addEventListener('click', () => VIZ.prev());
 document.getElementById('viz-next-btn').addEventListener('click', () => VIZ.next());
 document.getElementById('viz-mode-btn').addEventListener('click', () => VIZ.toggleMode());
+document.getElementById('eq-btn').addEventListener('click', () => EQ.toggle());
 window.addEventListener('resize', () => {
   const overlay = document.getElementById('viz-overlay');
   if (overlay.classList.contains('hidden')) return;
