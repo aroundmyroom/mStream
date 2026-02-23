@@ -1027,7 +1027,37 @@ function renderFileExplorer(d) {
   const body = document.getElementById('content-body');
   body.innerHTML = `
     <div class="fe-breadcrumb">${crumbs}</div>
-    <div class="fe-grid">${dirs}${files}</div>`;
+    <div class="fe-filter-row">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="fe-filter" class="fe-filter-input" type="text" placeholder="Filter folders and songs…" autocomplete="off">
+      <span id="fe-match-count" class="fe-match-count"></span>
+      <button id="fe-filter-clear" class="fe-filter-clear hidden" title="Clear filter">✕</button>
+    </div>
+    <div id="fe-grid" class="fe-grid">${dirs}${files}</div>`;
+
+  // Live filter
+  const filterInput  = body.querySelector('#fe-filter');
+  const filterClear  = body.querySelector('#fe-filter-clear');
+  const matchCount   = body.querySelector('#fe-match-count');
+  const grid         = body.querySelector('#fe-grid');
+
+  function applyFilter() {
+    const q = filterInput.value.trim().toLowerCase();
+    filterClear.classList.toggle('hidden', !q);
+    const rows = grid.querySelectorAll('.fe-dir, .fe-file');
+    let visible = 0;
+    rows.forEach(row => {
+      const name = (row.dataset.dir || row.dataset.name || '').split('/').pop().toLowerCase();
+      const artist = row.querySelector('[style*="color:var(--t2)"]')?.textContent?.toLowerCase() || '';
+      const matches = !q || name.includes(q) || artist.includes(q);
+      row.classList.toggle('fe-hidden', !matches);
+      if (matches) visible++;
+    });
+    matchCount.textContent = q ? `${visible} result${visible !== 1 ? 's' : ''}` : '';
+  }
+
+  filterInput.addEventListener('input', applyFilter);
+  filterClear.addEventListener('click', () => { filterInput.value = ''; filterInput.focus(); applyFilter(); });
 
   // Breadcrumb navigation
   body.querySelectorAll('.fe-crumb').forEach(el => {
