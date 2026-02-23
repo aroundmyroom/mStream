@@ -374,6 +374,13 @@
       <button id="viz-open-btn" class="ctrl-btn ctrl-sm" title="Visualizer">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
       </button>
+      <button id="eq-btn" class="ctrl-btn ctrl-sm" title="Equalizer">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="4" y1="4" x2="4" y2="20"/><circle cx="4" cy="10" r="2.5"/>
+          <line x1="12" y1="4" x2="12" y2="20"/><circle cx="12" cy="17" r="2.5"/>
+          <line x1="20" y1="4" x2="20" y2="20"/><circle cx="20" cy="8" r="2.5"/>
+        </svg>
+      </button>
       <button id="queue-btn" class="ctrl-btn ctrl-sm" title="Queue">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
         <span id="queue-count" class="q-count"></span>
@@ -384,6 +391,27 @@
       </div>
     </div>
   </footer>
+
+  <!-- EQUALIZER PANEL -->
+  <div id="eq-panel" class="eq-panel hidden">
+    <div class="eq-header">
+      <span class="eq-title">Equalizer</span>
+      <div class="eq-presets">
+        <button class="eq-preset-btn" data-preset="Flat">Flat</button>
+        <button class="eq-preset-btn" data-preset="Bass Boost">Bass</button>
+        <button class="eq-preset-btn" data-preset="Classical">Classical</button>
+        <button class="eq-preset-btn" data-preset="Vocal">Vocal</button>
+        <button class="eq-preset-btn" data-preset="Electronic">Electronic</button>
+        <button class="eq-preset-btn" data-preset="Rock">Rock</button>
+      </div>
+      <div class="eq-bypass-wrap">
+        <span id="eq-bypass-text" class="eq-bypass-text">On</span>
+        <div id="eq-bypass-track" class="eq-bypass-track lit"><div class="eq-bypass-thumb"></div></div>
+      </div>
+      <button id="eq-close-btn" class="eq-close-btn" title="Close">✕</button>
+    </div>
+    <div class="eq-sliders" id="eq-sliders"></div>
+  </div>
 
 </div><!-- #app -->
 
