@@ -9,6 +9,9 @@
   <link rel="icon" type="image/png" sizes="16x16" href="../assets/fav/favicon-16x16.png">
   <link rel="manifest" href="../assets/fav/site.webmanifest">
   <link rel="shortcut icon" href="../assets/fav/favicon.ico">
+  <script defer src="../assets/js/lib/butterchurn.min.js"></script>
+  <script defer src="../assets/js/lib/butterchurn-presets.min.js"></script>
+  <script defer src="../assets/js/lib/butterchurn-presets-extra.js"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -103,8 +106,57 @@
   </div>
   <button id="rate-clear">Clear rating</button>
 </div>
-
-
+<!-- Now Playing modal -->
+<div id="np-modal" class="modal-overlay hidden">
+  <div class="np-modal-box" id="np-box">
+    <button id="np-close-btn" class="np-close" title="Close (Esc)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <!-- Left: blurred glow background + square art -->
+    <div class="np-left">
+      <div id="np-art-blur" class="np-art-blur"></div>
+      <div id="np-art" class="np-art"></div>
+    </div>
+    <!-- Right: info + controls + metadata -->
+    <div class="np-right">
+      <div class="np-info">
+        <div id="np-title" class="np-title"></div>
+        <div id="np-artist" class="np-artist"></div>
+        <div id="np-album" class="np-album hidden"></div>
+      </div>
+      <div class="np-rate-row">
+        <div class="rate-stars" id="np-rate-stars">
+          <span data-v="2">★</span><span data-v="4">★</span><span data-v="6">★</span><span data-v="8">★</span><span data-v="10">★</span>
+        </div>
+      </div>
+      <div class="np-progress">
+        <span id="np-time-cur">0:00</span>
+        <div id="np-prog-track" class="prog-track">
+          <div id="np-prog-fill" class="prog-fill"></div>
+          <div class="prog-thumb"></div>
+        </div>
+        <span id="np-time-total">0:00</span>
+      </div>
+      <div class="np-controls">
+        <button id="np-prev-btn" class="ctrl-btn" title="Previous">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><polygon points="19,20 9,12 19,4"/><line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2.5"/></svg>
+        </button>
+        <button id="np-play-btn" class="ctrl-btn play-main" style="width:62px;height:62px" title="Play/Pause">
+          <svg id="np-icon-play"  width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+          <svg id="np-icon-pause" width="30" height="30" viewBox="0 0 24 24" fill="currentColor" class="hidden"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+        </button>
+        <button id="np-next-btn" class="ctrl-btn" title="Next">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,4 15,12 5,20"/><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2.5"/></svg>
+        </button>
+      </div>
+      <div id="np-meta" class="np-meta"></div>
+      <button id="np-viz-btn" class="np-viz-btn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        Open Visualizer
+      </button>
+    </div>
+  </div>
+</div>
 <!-- ══════════════════ APP ══════════════════ -->
 <div id="app" class="hidden">
 
@@ -262,14 +314,15 @@
 
   <!-- PLAYER BAR -->
   <footer class="player">
-    <!-- Left: now playing info -->
-    <div class="player-left">
+    <!-- Left: now playing info (click to expand) -->
+    <div class="player-left" id="np-open-btn" title="Expand Now Playing">
       <div id="player-art" class="player-thumb">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.25"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.25"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
       </div>
       <div class="player-info">
         <div id="player-title" class="player-title">—</div>
         <div id="player-artist" class="player-artist"></div>
+        <div id="player-album" class="player-album hidden"></div>
         <div id="player-stars" class="player-stars-row"></div>
       </div>
     </div>
@@ -307,6 +360,9 @@
     <!-- Right: volume + extras -->
     <div class="player-right">
       <span id="dj-light" class="dj-light hidden" title="Auto-DJ active">DJ</span>
+      <button id="viz-open-btn" class="ctrl-btn ctrl-sm" title="Visualizer">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
       <button id="queue-btn" class="ctrl-btn ctrl-sm" title="Queue">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
         <span id="queue-count" class="q-count"></span>
@@ -319,6 +375,27 @@
   </footer>
 
 </div><!-- #app -->
+
+<!-- Butterchurn / Milkdrop Visualizer -->
+<div id="viz-overlay" class="viz-overlay hidden">
+  <canvas id="viz-canvas" class="viz-canvas"></canvas>
+  <div class="viz-bar">
+    <button class="viz-btn" id="viz-prev-btn" title="Previous preset">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="19,20 9,12 19,4"/><line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2.5"/></svg>
+    </button>
+    <span id="viz-preset-name" class="viz-preset-name"></span>
+    <button class="viz-btn" id="viz-next-btn" title="Next preset">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,4 15,12 5,20"/><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2.5"/></svg>
+    </button>
+    <button class="viz-btn" id="viz-close-btn" title="Close (Esc)" style="margin-left:8px">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="viz-song">
+    <div id="viz-song-title" class="viz-song-title"></div>
+    <div id="viz-song-artist" class="viz-song-artist"></div>
+  </div>
+</div>
 
 <audio id="audio" preload="metadata"></audio>
 <div id="toast" class="toast hidden"></div>
