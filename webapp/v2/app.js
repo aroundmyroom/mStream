@@ -23,8 +23,9 @@ const S = {
 };
 
 const audioEl = document.getElementById('audio');
-let scanTimer  = null;
-let djTimer    = null;
+let scanTimer    = null;
+let djTimer      = null;
+let scrobbleTimer = null;
 
 // ── HELPERS ──────────────────────────────────────────────────
 function esc(s) {
@@ -136,6 +137,11 @@ const Player = {
     this.updateBar();
     highlightRow();
     refreshQueueUI();
+    // Scrobble after 30 s (logs play count + last-played timestamp)
+    clearTimeout(scrobbleTimer);
+    scrobbleTimer = setTimeout(() => {
+      api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath }).catch(() => {});
+    }, 30000);
   },
   toggle() {
     if (!audioEl.src) return;
