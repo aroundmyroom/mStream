@@ -1334,8 +1334,8 @@ async function viewArtists() {
   } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
-async function viewArtistAlbums(artist) {
-  setTitle(artist); setBack(() => viewArtists());
+async function viewArtistAlbums(artist, backFn) {
+  setTitle(artist); setBack(backFn || (() => viewArtists()));
   setBody('<div class="loading-state"></div>');
   try {
     const d = await api('POST', 'api/v1/db/artists-albums', { artist });
@@ -1407,11 +1407,18 @@ function viewSearch() {
     </div>
     <div id="search-results"></div>`;
   const input = document.getElementById('search-input');
-  input.focus();
+  // Restore previous query if returning from a drill-down
+  if (S.lastSearch) {
+    input.value = S.lastSearch;
+    doSearch(S.lastSearch);
+  } else {
+    input.focus();
+  }
   let timer;
   input.addEventListener('input', () => {
     clearTimeout(timer);
     const q = input.value.trim();
+    S.lastSearch = q;
     if (!q) { document.getElementById('search-results').innerHTML = ''; return; }
     timer = setTimeout(() => doSearch(q), 320);
   });
@@ -1458,7 +1465,7 @@ async function doSearch(q) {
     if (!html) html = `<div class="empty-state">No results for "${esc(q)}"</div>`;
     res.innerHTML = html;
 
-    res.querySelectorAll('.artist-row[data-artist]').forEach(r => r.addEventListener('click', () => viewArtistAlbums(r.dataset.artist)));
+    res.querySelectorAll('.artist-row[data-artist]').forEach(r => r.addEventListener('click', () => viewArtistAlbums(r.dataset.artist, () => viewSearch())));
     res.querySelectorAll('.artist-row[data-album]').forEach(r => r.addEventListener('click', () => viewAlbumSongs(r.dataset.album, null, () => viewSearch())));
     attachSongListEvents(res, titleSongs);
     S.curSongs = titleSongs;
