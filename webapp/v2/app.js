@@ -543,22 +543,43 @@ function hideNPModal() {
   document.getElementById('np-modal').classList.add('hidden');
 }
 
-// ── BUTTERCHURN VISUALIZER ────────────────────────────────────────
+// ── BUTTERCHURN VISUALIZER + SPECTRUM ────────────────────────
 const VIZ = (() => {
   let visualizer = null, audioCtx = null, analyserNode = null;
+  let analyserL = null, analyserR = null;         // per-channel for spectrum
   let presets = {}, presetKeys = [], presetHistory = [], presetIndex = 0;
   let cycleTimer = null, frameId = null;
   const CYCLE_MS = 15000;
 
+  // Spectrum state
+  let specMode = false;           // false = butterchurn, true = spectrum
+  let specFrameId = null;
+  let peakL = [], peakVelL = [];  // peak state — left channel
+  let peakR = [], peakVelR = [];  // peak state — right channel
+
   function ensureAudio() {
     if (audioCtx) { audioCtx.resume(); return; }
     audioCtx    = new (window.AudioContext || window.webkitAudioContext)();
+    // Main analyser for butterchurn
     analyserNode = audioCtx.createAnalyser();
-    const gain   = audioCtx.createGain();
+    analyserNode.fftSize = 2048;
+    analyserNode.smoothingTimeConstant = 0.82;
+    // Per-channel analysers for spectrum
+    analyserL = audioCtx.createAnalyser();
+    analyserL.fftSize = 2048;
+    analyserL.smoothingTimeConstant = 0.82;
+    analyserR = audioCtx.createAnalyser();
+    analyserR.fftSize = 2048;
+    analyserR.smoothingTimeConstant = 0.82;
+    const gain     = audioCtx.createGain();
     gain.gain.value = 1.25;
-    const src    = audioCtx.createMediaElementSource(audioEl);
+    const splitter = audioCtx.createChannelSplitter(2);
+    const src      = audioCtx.createMediaElementSource(audioEl);
     src.connect(gain);
-    gain.connect(analyserNode);
+    gain.connect(analyserNode);       // butterchurn (mono mix)
+    gain.connect(splitter);           // split into L + R
+    splitter.connect(analyserL, 0);   // left  channel
+    splitter.connect(analyserR, 1);   // right channel
     analyserNode.connect(audioCtx.destination);
   }
 
@@ -566,7 +587,7 @@ const VIZ = (() => {
     const el = document.getElementById('viz-preset-name');
     if (!el) return;
     const n = presetKeys[presetIndex] || '';
-    el.textContent = n.length > 65 ? n.substring(0, 65) + '…' : n;
+    el.textContent = n.length > 65 ? n.substring(0, 65) + '\u2026' : n;
   }
 
   function loadPreset(blend) {
@@ -581,7 +602,7 @@ const VIZ = (() => {
   }
 
   function initViz(canvas) {
-    if (!window.butterchurn) { toast('Visualizer loading… try again in a moment'); return; }
+    if (!window.butterchurn) { toast('Visualizer loading\u2026 try again in a moment'); return; }
     presets = {};
     if (window.butterchurnPresets)      Object.assign(presets, butterchurnPresets.getPresets());
     if (window.butterchurnPresetsExtra) Object.assign(presets, butterchurnPresetsExtra.getPresets());
@@ -603,6 +624,432 @@ const VIZ = (() => {
     }, CYCLE_MS);
   }
 
+  // ── SPECTRUM RENDERER — 7 modes, click canvas to cycle ────
+  const SPEC_MODES = ['Bar Spectrum','Mirror Bars','Radial','Oscilloscope','Waterfall','VU Needles','Lissajous'];
+  let specStyleIdx = parseInt(localStorage.getItem('ms2_spec_style') || '0') % SPEC_MODES.length;
+  let specLabelAlpha = 0;         // fade-out alpha for mode label overlay
+  let waterfallRows = null;       // pixel row buffer for waterfall mode
+  let waterfallPos  = 0;
+
+  function startSpectrum(canvas) {
+    const ctx = canvas.getContext('2d');
+    const BAR_COUNT = 96;
+    const GAP = 2;
+    const CENTRE_GAP = 3;
+
+    // ---- shared peak arrays (reused across mode switches) ----
+    function ensurePeaks(arr, vel, n) {
+      while (arr.length < n) { arr.push(0); vel.push(0); }
+      arr.length = n; vel.length = n;
+    }
+    ensurePeaks(peakL, peakVelL, BAR_COUNT);
+    ensurePeaks(peakR, peakVelR, BAR_COUNT);
+
+    const dataL  = new Uint8Array(analyserL.frequencyBinCount);
+    const dataR  = new Uint8Array(analyserR.frequencyBinCount);
+    const waveL  = new Uint8Array(analyserL.fftSize);
+    const waveR  = new Uint8Array(analyserR.fftSize);
+
+    function resizeCanvas() {
+      const nw = canvas.clientWidth  * (window.devicePixelRatio || 1);
+      const nh = canvas.clientHeight * (window.devicePixelRatio || 1);
+      if (canvas.width !== nw || canvas.height !== nh) {
+        canvas.width = nw; canvas.height = nh;
+        waterfallRows = null; // reset waterfall on resize
+      }
+    }
+
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function barBin(i, total, binCount) {
+      const freq = Math.pow(2, lerp(Math.log2(20), Math.log2(20000), i / total));
+      return Math.min(Math.floor(freq / (audioCtx.sampleRate / 2) * binCount), binCount - 1);
+    }
+    function barHue(v) { return (1 - v) * 200; }
+
+    // ── shared background ──
+    function drawBg(W, H) {
+      const bg = ctx.createLinearGradient(0, 0, 0, H);
+      bg.addColorStop(0, '#06060e'); bg.addColorStop(1, '#0d0d1a');
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    }
+
+    // ── shared channel label ──
+    function drawLabels(W, H, dpr, y, lx, rx) {
+      ctx.shadowBlur = 0;
+      const fs = Math.max(18, 22 * dpr);
+      ctx.font = `700 ${fs}px system-ui,sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.fillText('L', lx, y); ctx.fillText('R', rx, y);
+    }
+
+    // ── shared bar-channel renderer ──
+    function drawBarChannel(data, peaks, vels, px, pw, baseline, dpr) {
+      const gap  = GAP * dpr;
+      const barW = (pw - gap * (BAR_COUNT - 1)) / BAR_COUNT;
+      for (let i = 0; i < BAR_COUNT; i++) {
+        const v    = data[barBin(i, BAR_COUNT, data.length)] / 255;
+        const barH = v * baseline;
+        const x    = px + i * (barW + gap);
+        const hue  = barHue(v);
+        const grd  = ctx.createLinearGradient(0, baseline, 0, baseline - barH);
+        grd.addColorStop(0,   `hsla(${hue},100%,50%,.95)`);
+        grd.addColorStop(0.6, `hsla(${hue+40},100%,62%,.9)`);
+        grd.addColorStop(1,   `hsla(${hue+80},100%,78%,.85)`);
+        ctx.shadowColor = `hsla(${hue},100%,58%,.55)`; ctx.shadowBlur = 10*dpr;
+        ctx.fillStyle = grd;
+        const r = Math.min(barW*.35, 4*dpr);
+        ctx.beginPath(); ctx.roundRect(x, baseline-barH, barW, barH, [r,r,0,0]); ctx.fill();
+        if (barH > peaks[i]) { peaks[i]=barH; vels[i]=0; }
+        else { vels[i]+=0.35*dpr; peaks[i]-=vels[i]; if(peaks[i]<0)peaks[i]=0; }
+        if (peaks[i]>2) {
+          ctx.shadowBlur=6*dpr; ctx.fillStyle=`hsla(${hue+60},100%,90%,.95)`;
+          ctx.fillRect(x, baseline-peaks[i]-3*dpr, barW, 2*dpr);
+        }
+        ctx.shadowBlur=0;
+        const rg = ctx.createLinearGradient(0,baseline,0,baseline+barH*.4);
+        rg.addColorStop(0,`hsla(${hue},100%,50%,.20)`); rg.addColorStop(1,`hsla(${hue},100%,50%,0)`);
+        ctx.fillStyle=rg; ctx.beginPath(); ctx.roundRect(x,baseline,barW,barH*.4,[0,0,r,r]); ctx.fill();
+      }
+    }
+
+    // ══ MODE 0 — Bar Spectrum ══════════════════════════════════
+    function drawBarSpectrum(W, H, dpr) {
+      drawBg(W, H);
+      ctx.shadowBlur=0; ctx.strokeStyle='rgba(255,255,255,.03)'; ctx.lineWidth=1;
+      for(let g=.25;g<1;g+=.25){ctx.beginPath();ctx.moveTo(0,H*g);ctx.lineTo(W,H*g);ctx.stroke();}
+      const cg=CENTRE_GAP*dpr, hw=(W-cg)/2, bl=H*.85;
+      drawBarChannel(dataL,peakL,peakVelL,0,hw,bl,dpr);
+      ctx.shadowBlur=0; ctx.fillStyle='rgba(255,255,255,.06)'; ctx.fillRect(hw,0,cg,H);
+      drawBarChannel(dataR,peakR,peakVelR,hw+cg,hw,bl,dpr);
+      ctx.shadowBlur=0; ctx.strokeStyle='rgba(255,255,255,.08)'; ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(0,bl);ctx.lineTo(W,bl);ctx.stroke();
+      drawLabels(W,H,dpr, bl+28*dpr, hw/2, hw+cg+hw/2);
+    }
+
+    // ══ MODE 1 — Mirror Bars ══════════════════════════════════
+    function drawMirrorBars(W, H, dpr) {
+      drawBg(W, H);
+      const cg=CENTRE_GAP*dpr, hw=(W-cg)/2, cy=H/2;
+      const gap=GAP*dpr, barW=(hw-gap*(BAR_COUNT-1))/BAR_COUNT;
+      // draw both channels mirrored up+down
+      [[dataL,0],[dataR,hw+cg]].forEach(([data,px],ci)=>{
+        for(let i=0;i<BAR_COUNT;i++){
+          const v=data[barBin(i,BAR_COUNT,data.length)]/255;
+          const half=v*cy*.9;
+          const x=px+i*(barW+gap);
+          const hue=barHue(v);
+          const grdU=ctx.createLinearGradient(0,cy,0,cy-half);
+          grdU.addColorStop(0,`hsla(${hue},100%,50%,.9)`);
+          grdU.addColorStop(1,`hsla(${hue+80},100%,78%,.85)`);
+          ctx.shadowColor=`hsla(${hue},100%,55%,.5)`; ctx.shadowBlur=8*dpr;
+          ctx.fillStyle=grdU; ctx.beginPath();
+          ctx.roundRect(x,cy-half,barW,half,[Math.min(barW*.4,4*dpr),Math.min(barW*.4,4*dpr),0,0]);
+          ctx.fill();
+          const grdD=ctx.createLinearGradient(0,cy,0,cy+half);
+          grdD.addColorStop(0,`hsla(${hue},100%,50%,.9)`);
+          grdD.addColorStop(1,`hsla(${hue+80},100%,78%,.1)`);
+          ctx.fillStyle=grdD; ctx.beginPath();
+          ctx.roundRect(x,cy,barW,half,[0,0,Math.min(barW*.4,4*dpr),Math.min(barW*.4,4*dpr)]);
+          ctx.fill();
+        }
+      });
+      ctx.shadowBlur=0; ctx.fillStyle='rgba(255,255,255,.06)'; ctx.fillRect(hw,0,cg,H);
+      ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(0,cy);ctx.lineTo(W,cy);ctx.stroke();
+      drawLabels(W,H,dpr, H*.92, hw/2, hw+cg+hw/2);
+    }
+
+    // ══ MODE 2 — Radial ═══════════════════════════════════════
+    function drawRadial(W, H, dpr) {
+      drawBg(W, H);
+      const cx=W/2, cy=H/2, innerR=Math.min(W,H)*.12, outerMax=Math.min(W,H)*.47;
+      const BARS=120;
+      ctx.shadowBlur=0;
+      // inner circle glow
+      const cGrd=ctx.createRadialGradient(cx,cy,0,cx,cy,innerR);
+      cGrd.addColorStop(0,'rgba(130,60,255,.35)'); cGrd.addColorStop(1,'rgba(130,60,255,0)');
+      ctx.fillStyle=cGrd; ctx.beginPath(); ctx.arc(cx,cy,innerR,0,Math.PI*2); ctx.fill();
+      // L = left half (π..2π), R = right half (0..π)
+      [[dataL,Math.PI,2*Math.PI],[dataR,0,Math.PI]].forEach(([data,aStart,aEnd])=>{
+        for(let i=0;i<BARS;i++){
+          const v=data[barBin(i,BARS,data.length)]/255;
+          const angle=lerp(aStart,aEnd,(i+.5)/BARS);
+          const barLen=(outerMax-innerR)*v;
+          const r1=innerR+2*dpr, r2=innerR+barLen;
+          if(r2<=r1) continue;
+          const hue=barHue(v);
+          ctx.shadowColor=`hsla(${hue},100%,55%,.4)`; ctx.shadowBlur=8*dpr;
+          ctx.strokeStyle=`hsla(${hue},100%,62%,.9)`; ctx.lineWidth=Math.max(2,W/600*dpr);
+          ctx.beginPath();
+          ctx.moveTo(cx+Math.cos(angle)*r1, cy+Math.sin(angle)*r1);
+          ctx.lineTo(cx+Math.cos(angle)*r2, cy+Math.sin(angle)*r2);
+          ctx.stroke();
+        }
+      });
+      ctx.shadowBlur=0;
+      // L / R labels
+      const fs=Math.max(18,22*dpr);
+      ctx.font=`700 ${fs}px system-ui,sans-serif`; ctx.textAlign='center';
+      ctx.fillStyle='rgba(255,255,255,.45)';
+      ctx.fillText('L',cx-innerR*1.8,cy); ctx.fillText('R',cx+innerR*1.8,cy);
+    }
+
+    // ══ MODE 3 — Oscilloscope ═════════════════════════════════
+    function drawOscilloscope(W, H, dpr) {
+      ctx.fillStyle='rgba(0,0,0,.88)'; ctx.fillRect(0,0,W,H);
+      [[waveL,'#00ff88',H*.28],[waveR,'#00aaff',H*.72]].forEach(([wave,colour,midY])=>{
+        ctx.shadowColor=colour; ctx.shadowBlur=14*dpr;
+        ctx.strokeStyle=colour; ctx.lineWidth=1.5*dpr;
+        ctx.beginPath();
+        const sliceW=W/wave.length;
+        for(let i=0;i<wave.length;i++){
+          const x=i*sliceW;
+          const y=midY+((wave[i]/128)-1)*H*.2;
+          i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+        }
+        ctx.stroke();
+        // channel label
+        ctx.shadowBlur=0; ctx.font=`700 ${Math.max(14,16*dpr)}px system-ui,sans-serif`;
+        ctx.textAlign='left'; ctx.fillStyle=colour+'aa';
+        ctx.fillText(colour==='#00ff88'?'L':'R', 12*dpr, midY-H*.22);
+      });
+    }
+
+    // ══ MODE 4 — Waterfall / Spectrogram ═════════════════════
+    function drawWaterfall(W, H, dpr) {
+      const BINS=256;
+      if (!waterfallRows || waterfallRows.width!==W) {
+        waterfallRows=ctx.createImageData(W, H);
+        waterfallPos=0;
+      }
+      // shift image down one row
+      const rowBytes=W*4;
+      waterfallRows.data.copyWithin(rowBytes, 0, W*H*4-rowBytes);
+      // write new top row using average of L+R
+      for(let x=0;x<W;x++){
+        const i=Math.floor(x/W*BINS);
+        const vL=dataL[Math.min(i,dataL.length-1)]/255;
+        const vR=dataR[Math.min(i,dataR.length-1)]/255;
+        const v=(vL+vR)/2;
+        const hue=barHue(v)*1.1;
+        // hsla→rgb inline (fast approximation)
+        const l=0.1+v*0.55, s=1;
+        const a=v>0.02?1:0;
+        // simple hue→rgb
+        function hsl2rgb(h,sl,ll){
+          h=((h%360)+360)%360; const c=(1-Math.abs(2*ll-1))*sl;
+          const x2=c*(1-Math.abs((h/60)%2-1)); const m=ll-c/2;
+          let r=0,g=0,b=0;
+          if(h<60){r=c;g=x2;}else if(h<120){r=x2;g=c;}
+          else if(h<180){g=c;b=x2;}else if(h<240){g=x2;b=c;}
+          else if(h<300){r=x2;b=c;}else{r=c;b=x2;}
+          return[(r+m)*255,(g+m)*255,(b+m)*255];
+        }
+        const [r,g,b]=hsl2rgb(hue,s,l);
+        const base=x*4;
+        waterfallRows.data[base]=r; waterfallRows.data[base+1]=g;
+        waterfallRows.data[base+2]=b; waterfallRows.data[base+3]=a*255;
+      }
+      ctx.clearRect(0,0,W,H);
+      ctx.putImageData(waterfallRows,0,0);
+      // time axis label
+      ctx.shadowBlur=0; ctx.font=`${Math.max(11,13*dpr)}px system-ui,sans-serif`;
+      ctx.textAlign='right'; ctx.fillStyle='rgba(255,255,255,.3)';
+      ctx.fillText('L+R Spectrogram', W-10*dpr, H-10*dpr);
+    }
+
+    // ══ MODE 5 — Analog VU Needles ════════════════════════════
+    function drawVUNeedles(W, H, dpr) {
+      drawBg(W, H);
+      const channels=[{data:dataL,label:'L',cx:W*.27},{data:dataR,label:'R',cx:W*.73}];
+      const cy=H*.55, radius=Math.min(W*.22, H*.52);
+      const arcStart=Math.PI*.75, arcEnd=Math.PI*2.25; // 135°..405° (270° sweep)
+      channels.forEach(({data,label,cx})=>{
+        // compute RMS-like level
+        let sum=0; for(let i=0;i<data.length;i++) sum+=data[i]*data[i];
+        const rms=Math.sqrt(sum/data.length)/255;
+        // peak hold
+        const key=label==='L'?'_vuPkL':'_vuPkR';
+        const keyV=label==='L'?'_vuPkVL':'_vuPkVR';
+        if(!startSpectrum[key]) startSpectrum[key]=0;
+        if(!startSpectrum[keyV]) startSpectrum[keyV]=0;
+        if(rms>startSpectrum[key]){startSpectrum[key]=rms;startSpectrum[keyV]=0;}
+        else{startSpectrum[keyV]+=0.002; startSpectrum[key]-=startSpectrum[keyV]; if(startSpectrum[key]<0)startSpectrum[key]=0;}
+        const pk=startSpectrum[key];
+
+        // arc background
+        ctx.shadowBlur=0;
+        ctx.strokeStyle='rgba(255,255,255,.06)'; ctx.lineWidth=18*dpr;
+        ctx.lineCap='round';
+        ctx.beginPath(); ctx.arc(cx,cy,radius,arcStart,arcEnd); ctx.stroke();
+
+        // coloured arc fill
+        const fillEnd=arcStart+(arcEnd-arcStart)*rms;
+        const hue=barHue(rms);
+        const arcGrd=ctx.createConicalGradient?null:null; // fallback: solid
+        ctx.shadowColor=`hsla(${hue},100%,55%,.5)`; ctx.shadowBlur=16*dpr;
+        ctx.strokeStyle=`hsla(${hue},100%,55%,.9)`; ctx.lineWidth=14*dpr;
+        ctx.beginPath(); ctx.arc(cx,cy,radius,arcStart,fillEnd); ctx.stroke();
+
+        // peak indicator tick
+        const pkAngle=arcStart+(arcEnd-arcStart)*pk;
+        ctx.shadowBlur=10*dpr; ctx.strokeStyle='rgba(255,255,255,.9)'; ctx.lineWidth=3*dpr;
+        ctx.beginPath();
+        ctx.moveTo(cx+Math.cos(pkAngle)*(radius-10*dpr), cy+Math.sin(pkAngle)*(radius-10*dpr));
+        ctx.lineTo(cx+Math.cos(pkAngle)*(radius+10*dpr), cy+Math.sin(pkAngle)*(radius+10*dpr));
+        ctx.stroke();
+
+        // needle
+        const needleAngle=arcStart+(arcEnd-arcStart)*rms;
+        ctx.shadowColor='rgba(255,200,50,.7)'; ctx.shadowBlur=12*dpr;
+        ctx.strokeStyle='rgba(255,220,80,.95)'; ctx.lineWidth=2.5*dpr;
+        ctx.lineCap='round';
+        ctx.beginPath();
+        ctx.moveTo(cx,cy);
+        ctx.lineTo(cx+Math.cos(needleAngle)*radius*.92, cy+Math.sin(needleAngle)*radius*.92);
+        ctx.stroke();
+
+        // centre pivot dot
+        ctx.shadowBlur=8*dpr; ctx.fillStyle='rgba(255,220,80,.9)';
+        ctx.beginPath(); ctx.arc(cx,cy,6*dpr,0,Math.PI*2); ctx.fill();
+
+        // db labels along arc
+        ctx.shadowBlur=0; ctx.fillStyle='rgba(255,255,255,.35)';
+        ctx.font=`${Math.max(9,10*dpr)}px system-ui,sans-serif`; ctx.textAlign='center';
+        ['-40','-20','-10','-6','-3','0','+3'].forEach((db,di,arr)=>{
+          const t=di/(arr.length-1);
+          const a=arcStart+(arcEnd-arcStart)*t;
+          const lx=cx+Math.cos(a)*(radius+16*dpr), ly=cy+Math.sin(a)*(radius+16*dpr);
+          ctx.fillText(db,lx,ly);
+        });
+
+        // channel label
+        ctx.font=`700 ${Math.max(20,26*dpr)}px system-ui,sans-serif`;
+        ctx.fillStyle='rgba(255,255,255,.5)'; ctx.textAlign='center';
+        ctx.fillText(label, cx, cy+radius*.45);
+
+        // dB value
+        const db=rms>0?Math.max(-60,20*Math.log10(rms)):'-∞';
+        ctx.font=`${Math.max(13,15*dpr)}px system-ui,sans-serif`;
+        ctx.fillStyle='rgba(255,220,80,.7)';
+        ctx.fillText(typeof db==='number'?db.toFixed(1)+' dB':db, cx, cy+radius*.62);
+      });
+    }
+
+    // ══ MODE 6 — Lissajous / XY Phase Scope ══════════════════
+    function drawLissajous(W, H, dpr) {
+      ctx.fillStyle='rgba(0,0,0,.85)'; ctx.fillRect(0,0,W,H);
+      const cx=W/2, cy=H/2, r=Math.min(W,H)*.42;
+      // crosshair
+      ctx.shadowBlur=0; ctx.strokeStyle='rgba(255,255,255,.07)'; ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(cx-r,cy);ctx.lineTo(cx+r,cy);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(cx,cy-r);ctx.lineTo(cx,cy+r);ctx.stroke();
+      // circle guide
+      ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+
+      const N=waveL.length;
+      ctx.lineWidth=1.5*dpr;
+      ctx.shadowColor='rgba(120,80,255,.6)'; ctx.shadowBlur=8*dpr;
+      ctx.beginPath();
+      for(let i=0;i<N;i++){
+        const x=cx + ((waveL[i]-128)/128)*r;
+        const y=cy - ((waveR[i]-128)/128)*r;
+        i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+      }
+      // colour by position using a gradient stroke
+      const lGrd=ctx.createLinearGradient(cx-r,cy,cx+r,cy);
+      lGrd.addColorStop(0,'rgba(0,200,255,.7)');
+      lGrd.addColorStop(.5,'rgba(160,80,255,.8)');
+      lGrd.addColorStop(1,'rgba(255,80,160,.7)');
+      ctx.strokeStyle=lGrd; ctx.stroke();
+
+      ctx.shadowBlur=0; ctx.font=`${Math.max(11,13*dpr)}px system-ui,sans-serif`;
+      ctx.fillStyle='rgba(255,255,255,.3)'; ctx.textAlign='center';
+      ctx.fillText('L → X   R → Y   Phase Correlation',cx,H-14*dpr);
+    }
+
+    // ── mode-name flash overlay ──────────────────────────────
+    function drawModeLabel(W, H, dpr) {
+      if (specLabelAlpha <= 0) return;
+      ctx.shadowBlur=0;
+      const fs=Math.max(22,28*dpr);
+      ctx.font=`700 ${fs}px system-ui,sans-serif`;
+      ctx.textAlign='center';
+      ctx.fillStyle=`rgba(255,255,255,${specLabelAlpha.toFixed(2)})`;
+      ctx.fillText(SPEC_MODES[specStyleIdx], W/2, H/2);
+      specLabelAlpha=Math.max(0, specLabelAlpha-0.012);
+    }
+
+    // ── main render loop ────────────────────────────────────
+    function drawFrame() {
+      specFrameId = requestAnimationFrame(drawFrame);
+      resizeCanvas();
+      analyserL.getByteFrequencyData(dataL);
+      analyserR.getByteFrequencyData(dataR);
+      analyserL.getByteTimeDomainData(waveL);
+      analyserR.getByteTimeDomainData(waveR);
+      const W=canvas.width, H=canvas.height, dpr=window.devicePixelRatio||1;
+      switch(specStyleIdx) {
+        case 0: drawBarSpectrum(W,H,dpr); break;
+        case 1: drawMirrorBars(W,H,dpr);  break;
+        case 2: drawRadial(W,H,dpr);      break;
+        case 3: drawOscilloscope(W,H,dpr);break;
+        case 4: drawWaterfall(W,H,dpr);   break;
+        case 5: drawVUNeedles(W,H,dpr);   break;
+        case 6: drawLissajous(W,H,dpr);   break;
+      }
+      drawModeLabel(W,H,dpr);
+    }
+
+    // click anywhere on spectrum canvas to cycle modes
+    canvas._specClick = () => {
+      specStyleIdx = (specStyleIdx + 1) % SPEC_MODES.length;
+      localStorage.setItem('ms2_spec_style', specStyleIdx);
+      specLabelAlpha = 1.0;
+      peakL.fill(0); peakVelL.fill(0);
+      peakR.fill(0); peakVelR.fill(0);
+      waterfallRows = null;
+    };
+    canvas.removeEventListener('click', canvas._specClick);
+    canvas.addEventListener('click', canvas._specClick);
+
+    drawFrame();
+  }
+
+  function stopSpectrum() {
+    if (specFrameId) { cancelAnimationFrame(specFrameId); specFrameId = null; }
+  }
+
+  function applyMode() {
+    const bcCanvas   = document.getElementById('viz-canvas');
+    const spCanvas   = document.getElementById('spec-canvas');
+    const label      = document.getElementById('viz-mode-label');
+    const prevBtn    = document.getElementById('viz-prev-btn');
+    const nextBtn    = document.getElementById('viz-next-btn');
+    const presetName = document.getElementById('viz-preset-name');
+    if (specMode) {
+      bcCanvas.classList.add('hidden');
+      spCanvas.classList.remove('hidden');
+      if (label) label.textContent = 'Milkdrop';
+      if (prevBtn)    prevBtn.style.visibility    = 'hidden';
+      if (nextBtn)    nextBtn.style.visibility    = 'hidden';
+      if (presetName) presetName.style.visibility = 'hidden';
+      // stop butterchurn render loop (it will be resumed on mode switch back)
+      if (frameId) { cancelAnimationFrame(frameId); frameId = null; }
+      startSpectrum(spCanvas);
+    } else {
+      spCanvas.classList.add('hidden');
+      bcCanvas.classList.remove('hidden');
+      if (label) label.textContent = 'Spectrum';
+      if (prevBtn)    prevBtn.style.visibility    = '';
+      if (nextBtn)    nextBtn.style.visibility    = '';
+      if (presetName) presetName.style.visibility = '';
+      stopSpectrum();
+      if (visualizer && !frameId) startRender();
+    }
+  }
+
   function updateSongInfo() {
     const s = S.queue[S.idx];
     const t = document.getElementById('viz-song-title');
@@ -619,29 +1066,40 @@ const VIZ = (() => {
       document.getElementById('viz-open-btn').classList.add('active');
       updateSongInfo();
       const canvas  = document.getElementById('viz-canvas');
-      if (!visualizer) {
-        initViz(canvas);
+      if (specMode) {
+        applyMode();
       } else {
-        canvas.width  = canvas.clientWidth;
-        canvas.height = canvas.clientHeight;
-        visualizer.setRendererSize(canvas.width, canvas.height);
-        if (!frameId) startRender();
+        if (!visualizer) {
+          initViz(canvas);
+        } else {
+          canvas.width  = canvas.clientWidth;
+          canvas.height = canvas.clientHeight;
+          visualizer.setRendererSize(canvas.width, canvas.height);
+          if (!frameId) startRender();
+        }
       }
     },
     close() {
       document.getElementById('viz-overlay').classList.add('hidden');
       document.getElementById('viz-open-btn').classList.remove('active');
-      if (frameId) { cancelAnimationFrame(frameId); frameId = null; }
+      if (frameId)    { cancelAnimationFrame(frameId);    frameId    = null; }
+      if (specFrameId){ cancelAnimationFrame(specFrameId); specFrameId = null; }
     },
     next()  {
+      if (specMode) return;
       presetHistory.push(presetIndex);
       presetIndex = Math.floor(Math.random() * presetKeys.length);
       loadPreset(2.7);
     },
     prev()  {
+      if (specMode) return;
       if (presetHistory.length) presetIndex = presetHistory.pop();
       else presetIndex = ((presetIndex - 1) + presetKeys.length) % presetKeys.length;
       loadPreset(2.7);
+    },
+    toggleMode() {
+      specMode = !specMode;
+      applyMode();
     },
     songChanged() { updateSongInfo(); },
   };
@@ -1523,6 +1981,7 @@ document.getElementById('viz-open-btn').addEventListener('click', () => VIZ.open
 document.getElementById('viz-close-btn').addEventListener('click', () => VIZ.close());
 document.getElementById('viz-prev-btn').addEventListener('click', () => VIZ.prev());
 document.getElementById('viz-next-btn').addEventListener('click', () => VIZ.next());
+document.getElementById('viz-mode-btn').addEventListener('click', () => VIZ.toggleMode());
 window.addEventListener('resize', () => {
   const overlay = document.getElementById('viz-overlay');
   if (overlay.classList.contains('hidden')) return;
