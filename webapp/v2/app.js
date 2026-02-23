@@ -26,6 +26,9 @@ const audioEl = document.getElementById('audio');
 let scanTimer    = null;
 let djTimer      = null;
 let scrobbleTimer = null;
+let audioCtx     = null;   // shared Web Audio context (initialised by VIZ.open)
+let analyserL    = null;   // left-channel analyser
+let analyserR    = null;   // right-channel analyser
 
 // ── HELPERS ──────────────────────────────────────────────────
 function esc(s) {
@@ -142,6 +145,7 @@ const Player = {
     audioEl.src = mediaUrl(s.filepath);
     audioEl.load();
     audioEl.play().catch(() => {});
+    VIZ.initAudio();   // ensure AudioContext + L/R analysers exist for mini spectrum
     this.updateBar();
     highlightRow();
     refreshQueueUI();
@@ -543,10 +547,85 @@ function hideNPModal() {
   document.getElementById('np-modal').classList.add('hidden');
 }
 
+// ── MINI SPECTRUM (player bar) ──────────────────────────────
+const MINI_SPEC = (() => {
+  let rafId = null;
+
+  function draw() {
+    const canvas = document.getElementById('mini-spec');
+    if (!canvas) return;
+    // Only run when audio context is ready
+    if (!audioCtx || !analyserL || !analyserR) { rafId = requestAnimationFrame(draw); return; }
+    const aL = analyserL;
+    const aR = analyserR;
+
+    const dpr = window.devicePixelRatio || 1;
+    const W   = canvas.clientWidth  * dpr;
+    const H   = canvas.clientHeight * dpr;
+    if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+
+    const ctx = canvas.getContext('2d');
+    const BARS = 80;  // per channel
+    const GAP  = 1.5 * dpr;
+    const cg   = 2 * dpr;          // centre divider
+    const hw   = (W - cg) / 2;
+    const barW = (hw - GAP * (BARS - 1)) / BARS;
+    const baseline = H;
+
+    ctx.clearRect(0, 0, W, H);
+
+    const dL = new Uint8Array(aL.frequencyBinCount);
+    const dR = new Uint8Array(aR.frequencyBinCount);
+    aL.getByteFrequencyData(dL);
+    aR.getByteFrequencyData(dR);
+
+    function logBin(i, binCount) {
+      const freq = Math.pow(2, (Math.log2(20) + (Math.log2(20000) - Math.log2(20)) * i / BARS));
+      return Math.min(Math.floor(freq / (audioCtx.sampleRate / 2) * binCount), binCount - 1);
+    }
+
+    // Draw one side; reverse = true mirrors freq axis
+    function side(data, startX, reverse) {
+      for (let i = 0; i < BARS; i++) {
+        const bi  = reverse ? (BARS - 1 - i) : i;
+        const v   = data[logBin(bi, data.length)] / 255;
+        const bh  = Math.max(1, v * H * 0.92);
+        const x   = startX + i * (barW + GAP);
+        const hue = (1 - v) * 200;
+        const grd = ctx.createLinearGradient(0, baseline, 0, baseline - bh);
+        grd.addColorStop(0,   `hsla(${hue},100%,48%,.85)`);
+        grd.addColorStop(1,   `hsla(${hue+80},100%,72%,.75)`);
+        ctx.fillStyle = grd;
+        const r = Math.min(barW * .4, 2.5 * dpr);
+        ctx.beginPath();
+        ctx.roundRect(x, baseline - bh, barW, bh, [r, r, 0, 0]);
+        ctx.fill();
+      }
+    }
+
+    // L: bass left → treble at centre
+    side(dL, 0, false);
+    // centre gap
+    ctx.fillStyle = 'rgba(255,255,255,.04)';
+    ctx.fillRect(hw, 0, cg, H);
+    // R: treble at centre → bass right (mirrored)
+    side(dR, hw + cg, true);
+
+    rafId = requestAnimationFrame(draw);
+  }
+
+  return {
+    start() { if (!rafId) draw(); },
+    stop()  { if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+               const c = document.getElementById('mini-spec');
+               if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height); } },
+  };
+})();
+
 // ── BUTTERCHURN VISUALIZER + SPECTRUM ────────────────────────
 const VIZ = (() => {
-  let visualizer = null, audioCtx = null, analyserNode = null;
-  let analyserL = null, analyserR = null;         // per-channel for spectrum
+  let visualizer = null, analyserNode = null;
+  // analyserL, analyserR, audioCtx are module-scope (shared with MINI_SPEC)
   let presets = {}, presetKeys = [], presetHistory = [], presetIndex = 0;
   let cycleTimer = null, frameId = null;
   const CYCLE_MS = 15000;
@@ -1103,6 +1182,7 @@ const VIZ = (() => {
       applyMode();
     },
     songChanged() { updateSongInfo(); },
+    initAudio()   { ensureAudio(); },
   };
 })();
 
@@ -1932,12 +2012,14 @@ audioEl.addEventListener('play', () => {
   document.getElementById('icon-pause').classList.remove('hidden');
   document.getElementById('np-icon-play').classList.add('hidden');
   document.getElementById('np-icon-pause').classList.remove('hidden');
+  MINI_SPEC.start();
 });
 audioEl.addEventListener('pause', () => {
   document.getElementById('icon-play').classList.remove('hidden');
   document.getElementById('icon-pause').classList.add('hidden');
   document.getElementById('np-icon-pause').classList.add('hidden');
   document.getElementById('np-icon-play').classList.remove('hidden');
+  MINI_SPEC.stop();
 });
 audioEl.addEventListener('ended', () => Player.next());
 audioEl.addEventListener('timeupdate', () => {
