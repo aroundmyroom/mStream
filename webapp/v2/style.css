@@ -614,8 +614,10 @@ a{color:inherit;text-decoration:none;}
   display:flex;flex-direction:column;
 }
 .viz-canvas{flex:1;display:block;width:100%;min-height:0;}
+.spec-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;background:#000;z-index:1;}
+/* When spec-canvas is active it overlays the butterchurn canvas */
 .viz-bar{
-  position:absolute;top:0;left:0;right:0;
+  position:absolute;top:0;left:0;right:0;z-index:2;
   display:flex;align-items:center;gap:8px;padding:12px 16px;
   background:linear-gradient(180deg,rgba(0,0,0,.72) 0%,transparent 100%);
   opacity:0;transition:opacity .22s;
@@ -623,9 +625,11 @@ a{color:inherit;text-decoration:none;}
 .viz-overlay:hover .viz-bar,.viz-overlay:focus-within .viz-bar{opacity:1;}
 .viz-btn{display:flex;align-items:center;justify-content:center;padding:6px 10px;border-radius:6px;color:#fff;background:rgba(255,255,255,.1);transition:background .15s;flex-shrink:0;}
 .viz-btn:hover{background:rgba(255,255,255,.24);}
+.viz-mode-btn{border:1px solid rgba(255,255,255,.18);}
+.viz-mode-btn:hover{background:rgba(109,60,230,.5);border-color:rgba(109,60,230,.8);}
 .viz-preset-name{flex:1;font-size:11px;color:rgba(255,255,255,.7);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;cursor:default;}
 .viz-song{
-  position:absolute;bottom:0;left:0;right:0;
+  position:absolute;bottom:0;left:0;right:0;z-index:2;
   padding:20px 20px 20px;
   background:linear-gradient(0deg,rgba(0,0,0,.7) 0%,transparent 100%);
   opacity:0;transition:opacity .22s;pointer-events:none;

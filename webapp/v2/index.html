@@ -389,6 +389,7 @@
 <!-- Butterchurn / Milkdrop Visualizer -->
 <div id="viz-overlay" class="viz-overlay hidden">
   <canvas id="viz-canvas" class="viz-canvas"></canvas>
+  <canvas id="spec-canvas" class="spec-canvas hidden"></canvas>
   <div class="viz-bar">
     <button class="viz-btn" id="viz-prev-btn" title="Previous preset">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="19,20 9,12 19,4"/><line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2.5"/></svg>
@@ -396,6 +397,10 @@
     <span id="viz-preset-name" class="viz-preset-name"></span>
     <button class="viz-btn" id="viz-next-btn" title="Next preset">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,4 15,12 5,20"/><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2.5"/></svg>
+    </button>
+    <button class="viz-btn viz-mode-btn" id="viz-mode-btn" title="Switch to Spectrum Analyzer" style="margin-left:8px;gap:5px">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="14" width="3" height="8"/><rect x="7" y="9" width="3" height="13"/><rect x="12" y="5" width="3" height="17"/><rect x="17" y="11" width="3" height="11"/></svg>
+      <span id="viz-mode-label">Spectrum</span>
     </button>
     <button class="viz-btn" id="viz-close-btn" title="Close (Esc)" style="margin-left:8px">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
