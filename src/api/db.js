@@ -46,7 +46,8 @@ export function setup(mstream) {
 
     res.json({
       totalFileCount: total,
-      locked: dbQueue.isScanning()
+      locked: dbQueue.isScanning(),
+      vpaths: req.user.vpaths
     });
   });
 
