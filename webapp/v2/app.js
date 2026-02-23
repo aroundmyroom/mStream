@@ -684,11 +684,12 @@ const VIZ = (() => {
     }
 
     // ── shared bar-channel renderer ──
-    function drawBarChannel(data, peaks, vels, px, pw, baseline, dpr) {
+    function drawBarChannel(data, peaks, vels, px, pw, baseline, dpr, reverse) {
       const gap  = GAP * dpr;
       const barW = (pw - gap * (BAR_COUNT - 1)) / BAR_COUNT;
       for (let i = 0; i < BAR_COUNT; i++) {
-        const v    = data[barBin(i, BAR_COUNT, data.length)] / 255;
+        const bi   = reverse ? (BAR_COUNT - 1 - i) : i;
+        const v    = data[barBin(bi, BAR_COUNT, data.length)] / 255;
         const barH = v * baseline;
         const x    = px + i * (barW + gap);
         const hue  = barHue(v);
@@ -719,9 +720,9 @@ const VIZ = (() => {
       ctx.shadowBlur=0; ctx.strokeStyle='rgba(255,255,255,.03)'; ctx.lineWidth=1;
       for(let g=.25;g<1;g+=.25){ctx.beginPath();ctx.moveTo(0,H*g);ctx.lineTo(W,H*g);ctx.stroke();}
       const cg=CENTRE_GAP*dpr, hw=(W-cg)/2, bl=H*.85;
-      drawBarChannel(dataL,peakL,peakVelL,0,hw,bl,dpr);
+      drawBarChannel(dataL, peakL, peakVelL, 0,       hw, bl, dpr, false);
       ctx.shadowBlur=0; ctx.fillStyle='rgba(255,255,255,.06)'; ctx.fillRect(hw,0,cg,H);
-      drawBarChannel(dataR,peakR,peakVelR,hw+cg,hw,bl,dpr);
+      drawBarChannel(dataR, peakR, peakVelR, hw+cg, hw, bl, dpr, true);
       ctx.shadowBlur=0; ctx.strokeStyle='rgba(255,255,255,.08)'; ctx.lineWidth=1;
       ctx.beginPath();ctx.moveTo(0,bl);ctx.lineTo(W,bl);ctx.stroke();
       drawLabels(W,H,dpr, bl+28*dpr, hw/2, hw+cg+hw/2);
