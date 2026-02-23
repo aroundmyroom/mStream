@@ -12,6 +12,7 @@ const S = {
   autoDJ:   false,
   djIgnore: [],
   djMinRating: 0,
+  djVpaths: [],       // [] means all selected
   playlists:[],
   view:     'recent',
   backFn:   null,
@@ -194,9 +195,12 @@ const Player = {
 // ── AUTO-DJ ──────────────────────────────────────────────────
 async function autoDJFetch() {
   try {
+    const selected = S.djVpaths.length > 0 ? S.djVpaths : S.vpaths;
+    const ignoreVPaths = S.vpaths.filter(v => !selected.includes(v));
     const d = await api('POST', 'api/v1/db/random-songs', {
-      ignoreList: S.djIgnore,
-      minRating:  S.djMinRating || undefined,
+      ignoreList:   S.djIgnore,
+      minRating:    S.djMinRating || undefined,
+      ignoreVPaths: ignoreVPaths.length > 0 ? ignoreVPaths : undefined,
     });
     S.djIgnore = d.ignoreList;
     const song = norm(d.songs[0]);
@@ -1056,9 +1060,19 @@ function renderFileExplorer(d) {
 }
 
 // ── AUTO-DJ VIEW ──────────────────────────────────────────────
-function viewAutoDJ() {
+async function viewAutoDJ() {
   setTitle('Auto-DJ'); setBack(null); setNavActive('autodj'); S.view = 'autodj';
   S.curSongs = [];
+  // Ensure vpaths are loaded (may be empty if checkSession had a hiccup)
+  if (!S.vpaths.length) {
+    try {
+      const d = await api('GET', 'api/v1/db/status');
+      if (d.vpaths && d.vpaths.length) {
+        S.vpaths = d.vpaths;
+        if (!S.djVpaths.length) S.djVpaths = [...S.vpaths];
+      }
+    } catch(_) {}
+  }
   document.getElementById('play-all-btn').onclick = null;
   document.getElementById('add-all-btn').onclick  = null;
 
@@ -1078,6 +1092,16 @@ function viewAutoDJ() {
       </div>
       <div class="autodj-opts">
         <h4>Settings</h4>
+        ${S.vpaths.length > 1 ? `
+        <div class="autodj-opt-row">
+          <div>
+            <div class="autodj-opt-label">Sources</div>
+            <div class="autodj-opt-hint">Collections Auto-DJ draws from</div>
+          </div>
+          <div class="dj-vpath-pills" id="dj-vpaths">
+            ${S.vpaths.map(v => `<button class="dj-vpath-pill${S.djVpaths.includes(v) ? ' on' : ''}" data-vpath="${esc(v)}">${esc(v)}</button>`).join('')}
+          </div>
+        </div>` : ''}
         <div class="autodj-opt-row">
           <div>
             <div class="autodj-opt-label">Minimum Rating</div>
@@ -1097,6 +1121,27 @@ function viewAutoDJ() {
 
   document.getElementById('autodj-main-btn').onclick = () => setAutoDJ(!S.autoDJ);
   document.getElementById('dj-min-rating').onchange = e => { S.djMinRating = parseInt(e.target.value); };
+
+  const pillsEl = document.getElementById('dj-vpaths');
+  if (pillsEl) {
+    pillsEl.addEventListener('click', e => {
+      const pill = e.target.closest('.dj-vpath-pill');
+      if (!pill) return;
+      const v = pill.dataset.vpath;
+      const idx = S.djVpaths.indexOf(v);
+      if (idx === -1) {
+        S.djVpaths.push(v);
+        pill.classList.add('on');
+      } else if (S.djVpaths.length > 1) {
+        S.djVpaths.splice(idx, 1);
+        pill.classList.remove('on');
+      } else {
+        toast('At least one source must be active');
+        return;
+      }
+      S.djIgnore = []; // reset play history when sources change
+    });
+  }
 }
 
 // ── SCAN STATUS ───────────────────────────────────────────────
@@ -1111,6 +1156,12 @@ async function pollScan() {
     } else {
       badge.classList.remove('show');
     }
+    // Populate S.vpaths from status if checkSession() didn't do it yet
+    if (d.vpaths && d.vpaths.length && !S.vpaths.length) {
+      S.vpaths = d.vpaths;
+      if (!S.djVpaths.length) S.djVpaths = [...S.vpaths];
+      if (S.view === 'autodj') viewAutoDJ(); // re-render to show source pills
+    }
   } catch(_) {}
 }
 
@@ -1120,6 +1171,7 @@ async function tryLogin(username, password) {
   S.token    = d.token;
   S.username = username;
   S.vpaths   = d.vpaths || [];
+  S.djVpaths = [...S.vpaths];  // default: all sources selected
   localStorage.setItem('ms2_token', d.token);
   localStorage.setItem('ms2_user',  username);
 }
@@ -1128,6 +1180,8 @@ async function checkSession() {
   if (S.token) {
     try {
       const d = await api('GET', 'api/v1/db/status');
+      S.vpaths = d.vpaths || [];
+      if (S.djVpaths.length === 0) { S.djVpaths = [...S.vpaths]; }
       // detect admin by trying the admin endpoint
       try {
         await api('GET', 'api/v1/admin/directories');
