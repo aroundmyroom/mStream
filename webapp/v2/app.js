@@ -1277,23 +1277,24 @@ async function openPlaylist(name) {
 
   try {
     const d = await api('POST', 'api/v1/playlist/load', { playlistname: name });
-    const songs = d.map(item => norm(item));
+    const songs = d.map(item => ({ ...norm(item), _plid: item.id }));
     S.curSongs = songs;
     if (!songs.length) { setBody('<div class="empty-state">This playlist is empty</div>'); return; }
     const body = document.getElementById('content-body');
-    // Playlist gets a save button in header
     body.innerHTML = `
-      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:8px;">
         <button id="pl-save-cur-btn" class="btn-sm">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
-          Save Queue as "${esc(name)}"
+          Save current queue into "${esc(name)}"
         </button>
       </div>
       <div class="song-list">${renderSongRows(songs)}</div>`;
     document.getElementById('pl-save-cur-btn').onclick = async () => {
+      if (!S.queue.length) { toast('Queue is empty'); return; }
       try {
         await api('POST', 'api/v1/playlist/save', { title: name, songs: S.queue.map(s => s.filepath) });
         toast(`Saved ${S.queue.length} songs to "${name}"`);
+        openPlaylist(name);
       } catch(e) { toast('Save failed'); }
     };
     attachSongListEvents(body, songs);
@@ -2101,6 +2102,53 @@ document.getElementById('np-rate-stars').querySelectorAll('span').forEach((star,
     await rateSong(s.filepath, val);
   });
 });
+
+// ── PLAYLIST MODAL WIRING ─────────────────────────────────────
+
+// "New playlist" button in sidebar
+document.getElementById('new-pl-btn').addEventListener('click', () => showNewPlaylistModal());
+
+// "Save queue as playlist" button in queue panel
+document.getElementById('qp-save-btn').addEventListener('click', () => {
+  if (!S.queue.length) { toast('Queue is empty'); return; }
+  showSavePlaylistModal();
+});
+
+// pl-new modal
+document.getElementById('pl-new-cancel').addEventListener('click', () => hideModal('pl-new-modal'));
+document.getElementById('pl-new-ok').addEventListener('click', async () => {
+  const name = document.getElementById('pl-new-name').value.trim();
+  if (!name) return;
+  hideModal('pl-new-modal');
+  try {
+    await api('POST', 'api/v1/playlist/new', { title: name });
+    await loadPlaylists();
+    toast(`Playlist "${name}" created`);
+    openPlaylist(name);
+  } catch(e) { toast(e.message?.includes('Already Exists') ? `"${name}" already exists` : 'Failed to create playlist'); }
+});
+document.getElementById('pl-new-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('pl-new-ok').click();
+});
+
+// pl-save modal (save current queue into a named playlist)
+document.getElementById('pl-save-cancel').addEventListener('click', () => hideModal('pl-save-modal'));
+document.getElementById('pl-save-ok').addEventListener('click', async () => {
+  const name = document.getElementById('pl-save-name').value.trim();
+  if (!name) return;
+  hideModal('pl-save-modal');
+  try {
+    await api('POST', 'api/v1/playlist/save', { title: name, songs: S.queue.map(s => s.filepath) });
+    await loadPlaylists();
+    toast(`Saved ${S.queue.length} songs to "${name}"`);
+  } catch(e) { toast('Failed to save playlist'); }
+});
+document.getElementById('pl-save-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('pl-save-ok').click();
+});
+
+// atp-cancel
+document.getElementById('atp-cancel').addEventListener('click', () => hideModal('atp-modal'));
 
 // ── THEME ─────────────────────────────────────────────────────
 function applyTheme(light) {
