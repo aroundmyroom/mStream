@@ -1509,6 +1509,20 @@ document.getElementById('np-rate-stars').querySelectorAll('span').forEach((star,
   });
 });
 
+// ── THEME ─────────────────────────────────────────────────────
+function applyTheme(light) {
+  document.documentElement.classList.toggle('light', light);
+  const track = document.getElementById('theme-track');
+  const label = document.getElementById('theme-label');
+  if (track) track.classList.toggle('lit', light);
+  if (label) label.textContent = light ? 'Light Mode' : 'Dark Mode';
+  localStorage.setItem('ms2_theme', light ? 'light' : 'dark');
+}
+
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  applyTheme(!document.documentElement.classList.contains('light'));
+});
+
 // Keyboard shortcuts
 document.addEventListener('keydown', e => {
   if (['INPUT','TEXTAREA'].includes(e.target.tagName)) return;
@@ -1521,6 +1535,9 @@ document.addEventListener('keydown', e => {
 
 // ── INIT ─────────────────────────────────────────────────────
 (async () => {
+  // Apply saved theme before anything renders (prevents flash)
+  applyTheme(localStorage.getItem('ms2_theme') === 'light');
+
   const ok = await checkSession();
   ok ? showApp() : showLogin();
 })();
