@@ -13,6 +13,7 @@ const S = {
   djIgnore: [],
   djMinRating: 0,
   djVpaths: [],       // [] means all selected
+  _djPrefetching: false, // true while prefetch request is in-flight
   playlists:[],
   view:     'recent',
   backFn:   null,
@@ -172,7 +173,12 @@ const Player = {
     } else if (S.repeat === 'all') {
       this.playAt(0);
     } else if (S.autoDJ) {
-      autoDJFetch();
+      // If autoDJPrefetch already queued a song, just advance; otherwise fetch now
+      if (S.queue.length > S.idx + 1) {
+        this.playAt(S.idx + 1);
+      } else {
+        autoDJFetch();
+      }
     }
   },
   prev() {
@@ -211,15 +217,35 @@ const Player = {
 };
 
 // ── AUTO-DJ ──────────────────────────────────────────────────
+// Shared helper — returns {ignoreList, songs} from the random-songs API
+async function _djApiCall() {
+  const selected = S.djVpaths.length > 0 ? S.djVpaths : S.vpaths;
+  const ignoreVPaths = S.vpaths.filter(v => !selected.includes(v));
+  return api('POST', 'api/v1/db/random-songs', {
+    ignoreList:   S.djIgnore,
+    minRating:    S.djMinRating || undefined,
+    ignoreVPaths: ignoreVPaths.length > 0 ? ignoreVPaths : undefined,
+  });
+}
+
+// Pre-fetch: silently queue the next DJ song without playing it
+async function autoDJPrefetch() {
+  if (S._djPrefetching) return;          // already in-flight
+  if (S.queue.length > S.idx + 1) return; // already pre-queued
+  S._djPrefetching = true;
+  try {
+    const d = await _djApiCall();
+    S.djIgnore = d.ignoreList;
+    S.queue.push(norm(d.songs[0]));
+    refreshQueueUI();
+  } catch(e) { console.error('Auto-DJ prefetch failed:', e); }
+  finally { S._djPrefetching = false; }
+}
+
+// Full fetch + play: used as fallback when prefetch wasn't ready in time
 async function autoDJFetch() {
   try {
-    const selected = S.djVpaths.length > 0 ? S.djVpaths : S.vpaths;
-    const ignoreVPaths = S.vpaths.filter(v => !selected.includes(v));
-    const d = await api('POST', 'api/v1/db/random-songs', {
-      ignoreList:   S.djIgnore,
-      minRating:    S.djMinRating || undefined,
-      ignoreVPaths: ignoreVPaths.length > 0 ? ignoreVPaths : undefined,
-    });
+    const d = await _djApiCall();
     S.djIgnore = d.ignoreList;
     const song = norm(d.songs[0]);
     S.queue.push(song);
@@ -2036,6 +2062,11 @@ audioEl.addEventListener('timeupdate', () => {
   document.getElementById('prog-fill').style.width = pct + '%';
   document.getElementById('time-cur').textContent   = fmt(audioEl.currentTime);
   document.getElementById('time-total').textContent = fmt(audioEl.duration);
+  // Auto-DJ pre-fetch: queue next song 10 s before the current one ends
+  if (S.autoDJ && S.idx === S.queue.length - 1 &&
+      (audioEl.duration - audioEl.currentTime) < 10) {
+    autoDJPrefetch();
+  }
   if (!document.getElementById('np-modal').classList.contains('hidden')) {
     document.getElementById('np-prog-fill').style.width  = pct + '%';
     document.getElementById('np-time-cur').textContent   = fmt(audioEl.currentTime);
