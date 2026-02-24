@@ -78,6 +78,21 @@
   </div>
 </div>
 
+<!-- Delete shared link confirmation modal -->
+<div id="del-share-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="pl-del-icon">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+    </div>
+    <h3>Delete Shared Link</h3>
+    <p class="pl-del-msg">Anyone with this URL will immediately lose access. This cannot be undone.</p>
+    <div class="modal-actions">
+      <button id="del-share-cancel" class="btn-ghost">Cancel</button>
+      <button id="del-share-ok" class="btn-danger">Delete</button>
+    </div>
+  </div>
+</div>
+
 <!-- Add to playlist modal -->
 <div id="atp-modal" class="modal-overlay hidden">
   <div class="modal-box">
@@ -217,7 +232,8 @@
 
     <div class="sidebar-scroll">
 
-      <div class="nav-label">Explore</div>
+      <div class="nav-section" data-section="explore">
+      <div class="nav-label nav-toggle">Explore<svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
       <nav class="sidenav">
         <button class="nav-btn" data-view="files">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
@@ -228,8 +244,10 @@
           Auto-DJ
         </button>
       </nav>
+      </div>
 
-      <div class="nav-label">Library</div>
+      <div class="nav-section" data-section="library">
+      <div class="nav-label nav-toggle">Library<svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
       <nav class="sidenav">
         <button class="nav-btn active" data-view="recent">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
@@ -248,8 +266,10 @@
           Search
         </button>
       </nav>
+      </div>
 
-      <div class="nav-label">Stats</div>
+      <div class="nav-section" data-section="stats">
+      <div class="nav-label nav-toggle">Stats<svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
       <nav class="sidenav">
         <button class="nav-btn" data-view="rated">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>
@@ -264,18 +284,25 @@
           Recently Played
         </button>
       </nav>
+      </div>
 
-      <div class="nav-label nav-label-row">
+      <div class="nav-section" data-section="playlists">
+      <div class="nav-label nav-label-row nav-toggle">
         Playlists
-        <button id="new-pl-btn" class="icon-btn" title="New playlist">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </button>
+        <div class="nav-label-actions">
+          <button id="new-pl-btn" class="icon-btn" title="New playlist">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+          <svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg>
+        </div>
       </div>
       <nav id="playlist-nav" class="sidenav playlist-nav">
         <!-- dynamically populated -->
       </nav>
+      </div>
 
-      <div class="nav-label">Tools</div>
+      <div class="nav-section" data-section="tools">
+      <div class="nav-label nav-toggle">Tools<svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
       <nav class="sidenav">
         <button class="nav-btn" data-view="shared-links">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
@@ -294,6 +321,7 @@
           Mobile Apps
         </button>
       </nav>
+      </div>
 
     </div><!-- .sidebar-scroll -->
 

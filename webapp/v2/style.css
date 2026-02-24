@@ -97,6 +97,13 @@ a{color:inherit;text-decoration:none;}
 .nav-label-row{
   display:flex;align-items:center;justify-content:space-between;padding-right:10px;
 }
+.nav-toggle{cursor:pointer;user-select:none;display:flex;align-items:center;justify-content:space-between;padding-right:10px;}
+.nav-toggle:hover{color:var(--t1);}
+.nav-chevron{flex-shrink:0;opacity:.4;transition:transform .2s ease;margin-left:4px;}
+.nav-toggle:hover .nav-chevron{opacity:.75;}
+.nav-section.collapsed .nav-chevron{transform:rotate(-90deg);}
+.nav-section.collapsed .sidenav{display:none;}
+.nav-label-actions{display:flex;align-items:center;gap:2px;}
 .sidenav{display:flex;flex-direction:column;padding:0 8px;}
 .nav-btn{
   display:flex;align-items:center;gap:9px;width:100%;padding:8px 10px;
