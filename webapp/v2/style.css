@@ -508,6 +508,10 @@ a{color:inherit;text-decoration:none;}
 .btn-ghost:hover{color:var(--t1);background:var(--card);}
 .btn-primary{padding:8px 18px;border-radius:var(--r);font-size:13px;font-weight:600;color:#fff;background:var(--primary);border:none;transition:all .15s;cursor:pointer;}
 .btn-primary:hover{background:var(--primary-h);}
+.btn-danger{padding:8px 18px;border-radius:var(--r);font-size:13px;font-weight:600;color:#fff;background:var(--red);border:none;transition:all .15s;cursor:pointer;}
+.btn-danger:hover{background:#ef4444;}
+.pl-del-icon{display:flex;justify-content:center;margin-bottom:12px;color:var(--red);opacity:.85;}
+.pl-del-msg{font-size:13px;color:var(--t2);margin-top:-6px;margin-bottom:4px;line-height:1.6;}
 .modal-list{display:flex;flex-direction:column;gap:3px;max-height:260px;overflow-y:auto;margin-top:4px;}
 .modal-pl-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--r);cursor:pointer;font-size:13px;transition:background .14s;}
 .modal-pl-item:hover{background:var(--hover);}
