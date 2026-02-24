@@ -1315,15 +1315,20 @@ function showNewPlaylistModal() {
   showModal('pl-new-modal');
   setTimeout(() => document.getElementById('pl-new-name').focus(), 50);
 }
+function showDeletePlaylistModal(name) {
+  document.getElementById('pl-del-msg').textContent = `"${name}" will be permanently removed. This cannot be undone.`;
+  document.getElementById('pl-del-ok').dataset.pl = name;
+  showModal('pl-del-modal');
+}
 function showAddToPlaylistModal(song) {
   const list = document.getElementById('atp-list');
   if (!S.playlists.length) {
     list.innerHTML = `<div class="modal-empty">No playlists yet. Create one first.</div>`;
   } else {
     list.innerHTML = S.playlists.map(p =>
-      `<div class="modal-pl-item" data-pl="${esc(p.title)}">
+      `<div class="modal-pl-item" data-pl="${esc(p.name)}">
         <svg class="modal-pl-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-        ${esc(p.title)}
+        ${esc(p.name)}
       </div>`
     ).join('');
     list.querySelectorAll('.modal-pl-item').forEach(el => {
@@ -1350,28 +1355,22 @@ async function loadPlaylists() {
 function renderPlaylistNav() {
   const nav = document.getElementById('playlist-nav');
   nav.innerHTML = S.playlists.map(p => `
-    <div class="pl-row" data-pl="${esc(p.title)}">
-      <button class="pl-row-btn" data-pl="${esc(p.title)}">
+    <div class="pl-row" data-pl="${esc(p.name)}">
+      <button class="pl-row-btn" data-pl="${esc(p.name)}">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-        ${esc(p.title)}
+        ${esc(p.name)}
       </button>
-      <button class="pl-row-del" data-pl="${esc(p.title)}" title="Delete">×</button>
+      <button class="pl-row-del" data-pl="${esc(p.name)}" title="Delete">×</button>
     </div>`).join('');
 
   nav.querySelectorAll('.pl-row-btn').forEach(btn => {
     btn.addEventListener('click', () => openPlaylist(btn.dataset.pl));
   });
   nav.querySelectorAll('.pl-row-del').forEach(btn => {
-    btn.addEventListener('click', async e => {
+    btn.addEventListener('click', e => {
       e.stopPropagation();
       const name = btn.dataset.pl;
-      if (!confirm(`Delete playlist "${name}"?`)) return;
-      try {
-        await api('POST', 'api/v1/playlist/delete', { playlistname: name });
-        await loadPlaylists();
-        toast(`Deleted "${name}"`);
-        if (S.view === 'playlist:' + name) viewRecent();
-      } catch(e) { toast('Failed to delete playlist'); }
+      showDeletePlaylistModal(name);
     });
   });
 }
@@ -2040,11 +2039,23 @@ document.getElementById('pl-save-ok').addEventListener('click', async () => {
     await api('POST', 'api/v1/playlist/save', { title: name, songs: S.queue.map(s => s.filepath) });
     await loadPlaylists();
     toast(`Saved ${S.queue.length} songs to "${name}"`);
+    openPlaylist(name);
   } catch(e) { toast('Failed to save playlist: ' + e.message); }
 });
 
 // Add to playlist modal cancel
 document.getElementById('atp-cancel').addEventListener('click', () => hideModal('atp-modal'));
+document.getElementById('pl-del-cancel').addEventListener('click', () => hideModal('pl-del-modal'));
+document.getElementById('pl-del-ok').addEventListener('click', async () => {
+  const name = document.getElementById('pl-del-ok').dataset.pl;
+  hideModal('pl-del-modal');
+  try {
+    await api('POST', 'api/v1/playlist/delete', { playlistname: name });
+    await loadPlaylists();
+    toast(`Deleted "${name}"`);
+    if (S.view === 'playlist:' + name) viewRecent();
+  } catch(e) { toast('Failed to delete playlist'); }
+});
 
 // Context menu actions
 document.getElementById('ctx-menu').querySelectorAll('.ctx-item').forEach(btn => {
