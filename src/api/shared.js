@@ -82,4 +82,25 @@ export function setupAfterSecurity(mstream) {
     db.saveShareDB();
     res.json(sharedItem);
   });
+
+  mstream.get('/api/v1/share/list', (req, res) => {
+    const all = db.getAllSharedPlaylists() || [];
+    const userItems = all.filter(p => p.user === req.user.username).map(p => ({
+      playlistId: p.playlistId,
+      songCount: (p.playlist || []).length,
+      expires: p.expires || null
+    }));
+    res.json(userItems);
+  });
+
+  mstream.delete('/api/v1/share/:playlistId', (req, res) => {
+    if (!req.params.playlistId) { throw new WebError('Validation Error', 403); }
+    const all = db.getAllSharedPlaylists() || [];
+    const item = all.find(p => p.playlistId === req.params.playlistId);
+    if (!item) { throw new WebError('Not Found', 404); }
+    if (item.user !== req.user.username) { throw new WebError('Forbidden', 403); }
+    db.removeSharedPlaylistById(req.params.playlistId);
+    db.saveShareDB();
+    res.json({ success: true });
+  });
 }

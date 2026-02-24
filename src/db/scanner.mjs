@@ -98,6 +98,7 @@ async function run() {
 }
 
 async function recursiveScan(dir) {
+  if (process.send) process.send({ dir });
   let files;
   try {
     files = fs.readdirSync(dir);
