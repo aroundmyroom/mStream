@@ -14,6 +14,7 @@ const S = {
   djMinRating: 0,
   djVpaths: [],       // [] means all selected
   _djPrefetching: false, // true while prefetch request is in-flight
+  vpathMeta: {},     // keyed by vpath: { type, parentVpath, filepathPrefix }
   playlists:[],
   view:     'recent',
   backFn:   null,
@@ -240,6 +241,30 @@ const Player = {
 // Shared helper — returns {ignoreList, songs} from the random-songs API
 async function _djApiCall() {
   const selected = S.djVpaths.length > 0 ? S.djVpaths : S.vpaths;
+
+  // Child-vpath optimisation: if every selected vpath is a child of the
+  // same parent (stored under the parent vpath in the DB), use a
+  // filepathPrefix filter on the parent instead of ignoreVPaths.
+  const meta = S.vpathMeta || {};
+  const allChildSameParent =
+    selected.length > 0 &&
+    selected.every(v => meta[v]?.parentVpath) &&
+    new Set(selected.map(v => meta[v].parentVpath)).size === 1;
+
+  if (allChildSameParent) {
+    const parentVpath = meta[selected[0]].parentVpath;
+    // Combine prefixes with OR is not supported cleanly; for a single child
+    // vpath (the common case) just send the one prefix.
+    const filepathPrefix = selected.length === 1 ? meta[selected[0]].filepathPrefix : null;
+    const ignoreVPaths = S.vpaths.filter(v => v !== parentVpath && !meta[v]?.parentVpath);
+    return api('POST', 'api/v1/db/random-songs', {
+      ignoreList:    S.djIgnore,
+      minRating:     S.djMinRating || undefined,
+      ignoreVPaths:  ignoreVPaths.length > 0 ? ignoreVPaths : undefined,
+      filepathPrefix: filepathPrefix || undefined,
+    });
+  }
+
   const ignoreVPaths = S.vpaths.filter(v => !selected.includes(v));
   return api('POST', 'api/v1/db/random-songs', {
     ignoreList:   S.djIgnore,
@@ -1371,6 +1396,50 @@ function showAddToPlaylistModal(song) {
   showModal('atp-modal');
 }
 
+// ── SHARE PLAYLIST ───────────────────────────────────────────
+function showSharePlaylistModal(songs) {
+  const resultEl = document.getElementById('share-pl-result');
+  const urlEl    = document.getElementById('share-pl-url');
+  const okBtn    = document.getElementById('share-pl-ok');
+  resultEl.classList.add('hidden');
+  urlEl.value = '';
+  document.getElementById('share-pl-expires').value = '';
+  okBtn.disabled = false;
+  okBtn.textContent = 'Create link';
+  showModal('share-pl-modal');
+
+  okBtn.onclick = async () => {
+    okBtn.disabled = true;
+    okBtn.textContent = 'Creating…';
+    try {
+      const expires = document.getElementById('share-pl-expires').value;
+      const body = { playlist: songs.map(s => s.filepath) };
+      if (expires) body.time = parseInt(expires);
+      const d = await api('POST', 'api/v1/share', body);
+      const url = `${location.origin}/shared/${d.playlistId}`;
+      urlEl.value = url;
+      resultEl.classList.remove('hidden');
+      okBtn.textContent = 'Create another';
+      okBtn.disabled = false;
+    } catch(e) {
+      toast('Failed to create share link');
+      okBtn.disabled = false;
+      okBtn.textContent = 'Create link';
+    }
+  };
+
+  document.getElementById('share-pl-copy').onclick = () => {
+    const url = urlEl.value;
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(() => {
+      const btn = document.getElementById('share-pl-copy');
+      const orig = btn.innerHTML;
+      btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20,6 9,17 4,12"/></svg> Copied!`;
+      setTimeout(() => { btn.innerHTML = orig; }, 1800);
+    }).catch(() => { urlEl.select(); toast('Copy failed — select the URL manually'); });
+  };
+}
+
 // ── PLAYLISTS ────────────────────────────────────────────────
 async function loadPlaylists() {
   try {
@@ -1387,11 +1456,25 @@ function renderPlaylistNav() {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
         ${esc(p.name)}
       </button>
+      <button class="pl-row-share" data-pl="${esc(p.name)}" title="Share">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+      </button>
       <button class="pl-row-del" data-pl="${esc(p.name)}" title="Delete">×</button>
     </div>`).join('');
 
   nav.querySelectorAll('.pl-row-btn').forEach(btn => {
     btn.addEventListener('click', () => openPlaylist(btn.dataset.pl));
+  });
+  nav.querySelectorAll('.pl-row-share').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const name = btn.dataset.pl;
+      try {
+        const d = await api('POST', 'api/v1/playlist/load', { playlistname: name });
+        const songs = d.map(item => norm(item));
+        showSharePlaylistModal(songs);
+      } catch(_) { toast('Failed to load playlist'); }
+    });
   });
   nav.querySelectorAll('.pl-row-del').forEach(btn => {
     btn.addEventListener('click', e => {
@@ -1423,7 +1506,7 @@ async function openPlaylist(name) {
     if (!songs.length) { setBody('<div class="empty-state">This playlist is empty</div>'); return; }
     const body = document.getElementById('content-body');
     body.innerHTML = `
-      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:8px;">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
         <button id="pl-save-cur-btn" class="btn-sm">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
           Save current queue into "${esc(name)}"
@@ -1444,6 +1527,65 @@ async function openPlaylist(name) {
 }
 
 // ── VIEWS ─────────────────────────────────────────────────────
+async function viewSharedLinks() {
+  setTitle('Shared Links'); setBack(null); setNavActive('shared-links'); S.view = 'shared-links';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+  setBody('<div class="loading-state"></div>');
+  try {
+    const items = await api('GET', 'api/v1/share/list');
+    if (!items.length) {
+      setBody(`<div class="empty-state">No shared links yet.<br>Use the share button in the queue panel to share your queue.</div>`);
+      return;
+    }
+    const body = document.getElementById('content-body');
+    body.innerHTML = `<div class="shared-links-list">${items.map(item => {
+      const url = `${location.origin}/shared/${item.playlistId}`;
+      const exp = item.expires ? new Date(item.expires * 1000).toLocaleDateString() : 'Never';
+      const expired = item.expires && item.expires * 1000 < Date.now();
+      return `<div class="shared-link-row${expired ? ' shared-expired' : ''}" data-id="${esc(item.playlistId)}">
+        <div class="shared-link-info">
+          <div class="shared-link-url">${esc(url)}</div>
+          <div class="shared-link-meta">${item.songCount} song${item.songCount !== 1 ? 's' : ''} &nbsp;&middot;&nbsp; Expires: ${exp}${expired ? ' <span class="shared-expired-tag">expired</span>' : ''}</div>
+        </div>
+        <div class="shared-link-actions">
+          <button class="btn-ghost shared-copy-btn" data-url="${esc(url)}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy
+          </button>
+          <a class="btn-ghost" href="${esc(url)}" target="_blank" rel="noopener">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            Open
+          </a>
+          <button class="btn-ghost shared-del-btn" data-id="${esc(item.playlistId)}" style="color:var(--red)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6l-1,14H6L5,6"/><path d="M9,6V4h6v2"/></svg>
+            Delete
+          </button>
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+    body.querySelectorAll('.shared-copy-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(btn.dataset.url).then(() => {
+          const orig = btn.innerHTML;
+          btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20,6 9,17 4,12"/></svg> Copied!`;
+          setTimeout(() => { btn.innerHTML = orig; }, 1800);
+        }).catch(() => toast('Copy failed'));
+      });
+    });
+    body.querySelectorAll('.shared-del-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Delete this shared link? Anyone with the URL will lose access.')) return;
+        try {
+          await api('DELETE', `api/v1/share/${btn.dataset.id}`);
+          viewSharedLinks();
+        } catch(e) { toast('Delete failed'); }
+      });
+    });
+  } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
+}
+
 async function viewRecent() {
   setTitle('Recently Added'); setBack(null); setNavActive('recent'); S.view = 'recent';
   setBody('<div class="loading-state"></div>');
@@ -2190,7 +2332,15 @@ async function pollScan() {
     const d = await api('GET', 'api/v1/db/status');
     const badge = document.getElementById('scan-badge');
     if (d.locked) {
-      badge.textContent = `Scanning… ${d.totalFileCount.toLocaleString()} files`;
+      let locStr = '';
+      if (d.scanningVpaths?.length) {
+        locStr = ' · ' + d.scanningVpaths.map(s => {
+          if (!s.dir) return s.vpath;
+          const parts = s.dir.split('/').filter(Boolean);
+          return parts.slice(-2).join('/');
+        }).join('  |  ');
+      }
+      badge.textContent = `Scanning… ${d.totalFileCount.toLocaleString()} files${locStr}`;
       badge.classList.add('show');
       scanTimer = setTimeout(pollScan, 3500);
     } else {
@@ -2254,7 +2404,7 @@ function showApp() {
   viewRecent();
   refreshQueueUI();
   pollScan();
-  // Fetch ping to get transcode server info
+  // Fetch ping to get transcode server info + vpath metadata
   api('GET', 'api/v1/ping').then(d => {
     if (d.transcode) {
       S.transInfo = {
@@ -2266,6 +2416,8 @@ function showApp() {
     } else {
       S.transInfo = { serverEnabled: false };
     }
+    // Store vpath parent/child metadata for Auto-DJ child-vpath optimisation
+    if (d.vpathMetaData) { S.vpathMeta = d.vpathMetaData; }
   }).catch(() => { S.transInfo = { serverEnabled: false }; });
 }
 function showLogin() {
@@ -2303,6 +2455,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'transcode') viewTranscode();
     else if (v === 'jukebox')   viewJukebox();
     else if (v === 'apps')      viewApps();
+    else if (v === 'shared-links') viewSharedLinks();
   });
 });
 
@@ -2340,6 +2493,10 @@ document.getElementById('qp-close-btn').addEventListener('click', () => {
   document.getElementById('queue-btn').classList.remove('active');
 });
 // Save queue as playlist
+document.getElementById('qp-share-btn').addEventListener('click', () => {
+  if (!S.queue.length) { toast('Queue is empty'); return; }
+  showSharePlaylistModal(S.queue);
+});
 document.getElementById('qp-save-btn').addEventListener('click', () => showSavePlaylistModal());
 document.getElementById('qp-shuffle-btn').addEventListener('click', () => {
   if (!S.queue.length) return;
@@ -2389,6 +2546,7 @@ document.getElementById('pl-new-ok').addEventListener('click', async () => {
 });
 
 // Save playlist modal
+document.getElementById('share-pl-cancel').addEventListener('click', () => hideModal('share-pl-modal'));
 document.getElementById('pl-save-cancel').addEventListener('click', () => hideModal('pl-save-modal'));
 document.getElementById('pl-save-ok').addEventListener('click', async () => {
   const name = document.getElementById('pl-save-name').value.trim();

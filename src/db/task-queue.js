@@ -11,6 +11,7 @@ const __dirname = getDirname(import.meta.url);
 const taskQueue = [];
 const runningTasks = new Set();
 const vpathLimiter = new Set();
+const currentScanDirs = new Map(); // vpath → { dir: string, root: string }
 let scanIntervalTimer = null; // This gets set after the server boots
 
 function addScanTask(vpath) {
@@ -22,9 +23,24 @@ function addScanTask(vpath) {
   }
 }
 
+// Returns true if vpathB's root is a subdirectory of vpathA's root.
+function isChildOf(vpathA, vpathB) {
+  const a = config.program.folders[vpathA].root.replace(/\/?$/, '/');
+  const b = config.program.folders[vpathB].root.replace(/\/?$/, '/');
+  return b.startsWith(a) && a !== b;
+}
+
+// Vpaths whose root sits inside another vpath's root — they need no separate
+// scan because the parent will cover them once otherRoots no longer skips them.
+function childVpaths() {
+  const keys = Object.keys(config.program.folders);
+  return new Set(keys.filter(v => keys.some(other => other !== v && isChildOf(other, v))));
+}
+
 function scanAll() {
+  const children = childVpaths();
   Object.keys(config.program.folders).forEach((vpath) => {
-    addScanTask(vpath);
+    if (!children.has(vpath)) { addScanTask(vpath); }
   });
 }
 
@@ -51,15 +67,19 @@ function runScan(scanObj) {
     scanId: scanObj.id,
     isHttps: config.getIsHttps(),
     compressImage: config.program.scanOptions.compressImage,
-    otherRoots: Object.values(config.program.folders)
-      .map(f => f.root)
-      .filter(r => r !== config.program.folders[scanObj.vpath].root)
+    otherRoots: Object.keys(config.program.folders)
+      .filter(v => v !== scanObj.vpath && !isChildOf(scanObj.vpath, v))
+      .map(v => config.program.folders[v].root)
   };
 
   const forkedScan = child.fork(path.join(__dirname, './scanner.mjs'), [JSON.stringify(jsonLoad)], { silent: true });
   winston.info(`File scan started on ${jsonLoad.directory}`);
   runningTasks.add(forkedScan);
   vpathLimiter.add(scanObj.vpath);
+
+  forkedScan.on('message', (msg) => {
+    if (msg?.dir) currentScanDirs.set(scanObj.vpath, { dir: msg.dir, root: jsonLoad.directory });
+  });
 
   forkedScan.stdout.on('data', (data) => {
     winston.info(`File scan message: ${data}`);
@@ -73,6 +93,7 @@ function runScan(scanObj) {
     winston.info(`File scan completed with code ${code}`);
     runningTasks.delete(forkedScan);
     vpathLimiter.delete(scanObj.vpath);
+    currentScanDirs.delete(scanObj.vpath);
     nextTask();
   });
 }
@@ -92,6 +113,20 @@ export function getAdminStats() {
     taskQueue,
     vpaths: [...vpathLimiter]
   };
+}
+
+export function getScanningVpaths() {
+  return [...vpathLimiter].map(vpath => {
+    const info = currentScanDirs.get(vpath);
+    let dir = null;
+    if (info) {
+      const rel = info.dir.startsWith(info.root)
+        ? info.dir.slice(info.root.length).replace(/^\//, '')
+        : info.dir;
+      dir = rel || null;
+    }
+    return { vpath, dir };
+  });
 }
 
 export function runAfterBoot() {

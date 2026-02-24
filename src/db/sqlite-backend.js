@@ -312,6 +312,14 @@ export function getAllFilesWithMetadata(vpaths, username, opts) {
   `;
   const params = [username, ...vIn.params];
 
+  // filepathPrefix: restrict to files inside a subdirectory of a vpath
+  // (used by Auto-DJ when a child vpath is selected instead of creating
+  // duplicate DB entries for the same physical files)
+  if (opts.filepathPrefix && typeof opts.filepathPrefix === 'string') {
+    sql += ' AND f.filepath LIKE ? ESCAPE \'\\\'';
+    params.push(opts.filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
+  }
+
   const minRating = Number(opts.minRating);
   if (minRating && typeof minRating === 'number' && minRating <= 10 && !(minRating < 1)) {
     sql += ' AND um.rating >= ?';
