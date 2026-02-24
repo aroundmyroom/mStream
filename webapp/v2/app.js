@@ -1456,13 +1456,40 @@ async function viewArtists() {
     document.getElementById('play-all-btn').onclick = null;
     document.getElementById('add-all-btn').onclick  = null;
     const body = document.getElementById('content-body');
-    body.innerHTML = `<div class="artist-list">${
-      artists.map(a => `<div class="artist-row" data-artist="${esc(a)}">
-        <div class="artist-av">${esc(a.charAt(0)).toUpperCase()}</div>
-        <div class="artist-name">${esc(a)}</div>
-      </div>`).join('')
-    }</div>`;
-    body.querySelectorAll('.artist-row').forEach(row => {
+    body.innerHTML = `
+      <div class="fe-filter-row">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="lib-filter" class="fe-filter-input" type="text" placeholder="Filter artists…" autocomplete="off">
+        <span id="lib-match-count" class="fe-match-count"></span>
+        <button id="lib-filter-clear" class="fe-filter-clear hidden" title="Clear filter">✕</button>
+      </div>
+      <div class="artist-list">${
+        artists.map(a => `<div class="artist-row" data-artist="${esc(a)}">
+          <div class="artist-av">${esc(a.charAt(0)).toUpperCase()}</div>
+          <div class="artist-name">${esc(a)}</div>
+        </div>`).join('')
+      }</div>`;
+    const filterInput  = body.querySelector('#lib-filter');
+    const filterClear  = body.querySelector('#lib-filter-clear');
+    const matchCount   = body.querySelector('#lib-match-count');
+    // Cache rows + pre-compute names once — no re-querying on every keystroke
+    const allRows      = Array.from(body.querySelectorAll('.artist-row'));
+    const rowNames     = allRows.map(r => r.dataset.artist.toLowerCase());
+    function applyFilter() {
+      const q = filterInput.value.trim().toLowerCase();
+      filterClear.classList.toggle('hidden', !q);
+      let visible = 0;
+      allRows.forEach((row, i) => {
+        const matches = !q || rowNames[i].includes(q);
+        row.classList.toggle('fe-hidden', !matches);
+        if (matches) visible++;
+      });
+      matchCount.textContent = q ? `${visible} result${visible !== 1 ? 's' : ''}` : '';
+    }
+    let _artTimer;
+    filterInput.addEventListener('input', () => { clearTimeout(_artTimer); _artTimer = setTimeout(applyFilter, 150); });
+    filterClear.addEventListener('click', () => { clearTimeout(_artTimer); filterInput.value = ''; filterInput.focus(); applyFilter(); });
+    allRows.forEach(row => {
       row.addEventListener('click', () => viewArtistAlbums(row.dataset.artist));
     });
   } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
@@ -1492,29 +1519,93 @@ function renderAlbumGrid(albums, defaultArtist) {
   document.getElementById('play-all-btn').onclick = null;
   document.getElementById('add-all-btn').onclick  = null;
   const body = document.getElementById('content-body');
-  body.innerHTML = `<div class="album-grid">${albums.map((a, i) => {
+  body.innerHTML = `
+    <div class="fe-filter-row">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="lib-filter" class="fe-filter-input" type="text" placeholder="Filter albums…" autocomplete="off">
+      <span id="lib-match-count" class="fe-match-count"></span>
+      <button id="lib-filter-clear" class="fe-filter-clear hidden" title="Clear filter">✕</button>
+    </div>
+    <div class="album-grid"></div>`;
+  const filterInput = body.querySelector('#lib-filter');
+  const filterClear = body.querySelector('#lib-filter-clear');
+  const matchCount  = body.querySelector('#lib-match-count');
+  const grid        = body.querySelector('.album-grid');
+
+  // Pre-build HTML strings only — one cheap JS string per album, no DOM work yet
+  const cardData = albums.map((a, i) => {
     const name = a.name || 'Singles';
     const art  = artUrl(a.album_art_file, 's');
-    return `<div class="album-card" data-i="${i}">
-      <div class="album-art">
-        ${art
-          ? `<img src="${art}" alt="${esc(name)}" loading="lazy" onerror="this.style.display='none'">`
-          : `<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.25"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>`}
-        <div class="play-ov"><svg width="30" height="30" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div>
-      </div>
-      <div class="album-meta">
-        <div class="album-name">${esc(name)}</div>
-        ${a.year ? `<div class="album-year">${a.year}</div>` : '<div class="album-year">&nbsp;</div>'}
-      </div>
-    </div>`;
-  }).join('')}</div>`;
-  body.querySelectorAll('.album-card').forEach(card => {
-    card.addEventListener('click', () => {
-      const album = albums[parseInt(card.dataset.i)];
-      const backFn = defaultArtist ? () => viewArtistAlbums(defaultArtist) : () => viewAllAlbums();
-      viewAlbumSongs(album.name, defaultArtist, backFn);
-    });
+    return {
+      lc: name.toLowerCase(),
+      html: `<div class="album-card" data-i="${i}">
+        <div class="album-art">
+          ${art
+            ? `<img src="${art}" alt="${esc(name)}" loading="lazy" onerror="this.style.display='none'">`
+            : `<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.25"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>`}
+          <div class="play-ov"><svg width="30" height="30" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div>
+        </div>
+        <div class="album-meta">
+          <div class="album-name">${esc(name)}</div>
+          ${a.year ? `<div class="album-year">${a.year}</div>` : '<div class="album-year">&nbsp;</div>'}
+        </div>
+      </div>`
+    };
   });
+
+  // Single delegated listener — one handler for the whole grid, attached once
+  grid.addEventListener('click', e => {
+    const card = e.target.closest('.album-card');
+    if (!card) return;
+    const album = albums[parseInt(card.dataset.i)];
+    if (!album) return;
+    const backFn = defaultArtist ? () => viewArtistAlbums(defaultArtist) : () => viewAllAlbums();
+    viewAlbumSongs(album.name, defaultArtist, backFn);
+  });
+
+  let _albTimer, _rafId;
+  const CHUNK = 80; // cards per animation frame — keeps each frame under ~16ms
+
+  // Chunked render: first CHUNK cards appear instantly, rest load in background frames
+  function renderChunked(data) {
+    cancelAnimationFrame(_rafId);
+    grid.innerHTML = '';
+    matchCount.textContent = '';
+    filterClear.classList.add('hidden');
+    let pos = 0;
+    function step() {
+      grid.insertAdjacentHTML('beforeend', data.slice(pos, pos + CHUNK).map(c => c.html).join(''));
+      pos += CHUNK;
+      if (pos < data.length) _rafId = requestAnimationFrame(step);
+    }
+    step(); // first batch is synchronous → grid is visible immediately
+  }
+
+  // Filtered render: result set is small, so one innerHTML pass is always fast
+  function renderFiltered(q) {
+    cancelAnimationFrame(_rafId);
+    const subset = cardData.filter(c => c.lc.includes(q));
+    grid.innerHTML = subset.map(c => c.html).join('');
+    filterClear.classList.remove('hidden');
+    matchCount.textContent = `${subset.length} result${subset.length !== 1 ? 's' : ''}`;
+  }
+
+  filterInput.addEventListener('input', () => {
+    clearTimeout(_albTimer);
+    _albTimer = setTimeout(() => {
+      const q = filterInput.value.trim().toLowerCase();
+      if (q) renderFiltered(q);
+      else renderChunked(cardData);
+    }, 150);
+  });
+  filterClear.addEventListener('click', () => {
+    clearTimeout(_albTimer);
+    filterInput.value = '';
+    filterInput.focus();
+    renderChunked(cardData);
+  });
+
+  renderChunked(cardData); // initial render — non-blocking
 }
 
 async function viewAlbumSongs(albumName, artist, backFn) {
@@ -2443,7 +2534,7 @@ const EQ = (() => {
       <div class="eq-band">
         <span class="eq-db" id="eq-db-${i}" style="color:${dbColor(gains[i])}">${dbLabel(gains[i])}</span>
         <div class="eq-slider-wrap"><input type="range" class="eq-slider" id="eq-s-${i}"
-          min="-12" max="12" step="0.5" value="${gains[i]}" orient="vertical"></div>
+          min="-12" max="12" step="0.5" value="${gains[i]}"></div>
         <span class="eq-freq">${esc(b.label)}</span>
       </div>`).join('');
     EQ_BANDS.forEach((_, i) => {
