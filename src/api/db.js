@@ -3,6 +3,7 @@ import path from 'path';
 import * as vpath from '../util/vpath.js';
 import * as dbQueue from '../db/task-queue.js';
 import * as db from '../db/manager.js';
+import * as config from '../state/config.js';
 import { joiValidate } from '../util/validation.js';
 import WebError from '../util/web-error.js';
 
@@ -28,13 +29,35 @@ function renderMetadataObj(row) {
 
 export function pullMetaData(filepath, user) {
   const pathInfo = vpath.getVPathInfo(filepath, user);
-  const result = db.getFileWithMetadata(pathInfo.relativePath, pathInfo.vpath, user.username);
+  let result = db.getFileWithMetadata(pathInfo.relativePath, pathInfo.vpath, user.username);
+
+  if (!result) {
+    // This vpath may be a sub-folder of another vpath (e.g. "12-inches" lives
+    // inside the "Music" root). Try to find the file via the parent vpath.
+    const folders = config.program?.folders || {};
+    const myRoot  = folders[pathInfo.vpath]?.root.replace(/\/?$/, '/');
+    if (myRoot) {
+      for (const [parentKey, parentFolder] of Object.entries(folders)) {
+        if (parentKey === pathInfo.vpath) continue;
+        if (!user.vpaths.includes(parentKey)) continue;
+        const parentRoot = parentFolder.root.replace(/\/?$/, '/');
+        if (myRoot.startsWith(parentRoot) && myRoot !== parentRoot) {
+          const prefix = myRoot.slice(parentRoot.length);
+          result = db.getFileWithMetadata(prefix + pathInfo.relativePath, parentKey, user.username);
+          if (result) break;
+        }
+      }
+    }
+  }
 
   if (!result) {
     return { "filepath": filepath, "metadata": null };
   }
 
-  return renderMetadataObj(result);
+  // Always return the original filepath so the song plays via the correct vpath
+  const rendered = renderMetadataObj(result);
+  rendered.filepath = filepath;
+  return rendered;
 }
 
 export function setup(mstream) {
@@ -291,30 +314,9 @@ export function setup(mstream) {
     const results = db.loadPlaylistEntries(req.user.username, playlist);
 
     for (const row of results) {
-      // Look up metadata
-      let pathInfo;
-      try {
-        pathInfo = vpath.getVPathInfo(row.filepath, req.user);
-      } catch (_err) { continue; }
-
-      const result = db.getFileWithMetadata(pathInfo.relativePath, pathInfo.vpath, req.user.username);
-
-      let metadata = {};
-      if (result) {
-        metadata = {
-          "artist": result.artist ? result.artist : null,
-          "hash": result.hash ? result.hash : null,
-          "album": result.album ? result.album : null,
-          "track": result.track ? result.track : null,
-          "title": result.title ? result.title : null,
-          "year": result.year ? result.year : null,
-          "album-art": result.aaFile ? result.aaFile : null,
-          "rating": result.rating ? result.rating : null,
-          "replaygain-track-db": result['replaygain-track-db'] ? result['replaygain-track-db'] : null
-        };
-      }
-
-      returnThis.push({ id: row.id, filepath: row.filepath, metadata: metadata });
+      // Look up metadata (with parent-vpath fallback for child vpaths)
+      const meta = pullMetaData(row.filepath, req.user);
+      returnThis.push({ id: row.id, filepath: row.filepath, metadata: meta.metadata || {} });
     }
 
     res.json(returnThis);
