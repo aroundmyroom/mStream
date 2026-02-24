@@ -8,7 +8,7 @@
   --primary-d:rgba(139,92,246,.15); --primary-g:rgba(139,92,246,.4);
   --accent:#60a5fa; --green:#34d399; --red:#f87171; --yellow:#fbbf24;
   --t1:#eeeeff; --t2:#8888b0; --t3:#44445c; --t4:#2a2a3e;
-  --sidebar:236px; --player:100px; --r:7px; --r2:12px; --qp-width:400px;
+  --sidebar:236px; --player:100px; --r:7px; --r2:12px; --qp-width:320px;
   --theme-icon-moon:block; --theme-icon-sun:none;
 }
 
@@ -23,8 +23,8 @@
   --t1:#0e0e1a; --t2:#555570; --t3:#9090a8; --t4:#c8c8dc;
   --theme-icon-moon:none; --theme-icon-sun:block;
 }
-html,body{height:100%;overflow:hidden;}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--t1);font-size:14px;line-height:1.5;}
+html{height:100%;height:-webkit-fill-available;}
+body{height:100%;min-height:-webkit-fill-available;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--t1);font-size:14px;line-height:1.5;}
 .hidden{display:none!important;}
 button{background:none;border:none;cursor:pointer;color:inherit;font-family:inherit;font-size:inherit;}
 a{color:inherit;text-decoration:none;}
@@ -76,6 +76,8 @@ a{color:inherit;text-decoration:none;}
   grid-template-rows:1fr var(--player);
   grid-template-areas:"side main queue" "side player player";
   height:100vh;
+  height:-webkit-fill-available;
+  height:100dvh;
 }
 
 /* ── SIDEBAR ───────────────────────────────────────────────── */
@@ -413,7 +415,7 @@ a{color:inherit;text-decoration:none;}
 
 /* ── PLAYER BAR ────────────────────────────────────────────── */
 .player{
-  grid-area:player;display:grid;grid-template-columns:1fr auto 1fr;
+  grid-area:player;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
   align-items:center;padding:0 20px;background:var(--surface);
   border-top:1px solid var(--border);gap:16px;
   position:relative; /* needed for absolute mini-spec */
@@ -432,14 +434,14 @@ a{color:inherit;text-decoration:none;}
 .player-thumb{width:64px;height:64px;flex-shrink:0;border-radius:var(--r);overflow:hidden;background:var(--raised);display:flex;align-items:center;justify-content:center;transition:box-shadow .18s;}
 .player-thumb img{width:100%;height:100%;object-fit:cover;}
 .player-info{min-width:0;}
-.player-title{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;}
-.player-artist{font-size:11px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;}
-.player-album{font-size:10px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;margin-top:1px;}
+.player-title{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:clamp(120px,14vw,220px);}
+.player-artist{font-size:11px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:clamp(120px,14vw,220px);}
+.player-album{font-size:10px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:clamp(120px,14vw,220px);margin-top:1px;}
 .player-stars-row{display:flex;gap:2px;margin-top:3px;font-size:12px;letter-spacing:-.5px;cursor:pointer;}
 .player-stars-row .ps-on{color:var(--yellow);}
 .player-stars-row .ps-off{color:var(--t4);}
 .player-stars-row:hover .ps-off{color:var(--t3);}
-.player-center{display:flex;flex-direction:column;align-items:center;gap:8px;min-width:320px;max-width:580px;}
+.player-center{display:flex;flex-direction:column;align-items:center;gap:8px;flex:1;min-width:0;max-width:580px;}
 .player-controls{display:flex;align-items:center;gap:6px;}
 
 /* base button */
@@ -485,13 +487,13 @@ a{color:inherit;text-decoration:none;}
 .prog-fill{height:100%;border-radius:99px;background:var(--primary);pointer-events:none;}
 .prog-thumb{position:absolute;top:50%;right:-4px;width:10px;height:10px;border-radius:50%;background:#fff;transform:translateY(-50%) scale(0);transition:transform .15s;pointer-events:none;}
 .prog-track:hover .prog-thumb{transform:translateY(-50%) scale(1);}
-.player-right{display:flex;align-items:center;justify-content:flex-end;gap:8px;}
+.player-right{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;}
 .dj-light{font-size:9px;font-weight:800;letter-spacing:.5px;padding:3px 7px;border-radius:99px;background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;animation:dj-pulse 1.6s ease-in-out infinite;}
 @keyframes dj-pulse{0%,100%{opacity:1}50%{opacity:.55}}
 .q-count{position:absolute;top:0;right:0;font-size:8px;min-width:14px;height:14px;line-height:14px;text-align:center;background:var(--primary);color:#fff;border-radius:99px;padding:0 3px;display:none;}
 .q-count.show{display:block;}
 #queue-btn{position:relative;}
-.vol-wrap{display:flex;align-items:center;gap:6px;min-width:100px;}
+.vol-wrap{display:flex;align-items:center;gap:6px;min-width:80px;max-width:130px;}
 .vol-slider{flex:1;height:3px;cursor:pointer;accent-color:var(--primary);-webkit-appearance:none;appearance:none;background:var(--border2);border-radius:99px;outline:none;}
 .vol-slider::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--primary);cursor:pointer;}
 
@@ -691,7 +693,23 @@ a{color:inherit;text-decoration:none;}
 .ctrl-btn.eq-active{color:var(--primary);}
 .ctrl-btn.eq-active svg{filter:drop-shadow(0 0 3px var(--primary-g));}
 
+/* Tablet / Safari iPad desktop mode (landscape ~1366 px) */
+@media(max-width:1366px){
+  :root{--qp-width:280px;--sidebar:200px;}
+}
 /* Responsive: stack vertically on phones */
+@media(max-width:1024px){
+  :root{--qp-width:280px;--sidebar:200px;}
+  .player{padding:0 12px;gap:10px;}
+  .player-thumb{width:52px;height:52px;}
+  .player-controls{gap:3px;}
+  .ctrl-sm{width:28px;height:28px;}
+  .ctrl-nav{width:34px;height:34px;}
+  .play-main{width:42px;height:42px;}
+  .player-right{gap:5px;}
+  .vol-wrap{min-width:60px;}
+  .eq-panel{width:min(640px,98vw);}
+}
 @media(max-width:600px){
   .song-row.mp-row{grid-template-columns:36px 48px 1fr auto auto auto;}
   .mp-bar-track{display:none;}
