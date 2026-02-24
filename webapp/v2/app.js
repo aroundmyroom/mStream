@@ -21,6 +21,15 @@ const S = {
   ctxSong:  null,    // song target for context menu
   feDir:    '',      // file explorer current path
   feDirStack: [],    // navigation history stack
+  // Transcode
+  transInfo:    null,  // { serverEnabled, defaultCodec, defaultBitrate, defaultAlgorithm }
+  transEnabled: !!localStorage.getItem('ms2_trans'),
+  transCodec:   localStorage.getItem('ms2_trans_codec')   || '',
+  transBitrate: localStorage.getItem('ms2_trans_bitrate') || '',
+  transAlgo:    localStorage.getItem('ms2_trans_algo')    || '',
+  // Jukebox
+  jukeWs:   null,
+  jukeCode: null,
 };
 
 const audioEl = document.getElementById('audio');
@@ -46,7 +55,17 @@ function artUrl(f, size) {
   const sz = size || 's';
   return `/album-art/${encodeURIComponent(f)}?compress=${sz}&token=${S.token}`;
 }
-function mediaUrl(fp) { return `/media/${String(fp).replace(/^\/+/, '')}?token=${S.token}`; }
+function mediaUrl(fp) {
+  const path = String(fp).replace(/^\/+/, '');
+  if (S.transEnabled && S.transInfo?.serverEnabled) {
+    const params = new URLSearchParams({ token: S.token });
+    if (S.transCodec)   params.set('codec',   S.transCodec);
+    if (S.transBitrate) params.set('bitrate', S.transBitrate);
+    if (S.transAlgo)    params.set('algo',    S.transAlgo);
+    return `/transcode/${path}?${params}`;
+  }
+  return `/media/${path}?token=${S.token}`;
+}
 function dlUrl(fp)    { return `/media/${String(fp).replace(/^\/+/, '')}?token=${S.token}`; }
 
 let _toastT;
@@ -1849,6 +1868,223 @@ async function viewAutoDJ() {
   }
 }
 
+// ── TRANSCODE ─────────────────────────────────────────────────
+function viewTranscode() {
+  setTitle('Transcode'); setBack(null); setNavActive('transcode'); S.view = 'transcode';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+
+  const info = S.transInfo;
+  if (!info || !info.serverEnabled) {
+    setBody(`
+      <div class="info-panel">
+        <div class="info-panel-icon">
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8.5 8.5h9l-9 9v11l20-20h11l-31 31h11l20-20v11l-9 9h9"/>
+          </svg>
+        </div>
+        <h2>Transcoding</h2>
+        <p class="info-hint">Transcoding is not enabled on this server. Ask your server admin to enable it in the config.</p>
+      </div>`);
+    return;
+  }
+
+  setBody(`
+    <div class="settings-panel">
+      <div class="settings-section-title">Transcode Settings</div>
+      <p class="settings-desc">Stream audio converted on-the-fly to reduce bandwidth. Server default: <strong>${esc(info.defaultCodec || '—')} / ${esc(info.defaultBitrate || '—')} / ${esc(info.defaultAlgorithm || '—')}</strong>.</p>
+      <div class="settings-row settings-row-toggle">
+        <span class="settings-label">Enable Transcoding</span>
+        <label class="toggle-sw">
+          <input type="checkbox" id="tc-enable" ${S.transEnabled ? 'checked' : ''}>
+          <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
+        </label>
+      </div>
+      <div id="tc-opts" class="settings-opts${S.transEnabled ? '' : ' dimmed'}">
+        <div class="settings-row">
+          <label class="settings-label" for="tc-codec">Codec</label>
+          <select class="settings-select" id="tc-codec">
+            <option value="">Default (${esc(info.defaultCodec || 'server')})</option>
+            <option value="opus" ${S.transCodec==='opus'?'selected':''}>Opus / OGG</option>
+            <option value="mp3"  ${S.transCodec==='mp3' ?'selected':''}>MP3</option>
+            <option value="aac"  ${S.transCodec==='aac' ?'selected':''}>AAC</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label" for="tc-bitrate">Bitrate</label>
+          <select class="settings-select" id="tc-bitrate">
+            <option value="">Default (${esc(info.defaultBitrate || 'server')})</option>
+            <option value="64k"  ${S.transBitrate==='64k' ?'selected':''}>64 kbps</option>
+            <option value="96k"  ${S.transBitrate==='96k' ?'selected':''}>96 kbps</option>
+            <option value="128k" ${S.transBitrate==='128k'?'selected':''}>128 kbps</option>
+            <option value="192k" ${S.transBitrate==='192k'?'selected':''}>192 kbps</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <label class="settings-label" for="tc-algo">Algorithm</label>
+          <select class="settings-select" id="tc-algo">
+            <option value="">Default (${esc(info.defaultAlgorithm || 'server')})</option>
+            <option value="buffer" ${S.transAlgo==='buffer'?'selected':''}>Buffer</option>
+            <option value="stream" ${S.transAlgo==='stream'?'selected':''}>Stream</option>
+          </select>
+        </div>
+      </div>
+    </div>`);
+
+  const optsEl = document.getElementById('tc-opts');
+  document.getElementById('tc-enable').onchange = e => {
+    S.transEnabled = e.target.checked;
+    S.transEnabled ? localStorage.setItem('ms2_trans', '1') : localStorage.removeItem('ms2_trans');
+    optsEl.classList.toggle('dimmed', !S.transEnabled);
+    // Reload current song with new URL scheme
+    if (S.queue[S.idx]) {
+      const t = audioEl.currentTime, playing = !audioEl.paused;
+      audioEl.src = mediaUrl(S.queue[S.idx].filepath);
+      audioEl.currentTime = t;
+      if (playing) audioEl.play().catch(() => {});
+    }
+    toast(S.transEnabled ? 'Transcoding enabled' : 'Transcoding disabled');
+  };
+  document.getElementById('tc-codec').onchange = e => {
+    S.transCodec = e.target.value;
+    e.target.value ? localStorage.setItem('ms2_trans_codec', e.target.value) : localStorage.removeItem('ms2_trans_codec');
+  };
+  document.getElementById('tc-bitrate').onchange = e => {
+    S.transBitrate = e.target.value;
+    e.target.value ? localStorage.setItem('ms2_trans_bitrate', e.target.value) : localStorage.removeItem('ms2_trans_bitrate');
+  };
+  document.getElementById('tc-algo').onchange = e => {
+    S.transAlgo = e.target.value;
+    e.target.value ? localStorage.setItem('ms2_trans_algo', e.target.value) : localStorage.removeItem('ms2_trans_algo');
+  };
+}
+
+// ── JUKEBOX ───────────────────────────────────────────────────
+function viewJukebox() {
+  setTitle('Jukebox'); setBack(null); setNavActive('jukebox'); S.view = 'jukebox';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+
+  if (S.jukeCode && S.jukeWs && S.jukeWs.readyState === WebSocket.OPEN) {
+    _renderJukeboxActive(S.jukeCode);
+    return;
+  }
+
+  setBody(`
+    <div class="info-panel">
+      <div class="info-panel-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15.5 1h-8A2.5 2.5 0 0 0 5 3.5v17A2.5 2.5 0 0 0 7.5 23h8a2.5 2.5 0 0 0 2.5-2.5v-17A2.5 2.5 0 0 0 15.5 1zm-4 21c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm4.5-4H7V4h9v14z"/></svg>
+      </div>
+      <h2>Jukebox Mode</h2>
+      <p class="info-hint">Control this player from another device on the same network. Click Connect to generate a shareable remote-control link.</p>
+      <button class="btn-primary" id="juke-connect-btn">Connect</button>
+    </div>`);
+
+  document.getElementById('juke-connect-btn').onclick = _connectJukebox;
+}
+
+function _connectJukebox() {
+  const btn = document.getElementById('juke-connect-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Connecting…'; }
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}?token=${S.token}`);
+
+  ws.onmessage = e => {
+    try {
+      const msg = JSON.parse(e.data);
+      // Initial handshake — server sends back the code
+      if (msg.code && !S.jukeCode) {
+        S.jukeCode = msg.code;
+        S.jukeWs = ws;
+        if (S.view === 'jukebox') _renderJukeboxActive(msg.code);
+      }
+      // Remote commands
+      if (msg.command) {
+        if      (msg.command === 'next')      Player.next();
+        else if (msg.command === 'previous')  Player.prev();
+        else if (msg.command === 'playPause') Player.toggle();
+        else if (msg.command === 'addSong' && msg.file) {
+          Player.addSong({ filepath: msg.file, title: msg.file.split('/').pop() });
+        }
+      }
+    } catch(_) {}
+  };
+
+  ws.onerror = () => {
+    toast('Jukebox connection failed');
+    if (btn) { btn.disabled = false; btn.textContent = 'Connect'; }
+  };
+
+  ws.onclose = () => {
+    S.jukeCode = null; S.jukeWs = null;
+    if (S.view === 'jukebox') viewJukebox();
+  };
+}
+
+function _renderJukeboxActive(code) {
+  const url = `${location.protocol}//${location.host}/remote/${code}`;
+  const qr  = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&color=ffffff&bgcolor=1a1a2e&data=${encodeURIComponent(url)}`;
+  setBody(`
+    <div class="jukebox-panel">
+      <div class="jukebox-header">
+        <div class="jukebox-live-dot"></div>
+        <h2>Jukebox Active</h2>
+      </div>
+      <p class="jukebox-hint">Scan the QR code or share the link to control this player from another device.</p>
+      <img class="jukebox-qr" src="${qr}" alt="QR Code" width="180" height="180" loading="lazy">
+      <div class="jukebox-code-row">
+        <span class="jukebox-code-label">Code</span>
+        <strong class="jukebox-code-val">${esc(code)}</strong>
+      </div>
+      <a class="jukebox-url" href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>
+      <button class="btn-ghost jukebox-disc" id="juke-disc-btn">Disconnect</button>
+    </div>`);
+
+  document.getElementById('juke-disc-btn').onclick = () => {
+    S.jukeWs?.close();
+    S.jukeWs = null; S.jukeCode = null;
+    viewJukebox();
+  };
+}
+
+// ── APPS ──────────────────────────────────────────────────────
+function viewApps() {
+  setTitle('Mobile Apps'); setBack(null); setNavActive('apps'); S.view = 'apps';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+
+  setBody(`
+    <div class="apps-panel">
+      <h2>Mobile Apps</h2>
+      <p class="apps-desc">Listen to your music on the go with the official mStream apps.</p>
+      <div class="apps-grid">
+        <a class="app-card" href="https://play.google.com/store/apps/details?id=mstream.music" target="_blank" rel="noopener">
+          <svg class="app-card-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3.18 23.76A1.51 1.51 0 0 1 2 22.36V1.64A1.51 1.51 0 0 1 3.18.24L13.6 12 3.18 23.76zM16.2 9.06l-2.58-2.58L5.8 1.68l8.37 4.83 2.03 2.55zm1.94 1.81L16.2 9.06 14.6 12l1.6 2.94 1.94-1.13a.97.97 0 0 0 0-1.94zM5.8 22.32l7.82-4.8-2.03-2.55-5.79 7.35z"/></svg>
+          <div>
+            <div class="app-card-title">Android</div>
+            <div class="app-card-sub">Get it on Google Play</div>
+          </div>
+        </a>
+        <a class="app-card" href="https://apps.apple.com/us/app/mstream-player/id1605378892" target="_blank" rel="noopener">
+          <svg class="app-card-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+          <div>
+            <div class="app-card-title">iOS</div>
+            <div class="app-card-sub">Download on the App Store</div>
+          </div>
+        </a>
+      </div>
+      <div class="apps-qr-section">
+        <h3>Add this server to the app</h3>
+        <p>Use the QR code tool to quickly connect a mobile device to this server.</p>
+        <a class="btn-primary" href="/qr" target="_blank" rel="noopener">Open QR Tool</a>
+      </div>
+    </div>`);
+}
+
 // ── SCAN STATUS ───────────────────────────────────────────────
 async function pollScan() {
   try {
@@ -1879,6 +2115,11 @@ async function tryLogin(username, password) {
   S.djVpaths = [...S.vpaths];  // default: all sources selected
   localStorage.setItem('ms2_token', d.token);
   localStorage.setItem('ms2_user',  username);
+  // Detect admin role after login
+  try {
+    await api('GET', 'api/v1/admin/directories');
+    S.isAdmin = true;
+  } catch(_) { S.isAdmin = false; }
 }
 
 async function checkSession() {
@@ -1904,13 +2145,29 @@ async function checkSession() {
 function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').classList.remove('hidden');
-  if (S.isAdmin) document.getElementById('scan-btn').classList.remove('hidden');
+  if (S.isAdmin) {
+    document.getElementById('scan-btn').classList.remove('hidden');
+    document.getElementById('admin-panel-btn').classList.remove('hidden');
+  }
   // Mark queue btn active (panel is visible by default)
   document.getElementById('queue-btn').classList.add('active');
   loadPlaylists();
   viewRecent();
   refreshQueueUI();
   pollScan();
+  // Fetch ping to get transcode server info
+  api('GET', 'api/v1/ping').then(d => {
+    if (d.transcode) {
+      S.transInfo = {
+        serverEnabled:    true,
+        defaultCodec:     d.transcode.defaultCodec     || '',
+        defaultBitrate:   d.transcode.defaultBitrate   || '',
+        defaultAlgorithm: d.transcode.defaultAlgorithm || '',
+      };
+    } else {
+      S.transInfo = { serverEnabled: false };
+    }
+  }).catch(() => { S.transInfo = { serverEnabled: false }; });
 }
 function showLogin() {
   document.getElementById('login-screen').style.display = '';
@@ -1944,6 +2201,9 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'played')  viewPlayed();
     else if (v === 'files')   { S.feDirStack = []; viewFiles('', false); }
     else if (v === 'autodj')  viewAutoDJ();
+    else if (v === 'transcode') viewTranscode();
+    else if (v === 'jukebox')   viewJukebox();
+    else if (v === 'apps')      viewApps();
   });
 });
 
