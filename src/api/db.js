@@ -47,7 +47,8 @@ export function setup(mstream) {
     res.json({
       totalFileCount: total,
       locked: dbQueue.isScanning(),
-      vpaths: req.user.vpaths
+      vpaths: req.user.vpaths,
+      scanningVpaths: dbQueue.getScanningVpaths().filter(s => req.user.vpaths.includes(s.vpath))
     });
   });
 
@@ -259,7 +260,8 @@ export function setup(mstream) {
 
     const results = db.getAllFilesWithMetadata(req.user.vpaths, req.user.username, {
       ignoreVPaths: req.body.ignoreVPaths,
-      minRating: req.body.minRating
+      minRating: req.body.minRating,
+      filepathPrefix: req.body.filepathPrefix || null
     });
 
     const count = results.length;

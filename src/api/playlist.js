@@ -22,12 +22,27 @@ export function setup(mstream) {
       vpathMetaData: {}
     };
 
+    const allFolders = config.program.folders;
+    const allKeys = Object.keys(allFolders);
     req.user.vpaths.forEach(p => {
-      if (config.program.folders[p]) {
-        returnThis.vpathMetaData[p] = {
-          type: config.program.folders[p].type
-        };
-      }
+      if (!allFolders[p]) { return; }
+      const myRoot = allFolders[p].root.replace(/\/?$/, '/');
+      // Find if this vpath's root sits inside another vpath the user has access to
+      const parentVpath = req.user.vpaths.find(other =>
+        other !== p &&
+        allFolders[other] &&
+        myRoot.startsWith(allFolders[other].root.replace(/\/?$/, '/')) &&
+        allFolders[other].root.replace(/\/?$/, '/') !== myRoot
+      );
+      returnThis.vpathMetaData[p] = {
+        type: allFolders[p].type,
+        // parentVpath: the vpath that physically covers this folder's files in the DB
+        // filepathPrefix: the relative path prefix to filter by inside the parent vpath
+        parentVpath: parentVpath || null,
+        filepathPrefix: parentVpath
+          ? allFolders[p].root.slice(allFolders[parentVpath].root.replace(/\/?$/, '/').length)
+          : null
+      };
     });
 
     res.json(returnThis);

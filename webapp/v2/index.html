@@ -89,6 +89,31 @@
   </div>
 </div>
 
+<!-- Share playlist modal -->
+<div id="share-pl-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h3>Share as Public Link</h3>
+    <p class="share-pl-desc">Creates a public link anyone can listen to — no login required.</p>
+    <div class="modal-row">
+      <label class="modal-label" for="share-pl-expires">Expires after (days)</label>
+      <input id="share-pl-expires" class="modal-input-sm" type="number" min="1" placeholder="Never" style="width:90px;">
+    </div>
+    <div id="share-pl-result" class="share-pl-result hidden">
+      <div class="share-pl-url-row">
+        <input id="share-pl-url" class="share-pl-url-input" type="text" readonly>
+        <button id="share-pl-copy" class="btn-ghost share-pl-copy-btn" title="Copy link">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          Copy
+        </button>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button id="share-pl-cancel" class="btn-ghost">Close</button>
+      <button id="share-pl-ok" class="btn-primary">Create link</button>
+    </div>
+  </div>
+</div>
+
 <!-- Context menu -->
 <div id="ctx-menu" class="ctx-menu hidden">
   <button class="ctx-item" data-action="add-queue">
@@ -252,6 +277,10 @@
 
       <div class="nav-label">Tools</div>
       <nav class="sidenav">
+        <button class="nav-btn" data-view="shared-links">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+          Shared Links
+        </button>
         <button class="nav-btn" data-view="transcode">
           <svg width="15" height="15" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 8.5h9l-9 9v11l20-20h11l-31 31h11l20-20v11l-9 9h9"/></svg>
           Transcode
@@ -345,6 +374,9 @@
       <div class="qp-btns">
         <button id="qp-shuffle-btn" title="Shuffle queue">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16,3 21,3 21,8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21,16 21,21 16,21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+        </button>
+        <button id="qp-share-btn" title="Share queue as public link">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
         </button>
         <button id="qp-save-btn" title="Save queue as playlist">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
