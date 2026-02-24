@@ -555,6 +555,9 @@ function showSongs(songs, title) {
 function showCtxMenu(x, y) {
   const menu = document.getElementById('ctx-menu');
   menu.classList.remove('hidden');
+  // Show remove-from-playlist only when inside a playlist view
+  const inPlaylist = typeof S.view === 'string' && S.view.startsWith('playlist:');
+  menu.querySelector('.ctx-remove-pl').classList.toggle('hidden', !inPlaylist);
   // Keep within viewport
   const mw = 180, mh = 200;
   const left = Math.min(x, window.innerWidth  - mw - 8);
@@ -759,6 +762,11 @@ const VIZ = (() => {
   function ensureAudio() {
     if (audioCtx) { audioCtx.resume(); return; }
     audioCtx    = new (window.AudioContext || window.webkitAudioContext)();
+    // Auto-resume if the browser suspends the context (energy-saving policy)
+    // — without this a suspended context causes ~0.5 s silence mid-song.
+    audioCtx.addEventListener('statechange', () => {
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    });
     // Main analyser for butterchurn
     analyserNode = audioCtx.createAnalyser();
     analyserNode.fftSize = 2048;
@@ -2418,6 +2426,15 @@ document.getElementById('ctx-menu').querySelectorAll('.ctx-item').forEach(btn =>
     if (action === 'add-queue')   { Player.addSong(song); }
     if (action === 'add-playlist'){ showAddToPlaylistModal(song); }
     if (action === 'play-next')   { Player.playNext(song); }
+    if (action === 'remove-from-playlist') {
+      if (!song._plid) { toast('Cannot remove: missing playlist entry ID'); return; }
+      const plName = S.view.replace(/^playlist:/, '');
+      try {
+        await api('POST', 'api/v1/playlist/remove-song', { id: song._plid });
+        toast('Removed from playlist');
+        openPlaylist(plName);
+      } catch(e) { toast('Failed to remove song'); }
+    }
     if (action === 'download')    {
       const a = document.createElement('a');
       a.href = dlUrl(song.filepath);

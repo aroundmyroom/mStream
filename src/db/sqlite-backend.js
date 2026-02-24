@@ -6,6 +6,12 @@ let db;
 export function init(dbDirectory) {
   db = new DatabaseSync(path.join(dbDirectory, 'mstream.sqlite'));
   db.exec('PRAGMA journal_mode=WAL');
+  // NORMAL skips per-write fsync (safe with WAL); prevents 50-200ms event-loop
+  // stalls on slow storage (SD card, HDD) that would interrupt audio streaming.
+  db.exec('PRAGMA synchronous = NORMAL');
+  // Raise auto-checkpoint threshold so SQLite never triggers a blocking
+  // checkpoint while a song is streaming. The WAL is cleaned up on DB close.
+  db.exec('PRAGMA wal_autocheckpoint(10000)');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS files (
