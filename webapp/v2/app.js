@@ -56,6 +56,16 @@ function artUrl(f, size) {
   const sz = size || 's';
   return `/album-art/${encodeURIComponent(f)}?compress=${sz}&token=${S.token}`;
 }
+// Returns an img tag if art exists, otherwise the animated waveform placeholder
+function artOrPlaceholder(f, size, extraClass) {
+  const u = artUrl(f, size);
+  const cls = extraClass ? ` ${extraClass}` : '';
+  if (u) return `<img src="${u}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`;
+  return noArtHtml(cls);
+}
+function noArtHtml(extraClass) {
+  return `<div class="no-art${extraClass||''}"><div class="no-art-wave"><span></span><span></span><span></span><span></span><span></span></div></div>`;
+}
 function encodeFp(fp) {
   // Encode each path segment so characters like # & ? don't break the URL,
   // while keeping / separators intact. express.static decodes them server-side.
@@ -224,8 +234,8 @@ const Player = {
     const thumb = document.getElementById('player-art');
     const u = artUrl(s['album-art'], 'l');
     thumb.innerHTML = u
-      ? `<img src="${u}" alt="" loading="lazy" onerror="this.style.display='none'">`
-      : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.25"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
+      ? `<img src="${u}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`
+      : noArtHtml();
     // update player stars
     const starsEl = document.getElementById('player-stars');
     if (s.rating) {
@@ -335,13 +345,10 @@ function refreshQueueUI() {
   // Now Playing card
   const cur = S.queue[S.idx];
   if (cur) {
-    const u = artUrl(cur['album-art'], 'm');
     npCard.innerHTML = `
       <div class="qp-np-track">
         <div class="qp-np-art">
-          ${u
-            ? `<img src="${u}" loading="lazy" onerror="this.style.display='none'">`
-            : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`}
+          ${artOrPlaceholder(cur['album-art'], 'm', 'no-art-sm')}
         </div>
         <div class="qp-np-info">
           <div class="qp-np-title">${esc(cur.title || cur.filepath?.split('/').pop() || '—')}</div>
@@ -367,7 +374,6 @@ function refreshQueueUI() {
   }
 
   list.innerHTML = S.queue.map((s, i) => {
-    const u = artUrl(s['album-art'], 's');
     const isActive = i === S.idx;
     return `
       <div class="q-item${isActive ? ' q-active' : ''}" data-qi="${i}">
@@ -376,9 +382,7 @@ function refreshQueueUI() {
           : i + 1}
         </div>
         <div class="q-art">
-          ${u
-            ? `<img src="${u}" loading="lazy" onerror="this.style.display='none'">`
-            : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`}
+          ${artOrPlaceholder(s['album-art'], 's', 'no-art-sm')}
         </div>
         <div class="q-info">
           <div class="q-title">${esc(s.title || s.filepath?.split('/').pop() || '?')}</div>
@@ -461,7 +465,7 @@ function renderSongRows(songs) {
         <svg class="row-play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
       </div>
       <div class="row-art">
-        ${art ? `<img src="${art}" loading="lazy" onerror="this.style.display='none'">` : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`}
+        ${art ? `<img src="${art}" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml(' no-art-sm')">` : noArtHtml(' no-art-sm')}
       </div>
       <div class="song-info">
         <div class="song-title">${esc(title)}</div>
@@ -495,7 +499,7 @@ function renderMostPlayedRows(songs, maxPlays) {
         <svg class="row-play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
       </div>
       <div class="row-art">
-        ${art ? `<img src="${art}" loading="lazy" onerror="this.style.display='none'">` : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`}
+        ${art ? `<img src="${art}" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml(' no-art-sm')">` : noArtHtml(' no-art-sm')}
       </div>
       <div class="song-info">
         <div class="song-title">${esc(title)}</div>
@@ -629,8 +633,8 @@ function renderNPModal() {
   if (blurEl) blurEl.style.backgroundImage = u ? `url(${u})` : '';
   // Square art
   document.getElementById('np-art').innerHTML = u
-    ? `<img src="${u}" alt="" onerror="this.style.display='none'">`
-    : `<svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.18"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
+    ? `<img src="${u}" alt="" onerror="this.parentNode.innerHTML=noArtHtml()">`
+    : noArtHtml();
   document.getElementById('np-title').textContent  = s.title  || s.filepath?.split('/').pop() || '—';
   document.getElementById('np-artist').textContent = s.artist || '';
   const sub = [s.album, s.year].filter(Boolean).join(' · ');
