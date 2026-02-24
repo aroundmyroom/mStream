@@ -312,7 +312,7 @@ function setAutoDJ(on) {
   if (btn) { btn.classList.toggle('on', on); btn.textContent = on ? '⏹ Stop Auto-DJ' : '▶ Start Auto-DJ'; }
   const status = document.querySelector('.autodj-status');
   if (status) { status.classList.toggle('on', on); status.textContent = on ? 'Auto-DJ is ON — random songs will play continuously' : 'Auto-DJ is OFF'; }
-  if (on && S.queue.length === 0) autoDJFetch();
+  if (on && (!audioEl.src || audioEl.ended || S.queue.length === 0)) autoDJFetch();
 }
 
 // ── QUEUE UI ─────────────────────────────────────────────────
