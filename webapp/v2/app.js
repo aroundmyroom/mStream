@@ -56,8 +56,13 @@ function artUrl(f, size) {
   const sz = size || 's';
   return `/album-art/${encodeURIComponent(f)}?compress=${sz}&token=${S.token}`;
 }
+function encodeFp(fp) {
+  // Encode each path segment so characters like # & ? don't break the URL,
+  // while keeping / separators intact. express.static decodes them server-side.
+  return String(fp).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
+}
 function mediaUrl(fp) {
-  const path = String(fp).replace(/^\/+/, '');
+  const path = encodeFp(fp);
   if (S.transEnabled && S.transInfo?.serverEnabled) {
     const params = new URLSearchParams({ token: S.token });
     if (S.transCodec)   params.set('codec',   S.transCodec);
@@ -67,7 +72,7 @@ function mediaUrl(fp) {
   }
   return `/media/${path}?token=${S.token}`;
 }
-function dlUrl(fp)    { return `/media/${String(fp).replace(/^\/+/, '')}?token=${S.token}`; }
+function dlUrl(fp) { return `/media/${encodeFp(fp)}?token=${S.token}`; }
 
 let _toastT;
 function toast(msg, ms = 2800) {
@@ -1575,12 +1580,22 @@ async function viewSharedLinks() {
       });
     });
     body.querySelectorAll('.shared-del-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        if (!confirm('Delete this shared link? Anyone with the URL will lose access.')) return;
-        try {
-          await api('DELETE', `api/v1/share/${btn.dataset.id}`);
-          viewSharedLinks();
-        } catch(e) { toast('Delete failed'); }
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        showModal('del-share-modal');
+        const ok     = document.getElementById('del-share-ok');
+        const cancel = document.getElementById('del-share-cancel');
+        const cleanup = () => { ok.replaceWith(ok.cloneNode(true)); cancel.replaceWith(cancel.cloneNode(true)); };
+        document.getElementById('del-share-ok').addEventListener('click', async () => {
+          hideModal('del-share-modal'); cleanup();
+          try {
+            await api('DELETE', `api/v1/share/${id}`);
+            viewSharedLinks();
+          } catch(e) { toast('Delete failed'); }
+        }, { once: true });
+        document.getElementById('del-share-cancel').addEventListener('click', () => {
+          hideModal('del-share-modal'); cleanup();
+        }, { once: true });
       });
     });
   } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
@@ -2939,6 +2954,22 @@ document.addEventListener('keydown', e => {
   if (e.code === 'ArrowLeft')   { e.preventDefault(); Player.prev(); }
   if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey) { S.shuffle = !S.shuffle; document.getElementById('shuffle-btn').classList.toggle('active', S.shuffle); toast(S.shuffle ? 'Shuffle: On' : 'Shuffle: Off'); }
 });
+
+// ── SIDEBAR COLLAPSE ─────────────────────────────────────────
+(function initSectionCollapse() {
+  const KEY = 'ms2_nav_collapsed';
+  const stored = new Set(JSON.parse(localStorage.getItem(KEY) || '[]'));
+  document.querySelectorAll('.nav-section').forEach(section => {
+    if (stored.has(section.dataset.section)) section.classList.add('collapsed');
+    section.querySelector('.nav-toggle').addEventListener('click', e => {
+      if (e.target.closest('#new-pl-btn')) return;
+      section.classList.toggle('collapsed');
+      const collapsed = [...document.querySelectorAll('.nav-section.collapsed')]
+        .map(s => s.dataset.section);
+      localStorage.setItem(KEY, JSON.stringify(collapsed));
+    });
+  });
+}());
 
 // ── INIT ─────────────────────────────────────────────────────
 (async () => {
