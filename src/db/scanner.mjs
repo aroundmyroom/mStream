@@ -220,7 +220,11 @@ async function getAlbumArt(songInfo) {
   }
 
   if (originalFileBuffer) {
-    await compressAlbumArt(originalFileBuffer, songInfo.aaFile);
+    try {
+      await compressAlbumArt(originalFileBuffer, songInfo.aaFile);
+    } catch (err) {
+      console.error(`Warning: failed to compress album art for ${songInfo.filePath}: ${err.message}`);
+    }
   }
 }
 
@@ -275,7 +279,31 @@ function checkDirectoryForAlbumArt(songInfo) {
   }
 
   if (imageArray.length === 0) {
-    return mapOfDirectoryAlbumArt[directory] = false;
+    // No images directly in this directory — check common artwork subdirectories
+    const artworkSubdirNames = ['artwork', 'scans', 'covers', 'images', 'art', 'cover', 'scan'];
+    for (const file of files) {
+      const subDirPath = path.join(directory, file);
+      let subDirStat;
+      try { subDirStat = fs.statSync(subDirPath); } catch { continue; }
+      if (!subDirStat.isDirectory()) continue;
+      if (!artworkSubdirNames.includes(file.toLowerCase())) continue;
+
+      let subFiles;
+      try { subFiles = fs.readdirSync(subDirPath); } catch { continue; }
+      for (const subFile of subFiles) {
+        const ext = getFileType(subFile).toLowerCase();
+        if (ext !== 'jpg' && ext !== 'png') continue;
+        let subStat;
+        try { subStat = fs.statSync(path.join(subDirPath, subFile)); } catch { continue; }
+        if (!subStat.isFile()) continue;
+        imageArray.push(path.join(file, subFile)); // e.g. "artwork/front.jpg"
+      }
+      if (imageArray.length > 0) break;
+    }
+
+    if (imageArray.length === 0) {
+      return mapOfDirectoryAlbumArt[directory] = false;
+    }
   }
 
   let imageBuffer;
@@ -285,17 +313,30 @@ function checkDirectoryForAlbumArt(songInfo) {
   // Search for a named file
   for (let i = 0; i < imageArray.length; i++) {
     const imgMod = imageArray[i].toLowerCase();
-    if (imgMod === 'folder.jpg' || imgMod === 'cover.jpg' || imgMod === 'album.jpg' || imgMod === 'folder.png' || imgMod === 'cover.png' || imgMod === 'album.png') {
-      imageBuffer = fs.readFileSync(path.join(directory, imageArray[i]));
-      picFormat = getFileType(imageArray[i]);
+    if (imgMod === 'folder.jpg' || imgMod === 'cover.jpg' || imgMod === 'album.jpg' || imgMod === 'front.jpg' || imgMod === 'folder.png' || imgMod === 'cover.png' || imgMod === 'album.png' || imgMod === 'front.png') {
+      try {
+        imageBuffer = fs.readFileSync(path.join(directory, imageArray[i]));
+        picFormat = getFileType(imageArray[i]);
+      } catch (err) {
+        console.error(`Warning: failed to read album art file ${imageArray[i]}: ${err.message}`);
+      }
       break;
     }
   }
   
   // default to first file if none are named
   if (!imageBuffer) {
-    imageBuffer = fs.readFileSync(path.join(directory, imageArray[0]));
-    picFormat = getFileType(imageArray[0]);
+    try {
+      imageBuffer = fs.readFileSync(path.join(directory, imageArray[0]));
+      picFormat = getFileType(imageArray[0]);
+    } catch (err) {
+      console.error(`Warning: failed to read album art file ${imageArray[0]}: ${err.message}`);
+    }
+  }
+
+  // If we still have no buffer (all reads failed or resulted in empty data), bail out
+  if (!imageBuffer || imageBuffer.length === 0) {
+    return mapOfDirectoryAlbumArt[directory] = false;
   }
 
   const picHashString = crypto.createHash('md5').update(imageBuffer).digest('hex');
