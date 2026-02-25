@@ -314,6 +314,19 @@ const Player = {
     const albumEl = document.getElementById('player-album');
     albumEl.textContent = albumYear;
     albumEl.classList.toggle('hidden', !albumYear);
+    requestAnimationFrame(() => {
+      ['player-title','player-artist','player-album'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el || el.classList.contains('hidden')) return;
+        el.classList.remove('marquee-scroll');
+        el.style.removeProperty('--scroll-by');
+        const overflow = el.scrollWidth - el.clientWidth;
+        if (overflow > 4) {
+          el.style.setProperty('--scroll-by', `-${overflow}px`);
+          el.classList.add('marquee-scroll');
+        }
+      });
+    });
     const thumb = document.getElementById('player-art');
     const u = artUrl(s['album-art'], 'l');
     thumb.innerHTML = u
