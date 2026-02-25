@@ -567,6 +567,43 @@ function renderSongRows(songs) {
   }).join('');
 }
 
+// Like renderSongRows but shows the file path under the subtitle — used in search results
+function renderSongRowsWithPath(songs) {
+  return songs.map((s, i) => {
+    const title  = s.title  || s.filepath?.split('/').pop() || 'Unknown';
+    const artist = s.artist || '';
+    const album  = s.album  ? ` · ${s.album}` : '';
+    const stars  = starsHtml(s.rating || 0);
+    const art    = artUrl(s['album-art'], 's');
+    // Show path without the filename at the end for ID3-matched songs,
+    // or the full relative path for filename-matched songs
+    const pathDir = s.filepath ? s.filepath.split('/').slice(0, -1).join('/') : '';
+    return `<div class="song-row" data-ci="${i}">
+      <div class="row-num">
+        <span class="num-val">${i + 1}</span>
+        <svg class="row-play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+      </div>
+      <div class="row-art">
+        ${art ? `<img src="${art}" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml(' no-art-sm')">` : noArtHtml(' no-art-sm')}
+      </div>
+      <div class="song-info">
+        <div class="song-title">${esc(title)}</div>
+        ${artist || album ? `<div class="song-sub">${esc(artist)}${esc(album)}</div>` : ''}
+        ${pathDir ? `<div class="song-path" title="${esc(s.filepath)}">📁 ${esc(pathDir)}</div>` : ''}
+      </div>
+      <div class="row-stars" data-ci="${i}">${stars}</div>
+      <div class="row-actions">
+        <button class="row-act-btn add-btn" data-ci="${i}" title="Add to queue">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button class="row-act-btn ctx-btn" data-ci="${i}" title="More options">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
 function renderMostPlayedRows(songs, maxPlays) {
   return songs.map((s, i) => {
     const title  = s.title  || s.filepath?.split('/').pop() || 'Unknown';
@@ -2079,22 +2116,37 @@ async function doSearch(q) {
         }).join('')
       }</div></div>`;
     }
-    const titleSongs = (d.title || []).map(t => ({
-      title:      t.name.includes(' - ') ? t.name.split(' - ').slice(1).join(' - ') : t.name,
-      artist:     t.name.includes(' - ') ? t.name.split(' - ')[0] : '',
-      filepath:   t.filepath,
-      'album-art': t.album_art_file || null,
-    }));
-    if (titleSongs.length) {
-      html += `<div class="search-section"><h3>Songs (${titleSongs.length})</h3><div class="song-list">${renderSongRows(titleSongs)}</div></div>`;
+    // Songs matched by ID3 title
+    const seenPaths = new Set();
+    const titleSongs = (d.title || []).map(t => {
+      seenPaths.add(t.filepath);
+      return {
+        title:      t.name.includes(' - ') ? t.name.split(' - ').slice(1).join(' - ') : t.name,
+        artist:     t.name.includes(' - ') ? t.name.split(' - ')[0] : '',
+        filepath:   t.filepath,
+        'album-art': t.album_art_file || null,
+      };
+    });
+    // Songs matched only by filename (no ID3 title hit) — deduplicate against above
+    const fileSongs = (d.files || [])
+      .filter(f => !seenPaths.has(f.filepath))
+      .map(f => ({
+        title:      f.filepath.split('/').pop().replace(/\.[^.]+$/, ''),
+        artist:     '',
+        filepath:   f.filepath,
+        'album-art': null,
+      }));
+    const allSongs = [...titleSongs, ...fileSongs];
+    if (allSongs.length) {
+      html += `<div class="search-section"><h3>Songs (${allSongs.length})</h3><div class="song-list">${renderSongRowsWithPath(allSongs)}</div></div>`;
     }
     if (!html) html = `<div class="empty-state">No results for "${esc(q)}"</div>`;
     res.innerHTML = html;
 
     res.querySelectorAll('.artist-row[data-artist]').forEach(r => r.addEventListener('click', () => viewArtistAlbums(r.dataset.artist, () => viewSearch())));
     res.querySelectorAll('.artist-row[data-album]').forEach(r => r.addEventListener('click', () => viewAlbumSongs(r.dataset.album, null, () => viewSearch())));
-    attachSongListEvents(res, titleSongs);
-    S.curSongs = titleSongs;
+    attachSongListEvents(res, allSongs);
+    S.curSongs = allSongs;
   } catch(e) { res.innerHTML = `<div class="empty-state">Search failed: ${esc(e.message)}</div>`; }
 }
 

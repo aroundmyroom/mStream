@@ -325,6 +325,7 @@ a{color:inherit;text-decoration:none;}
 .song-info{min-width:0;}
 .song-title{font-size:14px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .song-sub{font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
+.song-path{font-size:11px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;font-family:monospace;letter-spacing:-.2px;}
 .row-stars{display:flex;gap:1px;flex-shrink:0;font-size:12px;letter-spacing:-.5px;cursor:pointer;}
 .row-stars .s-on{color:var(--yellow);}
 .row-stars .s-off{color:var(--t4);}
