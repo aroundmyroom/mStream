@@ -8,7 +8,7 @@
   --primary-d:rgba(139,92,246,.15); --primary-g:rgba(139,92,246,.4);
   --accent:#60a5fa; --green:#34d399; --red:#f87171; --yellow:#fbbf24;
   --t1:#eeeeff; --t2:#8888b0; --t3:#44445c; --t4:#2a2a3e;
-  --sidebar:236px; --player:100px; --r:7px; --r2:12px; --qp-width:320px;
+  --sidebar:236px; --player:112px; --r:7px; --r2:12px; --qp-width:320px;
   --theme-icon-moon:block; --theme-icon-sun:none;
 }
 
@@ -531,9 +531,9 @@ a{color:inherit;text-decoration:none;}
 .player-thumb{width:64px;height:64px;flex-shrink:0;border-radius:var(--r);overflow:hidden;background:var(--raised);display:flex;align-items:center;justify-content:center;transition:box-shadow .18s;}
 .player-thumb img{width:100%;height:100%;object-fit:cover;}
 .player-info{min-width:0;flex:1;overflow:hidden;}
-.player-title{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.player-artist{font-size:11px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.player-album{font-size:10px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}
+.player-title{font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.player-artist{font-size:14px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.player-album{font-size:12px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
 @keyframes player-marquee{0%,15%{transform:translateX(0);}85%,100%{transform:translateX(var(--scroll-by,0px));}}
 .marquee-scroll{animation:player-marquee 9s ease-in-out infinite alternate;display:inline-block;}
 .player-stars-row{display:flex;gap:2px;margin-top:3px;font-size:12px;letter-spacing:-.5px;cursor:pointer;}
@@ -742,7 +742,10 @@ a{color:inherit;text-decoration:none;}
 }
 .np-artist{font-size:15px;color:var(--t2);margin-bottom:3px;}
 .np-album{font-size:13px;color:var(--t3);}
+.np-rate-row{display:flex;align-items:center;gap:16px;}
 .np-rate-row .rate-stars{font-size:28px;gap:8px;display:flex;}
+#np-rate-clear{font-size:12px;color:var(--t3);padding:2px 4px;transition:color .14s;white-space:nowrap;}
+#np-rate-clear:hover{color:var(--red);}
 .np-rate-row .rate-stars span{color:var(--t4);transition:color .12s;cursor:pointer;}
 .np-rate-row .rate-stars span.lit{color:var(--yellow);}
 .np-progress{display:flex;align-items:center;gap:10px;width:100%;}
