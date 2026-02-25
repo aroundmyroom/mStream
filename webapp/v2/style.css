@@ -513,7 +513,7 @@ a{color:inherit;text-decoration:none;}
 /* ── PLAYER BAR ────────────────────────────────────────────── */
 .player{
   grid-area:player;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
-  align-items:center;padding:0 20px;background:var(--surface);
+  align-items:center;padding:0 20px;padding-right:48px;background:var(--surface);
   border-top:1px solid var(--border);gap:16px;
   position:relative; /* needed for absolute mini-spec */
 }
@@ -592,7 +592,7 @@ a{color:inherit;text-decoration:none;}
 .q-count{position:absolute;top:0;right:0;font-size:8px;min-width:14px;height:14px;line-height:14px;text-align:center;background:var(--primary);color:#fff;border-radius:99px;padding:0 3px;display:none;}
 .q-count.show{display:block;}
 #queue-btn{position:relative;}
-.vol-wrap{display:flex;align-items:center;gap:6px;min-width:80px;max-width:130px;}
+.vol-wrap{display:flex;align-items:center;gap:6px;min-width:80px;max-width:110px;}
 .mute-btn{display:flex;align-items:center;justify-content:center;flex-shrink:0;opacity:.45;transition:opacity .15s,color .15s;color:var(--t1);}
 .mute-btn:hover{opacity:1;}
 .mute-btn.muted{opacity:1;color:var(--red);}
