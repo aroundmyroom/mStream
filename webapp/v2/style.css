@@ -593,6 +593,9 @@ a{color:inherit;text-decoration:none;}
 .q-count.show{display:block;}
 #queue-btn{position:relative;}
 .vol-wrap{display:flex;align-items:center;gap:6px;min-width:80px;max-width:130px;}
+.mute-btn{display:flex;align-items:center;justify-content:center;flex-shrink:0;opacity:.45;transition:opacity .15s,color .15s;color:var(--t1);}
+.mute-btn:hover{opacity:1;}
+.mute-btn.muted{opacity:1;color:var(--red);}
 .vol-slider{flex:1;height:3px;cursor:pointer;accent-color:var(--primary);-webkit-appearance:none;appearance:none;background:var(--border2);border-radius:99px;outline:none;}
 .vol-slider::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--primary);cursor:pointer;}
 
