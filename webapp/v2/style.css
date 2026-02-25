@@ -234,6 +234,16 @@ a{color:inherit;text-decoration:none;}
 .no-art-sm .no-art-wave{gap:12%;}
 .no-art-sm .no-art-wave span{border-radius:2px;}
 
+/* Album card variant — static bars + label, no animation */
+.no-art-album .no-art-wave span{animation:none;opacity:.35;}
+.no-art-album .no-art-wave span:nth-child(1){height:45%;}
+.no-art-album .no-art-wave span:nth-child(2){height:90%;}
+.no-art-album .no-art-wave span:nth-child(3){height:60%;}
+.no-art-album .no-art-wave span:nth-child(4){height:80%;}
+.no-art-album .no-art-wave span:nth-child(5){height:40%;}
+.no-art-label{font-size:9px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--t3);margin-top:7px;z-index:1;opacity:.7;}
+
 .back-btn:hover{background:var(--hover);color:var(--t1);}
 .header-right{display:flex;align-items:center;gap:8px;flex-shrink:0;}
 .scan-badge{

@@ -1863,30 +1863,49 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
   document.getElementById('play-all-btn').onclick = null;
   document.getElementById('add-all-btn').onclick  = null;
   const body = document.getElementById('content-body');
+
+  // Pre-compute clean names for display / filtering / A-Z
+  const albumsClean = albums.map(a => ({
+    ...a,
+    cleanName: a.name ? cleanArtistDisplay(a.name) : 'Singles',
+  }));
+
+  const letterOfAlbum = a => {
+    const ch = a.cleanName.charAt(0).toUpperCase();
+    return /[A-Z]/.test(ch) ? ch : '#';
+  };
+  const AZ_KEYS = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')];
+  const hasLetter = new Set(albumsClean.map(letterOfAlbum));
+
   body.innerHTML = `
     <div class="fe-filter-row">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input id="lib-filter" class="fe-filter-input" type="text" placeholder="Filter albums…" autocomplete="off">
+      <input id="lib-filter" class="fe-filter-input" type="text" placeholder="Search albums…" autocomplete="off">
       <span id="lib-match-count" class="fe-match-count"></span>
       <button id="lib-filter-clear" class="fe-filter-clear hidden" title="Clear filter">✕</button>
     </div>
+    <div class="az-strip" id="az-strip">${
+      AZ_KEYS.map(l => `<button class="az-btn" data-letter="${l}"${hasLetter.has(l) ? '' : ' disabled'}>${l}</button>`).join('')
+    }</div>
     <div class="album-grid"></div>`;
   const filterInput = body.querySelector('#lib-filter');
   const filterClear = body.querySelector('#lib-filter-clear');
   const matchCount  = body.querySelector('#lib-match-count');
+  const azStrip     = body.querySelector('#az-strip');
   const grid        = body.querySelector('.album-grid');
 
-  // Pre-build HTML strings only — one cheap JS string per album, no DOM work yet
-  const cardData = albums.map((a, i) => {
-    const name = a.name || 'Singles';
+  // Pre-build HTML strings — use cleanName for display
+  const cardData = albumsClean.map((a, i) => {
+    const name = a.cleanName;
     const art  = artUrl(a.album_art_file, 's');
     return {
-      lc: name.toLowerCase(),
+      lc:     name.toLowerCase(),
+      letter: letterOfAlbum(a),
       html: `<div class="album-card" data-i="${i}">
         <div class="album-art">
           ${art
             ? `<img src="${art}" alt="${esc(name)}" loading="lazy" onerror="this.style.display='none'">`
-            : `<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.25"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>`}
+            : `<div class="no-art no-art-album"><div class="no-art-wave"><span></span><span></span><span></span><span></span><span></span></div><span class="no-art-label">no artwork</span></div>`}
           <div class="play-ov"><svg width="30" height="30" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div>
         </div>
         <div class="album-meta">
@@ -1897,7 +1916,7 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
     };
   });
 
-  // Single delegated listener — one handler for the whole grid, attached once
+  // Single delegated listener
   grid.addEventListener('click', e => {
     const card = e.target.closest('.album-card');
     if (!card) return;
@@ -1907,10 +1926,13 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
     viewAlbumSongs(album.name, album._rawArtist || defaultArtist, backFn);
   });
 
-  let _albTimer, _rafId;
-  const CHUNK = 80; // cards per animation frame — keeps each frame under ~16ms
+  let _albTimer, _rafId, _activeLetter = null;
+  const CHUNK = 80;
 
-  // Chunked render: first CHUNK cards appear instantly, rest load in background frames
+  function setActiveAZ(letter) {
+    body.querySelectorAll('.az-btn').forEach(b => b.classList.toggle('active', b.dataset.letter === letter));
+  }
+
   function renderChunked(data) {
     cancelAnimationFrame(_rafId);
     grid.innerHTML = '';
@@ -1922,10 +1944,9 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
       pos += CHUNK;
       if (pos < data.length) _rafId = requestAnimationFrame(step);
     }
-    step(); // first batch is synchronous → grid is visible immediately
+    step();
   }
 
-  // Filtered render: result set is small, so one innerHTML pass is always fast
   function renderFiltered(q) {
     cancelAnimationFrame(_rafId);
     const subset = cardData.filter(c => c.lc.includes(q));
@@ -1934,22 +1955,52 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
     matchCount.textContent = `${subset.length} result${subset.length !== 1 ? 's' : ''}`;
   }
 
+  // A-Z strip
+  body.querySelectorAll('.az-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      filterInput.value = '';
+      azStrip.classList.remove('az-hidden');
+      const letter = btn.dataset.letter;
+      if (_activeLetter === letter) {
+        _activeLetter = null;
+        setActiveAZ(null);
+        matchCount.textContent = '';
+        renderChunked(cardData);
+        return;
+      }
+      _activeLetter = letter;
+      setActiveAZ(letter);
+      const subset = cardData.filter(c => c.letter === letter);
+      cancelAnimationFrame(_rafId);
+      grid.innerHTML = subset.map(c => c.html).join('');
+      matchCount.textContent = `${subset.length} album${subset.length !== 1 ? 's' : ''}`;
+      body.scrollTop = 0;
+    });
+  });
+
   filterInput.addEventListener('input', () => {
     clearTimeout(_albTimer);
     _albTimer = setTimeout(() => {
       const q = filterInput.value.trim().toLowerCase();
+      _activeLetter = null;
+      setActiveAZ(null);
+      azStrip.classList.toggle('az-hidden', !!q);
       if (q) renderFiltered(q);
-      else renderChunked(cardData);
+      else { matchCount.textContent = ''; renderChunked(cardData); }
     }, 150);
   });
   filterClear.addEventListener('click', () => {
     clearTimeout(_albTimer);
+    _activeLetter = null;
+    setActiveAZ(null);
     filterInput.value = '';
     filterInput.focus();
+    azStrip.classList.remove('az-hidden');
+    matchCount.textContent = '';
     renderChunked(cardData);
   });
 
-  renderChunked(cardData); // initial render — non-blocking
+  renderChunked(cardData);
 }
 
 async function viewAlbumSongs(albumName, artist, backFn) {
