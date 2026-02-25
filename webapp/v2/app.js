@@ -93,6 +93,55 @@ function toast(msg, ms = 2800) {
   _toastT = setTimeout(() => el.classList.add('hidden'), ms);
 }
 
+// ── QUEUE PERSISTENCE ───────────────────────────────────────
+function _queueKey() { return `ms2_queue_${S.username}`; }
+function persistQueue() {
+  if (!S.username) return;
+  try {
+    localStorage.setItem(_queueKey(), JSON.stringify({
+      queue: S.queue,
+      idx:   S.idx,
+      time:  audioEl.currentTime || 0,
+    }));
+  } catch(_) {}
+}
+function restoreQueue() {
+  const key = _queueKey();
+  if (!key) return;
+  let data;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    data = JSON.parse(raw);
+  } catch(_) { return; }
+  if (!Array.isArray(data.queue) || !data.queue.length) return;
+
+  // Restore core state — this must always succeed
+  S.queue = data.queue;
+  S.idx   = (typeof data.idx === 'number' && data.idx >= 0 && data.idx < data.queue.length)
+            ? data.idx : 0;
+  refreshQueueUI();
+  toast(`Queue restored (${S.queue.length} song${S.queue.length !== 1 ? 's' : ''})`, 2500);
+
+  // Set up audio element — failures here must NOT break queue display
+  try {
+    const s = S.queue[S.idx];
+    if (s) {
+      audioEl.src = mediaUrl(s.filepath);
+      audioEl.load();
+      Player.updateBar();
+      highlightRow();
+      if (data.time > 1) {
+        audioEl.addEventListener('loadedmetadata', () => {
+          audioEl.currentTime = data.time;
+        }, { once: true });
+      }
+    }
+  } catch(e) { console.warn('restoreQueue audio setup failed:', e); }
+}
+// Throttled save of currentTime every 5 s while audio is playing
+let _persistTimer = null;
+
 // ── API ───────────────────────────────────────────────────────
 async function api(method, path, body) {
   const r = await fetch('/' + path, {
@@ -163,17 +212,20 @@ const Player = {
     S.queue.push(song);
     toast('Added: ' + (song.title || song.filepath.split('/').pop()));
     refreshQueueUI();
+    persistQueue();
   },
   addAll(songs) {
     S.queue.push(...songs);
     toast(`Added ${songs.length} songs to queue`);
     refreshQueueUI();
+    persistQueue();
   },
   playNext(song) {
     const insertAt = S.idx + 1;
     S.queue.splice(insertAt, 0, song);
     toast('Playing next: ' + (song.title || song.filepath.split('/').pop()));
     refreshQueueUI();
+    persistQueue();
   },
   playAt(idx) {
     if (idx < 0 || idx >= S.queue.length) return;
@@ -191,6 +243,7 @@ const Player = {
     scrobbleTimer = setTimeout(() => {
       api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath }).catch(() => {});
     }, 30000);
+    persistQueue();
   },
   toggle() {
     if (!audioEl.src) return;
@@ -2422,6 +2475,14 @@ function showApp() {
   loadPlaylists();
   viewRecent();
   refreshQueueUI();
+  restoreQueue();
+  // Persist currentTime every 5 s while playing
+  audioEl.addEventListener('timeupdate', () => {
+    if (_persistTimer) return;
+    _persistTimer = setTimeout(() => { _persistTimer = null; persistQueue(); }, 5000);
+  });
+  // Guarantee a save on F5 / tab close
+  window.addEventListener('beforeunload', persistQueue);
   pollScan();
   // Fetch ping to get transcode server info + vpath metadata
   api('GET', 'api/v1/ping').then(d => {
@@ -2527,15 +2588,18 @@ document.getElementById('qp-shuffle-btn').addEventListener('click', () => {
   S.idx = 0;
   refreshQueueUI();
   toast('Queue shuffled');
+  persistQueue();
 });
 document.getElementById('qp-clear-btn').addEventListener('click', () => {
   S.queue = []; S.idx = -1;
   refreshQueueUI();
   toast('Queue cleared');
+  persistQueue();
 });
 
 // Logout
 document.getElementById('logout-btn').addEventListener('click', () => {
+  if (S.username) localStorage.removeItem(_queueKey());
   S.token = ''; S.username = '';
   localStorage.removeItem('ms2_token'); localStorage.removeItem('ms2_user');
   showLogin();
