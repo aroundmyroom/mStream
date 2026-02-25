@@ -188,6 +188,30 @@ async function rateSong(filepath, rating) {
   } catch(e) { toast('Rating failed'); }
 }
 
+// ── ARTIST NORMALIZATION ──────────────────────────────────────
+// Rules:
+//   - Strip leading symbols/brackets/quotes/spaces
+//   - Strip zero-padded track prefixes (0, 01, 09, 001 … always start with 0)
+//   - Keep bare single/multi non-zero digits ("2 Brothers", "1 Alarma", "10cc")
+// Three-pass approach so bracket-wrapped numbers like "(01) Name" are handled.
+function normalizeArtist(name) {
+  const noise = /^[\s#'"`()|[\]{}_.,\-\u2013\u2014*!/\\]+/;
+  return String(name)
+    .replace(noise, '')               // pass 1: strip leading symbols/brackets
+    .replace(/^0\d*[\s.,)\]]+/, '')   // pass 2: strip zero-padded number (0, 01, 09, 001…)
+    .replace(noise, '')               // pass 3: strip any symbols now exposed
+    .toLowerCase().trim();
+}
+// Same stripping logic but preserves original case — used for display, A-Z bucket, avatar letter.
+function cleanArtistDisplay(name) {
+  const noise = /^[\s#'"`()|[\]{}_.,\-\u2013\u2014*!/\\]+/;
+  return String(name)
+    .replace(noise, '')
+    .replace(/^0\d*[\s.,)\]]+/, '')
+    .replace(noise, '')
+    .trim();
+}
+
 // ── PLAYER ───────────────────────────────────────────────────
 const Player = {
   setQueue(songs, start) {
@@ -1672,34 +1696,76 @@ async function viewArtists() {
   setBody('<div class="loading-state"></div>');
   try {
     const d = await api('POST', 'api/v1/db/artists', {});
-    const artists = d.artists || [];
-    if (!artists.length) { setBody('<div class="empty-state">No artists found</div>'); return; }
+    const rawArtists = d.artists || [];
+    if (!rawArtists.length) { setBody('<div class="empty-state">No artists found</div>'); return; }
     S.curSongs = [];
     document.getElementById('play-all-btn').onclick = null;
     document.getElementById('add-all-btn').onclick  = null;
+
+    // Group raw artist name variants by normalized key
+    const groupMap = new Map();
+    for (const a of rawArtists) {
+      const key = normalizeArtist(a);
+      const clean = cleanArtistDisplay(a);
+      if (!groupMap.has(key)) {
+        groupMap.set(key, { display: a, cleanDisplay: clean, variants: [a] });
+      } else {
+        const g = groupMap.get(key);
+        g.variants.push(a);
+        // Prefer a clean display that starts with a real letter
+        if (!/^[a-zA-Z]/i.test(g.cleanDisplay) && /^[a-zA-Z]/i.test(clean)) {
+          g.display = a;
+          g.cleanDisplay = clean;
+        }
+      }
+    }
+    const groups = [...groupMap.values()];
+
+    // Determine which A-Z / # buckets are populated using the CLEAN name
+    const letterOf = g => {
+      const ch = g.cleanDisplay.charAt(0).toUpperCase();
+      return /[A-Z]/.test(ch) ? ch : '#';
+    };
+    const AZ_KEYS = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')];
+    const hasLetter = new Set(groups.map(letterOf));
+
     const body = document.getElementById('content-body');
     body.innerHTML = `
       <div class="fe-filter-row">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input id="lib-filter" class="fe-filter-input" type="text" placeholder="Filter artists…" autocomplete="off">
+        <input id="lib-filter" class="fe-filter-input" type="text" placeholder="Search artists…" autocomplete="off">
         <span id="lib-match-count" class="fe-match-count"></span>
         <button id="lib-filter-clear" class="fe-filter-clear hidden" title="Clear filter">✕</button>
       </div>
+      <div class="az-strip" id="az-strip">${
+        AZ_KEYS.map(l => `<button class="az-btn" data-letter="${l}"${hasLetter.has(l) ? '' : ' disabled'}>${l}</button>`).join('')
+      }</div>
       <div class="artist-list">${
-        artists.map(a => `<div class="artist-row" data-artist="${esc(a)}">
-          <div class="artist-av">${esc(a.charAt(0)).toUpperCase()}</div>
-          <div class="artist-name">${esc(a)}</div>
-        </div>`).join('')
+        groups.map((g, i) => {
+          const letter = letterOf(g);
+          const av = g.cleanDisplay.charAt(0).toUpperCase() || '?';
+          return `<div class="artist-row" data-gi="${i}" data-letter="${letter}">
+            <div class="artist-av">${esc(av)}</div>
+            <div class="artist-name">${esc(g.cleanDisplay)}${g.variants.length > 1 ? `<span class="artist-var"> +${g.variants.length - 1}</span>` : ''}</div>
+          </div>`;
+        }).join('')
       }</div>`;
-    const filterInput  = body.querySelector('#lib-filter');
-    const filterClear  = body.querySelector('#lib-filter-clear');
-    const matchCount   = body.querySelector('#lib-match-count');
-    // Cache rows + pre-compute names once — no re-querying on every keystroke
-    const allRows      = Array.from(body.querySelectorAll('.artist-row'));
-    const rowNames     = allRows.map(r => r.dataset.artist.toLowerCase());
+
+    const filterInput = body.querySelector('#lib-filter');
+    const filterClear = body.querySelector('#lib-filter-clear');
+    const matchCount  = body.querySelector('#lib-match-count');
+    const azStrip     = body.querySelector('#az-strip');
+    const allRows     = Array.from(body.querySelectorAll('.artist-row'));
+    const rowNames    = groups.map(g => g.cleanDisplay.toLowerCase());
+
+    function setActiveAZ(letter) {
+      body.querySelectorAll('.az-btn').forEach(b => b.classList.toggle('active', b.dataset.letter === letter));
+    }
     function applyFilter() {
       const q = filterInput.value.trim().toLowerCase();
       filterClear.classList.toggle('hidden', !q);
+      azStrip.classList.toggle('az-hidden', !!q); // hide A-Z when typing
+      if (q) { _activeLetter = null; setActiveAZ(null); }
       let visible = 0;
       allRows.forEach((row, i) => {
         const matches = !q || rowNames[i].includes(q);
@@ -1708,21 +1774,77 @@ async function viewArtists() {
       });
       matchCount.textContent = q ? `${visible} result${visible !== 1 ? 's' : ''}` : '';
     }
+
+    // A-Z strip click: filter list to only artists starting with that letter
+    // Clicking the active letter again clears the filter and shows all
+    let _activeLetter = null;
+    body.querySelectorAll('.az-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        filterInput.value = '';
+        const letter = btn.dataset.letter;
+        if (_activeLetter === letter) {
+          // toggle off → show all
+          _activeLetter = null;
+          setActiveAZ(null);
+          allRows.forEach(r => r.classList.remove('fe-hidden'));
+          matchCount.textContent = '';
+          azStrip.classList.remove('az-hidden');
+          return;
+        }
+        _activeLetter = letter;
+        setActiveAZ(letter);
+        let visible = 0;
+        allRows.forEach(row => {
+          const matches = row.dataset.letter === letter;
+          row.classList.toggle('fe-hidden', !matches);
+          if (matches) visible++;
+        });
+        matchCount.textContent = `${visible} artist${visible !== 1 ? 's' : ''}`;
+        // Scroll content-body back to top so results are visible
+        body.scrollTop = 0;
+      });
+    });
+
     let _artTimer;
     filterInput.addEventListener('input', () => { clearTimeout(_artTimer); _artTimer = setTimeout(applyFilter, 150); });
-    filterClear.addEventListener('click', () => { clearTimeout(_artTimer); filterInput.value = ''; filterInput.focus(); applyFilter(); });
+    filterClear.addEventListener('click', () => { clearTimeout(_artTimer); _activeLetter = null; filterInput.value = ''; filterInput.focus(); applyFilter(); });
     allRows.forEach(row => {
-      row.addEventListener('click', () => viewArtistAlbums(row.dataset.artist));
+      const g = groups[parseInt(row.dataset.gi)];
+      if (g) row.addEventListener('click', () => viewArtistAlbums(g.display, g.variants));
     });
   } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
-async function viewArtistAlbums(artist, backFn) {
-  setTitle(artist); setBack(backFn || (() => viewArtists()));
+async function viewArtistAlbums(displayName, variantsOrBackFn, backFn) {
+  // Overloaded: (name, variants[], backFn?) from artist list
+  //             (name, backFn?)         from search / legacy callers
+  let variants, back;
+  if (Array.isArray(variantsOrBackFn)) {
+    variants = variantsOrBackFn;
+    back = backFn;
+  } else {
+    variants = [displayName];
+    back = variantsOrBackFn;
+  }
+  setTitle(displayName); setBack(back || (() => viewArtists()));
   setBody('<div class="loading-state"></div>');
   try {
-    const d = await api('POST', 'api/v1/db/artists-albums', { artist });
-    renderAlbumGrid(d.albums || [], artist);
+    // Parallel fetch for all name variants, then merge albums client-side
+    const results = await Promise.all(
+      variants.map(a => api('POST', 'api/v1/db/artists-albums', { artist: a }))
+    );
+    const seen = new Set();
+    const albums = [];
+    for (let i = 0; i < results.length; i++) {
+      for (const alb of (results[i].albums || [])) {
+        const key = `${alb.name}|${alb.year}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          albums.push({ ...alb, _rawArtist: variants[i] });
+        }
+      }
+    }
+    renderAlbumGrid(albums, displayName, variants);
   } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
@@ -1735,7 +1857,7 @@ async function viewAllAlbums() {
   } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
-function renderAlbumGrid(albums, defaultArtist) {
+function renderAlbumGrid(albums, defaultArtist, artistVariants) {
   if (!albums.length) { setBody('<div class="empty-state">No albums found</div>'); return; }
   S.curSongs = [];
   document.getElementById('play-all-btn').onclick = null;
@@ -1781,8 +1903,8 @@ function renderAlbumGrid(albums, defaultArtist) {
     if (!card) return;
     const album = albums[parseInt(card.dataset.i)];
     if (!album) return;
-    const backFn = defaultArtist ? () => viewArtistAlbums(defaultArtist) : () => viewAllAlbums();
-    viewAlbumSongs(album.name, defaultArtist, backFn);
+    const backFn = defaultArtist ? () => viewArtistAlbums(defaultArtist, artistVariants || [defaultArtist]) : () => viewAllAlbums();
+    viewAlbumSongs(album.name, album._rawArtist || defaultArtist, backFn);
   });
 
   let _albTimer, _rafId;
