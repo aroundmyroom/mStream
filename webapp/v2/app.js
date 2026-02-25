@@ -2350,7 +2350,7 @@ async function pollScan() {
   try {
     const d = await api('GET', 'api/v1/db/status');
     const badge = document.getElementById('scan-badge');
-    if (d.locked) {
+    if (S.isAdmin && d.locked) {
       let locStr = '';
       if (d.scanningVpaths?.length) {
         locStr = ' · ' + d.scanningVpaths.map(s => {
