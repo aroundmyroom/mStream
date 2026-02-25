@@ -2216,9 +2216,13 @@ function renderFileExplorer(d) {
     const fp   = file.metadata?.filepath;
     const title  = meta?.title  || file.name;
     const artist = meta?.artist || '';
+    const artU   = artUrl(meta?.['album-art'], 's');
+    const thumb  = artU
+      ? `<img class="fe-thumb" src="${artU}" alt="" loading="lazy" onerror="this.outerHTML='<svg class=fe-icon width=16 height=16 viewBox=&quot;0 0 24 24&quot; fill=none stroke=currentColor stroke-width=2><path d=&quot;M9 18V5l12-2v13&quot;/><circle cx=6 cy=18 r=3/><circle cx=18 cy=16 r=3/></svg>'">`
+      : `<svg class="fe-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`;
     return `
       <div class="fe-file" data-fp="${esc(fp || '')}" data-name="${esc(file.name)}">
-        <svg class="fe-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        ${thumb}
         <div class="fe-name">
           <div>${esc(title)}</div>
           ${artist ? `<div style="font-size:11px;color:var(--t2);margin-top:1px">${esc(artist)}</div>` : ''}
