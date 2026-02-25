@@ -536,7 +536,7 @@ a{color:inherit;text-decoration:none;}
 .player-stars-row .ps-on{color:var(--yellow);}
 .player-stars-row .ps-off{color:var(--t4);}
 .player-stars-row:hover .ps-off{color:var(--t3);}
-.player-center{display:flex;flex-direction:column;align-items:center;gap:8px;flex:1;min-width:0;max-width:580px;}
+.player-center{display:flex;flex-direction:column;align-items:center;gap:8px;width:min(680px,42vw);min-width:0;}
 .player-controls{display:flex;align-items:center;gap:6px;}
 
 /* base button */
