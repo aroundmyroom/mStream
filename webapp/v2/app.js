@@ -2534,7 +2534,7 @@ function _connectJukebox() {
   if (btn) { btn.disabled = true; btn.textContent = 'Connecting…'; }
 
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(`${proto}//${location.host}?token=${S.token}`);
+  const ws = new WebSocket(`${proto}//${location.host}/?token=${S.token}`);
 
   ws.onmessage = e => {
     try {
@@ -2570,7 +2570,23 @@ function _connectJukebox() {
 
 function _renderJukeboxActive(code) {
   const url = `${location.protocol}//${location.host}/remote/${code}`;
-  const qr  = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&color=ffffff&bgcolor=1a1a2e&data=${encodeURIComponent(url)}`;
+
+  // Generate QR code locally — no external service needed
+  let qrSvg = '';
+  try {
+    const QRC = qrcodegen.QrCode;
+    const qr  = QRC.encodeText(url, QRC.Ecc.MEDIUM);
+    // toSvgString(border) returns a full <svg> string
+    const raw = qr.toSvgString(2);
+    // Inject sizing + theme-aware colours into the generated SVG
+    qrSvg = raw
+      .replace('<svg ', '<svg width="180" height="180" style="border-radius:8px" ')
+      .replace(/fill="#000000"/g, 'fill="var(--t1)"')
+      .replace(/fill="#ffffff"/g, 'fill="var(--surface)"');
+  } catch(e) {
+    qrSvg = `<div style="width:180px;height:180px;display:flex;align-items:center;justify-content:center;background:var(--raised);border-radius:8px;color:var(--t3);font-size:12px">QR unavailable</div>`;
+  }
+
   setBody(`
     <div class="jukebox-panel">
       <div class="jukebox-header">
@@ -2578,14 +2594,27 @@ function _renderJukeboxActive(code) {
         <h2>Jukebox Active</h2>
       </div>
       <p class="jukebox-hint">Scan the QR code or share the link to control this player from another device.</p>
-      <img class="jukebox-qr" src="${qr}" alt="QR Code" width="180" height="180" loading="lazy">
+      ${qrSvg}
       <div class="jukebox-code-row">
         <span class="jukebox-code-label">Code</span>
         <strong class="jukebox-code-val">${esc(code)}</strong>
       </div>
-      <a class="jukebox-url" href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>
+      <div style="display:flex;align-items:center;gap:8px;max-width:100%">
+        <a class="jukebox-url" href="${esc(url)}" target="_blank" rel="noopener" style="flex:1;min-width:0">${esc(url)}</a>
+        <button class="btn-ghost" id="juke-copy-btn" style="flex-shrink:0;padding:6px 12px;font-size:12px">Copy</button>
+      </div>
       <button class="btn-ghost jukebox-disc" id="juke-disc-btn">Disconnect</button>
     </div>`);
+
+  document.getElementById('juke-copy-btn').onclick = () => {
+    navigator.clipboard.writeText(url).then(() => toast('Link copied!')).catch(() => {
+      // Fallback for insecure contexts
+      const ta = document.createElement('textarea');
+      ta.value = url; document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta);
+      toast('Link copied!');
+    });
+  };
 
   document.getElementById('juke-disc-btn').onclick = () => {
     S.jukeWs?.close();
@@ -2702,6 +2731,24 @@ async function checkSession() {
       const d = await r.json().catch(() => ({}));
       S.vpaths   = d.vpaths || [];
       S.djVpaths = [...S.vpaths];
+      // User authenticated via cookie (e.g. arrived from classic UI).
+      // Extract the token from the cookie so WS connections and token-based
+      // API calls work correctly — the cookie is NOT httpOnly so JS can read it.
+      if (!S.token) {
+        const m = document.cookie.match(/(?:^|;\s*)x-access-token=([^;]+)/);
+        if (m) {
+          S.token = decodeURIComponent(m[1]);
+          // Also decode the username from the JWT payload (middle segment)
+          try {
+            const payload = JSON.parse(atob(S.token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+            if (payload.username && !S.username) {
+              S.username = payload.username;
+              localStorage.setItem('ms2_user', S.username);
+            }
+          } catch(_) {}
+          localStorage.setItem('ms2_token', S.token);
+        }
+      }
       return true;
     }
   } catch(_) {}
