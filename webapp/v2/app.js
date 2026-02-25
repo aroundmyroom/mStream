@@ -3223,6 +3223,32 @@ document.getElementById('prog-track').addEventListener('click', e => {
 document.getElementById('volume').addEventListener('input', e => { audioEl.volume = e.target.value / 100; });
 audioEl.volume = 0.8;
 
+let _preMuteVol = 0.8;
+document.getElementById('mute-btn').addEventListener('click', () => {
+  if (audioEl.volume > 0) {
+    _preMuteVol = audioEl.volume;
+    audioEl.volume = 0;
+    document.getElementById('volume').value = 0;
+    document.getElementById('mute-btn').classList.add('muted');
+    document.getElementById('vol-icon-on').classList.add('hidden');
+    document.getElementById('vol-icon-off').classList.remove('hidden');
+  } else {
+    audioEl.volume = _preMuteVol;
+    document.getElementById('volume').value = Math.round(_preMuteVol * 100);
+    document.getElementById('mute-btn').classList.remove('muted');
+    document.getElementById('vol-icon-on').classList.remove('hidden');
+    document.getElementById('vol-icon-off').classList.add('hidden');
+  }
+});
+// Restore mute icon if user drags slider back up from 0
+document.getElementById('volume').addEventListener('input', e => {
+  if (parseFloat(e.target.value) > 0 && audioEl.volume === 0) {
+    document.getElementById('mute-btn').classList.remove('muted');
+    document.getElementById('vol-icon-on').classList.remove('hidden');
+    document.getElementById('vol-icon-off').classList.add('hidden');
+  }
+});
+
 // NP Modal
 document.getElementById('np-open-btn').addEventListener('click', e => {
   if (e.target.closest('#player-stars')) return;
