@@ -2147,7 +2147,7 @@ async function doSearch(q) {
         title:      f.filepath.split('/').pop().replace(/\.[^.]+$/, ''),
         artist:     '',
         filepath:   f.filepath,
-        'album-art': null,
+        'album-art': f.album_art_file || null,
       }));
     const allSongs = [...titleSongs, ...fileSongs];
     if (allSongs.length) {
