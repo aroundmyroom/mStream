@@ -138,6 +138,9 @@ function restoreQueue() {
       }
     }
   } catch(e) { console.warn('restoreQueue audio setup failed:', e); }
+  // Ensure icons always reflect reality after restore (src reassignment can
+  // trigger spurious play events in some browsers before paused settles).
+  syncPlayIcons();
 }
 // Throttled save of currentTime every 5 s while audio is playing
 let _persistTimer = null;
@@ -257,8 +260,8 @@ const Player = {
     const s = S.queue[idx];
     audioEl.src = mediaUrl(s.filepath);
     audioEl.load();
+    VIZ.initAudio();   // ensure AudioContext + analysers exist BEFORE play fires
     audioEl.play().catch(() => {});
-    VIZ.initAudio();   // ensure AudioContext + L/R analysers exist for mini spectrum
     this.updateBar();
     highlightRow();
     refreshQueueUI();
@@ -271,7 +274,8 @@ const Player = {
   },
   toggle() {
     if (!audioEl.src) return;
-    audioEl.paused ? audioEl.play().catch(() => {}) : audioEl.pause();
+    if (audioEl.paused) { VIZ.initAudio(); audioEl.play().catch(() => {}); }
+    else { audioEl.pause(); }
   },
   next() {
     if (!S.queue.length) return;
@@ -2618,6 +2622,8 @@ async function tryLogin(username, password) {
 
 async function checkSession() {
   if (S.token) {
+    // Restore username from localStorage so queue key resolves correctly
+    if (!S.username) S.username = localStorage.getItem('ms2_user') || '';
     try {
       const d = await api('GET', 'api/v1/db/status');
       S.vpaths = d.vpaths || [];
@@ -2773,6 +2779,13 @@ document.getElementById('qp-clear-btn').addEventListener('click', () => {
 // Logout
 document.getElementById('logout-btn').addEventListener('click', () => {
   if (S.username) localStorage.removeItem(_queueKey());
+  // Full W3C reset: pause → remove src → load() wipes all internal play state
+  // so no spurious 'play' event can fire when restoreQueue() assigns a new src.
+  audioEl.pause();
+  audioEl.removeAttribute('src');
+  audioEl.load();
+  MINI_SPEC.stop();
+  syncPlayIcons();  // guarantee ▶ icon before login screen appears
   S.token = ''; S.username = '';
   localStorage.removeItem('ms2_token'); localStorage.removeItem('ms2_user');
   showLogin();
@@ -3030,19 +3043,23 @@ document.addEventListener('click', e => {
   }
 });
 
+// Sync play/pause icon state from audioEl.paused — call this any time the
+// icon may be stale (restore, logout, etc.) rather than relying on events.
+function syncPlayIcons() {
+  const playing = !audioEl.paused;
+  document.getElementById('icon-play').classList.toggle('hidden',  playing);
+  document.getElementById('icon-pause').classList.toggle('hidden', !playing);
+  document.getElementById('np-icon-play').classList.toggle('hidden',  playing);
+  document.getElementById('np-icon-pause').classList.toggle('hidden', !playing);
+}
+
 // Audio events
 audioEl.addEventListener('play', () => {
-  document.getElementById('icon-play').classList.add('hidden');
-  document.getElementById('icon-pause').classList.remove('hidden');
-  document.getElementById('np-icon-play').classList.add('hidden');
-  document.getElementById('np-icon-pause').classList.remove('hidden');
+  syncPlayIcons();
   MINI_SPEC.start();
 });
 audioEl.addEventListener('pause', () => {
-  document.getElementById('icon-play').classList.remove('hidden');
-  document.getElementById('icon-pause').classList.add('hidden');
-  document.getElementById('np-icon-pause').classList.add('hidden');
-  document.getElementById('np-icon-play').classList.remove('hidden');
+  syncPlayIcons();
   MINI_SPEC.stop();
 });
 audioEl.addEventListener('ended', () => Player.next());
