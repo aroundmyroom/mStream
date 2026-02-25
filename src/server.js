@@ -126,19 +126,19 @@ export async function serveIt(configFile) {
     next();
   });
 
-  mstream.get('/', (req, res, next) => {
-    if (Object.keys(config.program.users).length === 0) {
-      return next();
-    }
+  // v2 is the default UI — it manages its own auth (embedded login screen)
+  mstream.get('/', (_req, res) => res.redirect(302, '/v2'));
 
+  // Classic UI — still available at /classic with its own cookie-auth guard
+  mstream.get('/classic', (req, res, next) => {
+    if (Object.keys(config.program.users).length === 0) return next();
     try {
       jwt.verify(req.cookies['x-access-token'], config.program.secret);
-      next();
+      return res.sendFile(path.join(config.program.webAppDirectory, 'index.html'));
     } catch (_err) {
       return res.redirect(302, '/login');
     }
   });
-
   mstream.get('/login', (req, res, next) => {
     if (Object.keys(config.program.users).length === 0) {
       return res.redirect(302, '..');

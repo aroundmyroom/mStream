@@ -273,7 +273,9 @@ const Player = {
     persistQueue();
   },
   toggle() {
-    if (!audioEl.src) return;
+    if (!S.queue.length) return;
+    // src is cleared on logout — if there's a queued track, reload it and play
+    if (!audioEl.src) { this.playAt(S.idx); return; }
     if (audioEl.paused) { VIZ.initAudio(); audioEl.play().catch(() => {}); }
     else { audioEl.pause(); }
   },
@@ -2613,6 +2615,7 @@ async function tryLogin(username, password) {
   S.djVpaths = [...S.vpaths];  // default: all sources selected
   localStorage.setItem('ms2_token', d.token);
   localStorage.setItem('ms2_user',  username);
+  localStorage.removeItem('ms2_logged_out');
   // Detect admin role after login
   try {
     await api('GET', 'api/v1/admin/directories');
@@ -2638,7 +2641,18 @@ async function checkSession() {
       if (e.status === 401) { S.token = ''; localStorage.removeItem('ms2_token'); }
     }
   }
-  try { const r = await fetch('/api/v1/db/status'); if (r.ok) return true; } catch(_) {}
+  // Fallback for genuine no-auth servers (no users configured at all).
+  // Block it if the user explicitly logged out — they must re-enter credentials.
+  if (localStorage.getItem('ms2_logged_out')) { return false; }
+  try {
+    const r = await fetch('/api/v1/db/status');
+    if (r.ok) {
+      const d = await r.json().catch(() => ({}));
+      S.vpaths   = d.vpaths || [];
+      S.djVpaths = [...S.vpaths];
+      return true;
+    }
+  } catch(_) {}
   return false;
 }
 
@@ -2779,6 +2793,9 @@ document.getElementById('qp-clear-btn').addEventListener('click', () => {
 // Logout
 document.getElementById('logout-btn').addEventListener('click', () => {
   if (S.username) localStorage.removeItem(_queueKey());
+  // Flush queue to localStorage NOW, before we clear S.username (persistQueue
+  // guards on S.username so it must be called while it still has a value).
+  persistQueue();
   // Full W3C reset: pause → remove src → load() wipes all internal play state
   // so no spurious 'play' event can fire when restoreQueue() assigns a new src.
   audioEl.pause();
@@ -2788,6 +2805,9 @@ document.getElementById('logout-btn').addEventListener('click', () => {
   syncPlayIcons();  // guarantee ▶ icon before login screen appears
   S.token = ''; S.username = '';
   localStorage.removeItem('ms2_token'); localStorage.removeItem('ms2_user');
+  // Expire the server-set cookie so a page refresh cannot re-authenticate
+  document.cookie = 'x-access-token=; Max-Age=0; path=/; SameSite=Strict';
+  localStorage.setItem('ms2_logged_out', '1');
   showLogin();
 });
 
