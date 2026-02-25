@@ -3255,6 +3255,20 @@ window.addEventListener('resize', () => {
   canvas.width  = canvas.clientWidth;
   canvas.height = canvas.clientHeight;
 });
+document.getElementById('np-rate-clear').addEventListener('click', async () => {
+  const s = S.queue[S.idx];
+  if (!s) return;
+  delete s.rating;
+  const ci = S.curSongs.findIndex(cs => cs.filepath === s.filepath);
+  if (ci >= 0) {
+    delete S.curSongs[ci].rating;
+    document.querySelectorAll(`.row-stars[data-ci="${ci}"]`).forEach(el => { el.innerHTML = starsHtml(0); });
+  }
+  document.querySelectorAll('#np-rate-stars span').forEach(s2 => s2.classList.remove('lit'));
+  Player.updateBar();
+  await rateSong(s.filepath, null);
+});
+
 document.getElementById('np-rate-stars').querySelectorAll('span').forEach((star, i) => {
   star.addEventListener('mouseenter', () => {
     document.querySelectorAll('#np-rate-stars span').forEach((s2, j) => s2.classList.toggle('lit', j <= i));
