@@ -115,8 +115,14 @@ export function setup(mstream) {
 
     const bb = busboy({ headers: req.headers });
     bb.on('file', (fieldname, file, info) => {
-      const { filename } = info;
-      const saveTo = path.join(pathInfo.fullPath, filename);
+      // Use path.basename() to strip any directory components from the
+      // client-supplied filename before joining it to the upload path (CWE-22 fix).
+      const safeFilename = path.basename(info.filename);
+      if (!safeFilename || safeFilename.startsWith('.')) {
+        file.resume(); // drain and discard the stream
+        return;
+      }
+      const saveTo = path.join(pathInfo.fullPath, safeFilename);
       winston.info(`Uploading from ${req.user.username} to: ${saveTo}`);
       file.pipe(fsOld.createWriteStream(saveTo));
     });
