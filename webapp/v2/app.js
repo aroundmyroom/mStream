@@ -860,7 +860,7 @@ const MINI_SPEC = (() => {
     const cg   = 2 * dpr;          // centre divider
     const hw   = (W - cg) / 2;
     const barW = (hw - GAP * (BARS - 1)) / BARS;
-    const baseline = H;
+    const baseline = H;  // bottom of canvas — bars grow upward
 
     ctx.clearRect(0, 0, W, H);
 
@@ -879,16 +879,17 @@ const MINI_SPEC = (() => {
       for (let i = 0; i < BARS; i++) {
         const bi  = reverse ? (BARS - 1 - i) : i;
         const v   = data[logBin(bi, data.length)] / 255;
-        const bh  = Math.max(1, v * H * 0.92);
+        const barH = Math.max(1, v * baseline * 0.92);
         const x   = startX + i * (barW + GAP);
         const hue = (1 - v) * 200;
-        const grd = ctx.createLinearGradient(0, baseline, 0, baseline - bh);
-        grd.addColorStop(0,   `hsla(${hue},100%,48%,.85)`);
-        grd.addColorStop(1,   `hsla(${hue+80},100%,72%,.75)`);
+        const r   = Math.min(barW * .4, 2.5 * dpr);
+
+        const grd = ctx.createLinearGradient(0, baseline, 0, baseline - barH);
+        grd.addColorStop(0, `hsla(${hue},100%,48%,.85)`);
+        grd.addColorStop(1, `hsla(${hue+80},100%,72%,.75)`);
         ctx.fillStyle = grd;
-        const r = Math.min(barW * .4, 2.5 * dpr);
         ctx.beginPath();
-        ctx.roundRect(x, baseline - bh, barW, bh, [r, r, 0, 0]);
+        ctx.roundRect(x, baseline - barH, barW, barH, [r, r, 0, 0]);
         ctx.fill();
       }
     }
