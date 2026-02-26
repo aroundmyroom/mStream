@@ -273,11 +273,12 @@ const Player = {
     persistQueue();
   },
   toggle() {
+    // Always allow pausing even if the queue was cleared while playing
+    if (audioEl.src && !audioEl.paused) { audioEl.pause(); return; }
     if (!S.queue.length) return;
     // src is cleared on logout — if there's a queued track, reload it and play
     if (!audioEl.src) { this.playAt(S.idx); return; }
-    if (audioEl.paused) { VIZ.initAudio(); audioEl.play().catch(() => {}); }
-    else { audioEl.pause(); }
+    VIZ.initAudio(); audioEl.play().catch(() => {});
   },
   next() {
     if (!S.queue.length) return;
@@ -813,11 +814,23 @@ function renderNPModal() {
     ['Disc',        s.disk],
     ['Rating',      starStr],
     ['Replay Gain', rgStr],
-    ['File',        s.filepath],
   ];
   document.getElementById('np-meta').innerHTML = rows.map(([k, v]) =>
     `<span class="np-meta-k">${k}</span>${mv(v)}`
   ).join('');
+  // Filepath block — full path with directory dimmed and filename highlighted
+  const fpEl = document.getElementById('np-filepath');
+  if (s.filepath) {
+    const parts = s.filepath.split('/');
+    const fname = parts.pop();
+    const dirParts = parts.filter(Boolean);
+    const dirHtml = dirParts.map(p => `<span class="np-fp-dir">${esc(p)}</span><span class="np-fp-sep">/</span>`).join('');
+    fpEl.innerHTML = `<span class="np-fp-label">File Path</span><div class="np-fp-path">${dirHtml}<span class="np-fp-file">${esc(fname)}</span></div>`;
+    fpEl.classList.remove('hidden');
+  } else {
+    fpEl.innerHTML = '';
+    fpEl.classList.add('hidden');
+  }
 }
 function showNPModal() {
   if (!S.queue[S.idx]) return;
