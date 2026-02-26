@@ -84,6 +84,10 @@ export function updateFileScanId(file, scanId) {
   db.prepare('UPDATE files SET sID = ? WHERE filepath = ? AND vpath = ?').run(scanId, file.filepath, file.vpath);
 }
 
+export function updateFileArt(filepath, vpath, aaFile, scanId) {
+  db.prepare('UPDATE files SET aaFile = ?, sID = ? WHERE filepath = ? AND vpath = ?').run(aaFile, scanId, filepath, vpath);
+}
+
 export function insertFile(fileData) {
   const stmt = db.prepare(`INSERT INTO files (title, artist, year, album, filepath, format, track, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
