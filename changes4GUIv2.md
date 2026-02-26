@@ -236,6 +236,56 @@ Right-click (or 3-dot button) on any song row:
 
 ---
 
+## Reverse-Proxy Configuration
+
+When mStream is served through a reverse proxy (nginx, Caddy, Apache, etc.)
+audio streaming will silently stall or pause mid-song because the proxy
+drops idle TCP connections before the browser has finished reading the file.
+
+### Symptoms
+- Auto-DJ plays for a while, then the play button switches to ⏸ with no
+  console error (browser was using its 30 s audio buffer and ran out).
+- Console shows `ERR_CONNECTION_RESET 206 (Partial Content)` when the buffer
+  eventually empties.
+
+### Client-side recovery (already implemented)
+`app.js` now listens for `error` (MEDIA_ERR_NETWORK) and `stalled` events on
+the audio element.  When either fires with Auto-DJ active it re-issues the
+HTTP request and seeks back to the interrupted position, retrying up to 5
+times with exponential back-off (1 s → 2 s → 4 s → 8 s → 16 s).  A
+`visibilitychange` handler also resumes playback when the user switches back
+to the tab.
+
+### Permanent nginx fix (recommended)
+Add these two directives to the `location` block that proxies to mStream:
+
+```nginx
+location / {
+    proxy_pass         http://127.0.0.1:3000;
+    proxy_read_timeout 3600s;   # keep the connection open for up to 1 hour
+    proxy_buffering    off;     # stream bytes straight to the browser —
+                                # prevents nginx buffering the whole file
+                                # in memory before forwarding
+}
+```
+
+- **`proxy_read_timeout 3600s`** — extends the idle-connection timeout from
+  the default 60 s to 1 hour.  Without this, nginx closes the upstream socket
+  whenever no bytes have arrived for 60 s, which happens normally during
+  audio streaming once the browser's buffer is full.
+- **`proxy_buffering off`** — tells nginx to pass data to the client as it
+  arrives rather than accumulating it first.  This is important for large
+  audio files (FLAC can be 50–300 MB) because default buffering would cause
+  nginx to try to hold the entire file in its proxy buffer, fail, and reset
+  the connection.
+
+After editing nginx.conf, reload without downtime:
+```bash
+sudo nginx -t && sudo nginx -s reload
+```
+
+---
+
 ## Pending
 
 - **File upload UI** — the server endpoint `POST /api/v1/file-explorer/upload`

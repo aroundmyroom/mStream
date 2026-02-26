@@ -139,7 +139,20 @@ async function recursiveScan(dir) {
           }
         });
 
-        if (Object.entries(dbFileInfo.data).length === 0) {
+        if (dbFileInfo.data._needsArt) {
+          // File exists but has no art — run art detection only, don't touch ts
+          const songInfo = { filePath: path.relative(loadJson.directory, filepath) };
+          await getAlbumArt(songInfo);
+          if (songInfo.aaFile) {
+            await ax({
+              method: 'POST',
+              url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-art`,
+              headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+              responseType: 'json',
+              data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, aaFile: songInfo.aaFile, scanId: loadJson.scanId }
+            });
+          }
+        } else if (Object.entries(dbFileInfo.data).length === 0) {
           const songInfo = await parseMyFile(filepath, stat.mtime.getTime());
           await insertEntries(songInfo);
         }

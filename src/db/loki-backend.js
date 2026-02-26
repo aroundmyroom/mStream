@@ -121,6 +121,15 @@ export function updateFileScanId(file, scanId) {
   }
 }
 
+export function updateFileArt(filepath, vpath, aaFile, scanId) {
+  const dbFile = fileCollection.findOne({ '$and': [{ 'filepath': { '$eq': filepath } }, { 'vpath': { '$eq': vpath } }] });
+  if (dbFile) {
+    dbFile.aaFile = aaFile;
+    dbFile.sID = scanId;
+    fileCollection.update(dbFile);
+  }
+}
+
 export function insertFile(fileData) {
   const result = fileCollection.insert(fileData);
   return mapId(result);
