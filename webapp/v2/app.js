@@ -273,12 +273,14 @@ const Player = {
     persistQueue();
   },
   toggle() {
-    // Always allow pausing even if the queue was cleared while playing
-    if (audioEl.src && !audioEl.paused) { audioEl.pause(); return; }
-    if (!S.queue.length) return;
+    // If nothing is loaded and nothing is queued — truly nothing to do
+    if (!audioEl.src && !S.queue.length) return;
     // src is cleared on logout — if there's a queued track, reload it and play
     if (!audioEl.src) { this.playAt(S.idx); return; }
-    VIZ.initAudio(); audioEl.play().catch(() => {});
+    // src is set: toggle play/pause regardless of queue state
+    // (queue may have been cleared while a song was already loaded)
+    if (audioEl.paused) { VIZ.initAudio(); audioEl.play().catch(() => {}); }
+    else { audioEl.pause(); }
   },
   next() {
     if (!S.queue.length) return;
