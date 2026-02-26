@@ -412,13 +412,24 @@ async function autoDJFetch() {
 
 function setAutoDJ(on) {
   S.autoDJ = on;
+  localStorage.setItem('ms2_autodj', on ? '1' : '');
   document.getElementById('dj-light').classList.toggle('hidden', !on);
   // update autodj page if visible
   const btn = document.querySelector('.autodj-toggle');
   if (btn) { btn.classList.toggle('on', on); btn.textContent = on ? '⏹ Stop Auto-DJ' : '▶ Start Auto-DJ'; }
   const status = document.querySelector('.autodj-status');
   if (status) { status.classList.toggle('on', on); status.textContent = on ? 'Auto-DJ is ON — random songs will play continuously' : 'Auto-DJ is OFF'; }
-  if (on && (!audioEl.src || audioEl.ended || S.queue.length === 0)) autoDJFetch();
+  if (on) {
+    if (!audioEl.src || audioEl.ended || S.queue.length === 0) {
+      // Nothing playing and nothing queued — fetch a new song and play it
+      autoDJFetch();
+    } else if (audioEl.paused) {
+      // Song is queued/loaded but paused — just start playing
+      VIZ.initAudio();
+      audioEl.play().catch(() => {});
+    }
+    // If already playing, Auto-DJ will take over naturally at end of track
+  }
 }
 
 // ── QUEUE UI ─────────────────────────────────────────────────
@@ -2786,6 +2797,8 @@ function showApp() {
   viewRecent();
   refreshQueueUI();
   restoreQueue();
+  // Restore auto-DJ state from previous session
+  if (localStorage.getItem('ms2_autodj')) { setAutoDJ(true); }
   // Persist currentTime every 5 s while playing
   audioEl.addEventListener('timeupdate', () => {
     if (_persistTimer) return;
@@ -3206,9 +3219,9 @@ audioEl.addEventListener('timeupdate', () => {
   document.getElementById('prog-fill').style.width = pct + '%';
   document.getElementById('time-cur').textContent   = fmt(audioEl.currentTime);
   document.getElementById('time-total').textContent = fmt(audioEl.duration);
-  // Auto-DJ pre-fetch: queue next song 10 s before the current one ends
+  // Auto-DJ pre-fetch: queue next song 25 s before the current one ends
   if (S.autoDJ && S.idx === S.queue.length - 1 &&
-      (audioEl.duration - audioEl.currentTime) < 10) {
+      (audioEl.duration - audioEl.currentTime) < 25) {
     autoDJPrefetch();
   }
   if (!document.getElementById('np-modal').classList.contains('hidden')) {
