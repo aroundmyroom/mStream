@@ -160,6 +160,10 @@ export async function serveIt(configFile) {
   mstream.get('/robots.txt', (_req, res) => {
     res.type('text/plain').send('User-agent: *\nDisallow: /\n');
   });
+  // PWA manifest must be public — served at both paths (direct + through proxy that only forwards /v2/*)
+  const manifestFile = path.join(config.program.webAppDirectory, 'assets/fav/site.webmanifest');
+  mstream.get('/assets/fav/site.webmanifest', (_req, res) => res.sendFile(manifestFile));
+  mstream.get('/v2/site.webmanifest',          (_req, res) => res.sendFile(manifestFile));
 
   // Public APIs
   remoteApi.setupBeforeAuth(mstream, server);
