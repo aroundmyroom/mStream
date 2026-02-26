@@ -3214,38 +3214,73 @@ audioEl.addEventListener('pause', () => {
 });
 audioEl.addEventListener('ended', () => Player.next());
 
-// ── NETWORK RECOVERY (proxy / firewall timeout) ──────────────
-// Reverse proxies (nginx, Caddy, etc.) close idle TCP connections after
-// their proxy_read_timeout (often 60 s).  The browser buffers ~30 s of
-// audio ahead, then the connection goes quiet; the proxy drops it.  When
-// the buffer is exhausted the audio element fires MEDIA_ERR_NETWORK and
-// silently pauses — no console output unless we handle the event ourselves.
-// We catch it and reload the stream from the current playback position.
+// ── NETWORK RECOVERY (proxy / firewall connection reset) ─────
+// Reverse proxies (nginx, Caddy…) reset TCP connections mid-stream when
+// their proxy_read_timeout or keepalive limits are hit.  The browser logs
+// ERR_CONNECTION_RESET / 206 in the console, continues playing from its
+// buffer, then silently pauses when the buffer is exhausted.
+//
+// Two events signal trouble:
+//   • 'error'   – MEDIA_ERR_NETWORK (code 2) once the buffer runs dry
+//   • 'stalled' – browser stopped receiving bytes (fires 3 s after the
+//                 network goes quiet, BEFORE the buffer actually runs out)
+//
+// Recovery: capture currentTime, call load() to re-issue the HTTP request,
+// then seek back and resume.  If the proxy resets that request too, we retry
+// with exponential back-off (max 5 attempts, 1 → 2 → 4 → 8 → 16 s).
+
 let _netRecoveryTimer = null;
+
+function _reloadFromPosition(attempt) {
+  attempt = attempt || 0;
+  if (attempt > 5) { console.error('Auto-DJ: gave up after 5 recovery attempts'); return; }
+  const resumeAt = audioEl.currentTime;
+  const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
+  console.warn(`Auto-DJ: recovery attempt ${attempt + 1}/5 — resume from ${Math.round(resumeAt)}s in ${delay}ms`);
+  clearTimeout(_netRecoveryTimer);
+  _netRecoveryTimer = setTimeout(() => {
+    audioEl.load(); // re-issues the HTTP GET through the proxy
+    const onMeta = () => {
+      if (resumeAt > 1) audioEl.currentTime = resumeAt;
+      VIZ.initAudio();
+      audioEl.play().catch(() => _reloadFromPosition(attempt + 1));
+    };
+    audioEl.addEventListener('loadedmetadata', onMeta, { once: true });
+    // If loadedmetadata never fires (proxy keeps resetting), retry
+    const retryTimer = setTimeout(() => {
+      audioEl.removeEventListener('loadedmetadata', onMeta);
+      if (S.autoDJ && audioEl.paused) _reloadFromPosition(attempt + 1);
+    }, 12000);
+    // Clean up retry timer once we're actually playing
+    audioEl.addEventListener('playing', () => clearTimeout(retryTimer), { once: true });
+  }, delay);
+}
+
 audioEl.addEventListener('error', () => {
   const err = audioEl.error;
   if (!err || !audioEl.src) return;
-  console.warn(`Audio error (code ${err.code}): ${err.message || 'network/decode error'}`);
-  // Only auto-recover network / decode errors, not "no source" (code 4)
+  console.warn(`Audio error code ${err.code}: ${err.message || '(no message)'}`);
   if (err.code !== MediaError.MEDIA_ERR_NETWORK && err.code !== MediaError.MEDIA_ERR_DECODE) return;
+  if (!S.autoDJ) return;
+  _reloadFromPosition(0);
+});
+
+// 'stalled' fires when the browser stops receiving data for ~3 s.
+// Only act if the buffer is actually low (readyState < HAVE_FUTURE_DATA).
+audioEl.addEventListener('stalled', () => {
   if (!S.autoDJ) return;
   clearTimeout(_netRecoveryTimer);
   _netRecoveryTimer = setTimeout(() => {
-    console.warn('Auto-DJ: network error — reloading stream from', Math.round(audioEl.currentTime), 's');
-    const resumeAt = audioEl.currentTime;
-    audioEl.load(); // re-issues the HTTP request through the proxy
-    if (resumeAt > 1) {
-      audioEl.addEventListener('loadedmetadata', () => {
-        audioEl.currentTime = resumeAt;
-        VIZ.initAudio();
-        audioEl.play().catch(() => {});
-      }, { once: true });
-    } else {
-      VIZ.initAudio();
-      audioEl.play().catch(() => {});
+    if (audioEl.readyState < 3 /* HAVE_FUTURE_DATA */) {
+      console.warn(`Auto-DJ: stream stalled (readyState=${audioEl.readyState}) — recovering`);
+      _reloadFromPosition(0);
     }
-  }, 1200);
+  }, 5000);
 });
+
+// Cancel any pending recovery once the stream is healthy again
+audioEl.addEventListener('playing', () => clearTimeout(_netRecoveryTimer));
+audioEl.addEventListener('canplay', () => clearTimeout(_netRecoveryTimer));
 
 // When the user switches back to the browser tab (or wakes the screen),
 // Auto-DJ should resume if the audio has been silently paused.
@@ -3255,7 +3290,7 @@ document.addEventListener('visibilitychange', () => {
   if (audioEl.paused) {
     console.log('Auto-DJ: tab became visible, resuming playback');
     VIZ.initAudio();
-    audioEl.play().catch(() => {});
+    audioEl.play().catch(() => _reloadFromPosition(0));
   }
 });
 
