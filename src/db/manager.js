@@ -47,6 +47,7 @@ export function removeFilesByVpath(vpath) { return backend.removeFilesByVpath(vp
 export function countFilesByVpath(vpath) { return backend.countFilesByVpath(vpath); }
 
 // Metadata Queries
+export function updateFileArt(filepath, vpath, aaFile, scanId) { return backend.updateFileArt(filepath, vpath, aaFile, scanId); }
 export function getFileWithMetadata(filepath, vpath, username) { return backend.getFileWithMetadata(filepath, vpath, username); }
 export function getArtists(vpaths, ignoreVPaths) { return backend.getArtists(vpaths, ignoreVPaths); }
 export function getArtistAlbums(artist, vpaths, ignoreVPaths) { return backend.getArtistAlbums(artist, vpaths, ignoreVPaths); }

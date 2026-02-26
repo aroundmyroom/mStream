@@ -19,12 +19,23 @@ export function setup(mstream) {
       db.removeFileByPath(req.body.filepath, req.body.vpath);
       return res.json({});
     }
+    // if the file has no album art, signal the scanner to do an art-only
+    // update — preserves the original ts so it doesn't appear in Recent
+    else if (!dbFileInfo.aaFile) {
+      db.updateFileScanId(dbFileInfo, req.body.scanId);
+      return res.json({ _needsArt: true, filepath: dbFileInfo.filepath, vpath: dbFileInfo.vpath });
+    }
     // update the record with the new scan ID
     else {
       db.updateFileScanId(dbFileInfo, req.body.scanId);
     }
 
     res.json(dbFileInfo);
+  });
+
+  mstream.post('/api/v1/scanner/update-art', (req, res) => {
+    db.updateFileArt(req.body.filepath, req.body.vpath, req.body.aaFile, req.body.scanId);
+    res.json({});
   });
 
   mstream.post('/api/v1/scanner/finish-scan', (req, res) => {
