@@ -140,8 +140,16 @@ async function recursiveScan(dir) {
         });
 
         if (dbFileInfo.data._needsArt) {
-          // File exists but has no art — run art detection only, don't touch ts
-          const songInfo = { filePath: path.relative(loadJson.directory, filepath) };
+          // File exists but has no art — run art detection only, don't touch ts.
+          // We need to re-parse metadata to catch embedded art (e.g. WAV ID3 tags),
+          // then fall back to directory images if nothing is embedded.
+          let songInfo;
+          try {
+            songInfo = (await parseFile(filepath, { skipCovers: false })).common;
+          } catch (_e) {
+            songInfo = {};
+          }
+          songInfo.filePath = path.relative(loadJson.directory, filepath);
           await getAlbumArt(songInfo);
           if (songInfo.aaFile) {
             await ax({
