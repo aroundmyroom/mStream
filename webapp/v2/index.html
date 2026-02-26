@@ -7,8 +7,17 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/assets/fav/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/fav/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/assets/fav/favicon-16x16.png">
-  <link rel="manifest" href="/assets/fav/site.webmanifest">
   <link rel="shortcut icon" href="/assets/fav/favicon.ico">
+  <script>
+    // Generate PWA manifest inline — avoids proxy auth blocking a separate HTTP request
+    (function(){
+      var o=window.location.origin;
+      var m={"name":"mStream","short_name":"mStream","icons":[{"src":o+"/assets/fav/android-chrome-192x192.png","sizes":"192x192","type":"image/png"},{"src":o+"/assets/fav/android-chrome-512x512.png","sizes":"512x512","type":"image/png"}],"theme_color":"#1e1e2e","background_color":"#1e1e2e","display":"standalone","start_url":o+"/v2"};
+      var b=new Blob([JSON.stringify(m)],{type:'application/manifest+json'});
+      var l=document.createElement('link');l.rel='manifest';l.href=URL.createObjectURL(b);
+      document.head.appendChild(l);
+    })();
+  </script>
   <script defer src="../assets/js/lib/butterchurn.min.js"></script>
   <script defer src="../assets/js/lib/butterchurn-presets.min.js"></script>
   <script defer src="../assets/js/lib/butterchurn-presets-extra.js"></script>
