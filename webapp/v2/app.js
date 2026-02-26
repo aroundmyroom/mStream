@@ -3213,6 +3213,52 @@ audioEl.addEventListener('pause', () => {
   MINI_SPEC.stop();
 });
 audioEl.addEventListener('ended', () => Player.next());
+
+// ── NETWORK RECOVERY (proxy / firewall timeout) ──────────────
+// Reverse proxies (nginx, Caddy, etc.) close idle TCP connections after
+// their proxy_read_timeout (often 60 s).  The browser buffers ~30 s of
+// audio ahead, then the connection goes quiet; the proxy drops it.  When
+// the buffer is exhausted the audio element fires MEDIA_ERR_NETWORK and
+// silently pauses — no console output unless we handle the event ourselves.
+// We catch it and reload the stream from the current playback position.
+let _netRecoveryTimer = null;
+audioEl.addEventListener('error', () => {
+  const err = audioEl.error;
+  if (!err || !audioEl.src) return;
+  console.warn(`Audio error (code ${err.code}): ${err.message || 'network/decode error'}`);
+  // Only auto-recover network / decode errors, not "no source" (code 4)
+  if (err.code !== MediaError.MEDIA_ERR_NETWORK && err.code !== MediaError.MEDIA_ERR_DECODE) return;
+  if (!S.autoDJ) return;
+  clearTimeout(_netRecoveryTimer);
+  _netRecoveryTimer = setTimeout(() => {
+    console.warn('Auto-DJ: network error — reloading stream from', Math.round(audioEl.currentTime), 's');
+    const resumeAt = audioEl.currentTime;
+    audioEl.load(); // re-issues the HTTP request through the proxy
+    if (resumeAt > 1) {
+      audioEl.addEventListener('loadedmetadata', () => {
+        audioEl.currentTime = resumeAt;
+        VIZ.initAudio();
+        audioEl.play().catch(() => {});
+      }, { once: true });
+    } else {
+      VIZ.initAudio();
+      audioEl.play().catch(() => {});
+    }
+  }, 1200);
+});
+
+// When the user switches back to the browser tab (or wakes the screen),
+// Auto-DJ should resume if the audio has been silently paused.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (!S.autoDJ || !audioEl.src || audioEl.ended) return;
+  if (audioEl.paused) {
+    console.log('Auto-DJ: tab became visible, resuming playback');
+    VIZ.initAudio();
+    audioEl.play().catch(() => {});
+  }
+});
+
 audioEl.addEventListener('timeupdate', () => {
   if (!audioEl.duration) return;
   const pct = (audioEl.currentTime / audioEl.duration) * 100;
