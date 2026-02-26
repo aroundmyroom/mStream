@@ -3299,15 +3299,7 @@ audioEl.addEventListener('canplay', () => clearTimeout(_netRecoveryTimer));
 
 // When the user switches back to the browser tab (or wakes the screen),
 // Auto-DJ should resume if the audio has been silently paused.
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) return;
-  if (!S.autoDJ || !audioEl.src || audioEl.ended) return;
-  if (audioEl.paused) {
-    console.log('Auto-DJ: tab became visible, resuming playback');
-    VIZ.initAudio();
-    audioEl.play().catch(() => _reloadFromPosition(0));
-  }
-});
+
 
 audioEl.addEventListener('timeupdate', () => {
   if (!audioEl.duration) return;
