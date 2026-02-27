@@ -22,6 +22,17 @@ myDropzone.on("addedfile", (file) => {
     });
     myDropzone.removeFile(file);
   } else {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (window._msSupportedAudio && !window._msSupportedAudio[ext]) {
+      iziToast.error({
+        title: 'File type not allowed',
+        message: `".${ext}" files cannot be uploaded here`,
+        position: 'topCenter',
+        timeout: 4000
+      });
+      myDropzone.removeFile(file);
+      return;
+    }
     if (file.fullPath) {
       file.directory = getFileExplorerPath() + file.fullPath.substring(0, file.fullPath.indexOf(file.name));
     } else {
@@ -417,6 +428,7 @@ async function init() {
   try {
     const response = await MSTREAMAPI.ping();
     MSTREAMAPI.currentServer.vpaths = response.vpaths;
+    if (response.supportedAudioFiles) { window._msSupportedAudio = response.supportedAudioFiles; }
     VUEPLAYERCORE.playlists.length = 0;
     document.getElementById('pop-f').innerHTML = '<div class="pop-f pop-playlist">Add To Playlist:</div>';
 

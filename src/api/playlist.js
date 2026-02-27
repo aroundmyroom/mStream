@@ -19,6 +19,8 @@ export function setup(mstream) {
       vpaths: req.user.vpaths,
       playlists: db.getUserPlaylists(req.user.username),
       transcode,
+      noUpload: config.program.noUpload === true,
+      supportedAudioFiles: config.program.supportedAudioFiles,
       vpathMetaData: {}
     };
 

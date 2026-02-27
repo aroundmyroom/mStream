@@ -388,11 +388,51 @@ sudo nginx -t && sudo nginx -s reload
 
 ---
 
+## Upload — File Type Restriction
+
+Enforced audio-only uploads at every layer of the stack to prevent arbitrary
+files (PDFs, executables, text files, etc.) from being written to the server.
+
+### Server (`src/api/file-explorer.js`)
+- Each uploaded file's extension is checked against
+  `config.program.supportedAudioFiles` before the stream is piped to disk.
+- Rejected files have their stream drained and discarded immediately.
+- Tracks `acceptedCount` / `firstRejectedExt` across all files in the
+  multipart request.
+- `bb.on('close')` now returns **HTTP 400** `{ error: "File type not allowed: .pdf" }`
+  when every file in the batch was rejected, instead of silently returning 200.
+
+### Ping endpoint (`src/api/playlist.js`)
+- `GET /api/v1/ping` response now includes `supportedAudioFiles`
+  (the same map used by the scanner) so the UI can enforce the same
+  whitelist client-side without hard-coding extensions.
+
+### v2 UI (`webapp/v2/app.js`)
+- `S.supportedAudioFiles` state field populated from the ping response on login.
+- `addFiles()` in the upload modal validates each file's extension before
+  adding it to the pending list — invalid files are rejected immediately
+  with a red `toastError("Not allowed: file.pdf")` toast, before any network
+  request is made.
+- The `<input type="file">` `accept` attribute is set dynamically from the
+  server's whitelist when the modal opens, so the OS file picker also filters
+  to audio-only by default.
+- Added `toastError(msg)` helper — same position as the normal toast but with
+  a red background (`.toast-error`) so errors are visually distinct.
+
+### v2 CSS (`webapp/v2/style.css`)
+- `.toast.toast-error` rule added: red background (`#c0392b`), red border,
+  white text — distinguishes error toasts from neutral informational toasts.
+
+### Alpha UI (`webapp/alpha/m.js`)
+- `window._msSupportedAudio` populated from the ping response on init.
+- Dropzone `addedfile` handler checks the file extension and fires an
+  `iziToast.error` naming the rejected extension before calling
+  `myDropzone.removeFile()` — the file never enters the upload queue.
+
+---
+
 ## Pending
 
-- **File upload UI** — the server endpoint `POST /api/v1/file-explorer/upload`
-  is functional; the v2 front-end upload button and modal have not been built
-  yet.
 - **Song ratings UI** — the DB column and Auto-DJ `minRating` filter exist;
   there is currently no way to set ratings from within v2 (star widget saves
   via the rate panel but no dedicated "Rated songs" browse view exists).
