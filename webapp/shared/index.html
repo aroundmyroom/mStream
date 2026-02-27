@@ -696,7 +696,7 @@ async function fetchMeta(filepath) {
 
 /* ── Boot ────────────────────────────────────────────────────── */
 async function boot() {
-  if (typeof sharedPlaylist === 'undefined' || !Array.isArray(sharedPlaylist.playlist)) {
+  if (typeof sharedPlaylist === 'undefined' || !sharedPlaylist || !Array.isArray(sharedPlaylist.playlist)) {
     document.getElementById('sh-main').innerHTML =
       '<div class="sh-error">' +
         '<strong>Playlist not found</strong>' +

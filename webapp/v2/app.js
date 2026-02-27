@@ -3545,9 +3545,25 @@ function _onAudioError() {
   const err = audioEl.error;
   if (!err || !audioEl.src) return;
   console.warn(`Audio error code ${err.code}: ${err.message || '(no message)'}`);
-  if (err.code !== MediaError.MEDIA_ERR_NETWORK && err.code !== MediaError.MEDIA_ERR_DECODE) return;
-  if (!S.autoDJ) return;
-  _reloadFromPosition(0);
+
+  // Code 2 = MEDIA_ERR_NETWORK — connection dropped mid-stream; try to reload.
+  if (err.code === MediaError.MEDIA_ERR_NETWORK) {
+    if (!S.autoDJ) return; // only auto-recover for Auto-DJ streams
+    _reloadFromPosition(0);
+    return;
+  }
+
+  // Code 3 = MEDIA_ERR_DECODE, Code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED
+  // — the file exists but the browser can't parse it (corrupt, unsupported
+  //   codec, bad PTS timestamps, etc.).
+  if (err.code === MediaError.MEDIA_ERR_DECODE ||
+      err.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+    const song = S.queue[S.idx];
+    const name = song ? (song.title || song.filepath.split('/').pop()) : 'Unknown';
+    toast(`⚠ Skipping unplayable file: ${name}`);
+    Player.next();
+    return;
+  }
 }
 function _onAudioStalled() {
   if (!S.autoDJ) return;
