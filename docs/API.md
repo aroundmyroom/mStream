@@ -38,7 +38,7 @@ http://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [/dirparser](API/dirparser.md)
 
-[/upload](API/upload.md)
+[/upload](API/upload.md) — audio-only file type restriction enforced *(GitHub Copilot, 2026-02-27)*
 
 ## Playlists
 
@@ -49,6 +49,8 @@ http://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 [/playlist/save](API/playlist_save.md)
 
 [/playlist/delete](API/playlist_delete.md)
+
+[/playlist/new, /playlist/add-song, /playlist/remove-song](API/playlist_manage.md) *(GitHub Copilot, 2026-02-27)*
 
 ## Metadata (Albums/Artists/Etc)
 
@@ -68,6 +70,18 @@ http://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [/db/recursive-scan](API/db_recursive-scan.md)
 
+### Play Statistics *(GitHub Copilot, 2026-02-27)*
+
+[/db/recent/added, /db/stats/recently-played, /db/stats/most-played](API/db_stats-queries.md)
+
+[/db/stats/reset-play-counts, /db/stats/reset-recently-played](API/db_stats-reset.md)
+
+[/db/rate-song](API/db_rate-song.md)
+
+[/db/rated](API/db_rated.md)
+
+[/db/random-songs](API/db_random-songs.md)
+
 ## JukeBox
 
 [/jukebox/push-to-client](API/jukebox_push-to-client.md)
@@ -78,9 +92,11 @@ http://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 ## Share
 
-[/shared/make-shared](API/shared_make-shared.md)
+[/shared/make-shared](API/shared_make-shared.md) *(legacy)*
 
-[/shared/get-token-and-playlist](API/shared_get-token-and-playlist.md)
+[/shared/get-token-and-playlist](API/shared_get-token-and-playlist.md) *(legacy)*
+
+[/api/v1/share — create, list, revoke + expired-link page](API/shared_share.md) *(GitHub Copilot, 2026-02-27)*
 
 
 ## Login System & Authentication
@@ -90,7 +106,7 @@ mStream uses a token based authentication.  The token you get when logging in ca
 Login Functions:
 
 * [/login](API/login.md)
-* [/ping](API/ping.md)
+* [/ping](API/ping.md) — now returns `supportedAudioFiles` map *(GitHub Copilot, 2026-02-27)*
 * /change-password - Coming Soon
 
 Failure Endpoints:
@@ -100,6 +116,13 @@ Failure Endpoints:
 The security layer is written as a plugin.  If you don't set the username and password on boot the plugin won't load and your server will be accessible by to anyone.  All API endpoints require a token to access if the login system is enabled.  Tokens can be passed in through the GET or POST param token.  Tokens can also be put in the request header under 'x-access-token'
 
 If you want your tokens to work between reboots you can set the `secret` flag when booting by using `mstream -s YOUR_SECERT_STRING_HERE`.  The secret key is used to sign the tokens. If you do not set the secret key mStream will generate a random key on boot
+
+## Scanner (Internal)
+
+> These endpoints are protected by the internal scanner middleware and are not
+> intended for external use.
+
+[/scanner/update-art](API/scanner_update-art.md) *(GitHub Copilot, 2026-02-27)*
 
 ## Pages
 
