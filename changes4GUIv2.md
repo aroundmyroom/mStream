@@ -191,6 +191,27 @@ for two purely client-side features — no server or config changes required.
 
 ---
 
+## Play History Reset
+
+A **Play History** sidebar entry (under Tools) provides a clean-slate option
+for both play-history features — useful after importing a library or simply
+starting over.
+
+- **Reset Most Played** — zeroes the `pc` (play-count) column in
+  `user_metadata` for every song owned by the current user via
+  `POST /api/v1/db/stats/reset-play-counts`.  The Most Played view will show
+  an empty state until songs are played again.
+- **Reset Recently Played** — clears the `lp` (last-played timestamp) column
+  for every song owned by the current user via
+  `POST /api/v1/db/stats/reset-recently-played`.  The Recently Played view
+  will show an empty state until songs are played again.
+
+Both actions are per-user (other users' data is unaffected), require an
+explicit confirmation dialog, and show a toast on success.  Ratings are
+**not** touched by either reset.
+
+---
+
 ## Jukebox
 
 - Sidebar panel that shows the room code, full URL, and a QR code.
@@ -215,6 +236,7 @@ for two purely client-side features — no server or config changes required.
 | **Jukebox** | Room code + QR + WebSocket status |
 | **Apps** | Links to Android/iOS apps + QR for the local server URL |
 | **Transcode** | Toggle + codec/bitrate/algorithm selects; persists in localStorage |
+| **Play History** | Reset controls for Most Played counts and Recently Played timestamps |
 | **Admin** | Manage vpaths, trigger scans, user management (admin only) |
 
 Song rows across all views show: track number, album art, title + artist/album
@@ -250,6 +272,44 @@ Right-click (or 3-dot button) on any song row:
   `window.location.origin` is prepended to all icon and `start_url` paths so
   they resolve correctly from the blob context.
 - `apple-touch-icon` and standard favicon links remain as normal `<link>` tags.
+
+---
+
+## Audio Error Handling
+
+`_onAudioError()` in `app.js` handles `MediaError` codes on the main audio
+element:
+
+- **Code 2 — `MEDIA_ERR_NETWORK`** (connection dropped mid-stream): triggers
+  the existing stall-recovery path (`_reloadFromPosition`) — but only when
+  Auto-DJ is active, to avoid spamming retries during manual pauses on a bad
+  connection.
+- **Code 3 — `MEDIA_ERR_DECODE`** and **Code 4 —
+  `MEDIA_ERR_SRC_NOT_SUPPORTED`** (corrupt file, bad PTS timestamps,
+  unsupported codec): the track is immediately skipped via `Player.next()`
+  and a toast shows the filename.  These codes fire regardless of Auto-DJ
+  state.  A common trigger is a FLAC file with non-monotonically increasing
+  DTS packets that Chrome's demuxer rejects after partial playback.
+
+---
+
+## Expired / Missing Shared Links (`src/api/shared.js`)
+
+Visiting a shared-playlist URL that has expired or never existed previously
+returned a raw `{"error":"Server Error"}` JSON response in the browser.
+
+The `/shared/:playlistId` route now catches lookup errors itself before the
+global error handler can intercept them:
+
+- **Expired token** (`TokenExpiredError`) → HTTP 410 with a styled full-page
+  overlay: *"This link has expired"*.
+- **Not found** → HTTP 404 with *"Link not found"*.
+
+In both cases the response is the normal `shared/index.html` shell with a
+`position:fixed` overlay injected into `<body>` (hardcoded dark colours so
+it renders correctly before any CSS variables load).  The `sharedPlaylist`
+script variable is set to `null`; a null-guard in `shared/index.html`
+prevents a `TypeError` when the page JS runs.
 
 ---
 
