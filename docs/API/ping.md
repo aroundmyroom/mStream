@@ -1,26 +1,64 @@
 **Ping**
 ----
-  Used to check if the user is logged in.  Also used to get the vPath
+  Used to check if the user is logged in. Also used to get the vPath and
+  server capabilities.
 
 * **URL**
 
-  /ping
+  `/api/v1/ping`
 
 * **Method:**
 
   `GET`
 
+* **Headers**
+
+  | Header | Required | Description |
+  |---|---|---|
+  | `x-access-token` | Yes | User authentication token. |
+
 * **Success Response:**
 
-  ```
+  * **Code:** 200
+
+  ```json
   {
-    vpaths: ['path1', 'path2'],
-    guest: false
+    "vpaths": ["Music", "Audiobooks"],
+    "playlists": [{"name": "Favourites"}],
+    "noUpload": false,
+    "transcode": {
+      "defaultCodec": "opus",
+      "defaultBitrate": "96k",
+      "defaultAlgorithm": "stream"
+    },
+    "supportedAudioFiles": {
+      "mp3": true,
+      "flac": true,
+      "wav": true,
+      "ogg": true,
+      "aac": true,
+      "m4a": true,
+      "m4b": true,
+      "opus": true,
+      "m3u": false
+    },
+    "vpathMetaData": {
+      "Music": { "type": "music" }
+    }
   }
   ```
 
-  Returns whether user is a guest or not.  Guest accounts don't have write access
+  | Field | Type | Description |
+  |---|---|---|
+  | `vpaths` | `string[]` | Virtual paths the authenticated user has access to. |
+  | `playlists` | `object[]` | User's saved playlists. |
+  | `noUpload` | `boolean` | `true` when the server has uploads globally disabled. |
+  | `transcode` | `object\|false` | Transcode settings, or `false` if disabled. |
+  | `supportedAudioFiles` | `object` | Map of file extension → `boolean`. Extensions set to `true` are playable and uploadable. Use this to validate files before upload. *(added by GitHub Copilot, 2026-02-27)* |
+  | `vpathMetaData` | `object` | Per-vpath metadata (type, parent vpath relationship). |
+
+  `transcode` is `false` when the server has transcoding disabled.
 
 * **Error Response:**
 
- Forwards to `/login-failed` if not logged in
+  Forwards to `/login` if not logged in.

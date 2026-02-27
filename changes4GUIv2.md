@@ -1,9 +1,8 @@
 # mStream GUI v2 — Change Log
 
 > All changes are in `webapp/v2/` (app.js, style.css, index.html) plus
-> supporting fixes in `src/db/scanner.mjs` and `src/server.js`.
-> Upload UI is **pending** — the server endpoint already exists
-> (`POST /api/v1/file-explorer/upload`), only the v2 front-end is missing.
+> supporting fixes in `src/db/scanner.mjs`, `src/server.js`,
+> `src/api/file-explorer.js`, and `src/api/playlist.js`.
 
 ---
 
@@ -252,7 +251,7 @@ Right-click (or 3-dot button) on any song row:
 - Save to Playlist → opens playlist picker modal
 - Download (direct file download)
 - Rate → floating 5-star panel
-- Share → creates a time-limited share link via `POST /api/v1/shared/make-shared`
+- Share → creates a time-limited share link via `POST /api/v1/share`
 
 ---
 
