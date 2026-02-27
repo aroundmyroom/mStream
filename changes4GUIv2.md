@@ -143,13 +143,51 @@
     `POST /api/v1/db/random-songs` and plays it immediately.
   - If a song is paused: resumes playback.
   - If already playing: takes over at the end of the current track.
-- **Pre-fetch** — 25 s before the current track ends, the next DJ song is
-  silently appended to the queue so playback is seamless.
+- **Pre-fetch** — `max(25, crossfade + 15)` seconds before the current track
+  ends, the next DJ song is silently appended to the queue so playback is
+  seamless.  The extra headroom ensures the API response arrives before the
+  crossfade ramp needs the next track index.
 - **Ignore list** — the server returns a growing ignore list with each random
   song so the same track is not repeated until the list is exhausted.
 - **Persistence** — Auto-DJ on/off state is stored in
   `localStorage('ms2_autodj')` and restored at login.
 - A pulsing "DJ" pill in the player bar indicates active Auto-DJ.
+
+---
+
+## Playback Settings
+
+A dedicated **Playback** sidebar entry (under Tools) opens a settings panel
+for two purely client-side features — no server or config changes required.
+
+### Crossfade
+- Slider: 0 – 12 seconds (0 = off).
+- Setting is persisted in `localStorage('ms2_crossfade')`.
+- When a track has ≤ N seconds remaining a second hidden `<audio>` element
+  (`_xfadeEl`) is created, connected to the **same Web Audio graph** as the
+  main element (both go through `_audioGain` → EQ → analysers → destination),
+  and starts playing the next track at volume 0.
+- A `setInterval` ramp fades the outgoing track down and the incoming track
+  up over the configured duration — volume only, queue is never touched.
+- When `audioEl` fires `ended`, `_doXfadeHandoff()` performs a **true element
+  swap**: `audioEl = _xfadeEl`.  The incoming element is already playing at
+  the correct position through Web Audio — no `src` change, no `load()`,
+  zero gap.  All permanent event listeners are detached from the old element
+  and reattached to the new one; `MINI_SPEC.start()` is called explicitly
+  because the `play` event will not re-fire.
+- `_resetXfade()` (called by `Player.playAt()`) aborts a crossfade in
+  progress and restores the saved volume.
+- **Auto-DJ prefetch threshold** is `Math.max(25, crossfade + 15)` seconds,
+  so the API call always completes before the crossfade ramp needs the next
+  track in the queue.
+
+### Sleep Timer
+- Presets: **15 / 30 / 60 / 90 min** or **End of current song**.
+- Active timer shows a 😴 countdown pill in the player bar.
+- At expiry: a 40-step volume fade-out over 10 s, then `audioEl.pause()`.
+- "End of song" mode is checked in the `ended` event handler — playback
+  stops cleanly at the natural track boundary.
+- Timer state is intentionally **not** persisted (resets on page reload).
 
 ---
 
@@ -217,6 +255,12 @@ Right-click (or 3-dot button) on any song row:
 
 ## Scanner Changes (`src/db/scanner.mjs`)
 
+- **`_needsArt` art backfill** — if the DB record for a file already exists
+  but has no album art (`_needsArt: true`), the scanner re-parses the file
+  metadata (with `skipCovers: false`) and runs art detection without touching
+  the `ts` (last-scanned timestamp).  Covers embedded in WAV ID3 tags are
+  handled correctly.  A dedicated `POST /api/v1/scanner/update-art` call
+  writes only the `aaFile` column, leaving all other fields untouched.
 - **Artwork subdirectories** — if no image is found directly in a music
   folder, the scanner now checks common subdirectory names:
   `artwork`, `scans`, `covers`, `images`, `art`, `cover`, `scan`.
@@ -249,12 +293,10 @@ drops idle TCP connections before the browser has finished reading the file.
   eventually empties.
 
 ### Client-side recovery (already implemented)
-`app.js` now listens for `error` (MEDIA_ERR_NETWORK) and `stalled` events on
+`app.js` listens for `error` (MEDIA_ERR_NETWORK) and `stalled` events on
 the audio element.  When either fires with Auto-DJ active it re-issues the
 HTTP request and seeks back to the interrupted position, retrying up to 5
-times with exponential back-off (1 s → 2 s → 4 s → 8 s → 16 s).  A
-`visibilitychange` handler also resumes playback when the user switches back
-to the tab.
+times with exponential back-off (1 s → 2 s → 4 s → 8 s → 16 s).
 
 ### Permanent nginx fix (recommended)
 Add these two directives to the `location` block that proxies to mStream:
@@ -291,3 +333,6 @@ sudo nginx -t && sudo nginx -s reload
 - **File upload UI** — the server endpoint `POST /api/v1/file-explorer/upload`
   is functional; the v2 front-end upload button and modal have not been built
   yet.
+- **Song ratings UI** — the DB column and Auto-DJ `minRating` filter exist;
+  there is currently no way to set ratings from within v2 (star widget saves
+  via the rate panel but no dedicated "Rated songs" browse view exists).
