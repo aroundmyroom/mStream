@@ -35,10 +35,43 @@ export function setupBeforeSecurity(mstream) {
     }
 
     if (!req.params.playlistId) { throw new WebError('Validation Error', 403); }
-    let sharePage = await fs.readFile(path.join(config.program.webAppDirectory, 'shared/index.html'), 'utf-8');
+    let sharePage;
+    try {
+      sharePage = await fs.readFile(path.join(config.program.webAppDirectory, 'shared/index.html'), 'utf-8');
+    } catch (e) {
+      throw new WebError('Page not found', 404);
+    }
+
+    let sharedData;
+    try {
+      sharedData = lookupShared(req.params.playlistId);
+    } catch (e) {
+      // Link is expired or not found — serve a friendly HTML error page
+      const isExpired = e instanceof Error && e.name === 'TokenExpiredError';
+      const headline  = isExpired ? 'This link has expired' : 'Link not found';
+      const detail    = isExpired
+        ? 'The shared playlist link you followed is no longer valid.'
+        : 'This shared playlist link does not exist or has been revoked.';
+      const errorPage = sharePage.replace(
+        '<script></script>',
+        `<script>const sharedPlaylist = null</script>`
+      ).replace(
+        /<title>[^<]*<\/title>/,
+        `<title>mStream – ${headline}</title>`
+      ).replace(
+        /<body[^>]*>/,
+        `$&<div style="position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.4rem;background:#0f0f1a;color:#f0f0ff;font-family:system-ui,sans-serif;padding:2rem;text-align:center;">` +
+        `<svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>` +
+        `<h1 style="margin:0;font-size:2rem;font-weight:700;color:#f0f0ff;">${headline}</h1>` +
+        `<p style="margin:0;font-size:1.1rem;color:#b0b0d0;max-width:400px;line-height:1.6;">${detail}</p>` +
+        `</div>`
+      );
+      return res.status(isExpired ? 410 : 404).send(errorPage);
+    }
+
     sharePage = sharePage.replace(
       '<script></script>',
-      `<script>const sharedPlaylist = ${JSON.stringify(lookupShared(req.params.playlistId))}</script>`
+      `<script>const sharedPlaylist = ${JSON.stringify(sharedData)}</script>`
     );
     res.send(sharePage);
   });
