@@ -65,6 +65,8 @@ export function findUserMetadata(hash, username) { return backend.findUserMetada
 export function insertUserMetadata(obj) { return backend.insertUserMetadata(obj); }
 export function updateUserMetadata(obj) { return backend.updateUserMetadata(obj); }
 export function removeUserMetadataByUser(username) { return backend.removeUserMetadataByUser(username); }
+export function resetPlayCounts(username) { return backend.resetPlayCounts(username); }
+export function resetRecentlyPlayed(username) { return backend.resetRecentlyPlayed(username); }
 
 // Playlists
 export function getUserPlaylists(username) { return backend.getUserPlaylists(username); }
