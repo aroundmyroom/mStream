@@ -715,6 +715,7 @@ a{color:inherit;text-decoration:none;}
 
 /* ── TOAST ─────────────────────────────────────────────────── */
 .toast{position:fixed;bottom:calc(var(--player) + 14px);left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--border2);padding:9px 18px;border-radius:99px;font-size:13px;font-weight:500;box-shadow:0 8px 28px rgba(0,0,0,.4);z-index:600;animation:toast-in .2s ease;pointer-events:none;}
+.toast.toast-error{background:#c0392b;border-color:#e74c3c;color:#fff;}
 @keyframes toast-in{from{opacity:0;transform:translateX(-50%) translateY(8px)}}
 
 /* ── NOW PLAYING MODAL ─────────────────────────────────────── */
@@ -954,3 +955,21 @@ a{color:inherit;text-decoration:none;}
 .viz-overlay:hover .viz-song{opacity:1;}
 .viz-song-title{font-size:18px;font-weight:700;color:#fff;text-shadow:0 1px 8px rgba(0,0,0,.6);}
 .viz-song-artist{font-size:13px;color:rgba(255,255,255,.7);margin-top:3px;text-shadow:0 1px 6px rgba(0,0,0,.5);}
+
+/* ── UPLOAD ─────────────────────────────────────────────────── */
+.upload-modal-box{max-width:520px!important;}
+.fe-upload-btn{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:var(--r);background:var(--primary-d);color:var(--primary);border:1px solid rgba(139,92,246,.35);font-size:12px;font-weight:600;cursor:pointer;flex-shrink:0;transition:background .15s,color .15s;}
+.fe-upload-btn:hover{background:var(--primary);color:#fff;}
+.upload-drop-zone{border:2px dashed var(--border2);border-radius:var(--r);padding:28px 20px;text-align:center;font-size:13px;color:var(--t2);cursor:pointer;transition:border-color .18s,background .18s;margin-bottom:10px;}
+.upload-drop-zone.drag-over{border-color:var(--primary);background:var(--primary-d);}
+.upload-browse-lbl{color:var(--primary);cursor:pointer;text-decoration:underline;}
+.upload-file-list{display:flex;flex-direction:column;gap:5px;max-height:220px;overflow-y:auto;margin-bottom:4px;}
+.upload-file-item{display:flex;flex-direction:column;padding:7px 10px;background:var(--raised);border-radius:var(--r);font-size:12px;gap:4px;}
+.upload-file-row{display:flex;align-items:center;gap:8px;}
+.upload-file-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t1);}
+.upload-file-size{color:var(--t3);flex-shrink:0;}
+.upload-file-remove{color:var(--t3);cursor:pointer;flex-shrink:0;line-height:1;}
+.upload-file-remove:hover{color:var(--red);}
+.upload-file-status{font-size:13px;flex-shrink:0;}
+.upload-progress{height:3px;background:var(--border);border-radius:2px;overflow:hidden;}
+.upload-progress-bar{height:100%;background:var(--primary);border-radius:2px;width:0%;transition:width .15s;}
