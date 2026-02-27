@@ -1,24 +1,62 @@
 **Load Playlist**
 ----
-  Load a playlist
+  Load all songs from a saved playlist, including their metadata.
+
+  *(updated by GitHub Copilot, 2026-02-27)*
 
 * **URL**
 
-  /playlist/load
+  `/api/v1/playlist/load`
 
 * **Method:**
 
   `POST`
 
-*  **Request Params**
+* **Headers**
 
-   **Required:**
-   `playlistname` - The name of the playlist
+  `x-access-token` — JWT auth token (required)
 
+* **Request Body (JSON)**
+
+  **Required:**
+  `playlistname` — Name of the playlist to load (string)
 
 * **Success Response:**
 
-  * **Code:** 200 <br />
-    **Content:** `[{filepath: 'path/to/file1.mp3', metadata: ''}, {filepath: 'path/to/file2.flac', metadata: ''}]`
+  * **Code:** 200
+  * **Content:** Array of playlist entry objects
 
-    metadata fields are currently blank. A cache layer needs to be built before it's fast enough to lookup metadata for an entire playlists
+  ```json
+  [
+    {
+      "id": 42,
+      "filepath": "VirtualPath/Artist/Album/track.mp3",
+      "metadata": {
+        "artist": "Artist Name",
+        "album": "Album Name",
+        "title": "Track Title",
+        "year": 2023,
+        "track": 1,
+        "duration": 213.4
+      }
+    }
+  ]
+  ```
+
+  | Field | Type | Description |
+  |---|---|---|
+  | `id` | integer | Playlist entry row ID — used by `playlist/remove-song` |
+  | `filepath` | string | Virtual path to the audio file |
+  | `metadata` | object | Full metadata from the database; empty object `{}` if not yet cached |
+
+* **Error Responses:**
+
+  * **Code:** 400 — missing `playlistname`
+  * **Code:** 401 — missing or invalid token
+  * **Code:** 500 — database error
+
+* **Notes:**
+
+  * Metadata is now fully populated from the database (no longer blank).
+  * The `id` field is required when calling `POST /api/v1/playlist/remove-song` to remove a specific entry.
+  * Playlists are per-user; you will only see playlists belonging to the authenticated user.
