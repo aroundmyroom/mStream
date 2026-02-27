@@ -31,13 +31,25 @@ const S = {
   // Jukebox
   jukeWs:   null,
   jukeCode: null,
+  // Playback
+  crossfade: parseInt(localStorage.getItem('ms2_crossfade') || '0'),
+  sleepMins: 0,        // 0 = off; remaining minutes when active
+  sleepEndsAt: 0,      // Date.now() ms timestamp when sleep fires
 };
 
-const audioEl = document.getElementById('audio');
+let audioEl = document.getElementById('audio');
 let scanTimer    = null;
 let djTimer      = null;
 let scrobbleTimer = null;
 let audioCtx     = null;   // shared Web Audio context (initialised by VIZ.open)
+let _audioGain   = null;   // Web Audio gain node — set once in ensureAudio
+let _sleepTimer  = null;   // setInterval handle for sleep countdown
+let _xfadeEl     = null;   // second audio element used for crossfade
+let _xfadeGainIv = null;   // setInterval handle for crossfade gain ramp
+let _xfadeFired  = false;  // true once crossfade has started for the current track
+let _xfadeStartVol = 0;    // audioEl.volume at the moment crossfade began
+let _xfadeNextIdx  = -1;   // nextIdx stored for the ended-event handoff
+let _xfadeWired  = false;  // true once _xfadeEl is connected to Web Audio
 let analyserL    = null;   // left-channel analyser
 let analyserR    = null;   // right-channel analyser
 let eqFilters    = [];     // 8 BiquadFilterNodes – built on first play
@@ -257,6 +269,7 @@ const Player = {
   playAt(idx) {
     if (idx < 0 || idx >= S.queue.length) return;
     S.idx = idx;
+    _resetXfade();  // new track starting — arm crossfade for this track
     const s = S.queue[idx];
     audioEl.src = mediaUrl(s.filepath);
     audioEl.load();
@@ -972,8 +985,9 @@ const VIZ = (() => {
     analyserR = audioCtx.createAnalyser();
     analyserR.fftSize = 2048;
     analyserR.smoothingTimeConstant = 0.82;
-    const gain     = audioCtx.createGain();
-    gain.gain.value = 1.25;
+    _audioGain = audioCtx.createGain();
+    _audioGain.gain.value = 1.25;
+    const gain     = _audioGain;
     const splitter = audioCtx.createChannelSplitter(2);
     const src      = audioCtx.createMediaElementSource(audioEl);
     // Build 8-band EQ filter chain and apply saved settings
@@ -2702,6 +2716,300 @@ function viewApps() {
     </div>`);
 }
 
+// ── PLAYBACK VIEW ─────────────────────────────────────────────
+function viewPlayback() {
+  setTitle('Playback'); setBack(null); setNavActive('playback'); S.view = 'playback';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+
+  const xf = S.crossfade;
+  const sleepActive = S.sleepMins > 0;
+  const sleepRemaining = sleepActive ? Math.max(0, Math.ceil((S.sleepEndsAt - Date.now()) / 60000)) : 0;
+
+  setBody(`
+    <div class="playback-panel">
+
+      <!-- ── CROSSFADE ── -->
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">🎚️</div>
+          <div>
+            <div class="playback-section-title">Crossfade</div>
+            <div class="playback-section-desc">Smoothly blend between tracks — the current song fades out while the next fades in.</div>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Crossfade Duration</div>
+            <div class="playback-row-hint">0 = disabled · max 12 seconds</div>
+          </div>
+          <div class="xf-ctrl">
+            <input type="range" id="xf-slider" class="xf-slider" min="0" max="12" step="1" value="${xf}">
+            <span id="xf-val" class="xf-val">${xf === 0 ? 'Off' : xf + 's'}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── SLEEP TIMER ── -->
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">😴</div>
+          <div>
+            <div class="playback-section-title">Sleep Timer</div>
+            <div class="playback-section-desc">Playback fades out and stops automatically after the chosen time.</div>
+          </div>
+        </div>
+        ${sleepActive ? `
+        <div class="sleep-active-box" id="sleep-active-box">
+          <div class="sleep-active-info">
+            <span class="sleep-active-label">Timer active</span>
+            <span class="sleep-active-remaining" id="sleep-view-remaining">${sleepRemaining} min remaining</span>
+          </div>
+          <button class="sleep-cancel-btn" id="sleep-cancel-btn">Cancel</button>
+        </div>` : ''}
+        <div class="sleep-presets" id="sleep-presets">
+          <button class="sleep-preset" data-mins="15">15 min</button>
+          <button class="sleep-preset" data-mins="30">30 min</button>
+          <button class="sleep-preset" data-mins="60">60 min</button>
+          <button class="sleep-preset" data-mins="90">90 min</button>
+          <button class="sleep-preset" data-mins="-1">End of song</button>
+        </div>
+      </div>
+
+    </div>`);
+
+  // Crossfade slider
+  const xfSlider = document.getElementById('xf-slider');
+  const xfVal    = document.getElementById('xf-val');
+  xfSlider.addEventListener('input', () => {
+    const v = parseInt(xfSlider.value);
+    xfVal.textContent = v === 0 ? 'Off' : v + 's';
+    S.crossfade = v;
+    localStorage.setItem('ms2_crossfade', v);
+  });
+
+  // Sleep presets
+  document.getElementById('sleep-presets').addEventListener('click', e => {
+    const btn = e.target.closest('.sleep-preset');
+    if (!btn) return;
+    const mins = parseInt(btn.dataset.mins);
+    setSleepTimer(mins);
+    viewPlayback(); // re-render to show active box
+  });
+  const cancelBtn = document.getElementById('sleep-cancel-btn');
+  if (cancelBtn) cancelBtn.addEventListener('click', () => { setSleepTimer(0); viewPlayback(); });
+}
+
+// ── SLEEP TIMER LOGIC ─────────────────────────────────────────
+function setSleepTimer(mins) {
+  // Cancel any existing timer
+  clearInterval(_sleepTimer);
+  _sleepTimer = null;
+  S.sleepMins = 0;
+  S.sleepEndsAt = 0;
+  _updateSleepLight();
+
+  if (mins === 0) return;
+
+  if (mins === -1) {
+    // End of current song — trigger when 'ended' fires next
+    S.sleepMins = -1;
+    S.sleepEndsAt = -1;
+    toast('Sleep: will stop after this song');
+    _updateSleepLight();
+    return;
+  }
+
+  S.sleepMins = mins;
+  S.sleepEndsAt = Date.now() + mins * 60000;
+  toast(`Sleep timer set · ${mins} min`);
+  _updateSleepLight();
+
+  _sleepTimer = setInterval(() => {
+    const remaining = S.sleepEndsAt - Date.now();
+    _updateSleepLight();
+    // Update the playback view remaining label if visible
+    const remEl = document.getElementById('sleep-view-remaining');
+    if (remEl) remEl.textContent = Math.max(0, Math.ceil(remaining / 60000)) + ' min remaining';
+
+    if (remaining <= 0) {
+      clearInterval(_sleepTimer);
+      _sleepTimer = null;
+      S.sleepMins = 0;
+      _updateSleepLight();
+      _sleepFadeOut();
+    }
+  }, 15000); // update every 15 s
+}
+
+function _updateSleepLight() {
+  const el = document.getElementById('sleep-light');
+  const cd = document.getElementById('sleep-countdown');
+  if (!el) return;
+  if (S.sleepMins === 0) {
+    el.classList.add('hidden');
+    return;
+  }
+  el.classList.remove('hidden');
+  if (S.sleepMins === -1) {
+    cd.textContent = 'end of song';
+  } else {
+    const mins = Math.max(0, Math.ceil((S.sleepEndsAt - Date.now()) / 60000));
+    cd.textContent = mins + 'm';
+  }
+}
+
+function _sleepFadeOut() {
+  // Fade volume to 0 over 10 seconds then pause
+  const startVol = audioEl.volume;
+  const steps = 40;
+  const stepMs = 10000 / steps;
+  const dec = startVol / steps;
+  let step = 0;
+  const iv = setInterval(() => {
+    step++;
+    audioEl.volume = Math.max(0, startVol - dec * step);
+    if (step >= steps) {
+      clearInterval(iv);
+      audioEl.pause();
+      audioEl.volume = startVol; // restore volume for next play
+      toast('Sleep timer — playback stopped');
+      S.sleepMins = 0;
+      _updateSleepLight();
+    }
+  }, stepMs);
+}
+
+// ── CROSSFADE LOGIC ───────────────────────────────────────────
+// _xfadeEl is connected to the SAME Web Audio graph as audioEl (both go
+// through _audioGain → EQ → analysers → destination).  It starts the next
+// track at volume 0; the ramp brings _xfadeEl up and audioEl down.
+// When audioEl fires 'ended', _doXfadeHandoff does a TRUE element swap:
+//   audioEl = _xfadeEl  (already playing, no gap, no reload)
+// Event listeners are detached from the old element and attached to the new one.
+
+function _getOrCreateXfadeEl() {
+  if (_xfadeEl) return _xfadeEl;
+  _xfadeEl = document.createElement('audio');
+  _xfadeEl.volume = 0;
+  _xfadeEl.style.display = 'none';
+  document.body.appendChild(_xfadeEl);
+  _xfadeWired = false;
+  return _xfadeEl;
+}
+
+function _connectXfadeToAudio() {
+  if (_xfadeWired || !_audioGain || !_xfadeEl) return;
+  try {
+    const xSrc = audioCtx.createMediaElementSource(_xfadeEl);
+    xSrc.connect(_audioGain);
+    _xfadeWired = true;
+  } catch(e) { /* already connected or no audioCtx */ }
+}
+
+function _startCrossfade(nextIdx) {
+  if (_xfadeFired) return;
+  _xfadeFired    = true;
+  _xfadeNextIdx  = nextIdx;
+  _xfadeStartVol = audioEl.volume;
+
+  const xf     = S.crossfade;
+  const steps  = Math.max(20, xf * 10);
+  const stepMs = (xf * 1000) / steps;
+
+  VIZ.initAudio();               // ensure audioCtx + _audioGain exist
+  const xEl  = _getOrCreateXfadeEl();
+  _connectXfadeToAudio();         // wire xfadeEl into the Web Audio graph
+  const next = S.queue[nextIdx];
+  if (!next) { _xfadeFired = false; return; }
+  xEl.src    = mediaUrl(next.filepath);
+  xEl.volume = 0;
+  xEl.play().catch(() => {});
+
+  let step = 0;
+  clearInterval(_xfadeGainIv);
+  _xfadeGainIv = setInterval(() => {
+    step++;
+    const pct      = Math.min(step / steps, 1);
+    audioEl.volume = Math.max(0, _xfadeStartVol * (1 - pct));
+    xEl.volume     = Math.min(_xfadeStartVol, _xfadeStartVol * pct);
+    if (step >= steps) {
+      clearInterval(_xfadeGainIv);
+      _xfadeGainIv = null;
+      // Ramp done — audioEl has at most a few ms left.
+      // The 'ended' event will call _doXfadeHandoff to complete the transition.
+    }
+  }, stepMs);
+}
+
+// Called exclusively from the 'ended' handler when _xfadeFired is true.
+// _xfadeEl is already playing the next track through Web Audio.
+// We do a true element swap: retire the old audioEl, promote _xfadeEl to
+// be the new audioEl, reattach all event listeners — zero gap, no reload.
+function _doXfadeHandoff(nextIdx) {
+  clearInterval(_xfadeGainIv);
+  _xfadeGainIv = null;
+
+  const vol     = _xfadeStartVol > 0 ? _xfadeStartVol : 0.8;
+  const newEl   = _xfadeEl;
+  const oldEl   = audioEl;
+
+  // Clear crossfade state
+  _xfadeFired    = false;
+  _xfadeNextIdx  = -1;
+  _xfadeStartVol = 0;
+  _xfadeWired    = false;
+  _xfadeEl       = null;
+
+  S.idx = nextIdx;
+  const s = S.queue[nextIdx];
+
+  // Detach all permanent listeners from the old element
+  _detachAudioListeners(oldEl);
+  // Silence + pause the old element (it's no longer 'audioEl')
+  oldEl.volume = 0;
+  oldEl.pause();
+  // Don't clear oldEl.src — leave it for GC; removing src can cause a brief noise
+
+  // Promote the new element
+  audioEl = newEl;
+  audioEl.volume = vol;
+
+  // Re-attach all permanent listeners to the new element
+  _attachAudioListeners(audioEl);
+  // The new element is already playing — 'play' won't re-fire, so kick the
+  // VU meter and icon sync manually.
+  MINI_SPEC.start();
+  syncPlayIcons();
+
+  if (!s) return;
+
+  // Update UI / persistence (mirrors Player.playAt without touching audio)
+  Player.updateBar();
+  highlightRow();
+  refreshQueueUI();
+  clearTimeout(scrobbleTimer);
+  scrobbleTimer = setTimeout(() => {
+    api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath }).catch(() => {});
+  }, 30000);
+  persistQueue();
+}
+
+function _resetXfade() {
+  const wasActive = _xfadeFired;
+  const savedVol  = _xfadeStartVol;
+  _xfadeFired    = false;
+  _xfadeNextIdx  = -1;
+  _xfadeStartVol = 0;
+  _xfadeWired    = false;
+  clearInterval(_xfadeGainIv);
+  _xfadeGainIv = null;
+  if (_xfadeEl) { _xfadeEl.pause(); _xfadeEl.src = ''; _xfadeEl = null; }
+  // Restore volume if the ramp was interrupted mid-way by a manual action
+  if (wasActive && savedVol > 0) audioEl.volume = savedVol;
+}
+
 // ── SCAN STATUS ───────────────────────────────────────────────
 async function pollScan() {
   try {
@@ -2814,11 +3122,6 @@ function showApp() {
   restoreQueue();
   // Restore auto-DJ state from previous session
   if (localStorage.getItem('ms2_autodj')) { setAutoDJ(true); }
-  // Persist currentTime every 5 s while playing
-  audioEl.addEventListener('timeupdate', () => {
-    if (_persistTimer) return;
-    _persistTimer = setTimeout(() => { _persistTimer = null; persistQueue(); }, 5000);
-  });
   // Guarantee a save on F5 / tab close
   window.addEventListener('beforeunload', persistQueue);
   pollScan();
@@ -2874,6 +3177,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'jukebox')   viewJukebox();
     else if (v === 'apps')      viewApps();
     else if (v === 'shared-links') viewSharedLinks();
+    else if (v === 'playback')  viewPlayback();
   });
 });
 
@@ -3218,16 +3522,110 @@ function syncPlayIcons() {
   document.getElementById('np-icon-pause').classList.toggle('hidden', !playing);
 }
 
-// Audio events
-audioEl.addEventListener('play', () => {
-  syncPlayIcons();
-  MINI_SPEC.start();
-});
-audioEl.addEventListener('pause', () => {
-  syncPlayIcons();
-  MINI_SPEC.stop();
-});
-audioEl.addEventListener('ended', () => Player.next());
+// ── AUDIO EVENT HANDLERS (named so they can be moved to a swapped element) ──
+function _onAudioPlay()  { syncPlayIcons(); MINI_SPEC.start(); }
+function _onAudioPause() { syncPlayIcons(); MINI_SPEC.stop();  }
+function _onAudioEnded() {
+  if (S.sleepMins === -1) {
+    S.sleepMins = 0;
+    S.sleepEndsAt = 0;
+    _updateSleepLight();
+    toast('Sleep timer \u2014 playback stopped');
+    return;
+  }
+  // Crossfade: _xfadeEl is already playing through Web Audio.
+  // Swap it into the audioEl role — zero gap.
+  if (_xfadeFired) {
+    _doXfadeHandoff(_xfadeNextIdx);
+    return;
+  }
+  Player.next();
+}
+function _onAudioError() {
+  const err = audioEl.error;
+  if (!err || !audioEl.src) return;
+  console.warn(`Audio error code ${err.code}: ${err.message || '(no message)'}`);
+  if (err.code !== MediaError.MEDIA_ERR_NETWORK && err.code !== MediaError.MEDIA_ERR_DECODE) return;
+  if (!S.autoDJ) return;
+  _reloadFromPosition(0);
+}
+function _onAudioStalled() {
+  if (!S.autoDJ) return;
+  clearTimeout(_netRecoveryTimer);
+  _netRecoveryTimer = setTimeout(() => {
+    if (audioEl.readyState < 3) {
+      console.warn(`Auto-DJ: stream stalled (readyState=${audioEl.readyState}) — recovering`);
+      _reloadFromPosition(0);
+    }
+  }, 5000);
+}
+function _onAudioPlaying()  { clearTimeout(_netRecoveryTimer); }
+function _onAudioCanPlay() { clearTimeout(_netRecoveryTimer); }
+function _onAudioTimeupdatePersist() {
+  if (_persistTimer) return;
+  _persistTimer = setTimeout(() => { _persistTimer = null; persistQueue(); }, 5000);
+}
+function _onAudioTimeupdateUI() {
+  if (!audioEl.duration) return;
+  const pct = (audioEl.currentTime / audioEl.duration) * 100;
+  document.getElementById('prog-fill').style.width = pct + '%';
+  document.getElementById('time-cur').textContent   = fmt(audioEl.currentTime);
+  document.getElementById('time-total').textContent = fmt(audioEl.duration);
+  if (S.autoDJ && S.idx === S.queue.length - 1 &&
+      (audioEl.duration - audioEl.currentTime) < Math.max(25, S.crossfade + 15)) {
+    autoDJPrefetch();
+  }
+  if (!document.getElementById('np-modal').classList.contains('hidden')) {
+    document.getElementById('np-prog-fill').style.width  = pct + '%';
+    document.getElementById('np-time-cur').textContent   = fmt(audioEl.currentTime);
+    document.getElementById('np-time-total').textContent = fmt(audioEl.duration);
+  }
+  if (S.crossfade > 0 && !_xfadeFired) {
+    const remaining = audioEl.duration - audioEl.currentTime;
+    if (remaining > 0 && remaining <= S.crossfade) {
+      let nextIdx = -1;
+      if (S.shuffle) {
+        nextIdx = Math.floor(Math.random() * S.queue.length);
+      } else if (S.repeat === 'one') {
+        nextIdx = S.idx;
+      } else if (S.idx < S.queue.length - 1) {
+        nextIdx = S.idx + 1;
+      } else if (S.repeat === 'all') {
+        nextIdx = 0;
+      } else if (S.autoDJ && S.queue.length > S.idx + 1) {
+        nextIdx = S.idx + 1;
+      }
+      if (nextIdx !== -1) _startCrossfade(nextIdx);
+    }
+  }
+  _updateSleepLight();
+}
+
+function _attachAudioListeners(el) {
+  el.addEventListener('play',        _onAudioPlay);
+  el.addEventListener('pause',       _onAudioPause);
+  el.addEventListener('ended',       _onAudioEnded);
+  el.addEventListener('error',       _onAudioError);
+  el.addEventListener('stalled',     _onAudioStalled);
+  el.addEventListener('playing',     _onAudioPlaying);
+  el.addEventListener('canplay',     _onAudioCanPlay);
+  el.addEventListener('timeupdate',  _onAudioTimeupdatePersist);
+  el.addEventListener('timeupdate',  _onAudioTimeupdateUI);
+}
+function _detachAudioListeners(el) {
+  el.removeEventListener('play',        _onAudioPlay);
+  el.removeEventListener('pause',       _onAudioPause);
+  el.removeEventListener('ended',       _onAudioEnded);
+  el.removeEventListener('error',       _onAudioError);
+  el.removeEventListener('stalled',     _onAudioStalled);
+  el.removeEventListener('playing',     _onAudioPlaying);
+  el.removeEventListener('canplay',     _onAudioCanPlay);
+  el.removeEventListener('timeupdate',  _onAudioTimeupdatePersist);
+  el.removeEventListener('timeupdate',  _onAudioTimeupdateUI);
+}
+
+// Attach all permanent listeners to the initial audioEl
+_attachAudioListeners(audioEl);
 
 // ── NETWORK RECOVERY (proxy / firewall connection reset) ─────
 // Reverse proxies (nginx, Caddy…) reset TCP connections mid-stream when
@@ -3271,53 +3669,7 @@ function _reloadFromPosition(attempt) {
   }, delay);
 }
 
-audioEl.addEventListener('error', () => {
-  const err = audioEl.error;
-  if (!err || !audioEl.src) return;
-  console.warn(`Audio error code ${err.code}: ${err.message || '(no message)'}`);
-  if (err.code !== MediaError.MEDIA_ERR_NETWORK && err.code !== MediaError.MEDIA_ERR_DECODE) return;
-  if (!S.autoDJ) return;
-  _reloadFromPosition(0);
-});
-
-// 'stalled' fires when the browser stops receiving data for ~3 s.
-// Only act if the buffer is actually low (readyState < HAVE_FUTURE_DATA).
-audioEl.addEventListener('stalled', () => {
-  if (!S.autoDJ) return;
-  clearTimeout(_netRecoveryTimer);
-  _netRecoveryTimer = setTimeout(() => {
-    if (audioEl.readyState < 3 /* HAVE_FUTURE_DATA */) {
-      console.warn(`Auto-DJ: stream stalled (readyState=${audioEl.readyState}) — recovering`);
-      _reloadFromPosition(0);
-    }
-  }, 5000);
-});
-
-// Cancel any pending recovery once the stream is healthy again
-audioEl.addEventListener('playing', () => clearTimeout(_netRecoveryTimer));
-audioEl.addEventListener('canplay', () => clearTimeout(_netRecoveryTimer));
-
-// When the user switches back to the browser tab (or wakes the screen),
-// Auto-DJ should resume if the audio has been silently paused.
-
-
-audioEl.addEventListener('timeupdate', () => {
-  if (!audioEl.duration) return;
-  const pct = (audioEl.currentTime / audioEl.duration) * 100;
-  document.getElementById('prog-fill').style.width = pct + '%';
-  document.getElementById('time-cur').textContent   = fmt(audioEl.currentTime);
-  document.getElementById('time-total').textContent = fmt(audioEl.duration);
-  // Auto-DJ pre-fetch: queue next song 25 s before the current one ends
-  if (S.autoDJ && S.idx === S.queue.length - 1 &&
-      (audioEl.duration - audioEl.currentTime) < 25) {
-    autoDJPrefetch();
-  }
-  if (!document.getElementById('np-modal').classList.contains('hidden')) {
-    document.getElementById('np-prog-fill').style.width  = pct + '%';
-    document.getElementById('np-time-cur').textContent   = fmt(audioEl.currentTime);
-    document.getElementById('np-time-total').textContent = fmt(audioEl.duration);
-  }
-});
+// (error, stalled, playing, canplay, timeupdate × 2 are all registered via _attachAudioListeners above)
 document.getElementById('prog-track').addEventListener('click', e => {
   const r = e.currentTarget.getBoundingClientRect();
   if (audioEl.duration) audioEl.currentTime = ((e.clientX - r.left) / r.width) * audioEl.duration;
