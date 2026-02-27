@@ -22,6 +22,8 @@ const S = {
   ctxSong:  null,    // song target for context menu
   feDir:    '',      // file explorer current path
   feDirStack: [],    // navigation history stack
+  canUpload: true,   // false when server has noUpload=true
+  supportedAudioFiles: {},  // populated from ping
   // Transcode
   transInfo:    null,  // { serverEnabled, defaultCodec, defaultBitrate, defaultAlgorithm }
   transEnabled: !!localStorage.getItem('ms2_trans'),
@@ -100,9 +102,17 @@ let _toastT;
 function toast(msg, ms = 2800) {
   const el = document.getElementById('toast');
   el.textContent = msg;
-  el.classList.remove('hidden');
+  el.classList.remove('hidden', 'toast-error');
   clearTimeout(_toastT);
   _toastT = setTimeout(() => el.classList.add('hidden'), ms);
+}
+function toastError(msg, ms = 4000) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  el.classList.add('toast-error');
+  clearTimeout(_toastT);
+  _toastT = setTimeout(() => { el.classList.add('hidden'); el.classList.remove('toast-error'); }, ms);
 }
 
 // ── QUEUE PERSISTENCE ───────────────────────────────────────
@@ -1550,6 +1560,142 @@ function showConfirmModal(title, msg, onOk) {
   showModal('confirm-modal');
 }
 
+// ── UPLOAD MODAL ──────────────────────────────────────────────
+function openUploadModal(dir) {
+  let pendingFiles = [];   // { file: File, status: 'waiting'|'uploading'|'done'|'error' }
+
+  const destEl    = document.getElementById('upload-modal-dest');
+  const dropZone  = document.getElementById('upload-drop-zone');
+  const listEl    = document.getElementById('upload-file-list');
+  const startBtn  = document.getElementById('upload-start-btn');
+
+  destEl.textContent = `Destination: ${dir}`;
+  pendingFiles = [];
+  listEl.innerHTML = '';
+  startBtn.disabled = true;
+  startBtn.onclick = null;  // clear any previous listener without cloning
+
+  function fmtSize(bytes) {
+    if (bytes < 1024)       return bytes + ' B';
+    if (bytes < 1048576)    return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+  }
+
+  function renderList() {
+    listEl.innerHTML = pendingFiles.map((pf, i) => `
+      <div class="upload-file-item" id="ufi-${i}">
+        <div class="upload-file-row">
+          <span class="upload-file-name" title="${esc(pf.file.name)}">${esc(pf.file.name)}</span>
+          <span class="upload-file-size">${fmtSize(pf.file.size)}</span>
+          ${pf.status === 'waiting'
+            ? `<button class="upload-file-remove" data-idx="${i}" title="Remove">✕</button>`
+            : `<span class="upload-file-status">${pf.status === 'done' ? '✓' : pf.status === 'error' ? '✗' : '…'}</span>`}
+        </div>
+        <div class="upload-progress"><div class="upload-progress-bar" id="upb-${i}" style="width:${pf.progress || 0}%"></div></div>
+      </div>`).join('');
+    listEl.querySelectorAll('.upload-file-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        pendingFiles.splice(parseInt(btn.dataset.idx), 1);
+        renderList();
+      });
+    });
+    startBtn.disabled = pendingFiles.length === 0;
+  }
+
+  function addFiles(files) {
+    const rejected = [];
+    Array.from(files).forEach(f => {
+      const ext = f.name.split('.').pop().toLowerCase();
+      if (Object.keys(S.supportedAudioFiles).length > 0 && !S.supportedAudioFiles[ext]) {
+        rejected.push(f.name);
+        return;
+      }
+      if (!pendingFiles.some(p => p.file.name === f.name && p.file.size === f.size)) {
+        pendingFiles.push({ file: f, status: 'waiting', progress: 0 });
+      }
+    });
+    if (rejected.length > 0) {
+      const names = rejected.slice(0, 2).join(', ') + (rejected.length > 2 ? ` +${rejected.length - 2} more` : '');
+      toastError(`Not allowed: ${names}`);
+    }
+    renderList();
+  }
+
+  // Reset listeners by cloning the drop zone
+  const newDrop  = dropZone.cloneNode(true);
+  const newInput = newDrop.querySelector('#upload-file-input');
+  dropZone.parentNode.replaceChild(newDrop, dropZone);
+
+  // Set accept attribute from server's supported audio file list
+  const _acceptExts = Object.entries(S.supportedAudioFiles).filter(([,v]) => v).map(([k]) => '.' + k).join(',');
+  if (_acceptExts) newInput.setAttribute('accept', _acceptExts);
+
+  newDrop.addEventListener('click', e => { if (!e.target.closest('label')) newInput.click(); });
+  newInput.addEventListener('change', () => { addFiles(newInput.files); newInput.value = ''; });
+  newDrop.addEventListener('dragover',  e => { e.preventDefault(); newDrop.classList.add('drag-over'); });
+  newDrop.addEventListener('dragleave', ()=> { newDrop.classList.remove('drag-over'); });
+  newDrop.addEventListener('drop', e => {
+    e.preventDefault(); newDrop.classList.remove('drag-over');
+    if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files);
+  });
+
+  startBtn.onclick = async () => {
+    startBtn.disabled = true;
+    let doneCount = 0, errorCount = 0;
+
+    for (let i = 0; i < pendingFiles.length; i++) {
+      const pf = pendingFiles[i];
+      if (pf.status !== 'waiting') continue;
+      pf.status = 'uploading';
+      renderList();
+
+      await new Promise(resolve => {
+        const xhr = new XMLHttpRequest();
+        xhr.upload.onprogress = e => {
+          if (e.lengthComputable) {
+            pf.progress = Math.round((e.loaded / e.total) * 100);
+            const bar = document.getElementById(`upb-${i}`);
+            if (bar) bar.style.width = pf.progress + '%';
+          }
+        };
+        xhr.onload = () => {
+          pf.progress = 100;
+          if (xhr.status >= 200 && xhr.status < 300) {
+            pf.status = 'done'; doneCount++;
+          } else {
+            pf.status = 'error'; errorCount++;
+          }
+          renderList(); resolve();
+        };
+        xhr.onerror = () => { pf.status = 'error'; errorCount++; renderList(); resolve(); };
+        xhr.open('POST', '/api/v1/file-explorer/upload');
+        xhr.setRequestHeader('x-access-token', S.token);
+        xhr.setRequestHeader('data-location', encodeURI(dir));
+        const fd = new FormData();
+        fd.append('file', pf.file);
+        xhr.send(fd);
+      });
+    }
+
+    // All done
+    const allDone = pendingFiles.every(p => p.status === 'done' || p.status === 'error');
+    if (allDone) {
+      setTimeout(() => {
+        hideModal('upload-modal');
+        if (doneCount > 0) {
+          viewFiles(dir, false);
+          toast(`${doneCount} file${doneCount !== 1 ? 's' : ''} uploaded`);
+        }
+        if (errorCount > 0) {
+          toast(`${errorCount} file${errorCount !== 1 ? 's' : ''} failed to upload`);
+        }
+      }, 500);
+    }
+  };
+
+  showModal('upload-modal');
+}
+
 function showSavePlaylistModal() {
   document.getElementById('pl-save-name').value = '';
   showModal('pl-save-modal');
@@ -2332,6 +2478,7 @@ function renderFileExplorer(d) {
       <input id="fe-filter" class="fe-filter-input" type="text" placeholder="Filter folders and songs…" autocomplete="off">
       <span id="fe-match-count" class="fe-match-count"></span>
       <button id="fe-filter-clear" class="fe-filter-clear hidden" title="Clear filter">✕</button>
+      ${S.canUpload && curPath !== '/' ? `<button id="fe-upload-btn" class="fe-upload-btn" title="Upload files here"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16,16 12,12 8,16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg> Upload</button>` : ''}
     </div>
     <div id="fe-grid" class="fe-grid">${dirs}${files}</div>`;
 
@@ -2358,6 +2505,9 @@ function renderFileExplorer(d) {
 
   filterInput.addEventListener('input', applyFilter);
   filterClear.addEventListener('click', () => { filterInput.value = ''; filterInput.focus(); applyFilter(); });
+
+  // Upload button
+  body.querySelector('#fe-upload-btn')?.addEventListener('click', () => openUploadModal(curPath));
 
   // Breadcrumb navigation
   body.querySelectorAll('.fe-crumb').forEach(el => {
@@ -3127,6 +3277,7 @@ async function tryLogin(username, password) {
   S.vpaths   = d.vpaths || [];
   S.djVpaths = [...S.vpaths];  // default: all sources selected
   localStorage.setItem('ms2_token', d.token);
+  localStorage.setItem('token', d.token);   // mirror for admin panel compatibility
   localStorage.setItem('ms2_user',  username);
   localStorage.removeItem('ms2_logged_out');
   // Detect admin role after login
@@ -3179,6 +3330,7 @@ async function checkSession() {
             }
           } catch(_) {}
           localStorage.setItem('ms2_token', S.token);
+          localStorage.setItem('token', S.token);   // mirror for admin panel compatibility
         }
       }
       return true;
@@ -3219,6 +3371,9 @@ function showApp() {
     }
     // Store vpath parent/child metadata for Auto-DJ child-vpath optimisation
     if (d.vpathMetaData) { S.vpathMeta = d.vpathMetaData; }
+    // Upload capability
+    S.canUpload = !d.noUpload;
+    if (d.supportedAudioFiles) S.supportedAudioFiles = d.supportedAudioFiles;
   }).catch(() => { S.transInfo = { serverEnabled: false }; });
 }
 function showLogin() {
@@ -3383,6 +3538,7 @@ document.getElementById('pl-save-ok').addEventListener('click', async () => {
 document.getElementById('atp-cancel').addEventListener('click', () => hideModal('atp-modal'));
 document.getElementById('pl-del-cancel').addEventListener('click', () => hideModal('pl-del-modal'));
 document.getElementById('confirm-modal-cancel').addEventListener('click', () => hideModal('confirm-modal'));
+document.getElementById('upload-cancel-btn').addEventListener('click', () => hideModal('upload-modal'));
 document.getElementById('pl-del-ok').addEventListener('click', async () => {
   const name = document.getElementById('pl-del-ok').dataset.pl;
   hideModal('pl-del-modal');
