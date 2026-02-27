@@ -1540,6 +1540,16 @@ const VIZ = (() => {
 function showModal(id)  { document.getElementById(id).classList.remove('hidden'); }
 function hideModal(id)  { document.getElementById(id).classList.add('hidden'); }
 
+function showConfirmModal(title, msg, onOk) {
+  document.getElementById('confirm-modal-title').textContent = title;
+  document.getElementById('confirm-modal-msg').textContent   = msg;
+  const okBtn = document.getElementById('confirm-modal-ok');
+  const newOk = okBtn.cloneNode(true); // remove any previous listener
+  okBtn.parentNode.replaceChild(newOk, okBtn);
+  newOk.addEventListener('click', () => { hideModal('confirm-modal'); onOk(); });
+  showModal('confirm-modal');
+}
+
 function showSavePlaylistModal() {
   document.getElementById('pl-save-name').value = '';
   showModal('pl-save-modal');
@@ -2716,6 +2726,76 @@ function viewApps() {
     </div>`);
 }
 
+// ── PLAY HISTORY VIEW ────────────────────────────────────────
+function viewPlayHistory() {
+  setTitle('Play History'); setBack(null); setNavActive('play-history'); S.view = 'play-history';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+
+  setBody(`
+    <div class="playback-panel">
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">🏆</div>
+          <div>
+            <div class="playback-section-title">Most Played</div>
+            <div class="playback-section-desc">Reset all play-count statistics to zero. The Most Played list will be empty until songs are played again.</div>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Play counts</div>
+            <div class="playback-row-hint">Clears the play-count number on every song</div>
+          </div>
+          <button class="btn-danger" id="reset-play-counts-btn">Reset</button>
+        </div>
+      </div>
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">🕐</div>
+          <div>
+            <div class="playback-section-title">Recently Played</div>
+            <div class="playback-section-desc">Reset all last-played timestamps. The Recently Played list will be empty until songs are played again.</div>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Last-played timestamps</div>
+            <div class="playback-row-hint">Clears the date each song was last played</div>
+          </div>
+          <button class="btn-danger" id="reset-recently-played-btn">Reset</button>
+        </div>
+      </div>
+    </div>`);
+
+  document.getElementById('reset-play-counts-btn').addEventListener('click', () => {
+    showConfirmModal(
+      'Reset Most Played',
+      'All play counts will be set to zero. This cannot be undone.',
+      async () => {
+        try {
+          await api('POST', 'api/v1/db/stats/reset-play-counts', {});
+          toast('\u2713 Most Played counts reset');
+        } catch(e) { toast(`Error: ${esc(e.message)}`); }
+      }
+    );
+  });
+
+  document.getElementById('reset-recently-played-btn').addEventListener('click', () => {
+    showConfirmModal(
+      'Reset Recently Played',
+      'All last-played timestamps will be cleared. This cannot be undone.',
+      async () => {
+        try {
+          await api('POST', 'api/v1/db/stats/reset-recently-played', {});
+          toast('\u2713 Recently Played history reset');
+        } catch(e) { toast(`Error: ${esc(e.message)}`); }
+      }
+    );
+  });
+}
+
 // ── PLAYBACK VIEW ─────────────────────────────────────────────
 function viewPlayback() {
   setTitle('Playback'); setBack(null); setNavActive('playback'); S.view = 'playback';
@@ -3178,6 +3258,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'apps')      viewApps();
     else if (v === 'shared-links') viewSharedLinks();
     else if (v === 'playback')  viewPlayback();
+    else if (v === 'play-history') viewPlayHistory();
   });
 });
 
@@ -3301,6 +3382,7 @@ document.getElementById('pl-save-ok').addEventListener('click', async () => {
 // Add to playlist modal cancel
 document.getElementById('atp-cancel').addEventListener('click', () => hideModal('atp-modal'));
 document.getElementById('pl-del-cancel').addEventListener('click', () => hideModal('pl-del-modal'));
+document.getElementById('confirm-modal-cancel').addEventListener('click', () => hideModal('confirm-modal'));
 document.getElementById('pl-del-ok').addEventListener('click', async () => {
   const name = document.getElementById('pl-del-ok').dataset.pl;
   hideModal('pl-del-modal');

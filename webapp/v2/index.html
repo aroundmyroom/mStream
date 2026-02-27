@@ -73,6 +73,21 @@
   </div>
 </div>
 
+<!-- Generic confirm modal -->
+<div id="confirm-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="pl-del-icon">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    </div>
+    <h3 id="confirm-modal-title"></h3>
+    <p id="confirm-modal-msg" class="pl-del-msg"></p>
+    <div class="modal-actions">
+      <button id="confirm-modal-cancel" class="btn-ghost">Cancel</button>
+      <button id="confirm-modal-ok" class="btn-danger">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <!-- Delete playlist confirmation modal -->
 <div id="pl-del-modal" class="modal-overlay hidden">
   <div class="modal-box">
@@ -335,6 +350,10 @@
         <button class="nav-btn" data-view="apps">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           Mobile Apps
+        </button>
+        <button class="nav-btn" data-view="play-history">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.95"/></svg>
+          Play History
         </button>
       </nav>
       </div>
