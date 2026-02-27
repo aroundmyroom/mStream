@@ -1,3 +1,12 @@
+# AroundMyroom-mStream V2
+
+> **This is a heavily modified fork of [mStream](https://github.com/IrosTheBeggar/mStream) by [aroundmyroom](https://github.com/aroundmyroom).**
+>
+> The `GUIv2` branch contains all changes. The original `master` branch is preserved for reference.
+> See [changes4GUIv2.md](changes4GUIv2.md) for a full changelog of everything that was added or changed.
+
+---
+
 # mStream Music
 
 mStream is a personal music streaming server.  You can use mStream to stream your music from your home computer to any device, anywhere.
