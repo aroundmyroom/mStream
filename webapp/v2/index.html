@@ -88,6 +88,28 @@
   </div>
 </div>
 
+<!-- Upload files modal -->
+<div id="upload-modal" class="modal-overlay hidden">
+  <div class="modal-box upload-modal-box">
+    <div class="pl-del-icon">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16,16 12,12 8,16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+    </div>
+    <h3>Upload Files</h3>
+    <p id="upload-modal-dest" class="pl-del-msg"></p>
+    <div id="upload-drop-zone" class="upload-drop-zone">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--t3);margin-bottom:8px"><polyline points="16,16 12,12 8,16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+      <div>Drop files here or <label for="upload-file-input" class="upload-browse-lbl">browse</label></div>
+      <div style="font-size:11px;color:var(--t3);margin-top:4px">Audio files only</div>
+      <input id="upload-file-input" type="file" multiple style="display:none">
+    </div>
+    <div id="upload-file-list" class="upload-file-list"></div>
+    <div class="modal-actions">
+      <button id="upload-cancel-btn" class="btn-ghost">Cancel</button>
+      <button id="upload-start-btn" class="btn-primary" disabled>Upload</button>
+    </div>
+  </div>
+</div>
+
 <!-- Delete playlist confirmation modal -->
 <div id="pl-del-modal" class="modal-overlay hidden">
   <div class="modal-box">

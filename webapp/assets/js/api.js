@@ -32,8 +32,13 @@ const API = (() => {
     window.location.assign(window.location.href.replace('/admin', ''));
   }
 
-  module.axios = axios.create({
-    headers: { 'x-access-token': module.token() }
+  module.axios = axios.create();
+
+  // Always attach the latest token so a page refresh after login never sends null
+  module.axios.interceptors.request.use(config => {
+    const tok = module.token() || localStorage.getItem('ms2_token');
+    if (tok) { config.headers['x-access-token'] = tok; }
+    return config;
   });
 
   return module;
