@@ -356,6 +356,14 @@ export function removeUserMetadataByUser(username) {
   db.prepare('DELETE FROM user_metadata WHERE user = ?').run(username);
 }
 
+export function resetPlayCounts(username) {
+  db.prepare('UPDATE user_metadata SET pc = 0 WHERE user = ?').run(username);
+}
+
+export function resetRecentlyPlayed(username) {
+  db.prepare('UPDATE user_metadata SET lp = NULL WHERE user = ?').run(username);
+}
+
 // Playlists
 export function getUserPlaylists(username) {
   return db.prepare('SELECT name FROM playlists WHERE user = ? AND filepath IS NULL').all(username);

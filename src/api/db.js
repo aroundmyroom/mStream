@@ -269,6 +269,18 @@ export function setup(mstream) {
     res.json(songs);
   });
 
+  mstream.post('/api/v1/db/stats/reset-play-counts', (req, res) => {
+    db.resetPlayCounts(req.user.username);
+    db.saveUserDB();
+    res.json({ success: true });
+  });
+
+  mstream.post('/api/v1/db/stats/reset-recently-played', (req, res) => {
+    db.resetRecentlyPlayed(req.user.username);
+    db.saveUserDB();
+    res.json({ success: true });
+  });
+
   mstream.post('/api/v1/db/random-songs', (req, res) => {
     // Ignore list
     let ignoreList = [];
