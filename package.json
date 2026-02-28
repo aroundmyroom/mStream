@@ -68,7 +68,7 @@
     },
     "linux": {
       "files": [
-        "bin/syncthng/syncthing-linux"
+        "bin/syncthing/syncthing-linux"
       ],
       "target": [
         {

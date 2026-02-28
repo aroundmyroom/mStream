@@ -96,7 +96,7 @@ export function setup(mstream) {
     joiValidate(schema, req.body);
 
     const token = crypto.createHash('md5').update(req.body.username + crypto.createHash('md5').update(req.body.password, 'utf8').digest("hex"), 'utf8').digest("hex");
-    const cryptoString = `api_key${config.program.apiKey}authToken${token}methodauth.getMobileSessionusername${req.body.username}${config.program.apiSecret}`;
+    const cryptoString = `api_key${config.program.lastFM.apiKey}authToken${token}methodauth.getMobileSessionusername${req.body.username}${config.program.lastFM.apiSecret}`;
     const hash = crypto.createHash('md5').update(cryptoString, 'utf8').digest("hex");
 
     await axios({

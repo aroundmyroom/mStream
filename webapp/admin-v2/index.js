@@ -796,7 +796,7 @@ const advancedView = Vue.component('advanced-view', {
                       url: `${API.url()}/api/v1/admin/config/noupload`,
                       data: { noUpload: !this.params.noUpload }
                     }).then(() => {
-                      // update fronted data
+                      // update frontend data
                       Vue.set(ADMINDATA.serverParams, 'noUpload', !this.params.noUpload);
 
                       iziToast.success({
@@ -1181,7 +1181,7 @@ const dbView = Vue.component('db-view', {
                       url: `${API.url()}/api/v1/admin/db/params/compress-image`,
                       data: { compressImage: !this.dbParams.compressImage }
                     }).then(() => {
-                      // update fronted data
+                      // update frontend data
                       Vue.set(ADMINDATA.dbParams, 'compressImage', !this.dbParams.compressImage);
 
                       iziToast.success({
@@ -1205,7 +1205,7 @@ const dbView = Vue.component('db-view', {
                       url: `${API.url()}/api/v1/admin/db/params/skip-img`,
                       data: { skipImg: !this.dbParams.skipImg }
                     }).then(() => {
-                      // update fronted data
+                      // update frontend data
                       Vue.set(ADMINDATA.dbParams, 'skipImg', !this.dbParams.skipImg);
 
                       iziToast.success({
@@ -1799,7 +1799,7 @@ const federationView = Vue.component('federation-view', {
           }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.federationEnabled, 'val', !this.enabled.val);
   
         iziToast.success({
@@ -1892,7 +1892,7 @@ const logsView = Vue.component('logs-view', {
                       url: `${API.url()}/api/v1/admin/config/write-logs`,
                       data: { writeLogs: !this.params.writeLogs }
                     }).then(() => {
-                      // update fronted data
+                      // update frontend data
                       Vue.set(ADMINDATA.serverParams, 'writeLogs', !this.params.writeLogs);
 
                       iziToast.success({
@@ -2302,7 +2302,7 @@ const userAccessView = Vue.component('user-access-view', {
             }
           });
 
-          // update fronted data
+          // update frontend data
           Vue.set(ADMINDATA.users[this.currentUser.value], 'admin', this.isAdmin);
     
           // close & reset the modal
@@ -2360,7 +2360,7 @@ const editRequestSizeModal = Vue.component('edit-request-size-modal', {
           data: { maxRequestSize: this.maxRequestSize }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.serverParams, 'maxRequestSize', this.maxRequestSize);
   
         // close & reset the modal
@@ -2418,7 +2418,7 @@ const editPortModal = Vue.component('edit-port-modal', {
           data: { port: this.currentPort }
         });
 
-        // update fronted data
+        // update frontend data
         // Vue.set(ADMINDATA.serverParams, 'port', this.currentPort);
   
         // close & reset the modal
@@ -2479,7 +2479,7 @@ const editAddressModal = Vue.component('edit-address-modal', {
           data: { address: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.serverParams, 'address', this.editValue);
   
         // close & reset the modal
@@ -2536,7 +2536,7 @@ const editMaxScanModal = Vue.component('edit-max-scans-modal', {
           data: { maxConcurrentTasks: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.dbParams, 'maxConcurrentTasks', this.editValue);
   
         // close & reset the modal
@@ -2592,7 +2592,7 @@ const editPauseModal = Vue.component('edit-pause-modal', {
           data: { pause: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.dbParams, 'pause', this.editValue);
   
         // close & reset the modal
@@ -2648,7 +2648,7 @@ const editBootScanView = Vue.component('edit-boot-scan-delay-modal', {
           data: { bootScanDelay: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.dbParams, 'bootScanDelay', this.editValue);
   
         // close & reset the modal
@@ -2704,7 +2704,7 @@ const editSaveIntervalView = Vue.component('edit-save-interval-modal', {
           data: { saveInterval: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.dbParams, 'saveInterval', this.editValue);
   
         // close & reset the modal
@@ -2761,7 +2761,7 @@ const editScanIntervalView = Vue.component('edit-scan-interval-modal', {
           data: { scanInterval: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.dbParams, 'scanInterval', this.editValue);
   
         // close & reset the modal
@@ -2889,7 +2889,7 @@ const editTranscodeCodecModal = Vue.component('edit-transcode-codec-modal', {
           data: { defaultCodec: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.transcodeParams, 'defaultCodec', this.editValue);
   
         // close & reset the modal
@@ -2951,7 +2951,7 @@ const editTranscodeDefaultAlgorithm = Vue.component('edit-transcode-algorithm-mo
           data: { algorithm: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.transcodeParams, 'algorithm', this.editValue);
   
         // close & reset the modal
@@ -3015,7 +3015,7 @@ const editTranscodeDefaultBitrate = Vue.component('edit-transcode-bitrate-modal'
           data: { defaultBitrate: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.transcodeParams, 'defaultBitrate', this.editValue);
   
         // close & reset the modal
