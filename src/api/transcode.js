@@ -1,12 +1,12 @@
 import path from 'path';
-import ffbinaries from 'ffbinaries';
+import fs from 'fs';
 import ffmpeg from 'fluent-ffmpeg';
 import winston from 'winston';
 import * as vpath from '../util/vpath.js';
 import * as config from '../state/config.js';
 import { Readable } from 'stream';
 
-const platform = ffbinaries.detectPlatform();
+const binaryExt = process.platform === 'win32' ? '.exe' : '';
 
 const codecMap = {
   'mp3': { codec: 'libmp3lame', contentType: 'audio/mpeg' },
@@ -43,30 +43,27 @@ let isDownloading = false;
 
 function init() {
   return new Promise((resolve, reject) => {
-    // if (lockInit === true) { resolve(); }
     if (isDownloading === true) { reject('Download In Progress'); }
     isDownloading = true;
-    winston.info('Checking ffmpeg...');
-    ffbinaries.downloadFiles(
-      ["ffmpeg", "ffprobe"],
-      { platform: platform, quiet: true, destination: config.program.transcode.ffmpegDirectory },
-      (err, _data) => {
-        isDownloading = false;
-        if (err) { return reject(err); }
 
-        try {
-          winston.info('FFmpeg OK!');
-          const ffmpegPath = path.join(config.program.transcode.ffmpegDirectory, ffbinaries.getBinaryFilename("ffmpeg", platform));
-          const ffprobePath = path.join(config.program.transcode.ffmpegDirectory, ffbinaries.getBinaryFilename("ffprobe", platform));
-          ffmpeg.setFfmpegPath(ffmpegPath);
-          ffmpeg.setFfprobePath(ffprobePath);
-          lockInit = true;
-          resolve();
-        } catch (innerErr) {
-          reject(innerErr);
-        }
-      }
-    );
+    const ffmpegPath = path.join(config.program.transcode.ffmpegDirectory, `ffmpeg${binaryExt}`);
+    const ffprobePath = path.join(config.program.transcode.ffmpegDirectory, `ffprobe${binaryExt}`);
+
+    isDownloading = false;
+
+    if (!fs.existsSync(ffmpegPath) || !fs.existsSync(ffprobePath)) {
+      return reject(new Error(`FFmpeg binaries not found in ${config.program.transcode.ffmpegDirectory}`));
+    }
+
+    try {
+      winston.info('FFmpeg OK!');
+      ffmpeg.setFfmpegPath(ffmpegPath);
+      ffmpeg.setFfprobePath(ffprobePath);
+      lockInit = true;
+      resolve();
+    } catch (innerErr) {
+      reject(innerErr);
+    }
   });
 }
 
