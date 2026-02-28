@@ -3349,7 +3349,12 @@ function showApp() {
   if (S.isAdmin) {
     document.getElementById('scan-btn').classList.remove('hidden');
     document.getElementById('admin-panel-btn').classList.remove('hidden');
-    document.getElementById('classic-admin-btn').classList.remove('hidden');
+    if (localStorage.getItem('ms2_show_classic') === '1') {
+      document.getElementById('classic-admin-btn').classList.remove('hidden');
+    }
+  }
+  if (localStorage.getItem('ms2_show_classic') === '1') {
+    document.getElementById('classic-player-btn').classList.remove('hidden');
   }
   // Mark queue btn active (panel is visible by default)
   document.getElementById('queue-btn').classList.add('active');
@@ -4122,6 +4127,11 @@ document.addEventListener('keydown', e => {
 (async () => {
   // Apply saved theme before anything renders (prevents flash)
   applyTheme(localStorage.getItem('ms2_theme') === 'light');
+
+  // Hide classic UI login link unless explicitly enabled
+  if (localStorage.getItem('ms2_show_classic') !== '1') {
+    document.getElementById('classic-login-link').classList.add('hidden');
+  }
 
   const ok = await checkSession();
   ok ? showApp() : showLogin();
