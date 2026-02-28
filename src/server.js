@@ -102,6 +102,29 @@ export async function serveIt(configFile) {
     next();
   });
 
+  // GUIv2 admin — same auth guard as classic admin
+  mstream.get('/admin-v2', (req, res, next) => {
+    if (config.program.lockAdmin === true) {
+      return res.send('<p>Admin Page Disabled</p>');
+    }
+    if (Object.keys(config.program.users).length === 0) {
+      return next();
+    }
+    try {
+      jwt.verify(req.cookies['x-access-token'], config.program.secret);
+      next();
+    } catch (_err) {
+      return res.redirect(302, '/login');
+    }
+  });
+
+  mstream.get('/admin-v2/index.html', (req, res, next) => {
+    if (config.program.lockAdmin === true) {
+      return res.send('<p>Admin Page Disabled</p>');
+    }
+    next();
+  });
+
   // Block access to admin page if necessary
   mstream.get('/admin', (req, res, next) => {
     if (config.program.lockAdmin === true) {

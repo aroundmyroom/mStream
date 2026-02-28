@@ -32,7 +32,7 @@ export function setup(mstream) {
 
   mstream.get('/api/v1/admin/file-explorer/win-drives', (req, res) => {
     if (os.platform() !== 'win32') {
-      return res.status(400).json({});
+      return res.json([]);
     }
 
     child.exec('wmic logicaldisk get name', (error, stdout) => {
@@ -231,14 +231,7 @@ export function setup(mstream) {
   });
 
   mstream.get("/api/v1/admin/db/scan/stats", (req, res) => {
-    let total = 0;
-    for (const vpathItem of Object.keys(config.program.folders)) {
-      total += db.countFilesByVpath(vpathItem);
-    }
-
-    res.json({
-      fileCount: total
-    });
+    res.json(db.getStats());
   });
 
   mstream.delete("/api/v1/admin/users", async (req, res) => {

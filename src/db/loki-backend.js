@@ -158,6 +158,100 @@ export function countFilesByVpath(vpath) {
   return fileCollection.count({ 'vpath': vpath });
 }
 
+export function getStats() {
+  if (!fileCollection) {
+    return {
+      totalFiles: 0, totalArtists: 0, totalAlbums: 0, totalGenres: 0,
+      withArt: 0, withoutArt: 0, withReplaygain: 0,
+      oldestYear: null, newestYear: null, lastScannedTs: null,
+      addedLast7Days: 0, addedLast30Days: 0,
+      formats: [], perVpath: [], topArtists: [], topGenres: [], decades: [],
+    };
+  }
+
+  const now = Date.now();
+  const nowSec   = Math.floor(now / 1000);
+  const cutoff7  = nowSec - 7  * 86400;
+  const cutoff30 = nowSec - 30 * 86400;
+
+  const artists  = new Set();
+  const albums   = new Set();
+  const genres   = new Set();
+  const formatMap = {};
+  const vpathMap  = {};
+  const artistMap = {};
+  const genreMap  = {};
+  const decadeMap = {};
+
+  let withArt = 0, withReplaygain = 0;
+  let last7 = 0, last30 = 0;
+  let oldestYear = null, newestYear = null, lastScannedTs = null;
+
+  const docs = fileCollection.data;
+  const total = docs.length;
+
+  for (const doc of docs) {
+    if (doc.artist)  artists.add(doc.artist);
+    if (doc.album)   albums.add(doc.album);
+    if (doc.genre && doc.genre.trim()) genres.add(doc.genre.trim());
+
+    if (doc.aaFile && doc.aaFile.trim()) withArt++;
+    if (doc.replaygainTrackDb != null)   withReplaygain++;
+    if (doc.ts > cutoff7)  last7++;
+    if (doc.ts > cutoff30) last30++;
+    if (doc.ts && (!lastScannedTs || doc.ts > lastScannedTs)) lastScannedTs = doc.ts * 1000;
+
+    const yr = doc.year;
+    if (yr >= 1900 && yr <= 2030) {
+      const decade = Math.floor(yr / 10) * 10;
+      decadeMap[decade] = (decadeMap[decade] || 0) + 1;
+      if (oldestYear === null || yr < oldestYear) oldestYear = yr;
+      if (newestYear === null || yr > newestYear) newestYear = yr;
+    }
+
+    const fmt = doc.format ? doc.format.toLowerCase().trim() : null;
+    if (fmt) formatMap[fmt] = (formatMap[fmt] || 0) + 1;
+
+    if (doc.vpath) vpathMap[doc.vpath] = (vpathMap[doc.vpath] || 0) + 1;
+
+    const artist = doc.artist ? doc.artist.trim() : null;
+    if (artist) artistMap[artist] = (artistMap[artist] || 0) + 1;
+
+    const genre = doc.genre ? doc.genre.trim() : null;
+    if (genre) genreMap[genre] = (genreMap[genre] || 0) + 1;
+  }
+
+  const toSortedArr = (map) => Object.entries(map)
+    .map(([k, cnt]) => ({ format: k, cnt }))
+    .sort((a, b) => b.cnt - a.cnt);
+
+  const formats    = toSortedArr(formatMap);
+  const perVpath   = Object.entries(vpathMap).map(([vpath, cnt]) => ({ vpath, cnt })).sort((a, b) => b.cnt - a.cnt);
+  const topArtists = Object.entries(artistMap).map(([artist, cnt]) => ({ artist, cnt })).sort((a, b) => b.cnt - a.cnt).slice(0, 5);
+  const topGenres  = Object.entries(genreMap).map(([genre, cnt]) => ({ genre, cnt })).sort((a, b) => b.cnt - a.cnt).slice(0, 5);
+  const decades    = Object.entries(decadeMap).map(([decade, cnt]) => ({ decade: Number(decade), cnt })).sort((a, b) => a.decade - b.decade);
+
+  return {
+    totalFiles: total,
+    totalArtists: artists.size,
+    totalAlbums:  albums.size,
+    totalGenres:  genres.size,
+    withArt,
+    withoutArt: total - withArt,
+    withReplaygain,
+    oldestYear,
+    newestYear,
+    lastScannedTs,
+    addedLast7Days:  last7,
+    addedLast30Days: last30,
+    formats,
+    perVpath,
+    topArtists,
+    topGenres,
+    decades,
+  };
+}
+
 // Metadata Queries
 const mapFunDefault = (left, right) => {
   return {
