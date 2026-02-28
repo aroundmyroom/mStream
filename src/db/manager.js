@@ -45,6 +45,7 @@ export function removeFileByPath(filepath, vpath) { return backend.removeFileByP
 export function removeStaleFiles(vpath, scanId) { return backend.removeStaleFiles(vpath, scanId); }
 export function removeFilesByVpath(vpath) { return backend.removeFilesByVpath(vpath); }
 export function countFilesByVpath(vpath) { return backend.countFilesByVpath(vpath); }
+export function getStats() { return backend.getStats(); }
 
 // Metadata Queries
 export function updateFileArt(filepath, vpath, aaFile, scanId) { return backend.updateFileArt(filepath, vpath, aaFile, scanId); }
