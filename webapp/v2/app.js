@@ -4123,6 +4123,21 @@ document.addEventListener('keydown', e => {
   });
 }());
 
+// ── LOGOUT BROADCAST ────────────────────────────────────────
+// Stop playback and redirect to login if any other tab (e.g. admin) logs out.
+try {
+  const _logoutChannel = new BroadcastChannel('mstream');
+  _logoutChannel.onmessage = e => {
+    if (e.data?.type === 'logout') {
+      audioEl.pause();
+      persistQueue();   // save playing:false before token is wiped
+      localStorage.removeItem('ms2_token');
+      localStorage.removeItem('token');
+      window.location.assign(window.location.origin + '/');
+    }
+  };
+} catch(e) {}
+
 // ── INIT ─────────────────────────────────────────────────────
 (async () => {
   // Apply saved theme before anything renders (prevents flash)

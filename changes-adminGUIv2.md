@@ -477,3 +477,66 @@ The `POST /api/v1/federation/invite/accept` endpoint has its axios handshake cal
 - Password field changed to `type="password"`
 - Token pre-fill corrected to `ms2_token`
 - `materialize.js` dependency removed; page has zero external CSS/JS dependencies beyond `qr.js` and `jwt-decode.js`
+---
+
+## [Fix] VU Meter — Repositioned Into Player Layout Flow
+
+**Files:** `webapp/v2/index.html`, `webapp/v2/style.css`
+
+**Problem:** The `#mini-spec` canvas was `position:absolute` at the very top of the player bar, visually detached from the controls and progress bar. On smaller screens it overlapped other elements.
+
+**Fix:** Moved `#mini-spec` out of its old anchor point and into `.player-center` as a plain flow element, sitting below the progress bar. CSS changes:
+- `position:absolute` / `top` removed from `.mini-spec`; replaced with `width:100%; height:28px` (block flow)
+- `.player-center` `gap` reduced to `0` — controls, progress, and VU are tightly stacked
+- `.player` gained `padding: 8px 20px 18px 20px` to lift the whole bar off the browser bottom edge
+
+Final order in `.player-center`: song controls → progress bar → VU meter canvas.
+
+---
+
+## [Fix] Admin Logout — URL Crash + Incomplete Token Cleanup
+
+**File:** `webapp/assets/js/api.js`
+
+**Problem 1 — URL crash:** `logout()` and `goToPlayer()` both built the redirect URL with `window.location.href.replace('/admin', '')`. When the admin panel is at `/admin-v2` this strips only the literal string `/admin`, leaving `…3000-v2/login` — an invalid URL that threw:
+> `SyntaxError: Failed to execute 'assign' on 'Location': '…3000-v2/login' is not a valid URL`
+
+**Fix:** Both functions now use `window.location.origin + '/'` as the base, which is always valid regardless of the current path.
+
+**Problem 2 — Stale session:** `logout()` only cleared `localStorage.removeItem('token')` (the old classic-UI key). The GUIv2 session key `ms2_token` was never removed, so a GUIv2 player tab would remain "logged in" after the admin signed out.
+
+**Fix:** `logout()` now removes both `token` and `ms2_token`.
+
+---
+
+## [Feature] Admin Logout — Confirmation Warning
+
+**Files:** `webapp/admin-v2/index.html`
+
+**Problem:** Clicking Logout in the sidebar immediately called `API.logout()` with no warning. Users who had music playing in the player tab had no chance to cancel.
+
+**Fix:** The logout `onclick` now calls `adminConfirm('Sign out?', 'Music playing in the player tab will stop.', 'Sign Out', () => API.logout())` — the existing confirmation dialog — before proceeding. Users must explicitly confirm; clicking outside or pressing Cancel leaves the session intact.
+
+---
+
+## [Fix] Logout — Stop Player in All Open Tabs
+
+**Files:** `webapp/assets/js/api.js`, `webapp/v2/app.js`
+
+**Problem:** Confirming logout in the admin panel only cleared storage and redirected the admin tab. Any open player tab continued playing music with a now-invalid session.
+
+**Fix:** Uses the `BroadcastChannel` API (channel name `mstream`):
+- `api.js` `logout()` posts `{ type: 'logout' }` on the channel _before_ redirecting
+- `app.js` registers a listener at startup; on receiving `logout` it immediately pauses audio, clears both token keys, and redirects the player tab to the login page
+
+Works for any number of open player tabs regardless of how the admin panel was opened (named tab, direct URL, etc.). The `try/catch` around both sides silently ignores the rare private-browsing contexts where `BroadcastChannel` is unavailable.
+
+---
+
+## [Fix] Logout — Queue Saved as Paused, No Auto-Play on Re-login
+
+**File:** `webapp/v2/app.js`
+
+**Problem:** When the player tab received the logout broadcast and was redirected to login, the queue was saved to localStorage with `playing: true` (the `beforeunload` handler fired while the audio element was still considered playing). On re-login `restoreQueue()` read that flag and immediately called `audioEl.play()` — starting music automatically even when it should stay paused.
+
+**Fix:** In the broadcast logout handler, `persistQueue()` is now called explicitly right after `audioEl.pause()` and before the tokens are cleared. This guarantees the saved snapshot has `playing: false`. `restoreQueue()` then restores the queue position and seeks to the saved time, but does not call `audioEl.play()` — the player stays paused on login regardless of auto-DJ or any other setting.
