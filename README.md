@@ -2,6 +2,9 @@
 
 > **This is a heavily modified fork of [mStream](https://github.com/IrosTheBeggar/mStream) by [aroundmyroom](https://github.com/aroundmyroom).**
 >
+> **Be noticed that all changes are 100% AI generated changes made by Claude Sonnet 4.6 enterily. So be careful when running my REPO !**
+>
+>
 > The `GUIv2` branch contains all changes. The original `master` branch is preserved for reference.
 > See [changes4GUIv2.md](changes4GUIv2.md) for a full changelog of everything that was added or changed.
 
