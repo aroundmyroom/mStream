@@ -117,6 +117,61 @@ export function countFilesByVpath(vpath) {
   return row.cnt;
 }
 
+export function getStats() {
+  const totalFiles      = db.prepare('SELECT COUNT(*) AS cnt FROM files').get().cnt;
+  const totalArtists    = db.prepare("SELECT COUNT(DISTINCT artist) AS cnt FROM files WHERE artist IS NOT NULL AND artist != ''").get().cnt;
+  const totalAlbums     = db.prepare("SELECT COUNT(DISTINCT album) AS cnt FROM files WHERE album IS NOT NULL AND album != ''").get().cnt;
+  const totalGenres     = db.prepare("SELECT COUNT(DISTINCT genre) AS cnt FROM files WHERE genre IS NOT NULL AND genre != ''").get().cnt;
+  const withArt         = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE aaFile IS NOT NULL AND aaFile != ''").get().cnt;
+  const withReplaygain  = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE replaygainTrackDb IS NOT NULL').get().cnt;
+
+  const yearRow         = db.prepare('SELECT MIN(year) AS oldest, MAX(year) AS newest FROM files WHERE year >= 1900 AND year <= 2030').get();
+  const newestTsRow     = db.prepare('SELECT MAX(ts) AS ts FROM files').get();
+  const nowSec    = Math.floor(Date.now() / 1000);
+  const last7Days  = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE ts >= ?').get(nowSec - 7  * 86400).cnt;
+  const last30Days = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE ts >= ?').get(nowSec - 30 * 86400).cnt;
+
+  const formats = db.prepare(
+    'SELECT LOWER(TRIM(format)) AS format, COUNT(*) AS cnt FROM files WHERE format IS NOT NULL AND TRIM(format) != \'\' GROUP BY LOWER(TRIM(format)) ORDER BY cnt DESC'
+  ).all();
+
+  const perVpath = db.prepare(
+    'SELECT vpath, COUNT(*) AS cnt FROM files GROUP BY vpath ORDER BY cnt DESC'
+  ).all();
+
+  const topArtists = db.prepare(
+    "SELECT artist, COUNT(*) AS cnt FROM files WHERE artist IS NOT NULL AND artist != '' GROUP BY artist ORDER BY cnt DESC LIMIT 5"
+  ).all();
+
+  const topGenres = db.prepare(
+    "SELECT genre, COUNT(*) AS cnt FROM files WHERE genre IS NOT NULL AND genre != '' GROUP BY genre ORDER BY cnt DESC LIMIT 5"
+  ).all();
+
+  const decadeRows = db.prepare(
+    'SELECT (year / 10 * 10) AS decade, COUNT(*) AS cnt FROM files WHERE year >= 1900 AND year <= 2030 GROUP BY decade ORDER BY decade'
+  ).all();
+
+  return {
+    totalFiles,
+    totalArtists,
+    totalAlbums,
+    totalGenres,
+    withArt,
+    withoutArt: totalFiles - withArt,
+    withReplaygain,
+    oldestYear:  yearRow.oldest  || null,
+    newestYear:  yearRow.newest  || null,
+    lastScannedTs: newestTsRow.ts ? newestTsRow.ts * 1000 : null,
+    addedLast7Days:  last7Days,
+    addedLast30Days: last30Days,
+    formats,
+    perVpath,
+    topArtists,
+    topGenres,
+    decades: decadeRows,
+  };
+}
+
 // Metadata Queries
 export function getFileWithMetadata(filepath, vpath, username) {
   const row = db.prepare(`

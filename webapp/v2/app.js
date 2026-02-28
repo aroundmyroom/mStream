@@ -121,9 +121,10 @@ function persistQueue() {
   if (!S.username) return;
   try {
     localStorage.setItem(_queueKey(), JSON.stringify({
-      queue: S.queue,
-      idx:   S.idx,
-      time:  audioEl.currentTime || 0,
+      queue:   S.queue,
+      idx:     S.idx,
+      time:    audioEl.currentTime || 0,
+      playing: !audioEl.paused,
     }));
   } catch(_) {}
 }
@@ -156,7 +157,10 @@ function restoreQueue() {
       if (data.time > 1) {
         audioEl.addEventListener('loadedmetadata', () => {
           audioEl.currentTime = data.time;
+          if (data.playing) audioEl.play().catch(() => {});
         }, { once: true });
+      } else if (data.playing) {
+        audioEl.play().catch(() => {});
       }
     }
   } catch(e) { console.warn('restoreQueue audio setup failed:', e); }
@@ -436,7 +440,7 @@ async function autoDJFetch() {
   } catch(e) { console.error('Auto-DJ fetch failed:', e); }
 }
 
-function setAutoDJ(on) {
+function setAutoDJ(on, skipAutoStart) {
   S.autoDJ = on;
   localStorage.setItem('ms2_autodj', on ? '1' : '');
   document.getElementById('dj-light').classList.toggle('hidden', !on);
@@ -445,7 +449,7 @@ function setAutoDJ(on) {
   if (btn) { btn.classList.toggle('on', on); btn.textContent = on ? '⏹ Stop Auto-DJ' : '▶ Start Auto-DJ'; }
   const status = document.querySelector('.autodj-status');
   if (status) { status.classList.toggle('on', on); status.textContent = on ? 'Auto-DJ is ON — random songs will play continuously' : 'Auto-DJ is OFF'; }
-  if (on) {
+  if (on && !skipAutoStart) {
     if (!audioEl.src || audioEl.ended || S.queue.length === 0) {
       // Nothing playing and nothing queued — fetch a new song and play it
       autoDJFetch();
@@ -3345,6 +3349,7 @@ function showApp() {
   if (S.isAdmin) {
     document.getElementById('scan-btn').classList.remove('hidden');
     document.getElementById('admin-panel-btn').classList.remove('hidden');
+    document.getElementById('classic-admin-btn').classList.remove('hidden');
   }
   // Mark queue btn active (panel is visible by default)
   document.getElementById('queue-btn').classList.add('active');
@@ -3353,7 +3358,7 @@ function showApp() {
   refreshQueueUI();
   restoreQueue();
   // Restore auto-DJ state from previous session
-  if (localStorage.getItem('ms2_autodj')) { setAutoDJ(true); }
+  if (localStorage.getItem('ms2_autodj')) { setAutoDJ(true, /*skipAutoStart=*/true); }
   // Guarantee a save on F5 / tab close
   window.addEventListener('beforeunload', persistQueue);
   pollScan();
