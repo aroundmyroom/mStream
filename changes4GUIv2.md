@@ -430,6 +430,46 @@ files (PDFs, executables, text files, etc.) from being written to the server.
 
 ---
 
+## Security — Remove ffbinaries Dependency
+
+Removed the `ffbinaries` npm package (and its abandoned `request` + vulnerable
+`tough-cookie` transitive dependencies) from the project.
+
+### Problem
+`ffbinaries` pulled in `request@2.88.2` (officially abandoned 2020), which
+required `tough-cookie@2.5.0` — a known Prototype Pollution vulnerability.
+Dependabot could not auto-fix it because `request` will never accept a newer
+`tough-cookie` version.
+
+### Fix (`src/api/transcode.js`)
+- Removed `import ffbinaries` entirely.
+- `init()` now directly resolves the binary paths using `process.platform` to
+  determine the correct extension (`.exe` on Windows, none on Linux/macOS).
+- Checks that `ffmpeg` and `ffprobe` exist in `ffmpegDirectory` before setting
+  the paths via `fluent-ffmpeg` — throws a clear error if they are missing.
+- 49 packages removed from the dependency tree; `npm audit` reports
+  **0 vulnerabilities**.
+
+### Also fixed via `npm audit fix`
+- `ajv` — ReDoS via `$data` option
+- `fast-xml-parser` — stack overflow in XMLBuilder
+- `minimatch` — ReDoS via repeated wildcards
+
+---
+
+## Bug Fix — Loki Backend Parity
+
+Two functions added to `src/db/loki-backend.js` that existed in
+`src/db/sqlite-backend.js` but were missing from the Loki backend, causing
+the server to crash for Loki users when calling the reset endpoints:
+
+- `resetPlayCounts(username)` — sets `pc = 0` on all user metadata records
+- `resetRecentlyPlayed(username)` — sets `lp = null` on all user metadata records
+
+Both are now consistent across SQLite and Loki backends.
+
+---
+
 ## Pending
 
 - **Song ratings UI** — the DB column and Auto-DJ `minRating` filter exist;
