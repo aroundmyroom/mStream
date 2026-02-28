@@ -430,3 +430,50 @@ Object.keys(memClone).forEach(username => {
 **File:** `src/api/federation.js`
 
 The `POST /api/v1/federation/invite/accept` endpoint has its axios handshake call commented out and returns `{}` unconditionally. This is a work-in-progress feature stub, not an accidental regression. Left as-is pending federation implementation.
+
+---
+
+## [Fix] Admin Panel Tab — No Longer Spawns Multiple Instances
+
+**Files:** `webapp/v2/index.html`, `webapp/admin-v2/index.html`
+
+**Problem 1:** The "Admin Panel" footer link used `target="_blank"` — every click opened a fresh tab, leading to multiple admin instances fighting each other.
+
+**Fix (`webapp/v2/index.html`):** Changed to `target="mstream-admin"`. The browser opens one named tab on first click and reuses it on every subsequent click. Also removed `rel="noopener"` (which was blocking `window.opener` — required for the return fix below).
+
+**Problem 2:** The "Go to Player" link in the admin sidenav used `window.location.href = /` — this navigated the admin tab to a new player instance rather than switching back to the original player tab, so music effectively restarted.
+
+**Fix (`webapp/admin-v2/index.html`):** The link now checks `window.opener` first. If an opener exists (i.e. admin was opened from the player), it calls `window.opener.focus()` then `window.close()` — returning focus to the original tab with music still playing. Falls back to `window.location.href = /` when accessed standalone.
+
+---
+
+## [Feature] Classic UI — Hidden by Default, Toggleable via Admin
+
+**Files:** `webapp/v2/index.html`, `webapp/v2/app.js`, `webapp/admin-v2/index.js`
+
+**Problem:** The Classic UI links (login screen "← Back to Classic UI", footer "Classic UI" player link, and footer "Classic Admin" button) were always visible. There was no way to hide them for a clean GUIv2-only experience.
+
+**Solution:** All three links are now hidden by default. A single `localStorage` flag (`ms2_show_classic`) controls their visibility across the whole app.
+
+- **`webapp/v2/index.html`**: Added `id="classic-login-link"` and `id="classic-player-btn"` to the two classic player links; footer classic link starts with `class="hidden"`
+- **`webapp/v2/app.js` init block**: Hides `#classic-login-link` on page load unless `ms2_show_classic === '1'`
+- **`webapp/v2/app.js` `showApp()`**: Only unhides `#classic-player-btn` and `#classic-admin-btn` when the flag is set
+- **`webapp/admin-v2/index.js` `advancedView`**: Added `showClassicUI` data property (reads from localStorage) and a new **UI Settings** card with a `Classic UI (player & admin links): Hidden / Visible [show/hide]` toggle row. `toggleClassicUI()` writes or removes the `ms2_show_classic` key and toasts "Reload the player tab for changes to take effect"
+
+---
+
+## [Feature] QR Connect Page — Rewritten in GUIv2 Style
+
+**File:** `webapp/qr/index.html`
+
+**Problem:** The QR tool page still used Materialize CSS — green buttons, floating labels, white background — completely out of place when opened from the GUIv2 player. It also had two bugs:
+1. Read `localStorage.getItem("token")` — the old key; GUIv2 stores the session token under `ms2_token`, so the username never pre-filled
+2. The password field was `type="text"` — credentials visible in plain text on screen
+
+**Fix:** Full rewrite — Materialize removed entirely, page now uses the same CSS variables (`--bg`, `--surface`, `--raised`, `--accent`, `--t1/t2/t3`, `--border`, `--r`) as the GUIv2 player:
+- Dark/light theme toggle (sun icon, top-right), reads and writes `ms2_theme` to stay in sync with the player
+- Label-above input pattern matching the admin panel style  
+- Live QR regeneration on every keystroke (`oninput`) — no button press needed  
+- Password field changed to `type="password"`
+- Token pre-fill corrected to `ms2_token`
+- `materialize.js` dependency removed; page has zero external CSS/JS dependencies beyond `qr.js` and `jwt-decode.js`

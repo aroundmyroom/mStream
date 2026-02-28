@@ -646,7 +646,8 @@ const advancedView = Vue.component('advanced-view', {
   data() {
     return {
       params: ADMINDATA.serverParams,
-      paramsTS: ADMINDATA.serverParamsUpdated
+      paramsTS: ADMINDATA.serverParamsUpdated,
+      showClassicUI: localStorage.getItem('ms2_show_classic') === '1'
     };
   },
   template: `
@@ -656,6 +657,23 @@ const advancedView = Vue.component('advanced-view', {
     <div v-else>
       <div class="container">
         <div class="row">
+          <div class="col s12">
+            <div class="card">
+              <div class="card-content">
+                <span class="card-title">UI Settings</span>
+                <table>
+                  <tbody>
+                    <tr>
+                      <td><b>Classic UI (player &amp; admin links):</b> {{showClassicUI ? 'Visible' : 'Hidden'}}</td>
+                      <td>
+                        [<a v-on:click="toggleClassicUI()">{{showClassicUI ? 'hide' : 'show'}}</a>]
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
           <div class="col s12">
             <div class="card">
               <div class="card-content">
@@ -745,6 +763,11 @@ const advancedView = Vue.component('advanced-view', {
     openModal: function(modalView) {
       modVM.currentViewModal = modalView;
       modVM.openModal();
+    },
+    toggleClassicUI: function() {
+      this.showClassicUI = !this.showClassicUI;
+      this.showClassicUI ? localStorage.setItem('ms2_show_classic', '1') : localStorage.removeItem('ms2_show_classic');
+      toast('Reload the player tab for changes to take effect');
     },
     removeSSL: function() {
             adminConfirm('Remove SSL Keys?', 'Your server will need to reboot', 'Remove SSL', async () => {
