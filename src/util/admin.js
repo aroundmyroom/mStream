@@ -180,6 +180,21 @@ export async function editUserAccess(username, admin) {
   config.program.users[username].admin = admin;
 }
 
+export async function setUserLastFM(username, lastfmUser, lastfmPassword) {
+  if (!config.program.users[username]) { throw new Error(`'${username}' does not exist`); }
+
+  const memClone = JSON.parse(JSON.stringify(config.program.users));
+  memClone[username]['lastfm-user'] = lastfmUser;
+  memClone[username]['lastfm-password'] = lastfmPassword;
+
+  const loadConfig = await loadFile(config.configFile);
+  loadConfig.users = memClone;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.users[username]['lastfm-user'] = lastfmUser;
+  config.program.users[username]['lastfm-password'] = lastfmPassword;
+}
+
 export async function editPort(port) {
   if (config.program.port === port) { return; }
 

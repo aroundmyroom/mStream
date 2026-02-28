@@ -158,12 +158,11 @@ export function setup(mstream) {
   });
 
   mstream.get("/api/v1/admin/users", (req, res) => {
-    // Scrub passwords
+    // Scrub passwords and salts before sending to frontend
     const memClone = JSON.parse(JSON.stringify(config.program.users));
-    Object.keys(memClone).forEach(key => {
-      if(key === 'password' || key === 'salt') {
-        delete memClone[key];
-      }
+    Object.keys(memClone).forEach(username => {
+      delete memClone[username].password;
+      delete memClone[username].salt;
     });
 
     res.json(memClone);
@@ -258,12 +257,12 @@ export function setup(mstream) {
   mstream.post("/api/v1/admin/users/lastfm", async (req, res) => {
     const schema = Joi.object({
       username: Joi.string().required(),
-      lasftfmUser: Joi.string().required(),
-      lasftfmPassword: Joi.string().required()
+      lastfmUser: Joi.string().required(),
+      lastfmPassword: Joi.string().required()
     });
     joiValidate(schema, req.body);
 
-    await admin.setUserLastFM(req.body.username, req.body.password);
+    await admin.setUserLastFM(req.body.username, req.body.lastfmUser, req.body.lastfmPassword);
     res.json({});
   });
 
@@ -298,7 +297,8 @@ export function setup(mstream) {
       secret: config.program.secret.slice(-4),
       ssl: config.program.ssl,
       storage: config.program.storage,
-      maxRequestSize: config.program.maxRequestSize
+      maxRequestSize: config.program.maxRequestSize,
+      federation: config.program.federation
     });
   });
 

@@ -336,3 +336,97 @@ Full review of all admin-v2 components. Issues found and fixed:
 | `lockView` | Raw `<h2>`, `<p>`, `<br><br>` tags — no card wrapper, looks unstyled | Rewritten with `.card` / `.card-content` / `.card-action` pattern; explanatory text as `<ul>` list; action as `<button class="btn red">` |
 | `federationMainPanel` | "Generate Invite Token" was a `<p>` used as click target — not keyboard-accessible | Changed to `<button class="btn-flat btn-small">` |
 | `federationMainPanel` | Accept Invite "Server URL" input had no `v-model`, used dead Materialize `class="validate"` and floating-label pattern | Added `inviteServerUrl: ''` to `data()`; `v-model="inviteServerUrl"`; changed to label-above input pattern |
+---
+
+## [Audit] Backend Bug Pass — Full Project Source Review
+
+Full review of all backend source files. Issues found and fixed:
+
+---
+
+### [Fix] Security — GET /api/v1/admin/users sends password hashes to browser
+
+**File:** `src/api/admin.js`
+
+**Problem:** The scrubbing loop iterated all top-level keys of the users object (which are usernames — `alice`, `bob`, etc). These never match the strings `"password"` or `"salt"`, so the condition is never true and nothing is deleted. Every user's hashed password and salt were sent verbatim to the admin panel frontend on every page load.
+
+```js
+// BROKEN — iterates username keys, never matches 'password' or 'salt'
+Object.keys(memClone).forEach(key => {
+  if(key === 'password' || key === 'salt') { delete memClone[key]; }
+});
+```
+
+**Fix:** Iterate usernames and delete the nested properties on each user object.
+
+```js
+Object.keys(memClone).forEach(username => {
+  delete memClone[username].password;
+  delete memClone[username].salt;
+});
+```
+
+---
+
+### [Fix] POST /api/v1/admin/users/lastfm — three compounding bugs
+
+**Files:** `src/api/admin.js`, `src/util/admin.js`
+
+**Problem 1 — Field name typos:** Schema field names were `lasftfmUser` / `lasftfmPassword` (letters transposed — `lasftfm` instead of `lastfm`). Any client sending the correct field names would receive a Joi validation error.
+
+**Problem 2 — Wrong argument:** The handler called `admin.setUserLastFM(req.body.username, req.body.password)`. `req.body.password` was not in the Joi schema so Joi strips it — it is always `undefined`.
+
+**Problem 3 — Function did not exist:** `admin.setUserLastFM` was not exported from `src/util/admin.js` at all. The call would throw `TypeError: admin.setUserLastFM is not a function` at runtime.
+
+**Fix:**
+- Corrected schema field names to `lastfmUser` / `lastfmPassword`
+- Fixed handler call to `admin.setUserLastFM(req.body.username, req.body.lastfmUser, req.body.lastfmPassword)`
+- Implemented `setUserLastFM(username, lastfmUser, lastfmPassword)` in `src/util/admin.js` following the same transaction pattern as `editUserAccess`: deep-clone → update clone → save config file → update live `config.program.users`; stores under `lastfm-user` / `lastfm-password` keys as expected by the scrobbler
+
+---
+
+### [Fix] GET /api/v1/admin/config — federation object not included in response
+
+**File:** `src/api/admin.js`
+
+**Problem:** The config endpoint returned `address`, `port`, `noUpload`, `writeLogs`, `secret`, `ssl`, `storage`, `maxRequestSize` but omitted `federation`. The frontend's `serverParams.federation` was always `undefined`.
+
+**Fix:** Added `federation: config.program.federation` to the response object.
+
+---
+
+### [Fix] POST /api/v1/lastfm/test-login — wrong config path for API credentials
+
+**File:** `src/api/scrobbler.js`
+
+**Problem:** The HMAC signature string used `config.program.apiKey` and `config.program.apiSecret` — both `undefined` at the top level. The correct path is `config.program.lastFM.apiKey` / `config.program.lastFM.apiSecret`. As a result, the generated `api_sig` hash was always wrong and every Last.FM login test would return an authentication error from the Last.FM API.
+
+**Fix:** Changed both references to `config.program.lastFM.apiKey` and `config.program.lastFM.apiSecret`.
+
+---
+
+### [Fix] package.json — Linux syncthing binary path typo
+
+**File:** `package.json`
+
+**Problem:** The Electron builder `linux.files` array listed `"bin/syncthng/syncthing-linux"` — missing the `i` in `syncthing`. The directory is `bin/syncthing/`. Electron builds for Linux would silently omit the syncthing binary from the package.
+
+**Fix:** Corrected to `"bin/syncthing/syncthing-linux"`.
+
+---
+
+### [Fix] Comment typo — "fronted" → "frontend" (webapp/admin-v2/index.js)
+
+**File:** `webapp/admin-v2/index.js`
+
+**Problem:** 17 inline comments used `fronted` where `frontend` was intended (e.g. `// update fronted data`). No runtime impact.
+
+**Fix:** Global replacement via `sed`; zero occurrences remain.
+
+---
+
+### [Note] federation/invite/accept — incomplete feature, not a bug
+
+**File:** `src/api/federation.js`
+
+The `POST /api/v1/federation/invite/accept` endpoint has its axios handshake call commented out and returns `{}` unconditionally. This is a work-in-progress feature stub, not an accidental regression. Left as-is pending federation implementation.
