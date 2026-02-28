@@ -3343,6 +3343,15 @@ async function checkSession() {
   return false;
 }
 
+let _adminWin = null;
+function openAdminPanel() {
+  if (_adminWin && !_adminWin.closed) {
+    _adminWin.focus();
+  } else {
+    _adminWin = window.open('/admin-v2', '_blank');
+  }
+}
+
 function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').classList.remove('hidden');

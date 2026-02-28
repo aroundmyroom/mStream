@@ -540,3 +540,20 @@ Works for any number of open player tabs regardless of how the admin panel was o
 **Problem:** When the player tab received the logout broadcast and was redirected to login, the queue was saved to localStorage with `playing: true` (the `beforeunload` handler fired while the audio element was still considered playing). On re-login `restoreQueue()` read that flag and immediately called `audioEl.play()` — starting music automatically even when it should stay paused.
 
 **Fix:** In the broadcast logout handler, `persistQueue()` is now called explicitly right after `audioEl.pause()` and before the tokens are cleared. This guarantees the saved snapshot has `playing: false`. `restoreQueue()` then restores the queue position and seeks to the saved time, but does not call `audioEl.play()` — the player stays paused on login regardless of auto-DJ or any other setting.
+
+---
+
+## [Fix] Admin Panel Button — Never Navigates Player Tab Away
+
+**Files:** `webapp/v2/index.html`, `webapp/v2/app.js`
+
+**Problem:** The "Admin Panel" footer link used `target="mstream-admin"`. When the admin tab closed itself via `window.close()`, the browser could reassign that window name to the player tab. The next click on "Admin Panel" would then navigate the player tab to `/admin-v2`, killing playback.
+
+Switching to `target="_blank"` fixed that specific case but broke `window.opener` — the admin's "Go to Player" button relies on `window.opener` to focus the player tab and close itself.
+
+**Fix:** Replaced the `<a>` element with a `<span onclick="openAdminPanel()">` and added `openAdminPanel()` to `app.js`:
+- Stores the admin window in a module-level `_adminWin` variable
+- If that window is still open, focuses it (no duplicate tabs)
+- If not, opens a fresh one via `window.open('/admin-v2', '_blank')`
+
+Since `window.open()` always sets `window.opener` on the new tab, the admin's "Go to Player" (`window.opener.focus(); window.close()`) continues to work perfectly. The player tab is never navigated away.
