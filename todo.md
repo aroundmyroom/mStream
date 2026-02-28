@@ -16,3 +16,20 @@ The v2 GUI has no upload support at all yet.
 - [ ] Refresh the file list after a successful upload so the new files appear immediately
 - [ ] Hide/disable the upload UI entirely when `noUpload === true` (respect admin setting)
 - [ ] Ensure the upload target directory is the currently browsed vpath directory (pass as `data-location` header, URI-encoded)
+
+---
+
+## Admin Area — GUIv2
+
+The admin panel (`webapp/admin/`) is the original unchanged UI from the upstream project.
+It needs to be redesigned/integrated into the GUIv2 look and feel.
+
+### Tasks
+
+- [ ] Audit all existing admin panel features (scan controls, user management, transcode settings, db params)
+- [ ] Redesign admin panel to match the GUIv2 dark-mode / CSS variable theme
+- [ ] Integrate admin access into the GUIv2 sidebar (currently requires navigating to `/admin` separately)
+- [ ] Ensure admin-only UI elements are hidden from non-admin users based on the ping/login response
+- [ ] Replace or restyle all legacy CSS (materialize / foundation) in admin with GUIv2 variables
+- [ ] Test all admin API calls still work after any restructuring
+
