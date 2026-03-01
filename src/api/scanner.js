@@ -19,15 +19,17 @@ export function setup(mstream) {
       db.removeFileByPath(req.body.filepath, req.body.vpath);
       return res.json({});
     }
-    // if the file has no album art, signal the scanner to do an art-only
-    // update — preserves the original ts so it doesn't appear in Recent
-    else if (!dbFileInfo.aaFile) {
-      db.updateFileScanId(dbFileInfo, req.body.scanId);
-      return res.json({ _needsArt: true, filepath: dbFileInfo.filepath, vpath: dbFileInfo.vpath });
-    }
-    // update the record with the new scan ID
-    else {
-      db.updateFileScanId(dbFileInfo, req.body.scanId);
+    // update scan ID now so the record survives finish-scan pruning
+    db.updateFileScanId(dbFileInfo, req.body.scanId);
+
+    const flags = {};
+    // signal art-only update if aaFile is missing
+    if (!dbFileInfo.aaFile) { flags._needsArt = true; }
+    // signal cue-only update if cuepoints has never been checked (NULL)
+    if (dbFileInfo.cuepoints === null || dbFileInfo.cuepoints === undefined) { flags._needsCue = true; }
+
+    if (flags._needsArt || flags._needsCue) {
+      return res.json({ ...flags, filepath: dbFileInfo.filepath, vpath: dbFileInfo.vpath });
     }
 
     res.json(dbFileInfo);
@@ -35,6 +37,12 @@ export function setup(mstream) {
 
   mstream.post('/api/v1/scanner/update-art', (req, res) => {
     db.updateFileArt(req.body.filepath, req.body.vpath, req.body.aaFile, req.body.scanId);
+    res.json({});
+  });
+
+  mstream.post('/api/v1/scanner/update-cue', (req, res) => {
+    // cuepoints is either a JSON string or '[]' (sentinel: checked, no cue found)
+    db.updateFileCue(req.body.filepath, req.body.vpath, req.body.cuepoints);
     res.json({});
   });
 
