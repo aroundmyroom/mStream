@@ -90,6 +90,11 @@ export function updateFileArt(filepath, vpath, aaFile, scanId) {
   db.prepare('UPDATE files SET aaFile = ?, sID = ? WHERE filepath = ? AND vpath = ?').run(aaFile, scanId, filepath, vpath);
 }
 
+export function updateFileCue(filepath, vpath, cuepoints) {
+  // cuepoints is either a JSON string or '[]' (sentinel = checked, no cue)
+  db.prepare('UPDATE files SET cuepoints = ? WHERE filepath = ? AND vpath = ?').run(cuepoints, filepath, vpath);
+}
+
 export function insertFile(fileData) {
   const stmt = db.prepare(`INSERT INTO files (title, artist, year, album, filepath, format, track, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);

@@ -140,30 +140,63 @@ async function recursiveScan(dir) {
           }
         });
 
-        if (dbFileInfo.data._needsArt) {
-          // File exists but has no art — run art detection only, don't touch ts.
-          // We need to re-parse metadata to catch embedded art (e.g. WAV ID3 tags),
-          // then fall back to directory images if nothing is embedded.
-          let songInfo;
-          try {
-            songInfo = (await parseFile(filepath, { skipCovers: false })).common;
-          } catch (_e) {
-            songInfo = {};
-          }
-          songInfo.filePath = path.relative(loadJson.directory, filepath);
-          await getAlbumArt(songInfo);
-          if (songInfo.aaFile) {
-            await ax({
-              method: 'POST',
-              url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-art`,
-              headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
-              responseType: 'json',
-              data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, aaFile: songInfo.aaFile, scanId: loadJson.scanId }
-            });
-          }
-        } else if (Object.entries(dbFileInfo.data).length === 0) {
+        if (Object.entries(dbFileInfo.data).length === 0) {
+          // New file — full parse + insert (cuepoints extracted inside parseMyFile)
           const songInfo = await parseMyFile(filepath, stat.mtime.getTime());
           await insertEntries(songInfo);
+        } else {
+          // File already in DB — run targeted updates for anything still missing
+
+          if (dbFileInfo.data._needsArt) {
+            // File exists but has no art — run art detection only, don't touch ts.
+            // We need to re-parse metadata to catch embedded art (e.g. WAV ID3 tags),
+            // then fall back to directory images if nothing is embedded.
+            let songInfo;
+            try {
+              songInfo = (await parseFile(filepath, { skipCovers: false })).common;
+            } catch (_e) {
+              songInfo = {};
+            }
+            songInfo.filePath = path.relative(loadJson.directory, filepath);
+            await getAlbumArt(songInfo);
+            if (songInfo.aaFile) {
+              await ax({
+                method: 'POST',
+                url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-art`,
+                headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+                responseType: 'json',
+                data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, aaFile: songInfo.aaFile, scanId: loadJson.scanId }
+              });
+            }
+          }
+
+          if (dbFileInfo.data._needsCue) {
+            // cuepoints IS NULL — first time we check this file for an embedded cue sheet.
+            // Always writes back ('[]' sentinel or actual JSON) so this file is skipped next scan.
+            let cuepoints = '[]';
+            try {
+              const parsed = await parseFile(filepath, { skipCovers: true });
+              const cue = parsed.common?.cuesheet;
+              const sampleRate = parsed.format?.sampleRate || null;
+              if (cue && Array.isArray(cue.tracks) && cue.tracks.length && sampleRate) {
+                const pts = [];
+                for (const t of cue.tracks) {
+                  if (t.number === 170) continue;
+                  const idx1 = Array.isArray(t.indexes) && t.indexes.find(i => i.number === 1);
+                  if (!idx1) continue;
+                  pts.push({ no: t.number, title: t.title || null, t: Math.round((idx1.offset / sampleRate) * 100) / 100 });
+                }
+                if (pts.length > 1) cuepoints = JSON.stringify(pts);
+              }
+            } catch (_e) { /* non-critical */ }
+            await ax({
+              method: 'POST',
+              url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-cue`,
+              headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+              responseType: 'json',
+              data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, cuepoints }
+            });
+          }
         }
       } catch (err) {
         // console.log(err)
