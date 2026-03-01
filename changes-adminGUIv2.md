@@ -640,3 +640,16 @@ The `/remote/:code` page was using Materialize CSS and Vue 2, resulting in a whi
 - On successful `playPause` command: `_isPlaying` flips, icon updates immediately
 - On connect (`showRemote`): `_isPlaying` resets to false (assume paused, unknown state)
 - Matches v2's dual-icon play/pause button pattern
+
+## GUIv2 dark mode — navy blue background (remote-style) [EXPERIMENTAL / REVERTABLE]
+- Replaced near-black dark palette with remote page's solid navy blue palette
+- --bg: #08080e → #1a1a2e
+- --surface: #101018 → #16213e
+- --raised: #16161f → #0f3460
+- --card: #1a1a26 → #1e2d4a
+- --border: rgba(255,255,255,.07) → #2a3a5e (solid, visible)
+- --border2: rgba(255,255,255,.13) → #3a4e72 (solid)
+- --t3: #44445c → #6070a0 (more readable muted text on lighter bg)
+- --t4: #2a2a3e → #2a3a5e
+- Original values kept in comment block in style.css for easy revert
+- TO REVERT: in style.css :root block, uncomment the "ORIGINAL NEAR-BLACK DARK" block and remove the navy values, restore --t3:#44445c --t4:#2a2a3e
