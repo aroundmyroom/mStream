@@ -2,10 +2,10 @@
 
 :root {
   color-scheme: dark;
-  --bg: #08080e; --surface: #101018; --raised: #16161f; --card: #1a1a26;
+  --bg: #1a1a2e; --surface: #16213e; --raised: #0f3460; --card: #1e2d4a;
   --primary: #8b5cf6; --accent: #60a5fa; --green: #34d399; --red: #f87171; --yellow: #fbbf24;
-  --t1: #eeeeff; --t2: #8888b0; --t3: #44445c; --t4: #2a2a3e;
-  --border: #2a2a3e; --border2: #3a3a52; --hover: rgba(139,92,246,.08);
+  --t1: #eeeeff; --t2: #8888b0; --t3: #6070a0; --t4: #2a3a5e;
+  --border: #2a3a5e; --border2: #3a4e72; --hover: rgba(139,92,246,.08);
   --sidebar-w: 220px; --r: 6px;
   --theme-icon-moon: block; --theme-icon-sun: none;
 }

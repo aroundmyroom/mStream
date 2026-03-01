@@ -653,3 +653,9 @@ The `/remote/:code` page was using Materialize CSS and Vue 2, resulting in a whi
 - --t4: #2a2a3e → #2a3a5e
 - Original values kept in comment block in style.css for easy revert
 - TO REVERT: in style.css :root block, uncomment the "ORIGINAL NEAR-BLACK DARK" block and remove the navy values, restore --t3:#44445c --t4:#2a2a3e
+
+## All pages — navy dark palette applied everywhere
+- webapp/qr/index.html: --bg #08080e→#1a1a2e, --surface #101018→#16213e, --raised #16161f→#0f3460, --border rgba(.07)→#2a3a5e, --border2 rgba(.13)→#3a4e72, --t3 #44445c→#6070a0
+- webapp/admin-v2/index.css: same bg/surface/raised/card, plus --t4 #2a2a3e→#2a3a5e, --border #2a2a3e→#2a3a5e, --border2 #3a3a52→#3a4e72
+- webapp/shared/index.html: already inherits from v2/style.css (updated previously) ✓
+- webapp/remote/index.html: already the navy palette (the source) ✓
