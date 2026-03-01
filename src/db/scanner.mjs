@@ -64,7 +64,8 @@ async function insertEntries(song) {
     "ts": Math.floor(Date.now() / 1000),
     "sID": loadJson.scanId,
     "replaygainTrackDb": song.replaygain_track_gain ? song.replaygain_track_gain.dB : null,
-    "genre": song.genre ? String(song.genre) : null
+    "genre": song.genre ? String(song.genre) : null,
+    "cuepoints": song.cuepoints || null
   };
 
   await ax({
@@ -180,9 +181,11 @@ function timeout(ms) {
 }
 
 async function parseMyFile(thisSong, modified) {
-  let songInfo;
+  let songInfo, fmtInfo = {};
   try {
-    songInfo = (await parseFile(thisSong, { skipCovers: loadJson.skipImg })).common;
+    const parsed = await parseFile(thisSong, { skipCovers: loadJson.skipImg });
+    songInfo = parsed.common;
+    fmtInfo = parsed.format || {};
   } catch (err) {
     console.error(`Warning: metadata parse error on ${thisSong}: ${err.message}`);
     songInfo = {track: { no: null, of: null }, disk: { no: null, of: null }};
@@ -192,8 +195,27 @@ async function parseMyFile(thisSong, modified) {
   songInfo.filePath = path.relative(loadJson.directory, thisSong);
   songInfo.format = getFileType(thisSong);
   songInfo.hash = await calculateHash(thisSong);
-  await getAlbumArt(songInfo);
 
+  // Extract embedded cue sheet (present in single-file FLAC/WAV album rips)
+  try {
+    const cue = songInfo.cuesheet;
+    const sampleRate = fmtInfo.sampleRate || null;
+    if (cue && Array.isArray(cue.tracks) && cue.tracks.length && sampleRate) {
+      const cuePoints = [];
+      for (const t of cue.tracks) {
+        if (t.number === 170) continue; // 0xAA = lead-out marker
+        const idx1 = Array.isArray(t.indexes) && t.indexes.find(i => i.number === 1);
+        if (!idx1) continue;
+        const seconds = idx1.offset / sampleRate;
+        cuePoints.push({ no: t.number, title: t.title || null, t: Math.round(seconds * 100) / 100 });
+      }
+      if (cuePoints.length > 1) {
+        songInfo.cuepoints = JSON.stringify(cuePoints);
+      }
+    }
+  } catch (_e) { /* non-critical — cue extraction failed */ }
+
+  await getAlbumArt(songInfo);
   return songInfo;
 }
 

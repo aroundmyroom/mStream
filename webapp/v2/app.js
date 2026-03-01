@@ -52,6 +52,8 @@ let _xfadeFired  = false;  // true once crossfade has started for the current tr
 let _xfadeStartVol = 0;    // audioEl.volume at the moment crossfade began
 let _xfadeNextIdx  = -1;   // nextIdx stored for the ended-event handoff
 let _xfadeWired  = false;  // true once _xfadeEl is connected to Web Audio
+let _cuePoints         = [];    // cue sheet track markers for the current file
+let _cueMarkersRendered = false; // true once tick marks have been drawn for current file
 let analyserL    = null;   // left-channel analyser
 let analyserR    = null;   // right-channel analyser
 let eqFilters    = [];     // 8 BiquadFilterNodes – built on first play
@@ -289,6 +291,7 @@ const Player = {
     audioEl.load();
     VIZ.initAudio();   // ensure AudioContext + analysers exist BEFORE play fires
     audioEl.play().catch(() => {});
+    loadCuePoints(s.filepath);
     this.updateBar();
     highlightRow();
     refreshQueueUI();
@@ -3833,12 +3836,50 @@ function _onAudioStalled() {
 }
 function _onAudioPlaying()  { clearTimeout(_netRecoveryTimer); }
 function _onAudioCanPlay() { clearTimeout(_netRecoveryTimer); }
+
+// ── CUE SHEET MARKERS ────────────────────────────────────────
+async function loadCuePoints(filepath) {
+  _cuePoints = [];
+  _cueMarkersRendered = false;
+  ['cue-markers','np-cue-markers'].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ''; });
+  try {
+    const fp = encodeURIComponent(filepath);
+    const data = await api('GET', `api/v1/db/cuepoints?fp=${fp}`);
+    _cuePoints = (data.cuepoints || []).filter(cp => cp.t > 0);
+  } catch (_e) { _cuePoints = []; }
+  renderCueMarkers();
+}
+function renderCueMarkers() {
+  if (_cueMarkersRendered || !_cuePoints.length || !audioEl.duration) return;
+  _cueMarkersRendered = true;
+  const dur = audioEl.duration;
+  const html = _cuePoints.map(cp => {
+    const pct = (cp.t / dur) * 100;
+    if (pct <= 0 || pct >= 100) return '';
+    const label = cp.title ? `${cp.no}. ${cp.title}` : `Track ${cp.no}`;
+    return `<span class="cue-tick" style="left:${pct.toFixed(2)}%" data-label="${esc(label)}"></span>`;
+  }).join('');
+  ['cue-markers','np-cue-markers'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = html;
+    el.querySelectorAll('.cue-tick').forEach(tick => {
+      tick.addEventListener('click', e => {
+        e.stopPropagation();
+        if (audioEl.duration) audioEl.currentTime = (parseFloat(tick.style.left) / 100) * audioEl.duration;
+      });
+    });
+  });
+}
+// ─────────────────────────────────────────────────────────────
+
 function _onAudioTimeupdatePersist() {
   if (_persistTimer) return;
   _persistTimer = setTimeout(() => { _persistTimer = null; persistQueue(); }, 5000);
 }
 function _onAudioTimeupdateUI() {
   if (!audioEl.duration) return;
+  if (_cuePoints.length && !_cueMarkersRendered) renderCueMarkers();
   const pct = (audioEl.currentTime / audioEl.duration) * 100;
   document.getElementById('prog-fill').style.width = pct + '%';
   document.getElementById('time-cur').textContent   = fmt(audioEl.currentTime);
