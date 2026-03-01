@@ -631,7 +631,7 @@ function renderSongRowsWithPath(songs) {
     const art    = artUrl(s['album-art'], 's');
     // Show path without the filename at the end for ID3-matched songs,
     // or the full relative path for filename-matched songs
-    const pathDir = s.filepath ? s.filepath.split('/').slice(0, -1).join('/') : '';
+    const pathDir = s.filepath ? s.filepath.split('/').slice(0, -1).join('\\') : '';
     return `<div class="song-row" data-ci="${i}">
       <div class="row-num">
         <span class="num-val">${i + 1}</span>
@@ -853,7 +853,7 @@ function renderNPModal() {
     const parts = s.filepath.split('/');
     const fname = parts.pop();
     const dirParts = parts.filter(Boolean);
-    const dirHtml = dirParts.map(p => `<span class="np-fp-dir">${esc(p)}</span><span class="np-fp-sep">/</span>`).join('');
+    const dirHtml = dirParts.map(p => `<span class="np-fp-dir">${esc(p)}</span><span class="np-fp-sep">\\</span>`).join('');
     fpEl.innerHTML = `<span class="np-fp-label">File Path</span><div class="np-fp-path">${dirHtml}<span class="np-fp-file">${esc(fname)}</span></div>`;
     fpEl.classList.remove('hidden');
   } else {
