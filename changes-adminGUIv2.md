@@ -557,3 +557,86 @@ Switching to `target="_blank"` fixed that specific case but broke `window.opener
 - If not, opens a fresh one via `window.open('/admin-v2', '_blank')`
 
 Since `window.open()` always sets `window.opener` on the new tab, the admin's "Go to Player" (`window.opener.focus(); window.close()`) continues to work perfectly. The player tab is never navigated away.
+
+---
+
+## [Fix + Rewrite] Jukebox Remote Page — GUIv2 Style + 500 Error Fixed
+
+**Files:** `webapp/remote/index.html`, `webapp/remote/index.css`, `webapp/remote/index.js`, `src/api/remote.js`
+
+### Backend fix — 500 → proper 4xx
+`remote.js` was throwing plain `new Error(...)` for unknown code / invalid command, which the global error handler mapped to HTTP 500. Fixed by importing `WebError` and throwing `new WebError('Code Not Found', 404)` and `new WebError('Command Not Recognized', 400)`.
+
+### Remote page — full rewrite (no Materialize, no Vue, no axios)
+The `/remote/:code` page was using Materialize CSS and Vue 2, resulting in a white-only page completely out of place on mobile.
+
+**Rewritten as pure vanilla HTML/CSS/JS:**
+- GUIv2 CSS variables (`--bg`, `--surface`, `--raised`, `--accent`, `--t1/t2/t3`, `--border`) — full dark/light theme
+- Theme syncs with the player via `ms2_theme` localStorage key; toggle button top-right
+- Topbar with mStream logo and "Remote Control" label
+- Login card: enter code manually if not arriving via QR link; error feedback; Enter key submits
+- Auto-connects immediately when server pre-injects `remoteProperties` (QR scan flow)
+- **Controls**: ⏮ Previous, ⏯ Play/Pause (accent-coloured large button), ⏭ Next — all send commands via `fetch` with the jukebox token
+- Brief `ctrlToast` feedback line below controls on each command
+- **File browser**: breadcrumb path + back button, folder/file icons, tap anywhere on a song row OR tap "+ Queue" button to add to queue; spinner while loading
+- No external dependencies — zero CDN calls, works fully offline on local network
+
+## Remote login screen — GUIv2 modal style
+- Added `--primary`, `--primary-h`, `--primary-d`, `--primary-g`, `--red` CSS variables to remote page (dark + light)
+- Login `#login-screen` now uses the same radial-gradient purple glow background as GUIv2
+- `.login-card` upgraded: `border-radius:22px`, deep `box-shadow` (dark mode) / soft shadow (light mode)
+- `.field-input` focus state now shows primary-color border + `box-shadow: 0 0 0 3px var(--primary-d)` glow ring
+- `.btn-primary` now uses `--primary` purple with hover glow and active scale, matching GUIv2 login button
+- Added centered logo + title + subtitle brand block inside login card (replacing plain `<h2>` + `<p>`)
+
+## v2 login screen — input visibility & brand polish
+- `.login-card` border upgraded from `--border` (7% white) to `--border2` (13% white) — more defined card edge
+- `.login-card` box-shadow slightly stronger purple glow; added explicit light-mode shadow override
+- `#login-form input` background changed from `var(--raised)` (near-black, invisible) to `rgba(255,255,255,.06)` — clearly visible translucent fields in dark mode
+- `#login-form input` border changed from `var(--border)` (7% opacity, invisible) to `rgba(255,255,255,.16)` — solid visible border in dark mode
+- Added `:root.light #login-form input` override: `background:rgba(0,0,0,.05); border-color:rgba(0,0,0,.18)` — fixes "grey background" appearance in light mode
+- Login brand logo SVG updated from grey-blue (`#6684B2`/`#26477B`) to purple (`#a78bfa`/`#7c3aed`) — aligns with primary color theme
+
+## v2 login — properly visible inputs matching remote page style
+- `.login-card` background changed from `var(--surface)` (#101018, near-black) to `var(--card)` (#1a1a26) — card now visually separates from the page background
+- `#login-form input` dark mode: background `rgba(255,255,255,.11)`, border `rgba(255,255,255,.28)` — strongly visible fields on dark card
+- `#login-form input` light mode: background `#d8d8ee`, border `rgba(0,0,0,.22)` — clearly defined purple-tinted fields contrasting the light card
+
+## v2 login — full remote-page style parity
+- Root cause identified: v2 global theme uses near-black transparent colors (--bg:#08080e, --border:rgba(255,255,255,.07)) making inputs invisible
+- Fix: Scoped remote-page's solid-color variables directly onto #login-screen so all child elements (card, inputs, labels) inherit them — identical to remote page
+- Dark mode: --surface:#16213e, --raised:#0f3460, --border:#2a3a5e, --t1:#e0e0f0, --t2:#a0a8c0, --t3:#6070a0
+- Light mode: --surface:#ffffff, --raised:#e4e8f0, --border:#d1d5db, --t1:#111827, --t2:#4b5563, --t3:#9ca3af
+- #login-form input now uses var(--raised) + var(--border) — same as .field-input on remote page
+- Added field-label <label> elements above each input (Username / Password) matching remote page layout
+- Login card border/shadow match remote page exactly
+
+## Remote page — styled error screen for invalid/expired codes
+- `src/api/remote.js`: `/remote/:code` route no longer throws on invalid code (was causing 500 SERVER ERROR)
+  - Now serves the remote page HTML with `remoteProperties = { error: true }` injected
+- `webapp/remote/index.html`: Added `#error-screen` — hidden by default, shown when `remoteProperties.error === true`
+  - Red-tinted radial-gradient background (dark + light variants)
+  - `.error-card`: same card style as login card (border-radius:22px, box-shadow) with centered content
+  - `.error-icon`: circular red badge with info/alert SVG icon
+  - Heading "Code Not Found", message explaining the code is invalid or expired
+  - "Try Another Code" button linking to `/remote/` — purple primary button with hover/active effects
+- Login screen and remote screen are both hidden; JS checks `remoteProperties.error` at startup and shows correct screen
+
+## Login & remote page — restore correct mStream logo colors
+- Both login card logos were using purple (#8b5cf6/#6d3ce6) from a prior change
+- Restored to original mStream brand colors: outer polygons #6684B2, center polygon #26477B — matches topbar logo and all other instances in the app
+
+## Remote page — play buttons match GUIv2 exactly
+- Removed old `.ctrl-btn` / `.ctrl-btn.large` with blue accent background and hard borders
+- Added `.ctrl-nav` (44×44px, no background, hover rgba) for Prev/Next — matches v2 player bar
+- Added `.play-main` (56×56px, `var(--primary)` purple, hover glow ring `box-shadow:0 0 0 8px var(--primary-d)`) — matches v2 player bar
+- Controls row wrapped in `.ctrl-row` flex container inside `.controls` column flex
+- `ctrl-toast` feedback line restored inside controls block
+
+## Remote page — play/pause button icon toggles
+- Play button now has two SVGs: play triangle (#play-icon) and pause bars (#pause-icon)
+- `_isPlaying` state variable tracks optimistic play state
+- `updatePlayBtn()` toggles visibility of the two icons
+- On successful `playPause` command: `_isPlaying` flips, icon updates immediately
+- On connect (`showRemote`): `_isPlaying` resets to false (assume paused, unknown state)
+- Matches v2's dual-icon play/pause button pattern
