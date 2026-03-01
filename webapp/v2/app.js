@@ -156,6 +156,7 @@ function restoreQueue() {
       audioEl.load();
       Player.updateBar();
       highlightRow();
+      loadCuePoints(s.filepath);
       if (data.time > 1) {
         audioEl.addEventListener('loadedmetadata', () => {
           audioEl.currentTime = data.time;
@@ -3227,6 +3228,7 @@ function _doXfadeHandoff(nextIdx) {
   Player.updateBar();
   highlightRow();
   refreshQueueUI();
+  loadCuePoints(s.filepath);
   clearTimeout(scrobbleTimer);
   scrobbleTimer = setTimeout(() => {
     api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath }).catch(() => {});
