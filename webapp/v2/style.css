@@ -617,15 +617,15 @@ a{color:inherit;text-decoration:none;}
 /* The visible stem - centered in the hit zone */
 .cue-tick::before{
   content:'';
-  position:absolute;top:3px;bottom:3px;left:50%;margin-left:-1.5px;
-  width:3px;
+  position:absolute;top:3px;bottom:3px;left:50%;margin-left:-2px;
+  width:4px;
   background:rgba(255,190,30,.85);
   border-radius:2px;
-  transition:background .1s, transform .1s;
+  transition:background .1s;
 }
-.cue-tick:hover::before{background:var(--primary);transform:scaleY(1.4);}
+.cue-tick:hover::before{background:var(--primary);}
 /* Light mode: use dark purple stem so it's visible on white background */
-:root.light .cue-tick::before{background:rgba(109,60,230,.7);}
+:root.light .cue-tick::before{background:rgba(109,60,230,.75);}
 :root.light .cue-tick:hover::before{background:var(--primary);}
 /* Tooltip above the bar */
 .cue-tick::after{
