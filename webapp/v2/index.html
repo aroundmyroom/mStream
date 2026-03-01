@@ -30,7 +30,7 @@
 <div id="login-screen">
   <div class="login-card">
     <div class="login-brand">
-      <svg width="52" height="52" viewBox="72 33 76 89">
+      <svg width="44" height="44" viewBox="72 33 76 89">
         <polygon fill="#6684B2" points="75,118.5 75,35.5 96,48.5 96,118.5"/>
         <polygon fill="#26477B" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/>
         <polygon fill="#6684B2" points="124,118.5 124,48.5 145,35.5 145,118.5"/>
@@ -39,7 +39,9 @@
       <p>Your personal music server</p>
     </div>
     <form id="login-form">
-      <input id="l-user" type="text"     placeholder="Username" autocomplete="username">
+      <label class="field-label" for="l-user">Username</label>
+      <input id="l-user" type="text" placeholder="Username" autocomplete="username">
+      <label class="field-label" for="l-pass">Password</label>
       <input id="l-pass" type="password" placeholder="Password" autocomplete="current-password">
       <button type="submit" id="login-btn">Sign In</button>
       <p id="login-error"></p>

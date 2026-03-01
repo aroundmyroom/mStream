@@ -2800,11 +2800,10 @@ function _renderJukeboxActive(code) {
     const qr  = QRC.encodeText(url, QRC.Ecc.MEDIUM);
     // toSvgString(border) returns a full <svg> string
     const raw = qr.toSvgString(2);
-    // Inject sizing + theme-aware colours into the generated SVG
+    // Keep black-on-white — QR scanners need high contrast; add a white
+    // background so it looks correct in dark mode too.
     qrSvg = raw
-      .replace('<svg ', '<svg width="180" height="180" style="border-radius:8px" ')
-      .replace(/fill="#000000"/g, 'fill="var(--t1)"')
-      .replace(/fill="#ffffff"/g, 'fill="var(--surface)"');
+      .replace('<svg ', '<svg width="180" height="180" style="border-radius:8px;background:#fff;padding:4px;box-sizing:content-box;" ');
   } catch(e) {
     qrSvg = `<div style="width:180px;height:180px;display:flex;align-items:center;justify-content:center;background:var(--raised);border-radius:8px;color:var(--t3);font-size:12px">QR unavailable</div>`;
   }
