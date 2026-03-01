@@ -333,4 +333,15 @@ export function setup(mstream) {
 
     res.json(returnThis);
   });
+
+  // Returns embedded cue sheet track markers for a single file (used by the player seek bar)
+  mstream.get('/api/v1/db/cuepoints', (req, res) => {
+    try {
+      const pathInfo = vpath.getVPathInfo(req.query.fp, req.user);
+      const row = db.findFileByPath(pathInfo.relativePath, pathInfo.vpath);
+      res.json({ cuepoints: row?.cuepoints ? JSON.parse(row.cuepoints) : [] });
+    } catch (_e) {
+      res.json({ cuepoints: [] });
+    }
+  });
 }
