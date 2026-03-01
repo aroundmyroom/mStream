@@ -18,7 +18,7 @@ export function init(dbDirectory) {
       title TEXT, artist TEXT, year INTEGER, album TEXT,
       filepath TEXT NOT NULL, format TEXT, track INTEGER, disk INTEGER,
       modified REAL, hash TEXT, aaFile TEXT, vpath TEXT NOT NULL,
-      ts INTEGER, sID TEXT, replaygainTrackDb REAL, genre TEXT
+      ts INTEGER, sID TEXT, replaygainTrackDb REAL, genre TEXT, cuepoints TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_files_filepath_vpath ON files(filepath, vpath);
     CREATE INDEX IF NOT EXISTS idx_files_vpath ON files(vpath);
@@ -45,6 +45,8 @@ export function init(dbDirectory) {
     );
     CREATE INDEX IF NOT EXISTS idx_sp_expires ON shared_playlists(expires);
   `);
+  // Migration: add cuepoints column for databases created before this feature
+  try { db.exec('ALTER TABLE files ADD COLUMN cuepoints TEXT'); } catch (_e) {}
 }
 
 export function close() {
@@ -89,13 +91,13 @@ export function updateFileArt(filepath, vpath, aaFile, scanId) {
 }
 
 export function insertFile(fileData) {
-  const stmt = db.prepare(`INSERT INTO files (title, artist, year, album, filepath, format, track, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const stmt = db.prepare(`INSERT INTO files (title, artist, year, album, filepath, format, track, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const result = stmt.run(
     fileData.title ?? null, fileData.artist ?? null, fileData.year ?? null, fileData.album ?? null,
     fileData.filepath, fileData.format ?? null, fileData.track ?? null, fileData.disk ?? null,
     fileData.modified ?? null, fileData.hash ?? null, fileData.aaFile ?? null, fileData.vpath,
-    fileData.ts ?? null, fileData.sID ?? null, fileData.replaygainTrackDb ?? null, fileData.genre ?? null
+    fileData.ts ?? null, fileData.sID ?? null, fileData.replaygainTrackDb ?? null, fileData.genre ?? null, fileData.cuepoints ?? null
   );
   return { ...fileData, id: Number(result.lastInsertRowid) };
 }
