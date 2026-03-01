@@ -189,6 +189,13 @@ async function recursiveScan(dir) {
                 if (pts.length > 1) cuepoints = JSON.stringify(pts);
               }
             } catch (_e) { /* non-critical */ }
+            // Fallback: sidecar .cue file alongside the audio file
+            if (cuepoints === '[]') {
+              try {
+                const sidecar = parseSidecarCue(filepath);
+                if (sidecar) cuepoints = JSON.stringify(sidecar);
+              } catch (_e) { /* non-critical */ }
+            }
             await ax({
               method: 'POST',
               url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-cue`,
@@ -211,6 +218,50 @@ async function recursiveScan(dir) {
 
 function timeout(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Parse a sidecar .cue file alongside an audio file.
+// Returns [{no, title, t}] (t = seconds) or null.
+// Only applies to single-FILE cue sheets where the FILE entry matches this audio file.
+function parseSidecarCue(audioFilePath) {
+  const dir  = path.dirname(audioFilePath);
+  const base = path.basename(audioFilePath, path.extname(audioFilePath));
+
+  // Prefer exact-basename match, then fall back to sole .cue in the directory
+  let cuePath = path.join(dir, base + '.cue');
+  if (!fs.existsSync(cuePath)) {
+    let cueFiles;
+    try { cueFiles = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.cue')); } catch (_e) { return null; }
+    if (cueFiles.length !== 1) return null;
+    cuePath = path.join(dir, cueFiles[0]);
+  }
+
+  let content;
+  try { content = fs.readFileSync(cuePath, 'utf8'); } catch (_e) { return null; }
+
+  // Only handle single-FILE cue sheets whose FILE line references this audio file
+  const fileLines = [...content.matchAll(/^FILE\s+"([^"]+)"/gim)];
+  if (fileLines.length !== 1) return null;
+  const cueRef = path.basename(fileLines[0][1]);
+  if (cueRef.toLowerCase() !== path.basename(audioFilePath).toLowerCase()) return null;
+
+  // Parse TRACK / TITLE / INDEX 01 MM:SS:FF
+  const tracks = [];
+  let cur = null;
+  for (const line of content.split(/\r?\n/)) {
+    const trackM = line.match(/^\s*TRACK\s+(\d+)\s+AUDIO/i);
+    if (trackM) { cur = { no: parseInt(trackM[1], 10), title: null }; continue; }
+    if (!cur) continue;
+    const titleM = line.match(/^\s*TITLE\s+"(.*)"/i);
+    if (titleM) { cur.title = titleM[1]; continue; }
+    const idxM = line.match(/^\s*INDEX\s+01\s+(\d+):(\d+):(\d+)/i);
+    if (idxM) {
+      const t = parseInt(idxM[1], 10) * 60 + parseInt(idxM[2], 10) + parseInt(idxM[3], 10) / 75;
+      tracks.push({ no: cur.no, title: cur.title, t: Math.round(t * 100) / 100 });
+      cur = null;
+    }
+  }
+  return tracks.length > 1 ? tracks : null;
 }
 
 async function parseMyFile(thisSong, modified) {
@@ -247,6 +298,14 @@ async function parseMyFile(thisSong, modified) {
       }
     }
   } catch (_e) { /* non-critical — cue extraction failed */ }
+
+  // Fallback: sidecar .cue file alongside the audio file
+  if (!songInfo.cuepoints) {
+    try {
+      const sidecar = parseSidecarCue(thisSong);
+      if (sidecar) songInfo.cuepoints = JSON.stringify(sidecar);
+    } catch (_e) { /* non-critical */ }
+  }
 
   await getAlbumArt(songInfo);
   return songInfo;
