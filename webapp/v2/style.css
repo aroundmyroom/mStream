@@ -832,7 +832,7 @@ a{color:inherit;text-decoration:none;}
   border-radius:var(--r);padding:9px 11px;
 }
 .np-fp-dir{color:var(--t3);}
-.np-fp-sep{color:var(--t4);margin:0 1px;}
+.np-fp-sep{color:var(--t2);margin:0 1px;}
 .np-fp-file{color:var(--t1);font-weight:600;}
 .np-viz-btn{
   width:100%;padding:12px;border-radius:var(--r);font-size:13px;font-weight:600;
