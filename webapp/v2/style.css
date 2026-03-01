@@ -608,24 +608,24 @@ a{color:inherit;text-decoration:none;}
 .cue-markers{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index:3;}
 /* Each tick: visible colored bar + tooltip. Hit zone wider than visual. */
 .cue-tick{
-  position:absolute;top:-3px;bottom:-3px;width:12px;
+  position:absolute;top:-8px;bottom:-8px;width:12px;
   display:block;transform:translateX(-50%);
   pointer-events:auto;cursor:pointer;
   background:transparent;
   border:none;padding:0;
 }
-/* The visible stem - centered in the hit zone */
+/* The visible stem - full height of the hit zone */
 .cue-tick::before{
   content:'';
-  position:absolute;top:3px;bottom:3px;left:50%;margin-left:-2px;
+  position:absolute;top:0;bottom:0;left:50%;margin-left:-2px;
   width:4px;
-  background:rgba(255,190,30,.85);
+  background:rgba(255,190,30,.9);
   border-radius:2px;
   transition:background .1s;
 }
 .cue-tick:hover::before{background:var(--primary);}
 /* Light mode: use dark purple stem so it's visible on white background */
-:root.light .cue-tick::before{background:rgba(109,60,230,.75);}
+:root.light .cue-tick::before{background:rgba(109,60,230,.8);}
 :root.light .cue-tick:hover::before{background:var(--primary);}
 /* Tooltip above the bar */
 .cue-tick::after{
