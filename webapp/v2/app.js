@@ -896,7 +896,7 @@ const MINI_SPEC = (() => {
 
   function draw() {
     const canvas = document.getElementById('mini-spec');
-    if (!canvas) return;
+    if (!canvas) { rafId = null; return; }  // clear stale handle so start() can restart
     // Only run when audio context is ready
     if (!audioCtx || !analyserL || !analyserR) { rafId = requestAnimationFrame(draw); return; }
     const aL = analyserL;
@@ -983,6 +983,8 @@ const VIZ = (() => {
   function ensureAudio() {
     if (audioCtx) { audioCtx.resume(); return; }
     audioCtx    = new (window.AudioContext || window.webkitAudioContext)();
+    // Resume immediately — browsers often start in 'suspended' state
+    audioCtx.resume().catch(() => {});
     // Auto-resume if the browser suspends the context (energy-saving policy)
     // — without this a suspended context causes ~0.5 s silence mid-song.
     audioCtx.addEventListener('statechange', () => {
