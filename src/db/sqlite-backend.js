@@ -131,6 +131,8 @@ export function getStats() {
   const totalGenres     = db.prepare("SELECT COUNT(DISTINCT genre) AS cnt FROM files WHERE genre IS NOT NULL AND genre != ''").get().cnt;
   const withArt         = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE aaFile IS NOT NULL AND aaFile != ''").get().cnt;
   const withReplaygain  = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE replaygainTrackDb IS NOT NULL').get().cnt;
+  const withCue         = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE cuepoints IS NOT NULL AND cuepoints != '[]'").get().cnt;
+  const cueUnchecked    = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE cuepoints IS NULL').get().cnt;
 
   const yearRow         = db.prepare('SELECT MIN(year) AS oldest, MAX(year) AS newest FROM files WHERE year >= 1900 AND year <= 2030').get();
   const newestTsRow     = db.prepare('SELECT MAX(ts) AS ts FROM files').get();
@@ -166,6 +168,8 @@ export function getStats() {
     withArt,
     withoutArt: totalFiles - withArt,
     withReplaygain,
+    withCue,
+    cueUnchecked,
     oldestYear:  yearRow.oldest  || null,
     newestYear:  yearRow.newest  || null,
     lastScannedTs: newestTsRow.ts ? newestTsRow.ts * 1000 : null,
