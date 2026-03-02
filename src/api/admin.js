@@ -233,6 +233,30 @@ export function setup(mstream) {
     res.json(db.getStats());
   });
 
+  // ── Scan Error Audit ──────────────────────────────────────────────────────────
+  mstream.get('/api/v1/admin/db/scan-errors', (req, res) => {
+    res.json(db.getScanErrors());
+  });
+
+  mstream.delete('/api/v1/admin/db/scan-errors', (req, res) => {
+    db.clearScanErrors();
+    res.json({});
+  });
+
+  mstream.get('/api/v1/admin/db/scan-errors/count', (req, res) => {
+    res.json({ count: db.getScanErrorCount() });
+  });
+
+  mstream.post('/api/v1/admin/db/params/scan-error-retention', async (req, res) => {
+    const schema = Joi.object({
+      hours: Joi.number().integer().valid(12, 24, 48, 72, 168, 336, 720).required()
+    });
+    joiValidate(schema, req.body);
+    await admin.editScanErrorRetention(req.body.hours);
+    res.json({});
+  });
+  // ─────────────────────────────────────────────────────────────────────────────
+
   mstream.delete("/api/v1/admin/users", async (req, res) => {
     const schema = Joi.object({
       username: Joi.string().required()

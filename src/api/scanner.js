@@ -46,6 +46,23 @@ export function setup(mstream) {
     res.json({});
   });
 
+  // Scan error audit: called by the scanner child process to record an error.
+  // The guid (md5 of filepath|errorType) ensures deduplication: the same problem
+  // on the same file is counted (count++) rather than creating duplicate rows.
+  mstream.post('/api/v1/scanner/report-error', (req, res) => {
+    const { guid, filepath, vpath, errorType, errorMsg, stack } = req.body;
+    if (!guid || !filepath || !vpath || !errorType) { return res.json({}); }
+    db.insertScanError(guid, filepath, vpath, errorType, errorMsg || '', stack || '');
+    res.json({});
+  });
+
+  // Prune old scan errors before each scan run.
+  mstream.post('/api/v1/scanner/prune-errors', (req, res) => {
+    const retentionHours = config.program.scanOptions.scanErrorRetentionHours || 48;
+    db.pruneScanErrors(retentionHours);
+    res.json({});
+  });
+
   mstream.post('/api/v1/scanner/finish-scan', (req, res) => {
     db.removeStaleFiles(req.body.vpath, req.body.scanId);
     db.saveFilesDB();
