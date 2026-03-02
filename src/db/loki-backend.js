@@ -15,6 +15,7 @@ let fileCollection;
 let playlistCollection;
 let userMetadataCollection;
 let shareCollection;
+let scanErrorCollection;
 
 export function init(dbDirectory) {
   return new Promise((resolve) => {
@@ -32,6 +33,10 @@ export function init(dbDirectory) {
       fileCollection = filesDB.getCollection('files');
       if (!fileCollection) {
         fileCollection = filesDB.addCollection('files');
+      }
+      scanErrorCollection = filesDB.getCollection('scan_errors');
+      if (!scanErrorCollection) {
+        scanErrorCollection = filesDB.addCollection('scan_errors', { indices: ['vpath', 'last_seen'] });
       }
       checkDone();
     });
@@ -689,4 +694,50 @@ export function removeEternalSharedPlaylists() {
 
 export function removeSharedPlaylistsByUser(username) {
   shareCollection.findAndRemove({ 'user': { '$eq': username } });
+}
+
+// ── Scan Errors ─────────────────────────────────────────────────────────────
+
+export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stack) {
+  const now = Math.floor(Date.now() / 1000);
+  const existing = scanErrorCollection.findOne({ guid: { '$eq': guid } });
+  if (existing) {
+    existing.last_seen = now;
+    existing.count = (existing.count || 1) + 1;
+    scanErrorCollection.update(existing);
+  } else {
+    scanErrorCollection.insert({
+      guid, filepath, vpath,
+      error_type: errorType,
+      error_msg: errorMsg || '',
+      stack: stack || '',
+      first_seen: now,
+      last_seen: now,
+      count: 1
+    });
+  }
+}
+
+export function getScanErrors() {
+  const all = scanErrorCollection.find();
+  return all
+    .map(r => ({
+      guid: r.guid, filepath: r.filepath, vpath: r.vpath,
+      error_type: r.error_type, error_msg: r.error_msg, stack: r.stack,
+      first_seen: r.first_seen, last_seen: r.last_seen, count: r.count
+    }))
+    .sort((a, b) => b.last_seen - a.last_seen);
+}
+
+export function clearScanErrors() {
+  scanErrorCollection.clear();
+}
+
+export function pruneScanErrors(retentionHours) {
+  const cutoff = Math.floor(Date.now() / 1000) - retentionHours * 3600;
+  scanErrorCollection.findAndRemove({ last_seen: { '$lt': cutoff } });
+}
+
+export function getScanErrorCount() {
+  return scanErrorCollection.count();
 }

@@ -208,6 +208,18 @@ ADMINDATA.getServerParams().then(() => {
 ADMINDATA.getVersion();
 ADMINDATA.getWinDrives();
 
+// Fetch scan error count for sidebar badge on boot
+(async () => {
+  try {
+    const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/db/scan-errors/count` });
+    const badge = document.getElementById('scan-errors-badge');
+    if (badge && res.data.count > 0) {
+      badge.textContent = res.data.count > 99 ? '99+' : res.data.count;
+      badge.style.display = 'inline-flex';
+    }
+  } catch (_e) {}
+})();
+
 // Handle .modal-close class elements
 document.addEventListener('click', function(e) {
   if (e.target.closest('.modal-close')) modVM.closeModal();
@@ -233,6 +245,393 @@ Vue.mixin({
     closeModal() { if (typeof modVM !== 'undefined') modVM.closeModal(); }
   }
 });
+
+// ── Scan Error Audit View ──────────────────────────────────────────────────
+const scanErrorsView = Vue.component('scan-errors-view', {
+  data() {
+    return {
+      errors:          [],
+      loading:         false,
+      loaded:          false,
+      expandedRow:     null,
+      typeFilter:      null,
+      retentionHours:  ADMINDATA.dbParams.scanErrorRetentionHours || 48,
+      savingRetention: false,
+    };
+  },
+  computed: {
+    filteredErrors() {
+      if (!this.typeFilter) return this.errors;
+      return this.errors.filter(e => e.error_type === this.typeFilter);
+    },
+    typeCounts() {
+      const c = {};
+      for (const e of this.errors) { c[e.error_type] = (c[e.error_type] || 0) + 1; }
+      return c;
+    },
+    allTypes() {
+      return [...new Set(this.errors.map(e => e.error_type))];
+    }
+  },
+  mounted() { this.load(); },
+  methods: {
+    async load() {
+      this.loading = true;
+      try {
+        const [errRes, paramRes] = await Promise.all([
+          API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/db/scan-errors` }),
+          API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/db/params` })
+        ]);
+        this.errors = errRes.data;
+        this.loaded = true;
+        if (paramRes.data.scanErrorRetentionHours) {
+          this.retentionHours = paramRes.data.scanErrorRetentionHours;
+        }
+        const badge = document.getElementById('scan-errors-badge');
+        if (badge) {
+          if (errRes.data.length > 0) {
+            badge.textContent = errRes.data.length > 99 ? '99+' : errRes.data.length;
+            badge.style.display = 'inline-flex';
+          } else {
+            badge.style.display = 'none';
+          }
+        }
+      } catch (err) {
+        iziToast.error({ title: 'Failed to load scan errors', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.loading = false;
+      }
+    },
+    confirmClear() {
+      adminConfirm(
+        'Clear all scan errors?',
+        'This deletes the entire error history. Errors will re-appear on the next scan if the underlying problems persist.',
+        'Clear All',
+        () => this.doClear()
+      );
+    },
+    async doClear() {
+      try {
+        await API.axios({ method: 'DELETE', url: `${API.url()}/api/v1/admin/db/scan-errors` });
+        this.errors = [];
+        this.typeFilter = null;
+        const badge = document.getElementById('scan-errors-badge');
+        if (badge) badge.style.display = 'none';
+        iziToast.success({ title: 'Scan errors cleared', position: 'topCenter', timeout: 2500 });
+      } catch (err) {
+        iziToast.error({ title: 'Failed to clear errors', position: 'topCenter', timeout: 3000 });
+      }
+    },
+    async saveRetention() {
+      this.savingRetention = true;
+      try {
+        await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/admin/db/params/scan-error-retention`,
+          data: { hours: Number(this.retentionHours) }
+        });
+        ADMINDATA.dbParams.scanErrorRetentionHours = Number(this.retentionHours);
+        iziToast.success({ title: 'Retention period saved', position: 'topCenter', timeout: 2000 });
+      } catch (err) {
+        iziToast.error({ title: 'Failed to save retention', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.savingRetention = false;
+      }
+    },
+    toggleRow(guid) {
+      this.expandedRow = this.expandedRow === guid ? null : guid;
+    },
+    typeLabel(t) {
+      return { parse: 'Parse Error', art: 'Album Art', cue: 'CUE Sheet', insert: 'DB Insert', other: 'Other' }[t] || t;
+    },
+    typeIcon(t) {
+      const icons = {
+        parse:  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+        art:    '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
+        cue:    '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+        insert: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+        other:  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+      };
+      return icons[t] || icons.other;
+    },
+    typeColor(t) {
+      return { parse: 'var(--red)', art: 'var(--yellow)', cue: 'var(--primary)', insert: 'var(--accent)', other: 'var(--t2)' }[t] || 'var(--t2)';
+    },
+    typeBg(t) {
+      return { parse: 'rgba(248,113,113,.14)', art: 'rgba(251,191,36,.14)', cue: 'rgba(139,92,246,.14)', insert: 'rgba(96,165,250,.12)', other: 'rgba(136,136,176,.10)' }[t] || 'rgba(136,136,176,.10)';
+    },
+    retentionLabel(h) {
+      const map = { 12:'12 hours', 24:'1 day', 48:'2 days', 72:'3 days', 168:'1 week', 336:'2 weeks', 720:'30 days' };
+      return map[h] || h + 'h';
+    },
+    relTime(ts) {
+      const s = Math.floor(Date.now() / 1000) - ts;
+      if (s < 10)     return 'just now';
+      if (s < 60)     return s + 's ago';
+      if (s < 3600)   return Math.floor(s / 60) + 'm ago';
+      if (s < 86400)  return Math.floor(s / 3600) + 'h ago';
+      if (s < 2592000) return Math.floor(s / 86400) + 'd ago';
+      return new Date(ts * 1000).toLocaleDateString();
+    },
+    absTime(ts) {
+      return new Date(ts * 1000).toLocaleString();
+    },
+    shortPath(fp) {
+      if (!fp) return '—';
+      const parts = fp.replace(/\\/g, '/').split('/');
+      if (parts.length <= 3) return fp;
+      return '\u2026/' + parts.slice(-2).join('/');
+    },
+    copyPath(fp) {
+      if (!fp) return;
+      navigator.clipboard.writeText(fp).then(() => {
+        iziToast.info({ title: 'Path copied to clipboard', position: 'topCenter', timeout: 1500 });
+      }).catch(() => {});
+    }
+  },
+  template: `
+    <div>
+      <div class="container">
+
+        <!-- ── Header Card ── -->
+        <div class="row">
+          <div class="col s12">
+            <div class="card">
+              <div class="card-content">
+                <div class="se-header">
+                  <div class="se-title-group">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2" style="flex-shrink:0;margin-top:1px">
+                      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                    <div>
+                      <div class="se-main-title">Scan Error Audit</div>
+                      <div class="se-sub">Persistent log of every file that failed during a library scan — deduplicated by file &amp; error type so recurring problems show a count, not duplicate rows.</div>
+                    </div>
+                    <span class="se-total-pill" v-if="loaded && errors.length > 0">
+                      {{errors.length}} issue{{errors.length === 1 ? '' : 's'}}
+                    </span>
+                    <span class="se-total-pill se-total-ok" v-else-if="loaded && errors.length === 0">
+                      ✓ Clean
+                    </span>
+                  </div>
+                  <div class="se-controls-row">
+                    <div class="se-retention-group">
+                      <label class="se-retention-label">Keep errors for</label>
+                      <select v-model.number="retentionHours" @change="saveRetention" class="se-retention-sel" :disabled="savingRetention">
+                        <option :value="12">12 hours</option>
+                        <option :value="24">1 day</option>
+                        <option :value="48">2 days</option>
+                        <option :value="72">3 days</option>
+                        <option :value="168">1 week</option>
+                        <option :value="336">2 weeks</option>
+                        <option :value="720">30 days</option>
+                      </select>
+                      <span class="se-retention-hint">Older entries are pruned at scan start</span>
+                    </div>
+                    <div class="se-action-group">
+                      <button class="btn-flat btn-small" @click="load" :disabled="loading">
+                        <svg v-if="!loading" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        <svg v-else class="se-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                        {{loading ? 'Loading…' : 'Refresh'}}
+                      </button>
+                      <button class="btn btn-small red" @click="confirmClear" v-if="errors.length > 0">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+                        Clear All
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Loading spinner ── -->
+        <div class="row" v-if="loading && !loaded">
+          <div class="col s12" style="display:flex;justify-content:center;padding:3rem 0">
+            <svg class="spinner" width="50px" height="50px" viewBox="0 0 66 66"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
+          </div>
+        </div>
+
+        <!-- ── Empty state ── -->
+        <div class="row" v-else-if="loaded && errors.length === 0">
+          <div class="col s12">
+            <div class="card">
+              <div class="se-empty-state">
+                <div class="se-empty-icon">
+                  <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="1.5">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                  </svg>
+                </div>
+                <div class="se-empty-title">No scan errors</div>
+                <div class="se-empty-msg">Your library scanned cleanly — no file parsing, art extraction, cue sheet or database errors were recorded.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <template v-else-if="loaded && errors.length > 0">
+
+          <!-- ── Type filter chips ── -->
+          <div class="row">
+            <div class="col s12">
+              <div class="se-filter-strip">
+                <button class="se-fchip" :class="{active: typeFilter === null}" @click="typeFilter = null">
+                  All
+                  <span class="se-fchip-cnt">{{errors.length}}</span>
+                </button>
+                <button
+                  v-for="type in allTypes" :key="type"
+                  class="se-fchip"
+                  :class="{active: typeFilter === type}"
+                  :style="typeFilter === type ? {background: typeBg(type), borderColor: typeColor(type), color: typeColor(type)} : {}"
+                  @click="typeFilter = (typeFilter === type ? null : type)"
+                >
+                  <span class="se-fchip-dot" :style="{background: typeColor(type)}"></span>
+                  {{typeLabel(type)}}
+                  <span class="se-fchip-cnt">{{typeCounts[type] || 0}}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Errors table ── -->
+          <div class="row">
+            <div class="col s12">
+              <div class="card se-table-card">
+                <div class="se-table-wrap">
+
+                  <!-- Column headers -->
+                  <div class="se-thead">
+                    <div class="se-th se-col-type">Type</div>
+                    <div class="se-th se-col-file">File</div>
+                    <div class="se-th se-col-msg">Issue</div>
+                    <div class="se-th se-col-count">Detections</div>
+                    <div class="se-th se-col-first">First Seen</div>
+                    <div class="se-th se-col-last">Last Seen</div>
+                    <div class="se-th se-col-exp"></div>
+                  </div>
+
+                  <!-- Body rows -->
+                  <template v-for="err in filteredErrors" :key="err.guid">
+                    <!-- Main row -->
+                    <div
+                      class="se-row"
+                      :class="{expanded: expandedRow === err.guid}"
+                      @click="toggleRow(err.guid)"
+                    >
+                      <!-- Type badge -->
+                      <div class="se-col-type">
+                        <span class="se-type-badge"
+                          :style="{background: typeBg(err.error_type), color: typeColor(err.error_type), borderColor: typeColor(err.error_type)}"
+                        >
+                          <span v-html="typeIcon(err.error_type)"></span>
+                          {{typeLabel(err.error_type)}}
+                        </span>
+                      </div>
+
+                      <!-- File path -->
+                      <div class="se-col-file">
+                        <span class="se-vpath-tag">{{err.vpath}}</span>
+                        <span class="se-filepath" :title="err.filepath" @click.stop="copyPath(err.filepath)">
+                          {{shortPath(err.filepath)}}
+                        </span>
+                      </div>
+
+                      <!-- Error message (truncated) -->
+                      <div class="se-col-msg">
+                        <span class="se-errmsg">{{err.error_msg || '(no message)'}}</span>
+                      </div>
+
+                      <!-- Detection count -->
+                      <div class="se-col-count">
+                        <span class="se-count-badge" v-if="err.count > 1" :title="err.count + ' times detected'">
+                          {{err.count}}&times; detected
+                        </span>
+                        <span class="se-count-once" v-else>Once</span>
+                      </div>
+
+                      <!-- First seen -->
+                      <div class="se-col-first">
+                        <span :title="absTime(err.first_seen)">{{relTime(err.first_seen)}}</span>
+                      </div>
+
+                      <!-- Last seen -->
+                      <div class="se-col-last">
+                        <span :title="absTime(err.last_seen)">{{relTime(err.last_seen)}}</span>
+                      </div>
+
+                      <!-- Expand chevron -->
+                      <div class="se-col-exp">
+                        <svg class="se-chevron" :class="{open: expandedRow === err.guid}"
+                          width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                          <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                      </div>
+                    </div>
+
+                    <!-- Expanded detail panel -->
+                    <div class="se-detail" v-if="expandedRow === err.guid">
+                      <div class="se-detail-grid">
+                        <div class="se-detail-section">
+                          <div class="se-detail-label">Full Path</div>
+                          <div class="se-detail-value se-detail-path" @click="copyPath(err.filepath)" title="Click to copy">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            {{err.filepath || '—'}}
+                          </div>
+                        </div>
+                        <div class="se-detail-section">
+                          <div class="se-detail-label">Error Message</div>
+                          <div class="se-detail-value">{{err.error_msg || '(none)'}}</div>
+                        </div>
+                        <div class="se-detail-section" v-if="err.stack">
+                          <div class="se-detail-label">Stack Trace</div>
+                          <pre class="se-stack">{{err.stack}}</pre>
+                        </div>
+                        <div class="se-detail-meta-row">
+                          <div class="se-detail-meta-chip">
+                            <span class="se-detail-meta-k">Library path</span>
+                            <span class="se-detail-meta-v">{{err.vpath}}</span>
+                          </div>
+                          <div class="se-detail-meta-chip">
+                            <span class="se-detail-meta-k">First detected</span>
+                            <span class="se-detail-meta-v">{{absTime(err.first_seen)}}</span>
+                          </div>
+                          <div class="se-detail-meta-chip">
+                            <span class="se-detail-meta-k">Last detected</span>
+                            <span class="se-detail-meta-v">{{absTime(err.last_seen)}}</span>
+                          </div>
+                          <div class="se-detail-meta-chip">
+                            <span class="se-detail-meta-k">Total detections</span>
+                            <span class="se-detail-meta-v" :style="{color: err.count > 1 ? typeColor(err.error_type) : 'inherit'}">
+                              {{err.count}} time{{err.count === 1 ? '' : 's'}}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                  </template>
+
+                  <!-- Row count footer -->
+                  <div class="se-table-footer">
+                    Showing {{filteredErrors.length}} of {{errors.length}} error{{errors.length === 1 ? '' : 's'}}
+                    <span v-if="typeFilter"> &mdash; filtered by <b>{{typeLabel(typeFilter)}}</b></span>
+                    <a v-if="typeFilter" @click="typeFilter = null" style="margin-left:.5rem">&times; clear filter</a>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </template>
+
+      </div>
+    </div>`
+});
+// ─────────────────────────────────────────────────────────────────────────────
 
 const foldersView = Vue.component('folders-view', {
   data() {
@@ -2000,6 +2399,7 @@ const vm = new Vue({
     'logs-view': logsView,
     'rpn-view': rpnView,
     'lock-view': lockView,
+    'scan-errors-view': scanErrorsView,
   },
   data: {
     currentViewMain: 'folders-view',

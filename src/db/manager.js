@@ -88,3 +88,9 @@ export function removeSharedPlaylistById(playlistId) { return backend.removeShar
 export function removeExpiredSharedPlaylists() { return backend.removeExpiredSharedPlaylists(); }
 export function removeEternalSharedPlaylists() { return backend.removeEternalSharedPlaylists(); }
 export function removeSharedPlaylistsByUser(username) { return backend.removeSharedPlaylistsByUser(username); }
+// Scan Error Audit
+export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stack) { return backend.insertScanError(guid, filepath, vpath, errorType, errorMsg, stack); }
+export function getScanErrors() { return backend.getScanErrors(); }
+export function clearScanErrors() { return backend.clearScanErrors(); }
+export function pruneScanErrors(retentionHours) { return backend.pruneScanErrors(retentionHours); }
+export function getScanErrorCount() { return backend.getScanErrorCount(); }
