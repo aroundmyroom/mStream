@@ -594,6 +594,34 @@ See `docs/scan-progress.md` for full details.
 
 ---
 
+## Dynamic Queue Panel Label
+
+The **"Now Playing"** label at the top of the queue panel is now live and
+reflects the exact playback state at all times.
+
+| State | Icon | Label |
+|---|---|---|
+| Nothing in queue / no song loaded | ■ square | **Stopped** |
+| Song loaded but paused | ⏸ pause bars | **Paused** |
+| Song playing normally | ▶ triangle | **Now Playing** |
+| Auto-DJ crossfade in progress | ▶▶▶ fading triangles | **Crossfading…** |
+
+### Implementation (`webapp/v2/app.js`, `webapp/v2/index.html`)
+- Added `id="qp-np-label"` to the label `<div>` in `index.html`.
+- New `_syncQueueLabel()` function checks (in order):
+  1. `_xfadeFired` — if a crossfade ramp is active, show **Crossfading…**
+  2. `S.queue[S.idx]` — if no current song, show **Stopped**
+  3. `audioEl.paused` — if paused, show **Paused**; otherwise **Now Playing**
+- Called from:
+  - `syncPlayIcons()` — fires on every `play` / `pause` audio event
+  - `refreshQueueUI()` — fires when the queue changes or a new track loads
+    (both the normal path and the empty-queue early-return path)
+  - `_startCrossfade()` — immediately when the gain ramp begins
+  - `_resetXfade()` — if a crossfade is aborted mid-way (e.g. manual skip),
+    flips the label back to **Now Playing** or **Paused** instantly
+
+---
+
 ## Pending
 
 - **Song ratings UI** — the DB column and Auto-DJ `minRating` filter exist;
