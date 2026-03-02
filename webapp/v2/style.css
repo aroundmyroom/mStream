@@ -270,6 +270,30 @@ a{color:inherit;text-decoration:none;}
   padding:3px 10px;border-radius:99px;display:none;
 }
 .scan-badge.show{display:inline;}
+
+/* ── Compact scan progress (player header) ── */
+.spc-wrap{display:flex;flex-direction:column;gap:4px;}
+.spc-card{
+  display:flex;align-items:center;gap:7px;
+  background:var(--raised);border:1px solid var(--border);border-left:2px solid var(--green);
+  border-radius:var(--r);padding:6px 12px;cursor:default;min-width:200px;max-width:320px;
+}
+.spc-dot{
+  width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0;
+  animation:spc-pulse 1.4s ease-in-out infinite;
+}
+@keyframes spc-pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
+.spc-vpath{font-size:12px;font-weight:700;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;max-width:70px;}
+.spc-track{flex:1;position:relative;height:4px;background:var(--border);border-radius:99px;overflow:hidden;min-width:40px;}
+.spc-fill{height:100%;background:var(--green);border-radius:99px;transition:width .8s ease-out;}
+.spc-fill-ind{
+  position:absolute;inset:0;width:40%;
+  background:linear-gradient(90deg,transparent,var(--primary),transparent);
+  animation:spc-shimmer 1.8s ease-in-out infinite;
+}
+@keyframes spc-shimmer{0%{transform:translateX(-250%);}100%{transform:translateX(350%);}}
+.spc-pct{font-size:11px;font-weight:700;color:var(--green);white-space:nowrap;flex-shrink:0;}
+.spc-count{font-size:10px;color:var(--t3);white-space:nowrap;flex-shrink:0;}
 .btn-sm{
   display:flex;align-items:center;gap:5px;padding:6px 12px;border-radius:var(--r);
   font-size:12px;font-weight:600;color:var(--t2);background:var(--raised);

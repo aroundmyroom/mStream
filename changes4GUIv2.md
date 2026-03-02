@@ -470,6 +470,130 @@ Both are now consistent across SQLite and Loki backends.
 
 ---
 
+## CUE Sheet Track Markers
+
+The scanner now detects and stores cue-point data for tracks that have an
+embedded CUE sheet (via a `CUESHEET` Vorbis comment / ID3 tag) or a sidecar
+`.cue` file alongside the audio file.
+
+### How it works
+- `src/db/scanner.mjs` — after successfully parsing a file, attempts to find
+  a CUE sheet via `music-metadata`'s `native` tags.  If none is embedded,
+  a sidecar `<basename>.cue` next to the file is tried.
+- Parsed cue points are serialised as a JSON string and stored in the
+  `cuepoints` column of the files table.
+- Files that have been checked and contain no cue data get `'[]'` (sentinel,
+  distinguishes "checked, none found" from `NULL` = "never checked").
+- On subsequent scans, files with a non-NULL `cuepoints` value skip the
+  redundant re-parse unless the file `modTime` has changed.
+
+### Player UI
+- The progress bar in the **Now Playing** modal renders small tick marks at
+  each cue point (`.cue-markers` container, one `.cue-mark` per point).
+- Clicking a tick seeks directly to that timestamp.
+- Hovering a tick shows a tooltip with the track title and index number.
+
+### Admin Stats
+- The scan stats card in the Admin Panel shows two new fields:
+  - **With CUE** — files that have at least one cue point stored
+  - **CUE Unchecked** — files not yet analysed (decreases as scans proceed)
+
+See `docs/cue-sheet-markers.md` for full details.
+
+---
+
+## Bug Fix — Seek Bar Thumb (Now Playing modal)
+
+The circular thumb on the seek bar inside the Now Playing modal was
+invisible in both dark and light mode due to a missing CSS variable fallback.
+
+- `.prog-thumb` now uses `var(--primary)` fill with `var(--surface)` border,
+  making it a consistent purple dot that stands out against the progress track
+  in both themes.
+- Added `display: block` to prevent the inline default from collapsing the
+  element in some browsers.
+
+---
+
+## Scan Error Audit
+
+The scanner records every file that fails during a library scan into a
+persistent, deduplicated **scan error log** visible in the Admin Panel.
+
+### Backend (`src/db/scanner.mjs`, `src/api/scanner.js`, `src/db/manager.js`)
+- Scanner child process catches errors per-file and calls
+  `POST /api/v1/scanner/report-error` with a GUID = `md5(filepath|errorType)`.
+- Deduplication: same file + error type increments `count` / updates
+  `last_seen` rather than inserting a new row.
+- `POST /api/v1/scanner/prune-errors` deletes rows older than a configurable
+  retention window (default 48 h) at the start of every scan.
+- `GET /api/v1/admin/db/scan-errors` returns the full log.
+- `DELETE /api/v1/admin/db/scan-errors` clears the entire log.
+- `PUT /api/v1/admin/db/scan-errors/retention` saves the retention hours to
+  `default.json`.
+
+### Error types recorded
+`parse_error` · `album_art` · `cue_sheet` · `db_insert` · `other`
+
+### Admin UI (`webapp/admin-v2/`)
+- **Sidebar item "Scan Errors"** with a live count badge (red if > 0).
+- Full table with type badge, file path, error message, count, and
+  last-seen timestamp.
+- Filter chips per error type.
+- Retention-period dropdown (12 h → 30 days) saved on change.
+- Clear All button (with confirmation).
+
+Both SQLite and Loki backends implement the four required functions
+(`insertScanError`, `getScanErrors`, `clearScanErrors`, `pruneScanErrors`).
+
+See `docs/scan-error-audit.md` for full details.
+
+---
+
+## Live Scan Progress
+
+While a library scan is running, both the **Admin Panel** and the
+**player header** show real-time progress: percentage, file count, scan
+rate, ETA, and the current file being processed.
+
+### Backend (`src/state/scan-progress.js`, `src/db/task-queue.js`, `src/api/scanner.js`, `src/api/admin.js`)
+- New in-memory module `src/state/scan-progress.js` — a `Map` keyed by
+  `scanId` (nanoid).  Resets on server restart; no DB involved.
+- `startScan(scanId, vpath, expected)` — called in `task-queue.js` just
+  before forking the scanner child process.  `expected` is the current file
+  count for that vpath (baseline for % calculation); `null` on a first scan.
+- `tick(scanId, filepath)` — called in `POST /api/v1/scanner/get-file` for
+  every file the scanner processes.  Increments the counter, stores the
+  current filepath, and recalculates `filesPerSec` every 5 s.
+- `finish(scanId)` — called both in the `close` event of the child process
+  and in `POST /api/v1/scanner/finish-scan` to clean up.
+- `GET /api/v1/admin/db/scan/progress` — returns a snapshot array with
+  `{ scanId, vpath, scanned, expected, pct, currentFile, elapsedSec, filesPerSec, etaSec }`.
+
+### Admin Panel (`webapp/admin-v2/`)
+- The **Scan Queue & Stats** card auto-polls `/api/v1/admin/db/scan/progress`
+  every 3 s while the component is mounted.
+- Each active scan is shown as a card with:
+  - Pulsing green dot · vpath label
+  - `37%` badge (or `first scan` shimmer pill when no baseline exists)
+  - Estimated time remaining (e.g. `est. 4m 12s`)
+  - Scan rate (`29.6/s`)
+  - Animated progress bar (deterministic fill or indeterminate shimmer)
+  - File count (`50,811 / ~137,412`)
+  - Current file path (truncated to 60 chars from the right)
+
+### Player header (`webapp/v2/`)
+- While scanning, a compact single-row pill appears in the top-right of the
+  main content area (admin users only, hidden for regular users).
+- Same height as the Append All / Play All buttons.
+- Shows: pulsing dot · vpath · mini progress bar · `%` · file count.
+- The full current file path is available as a tooltip on hover.
+- Disappears automatically when the scan finishes.
+
+See `docs/scan-progress.md` for full details.
+
+---
+
 ## Pending
 
 - **Song ratings UI** — the DB column and Auto-DJ `minRating` filter exist;
