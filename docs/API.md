@@ -70,6 +70,8 @@ http://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [/db/recursive-scan](API/db_recursive-scan.md)
 
+[/db/cuepoints](API/db_cuepoints.md) — CUE sheet chapter markers for a file *(GitHub Copilot, 2026-03-02)*
+
 ### Play Statistics *(GitHub Copilot, 2026-02-27)*
 
 [/db/recent/added, /db/stats/recently-played, /db/stats/most-played](API/db_stats-queries.md)
@@ -123,6 +125,8 @@ If you want your tokens to work between reboots you can set the `secret` flag wh
 > intended for external use.
 
 [/scanner/update-art](API/scanner_update-art.md) *(GitHub Copilot, 2026-02-27)*
+
+[/scanner/update-cue](API/scanner_update-cue.md) — write cue point data for a file (internal scanner only) *(GitHub Copilot, 2026-03-02)*
 
 ## Pages
 
