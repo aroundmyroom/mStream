@@ -1403,12 +1403,14 @@ const VIZ = (() => {
     for (const f of eqFilters) { _node.connect(f); _node = f; }
     _pannerNode = audioCtx.createStereoPanner();
     _pannerNode.pan.value = parseFloat(localStorage.getItem('ms2_balance') || '0');
-    _node.connect(_pannerNode);
-    _pannerNode.connect(analyserNode);    // butterchurn (mono mix)
-    _pannerNode.connect(splitter);        // split into L + R
+    // Tap analysers BEFORE panner so balance never affects VU meters or spectrum levels
+    _node.connect(analyserNode);          // butterchurn tap (pre-pan)
+    _node.connect(splitter);              // L+R spectrum tap (pre-pan)
     splitter.connect(analyserL, 0);       // left  channel
     splitter.connect(analyserR, 1);       // right channel
-    analyserNode.connect(audioCtx.destination);
+    // Panner only affects the actual speaker output
+    _node.connect(_pannerNode);
+    _pannerNode.connect(audioCtx.destination);
   }
 
   function setPresetLabel() {
@@ -4453,6 +4455,12 @@ document.getElementById('balance').addEventListener('input', e => {
   localStorage.setItem('ms2_balance', v / 100);
 });
 document.getElementById('balance').addEventListener('dblclick', () => {
+  const el = document.getElementById('balance');
+  el.value = 0;
+  if (_pannerNode) _pannerNode.pan.value = 0;
+  localStorage.removeItem('ms2_balance');
+});
+document.getElementById('bal-center-btn').addEventListener('click', () => {
   const el = document.getElementById('balance');
   el.value = 0;
   if (_pannerNode) _pannerNode.pan.value = 0;
