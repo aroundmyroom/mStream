@@ -3174,8 +3174,10 @@ function _startCrossfade(nextIdx) {
   _xfadeGainIv = setInterval(() => {
     step++;
     const pct      = Math.min(step / steps, 1);
-    audioEl.volume = Math.max(0, _xfadeStartVol * (1 - pct));
-    xEl.volume     = Math.min(_xfadeStartVol, _xfadeStartVol * pct);
+    // Equal-power (constant-power) crossfade — sin²+cos²=1 keeps perceived
+    // loudness constant throughout the fade instead of dipping/swelling.
+    audioEl.volume = Math.max(0, _xfadeStartVol * Math.cos(pct * Math.PI / 2));
+    xEl.volume     = Math.min(_xfadeStartVol, _xfadeStartVol * Math.sin(pct * Math.PI / 2));
     if (step >= steps) {
       clearInterval(_xfadeGainIv);
       _xfadeGainIv = null;
