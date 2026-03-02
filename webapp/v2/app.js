@@ -3154,6 +3154,7 @@ function _startCrossfade(nextIdx) {
   _xfadeFired    = true;
   _xfadeNextIdx  = nextIdx;
   _xfadeStartVol = audioEl.volume;
+  _syncQueueLabel();
 
   const xf     = S.crossfade;
   const steps  = Math.max(20, xf * 10);
@@ -3250,6 +3251,8 @@ function _resetXfade() {
   if (_xfadeEl) { _xfadeEl.pause(); _xfadeEl.src = ''; _xfadeEl = null; }
   // Restore volume if the ramp was interrupted mid-way by a manual action
   if (wasActive && savedVol > 0) audioEl.volume = savedVol;
+  // If we aborted a crossfade, re-sync the label back to Now Playing / Paused
+  if (wasActive) _syncQueueLabel();
 }
 
 // ── SCAN STATUS ───────────────────────────────────────────────
@@ -3819,7 +3822,10 @@ function _syncQueueLabel() {
   const hasSong = !!S.queue[S.idx];
   const playing = !audioEl.paused;
   let icon, text;
-  if (!hasSong) {
+  if (_xfadeFired) {
+    icon = '<svg width="12" height="10" viewBox="0 0 28 24" fill="currentColor"><polygon points="1,3 11,12 1,21" opacity=".55"/><polygon points="9,3 19,12 9,21" opacity=".78"/><polygon points="17,3 27,12 17,21"/></svg>';
+    text = 'Crossfading…';
+  } else if (!hasSong) {
     icon = '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="1.5"/></svg>';
     text = 'Stopped';
   } else if (!playing) {
