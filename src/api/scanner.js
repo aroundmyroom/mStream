@@ -1,5 +1,6 @@
 import * as db from '../db/manager.js';
 import * as config from '../state/config.js';
+import * as scanProgress from '../state/scan-progress.js';
 
 export function setup(mstream) {
   mstream.all('/api/v1/scanner/{*path}', (req, res, next) => {
@@ -8,6 +9,7 @@ export function setup(mstream) {
   });
 
   mstream.post('/api/v1/scanner/get-file', (req, res) => {
+    if (req.body.scanId) { scanProgress.tick(req.body.scanId, req.body.filepath); }
     const dbFileInfo = db.findFileByPath(req.body.filepath, req.body.vpath);
 
     // return empty response if nothing was found
@@ -64,6 +66,7 @@ export function setup(mstream) {
   });
 
   mstream.post('/api/v1/scanner/finish-scan', (req, res) => {
+    scanProgress.finish(req.body.scanId);
     db.removeStaleFiles(req.body.vpath, req.body.scanId);
     db.saveFilesDB();
     res.json({});

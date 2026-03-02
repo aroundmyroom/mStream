@@ -1247,8 +1247,17 @@ const dbView = Vue.component('db-view', {
       sharedPlaylists: ADMINDATA.sharedPlaylists,
       sharedPlaylistsTS: ADMINDATA.sharedPlaylistUpdated,
       isPullingStats: false,
-      isPullingShared: false
+      isPullingShared: false,
+      scanProgress: [],
+      spPollTimer: null,
     };
+  },
+  mounted: async function() {
+    await this.pollProgress();
+    this.spPollTimer = setInterval(() => this.pollProgress(), 3000);
+  },
+  beforeDestroy: function() {
+    if (this.spPollTimer) { clearInterval(this.spPollTimer); this.spPollTimer = null; }
   },
   template: `
     <div>
@@ -1322,6 +1331,32 @@ const dbView = Vue.component('db-view', {
                 <span class="card-title">Scan Queue & Stats</span>
                 <a v-on:click="scanDB" class="btn">Start A Scan</a>
                 <a v-on:click="pullStats" class="btn">Pull Stats</a>
+                <div v-if="scanProgress.length > 0" class="sp-container">
+                  <div v-for="sp in scanProgress" :key="sp.scanId" class="sp-card">
+                    <div class="sp-header">
+                      <span class="sp-live-dot"></span>
+                      <span class="sp-vpath">{{sp.vpath}}</span>
+                      <span v-if="sp.pct !== null" class="sp-pct-badge">{{sp.pct}}%</span>
+                      <span v-else class="sp-firstscan-badge">first scan</span>
+                      <span class="sp-spacer"></span>
+                      <span v-if="sp.etaSec" class="sp-eta">est. {{formatEta(sp.etaSec)}}</span>
+                      <span v-if="sp.filesPerSec" class="sp-rate">{{sp.filesPerSec}}/s</span>
+                    </div>
+                    <div class="sp-track">
+                      <div v-if="sp.pct !== null" class="sp-fill" :style="{width: sp.pct + '%'}"></div>
+                      <div v-else class="sp-fill-indeterminate"></div>
+                    </div>
+                    <div class="sp-counts">
+                      <span v-if="sp.expected">{{sp.scanned.toLocaleString()}} / ~{{sp.expected.toLocaleString()}} files</span>
+                      <span v-else>{{sp.scanned.toLocaleString()}} files checked</span>
+                      <span class="sp-elapsed">elapsed: {{formatElapsed(sp.elapsedSec)}}</span>
+                    </div>
+                    <div v-if="sp.currentFile" class="sp-current-file">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                      <span class="sp-filepath" :title="sp.currentFile">{{truncatePath(sp.currentFile)}}</span>
+                    </div>
+                  </div>
+                </div>
                 <div v-if="isPullingStats === true">
                   <svg class="spinner" width="65px" height="65px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
                 </div>
@@ -1475,6 +1510,29 @@ const dbView = Vue.component('db-view', {
       </div>
     </div>`,
   methods: {
+    pollProgress: async function() {
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/db/scan/progress` });
+        this.scanProgress = res.data;
+      } catch (_e) {}
+    },
+    formatEta: function(sec) {
+      if (!sec || sec <= 0) return null;
+      if (sec < 60) return `${sec}s`;
+      if (sec < 3600) return `${Math.floor(sec/60)}m ${sec%60}s`;
+      return `${Math.floor(sec/3600)}h ${Math.floor((sec%3600)/60)}m`;
+    },
+    formatElapsed: function(sec) {
+      if (!sec || sec <= 0) return '0s';
+      if (sec < 60) return `${sec}s`;
+      if (sec < 3600) return `${Math.floor(sec/60)}m ${sec%60}s`;
+      return `${Math.floor(sec/3600)}h ${Math.floor((sec%3600)/60)}m`;
+    },
+    truncatePath: function(fp, maxLen = 60) {
+      if (!fp) return '';
+      if (fp.length <= maxLen) return fp;
+      return '\u2026' + fp.slice(-(maxLen - 1));
+    },
     pullStats: async function() {
       try {
         this.isPullingStats = true;
