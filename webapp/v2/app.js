@@ -511,6 +511,7 @@ function refreshQueueUI() {
         </svg>
         <p>Queue is empty.<br>Click <strong>+</strong> on any song to add it here.</p>
       </div>`;
+    _syncQueueLabel();
     return;
   }
 
@@ -553,6 +554,7 @@ function refreshQueueUI() {
 
   const active = list.querySelector('.q-active');
   if (active) active.scrollIntoView({ block: 'nearest' });
+  _syncQueueLabel();
 }
 
 function toggleQueue() {
@@ -3808,6 +3810,26 @@ function syncPlayIcons() {
   document.getElementById('icon-pause').classList.toggle('hidden', !playing);
   document.getElementById('np-icon-play').classList.toggle('hidden',  playing);
   document.getElementById('np-icon-pause').classList.toggle('hidden', !playing);
+  _syncQueueLabel();
+}
+
+function _syncQueueLabel() {
+  const label = document.getElementById('qp-np-label');
+  if (!label) return;
+  const hasSong = !!S.queue[S.idx];
+  const playing = !audioEl.paused;
+  let icon, text;
+  if (!hasSong) {
+    icon = '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="1.5"/></svg>';
+    text = 'Stopped';
+  } else if (!playing) {
+    icon = '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="4" height="16" rx="1.5"/><rect x="15" y="4" width="4" height="16" rx="1.5"/></svg>';
+    text = 'Paused';
+  } else {
+    icon = '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>';
+    text = 'Now Playing';
+  }
+  label.innerHTML = icon + ' ' + text;
 }
 
 // ── AUDIO EVENT HANDLERS (named so they can be moved to a swapped element) ──
