@@ -162,7 +162,7 @@ export function getStats() {
   if (!fileCollection) {
     return {
       totalFiles: 0, totalArtists: 0, totalAlbums: 0, totalGenres: 0,
-      withArt: 0, withoutArt: 0, withReplaygain: 0,
+      withArt: 0, withoutArt: 0, withReplaygain: 0, withCue: 0, cueUnchecked: 0,
       oldestYear: null, newestYear: null, lastScannedTs: null,
       addedLast7Days: 0, addedLast30Days: 0,
       formats: [], perVpath: [], topArtists: [], topGenres: [], decades: [],
@@ -183,7 +183,7 @@ export function getStats() {
   const genreMap  = {};
   const decadeMap = {};
 
-  let withArt = 0, withReplaygain = 0;
+  let withArt = 0, withReplaygain = 0, withCue = 0, cueUnchecked = 0;
   let last7 = 0, last30 = 0;
   let oldestYear = null, newestYear = null, lastScannedTs = null;
 
@@ -197,6 +197,8 @@ export function getStats() {
 
     if (doc.aaFile && doc.aaFile.trim()) withArt++;
     if (doc.replaygainTrackDb != null)   withReplaygain++;
+    if (doc.cuepoints != null && doc.cuepoints !== '[]') withCue++;
+    else if (doc.cuepoints == null) cueUnchecked++;
     if (doc.ts > cutoff7)  last7++;
     if (doc.ts > cutoff30) last30++;
     if (doc.ts && (!lastScannedTs || doc.ts > lastScannedTs)) lastScannedTs = doc.ts * 1000;
@@ -239,6 +241,8 @@ export function getStats() {
     withArt,
     withoutArt: total - withArt,
     withReplaygain,
+    withCue,
+    cueUnchecked,
     oldestYear,
     newestYear,
     lastScannedTs,
