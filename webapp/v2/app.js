@@ -3251,30 +3251,55 @@ function _resetXfade() {
 }
 
 // ── SCAN STATUS ───────────────────────────────────────────────
+function _scpTruncate(fp, max = 45) {
+  if (!fp) return '';
+  if (fp.length <= max) return fp;
+  return '\u2026' + fp.slice(-(max - 1));
+}
+
+function _renderScanProgress(scans) {
+  const wrap = document.getElementById('scan-progress-wrap');
+  if (!wrap) return;
+  if (!scans || scans.length === 0) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = scans.map(sp => {
+    const pctTxt   = sp.pct !== null ? `${sp.pct}%` : 'first scan';
+    const bar      = sp.pct !== null
+      ? `<div class="spc-fill" style="width:${sp.pct}%"></div>`
+      : `<div class="spc-fill-ind"></div>`;
+    const countTxt = sp.expected
+      ? `${sp.scanned.toLocaleString()} / ~${sp.expected.toLocaleString()}`
+      : `${sp.scanned.toLocaleString()} files`;
+    const fileTip  = sp.currentFile ? ` title="${sp.currentFile.replace(/"/g,'&quot;')}"` : '';
+    return `<div class="spc-card"${fileTip}>
+      <span class="spc-dot"></span>
+      <span class="spc-vpath">${sp.vpath}</span>
+      <div class="spc-track">${bar}</div>
+      <span class="spc-pct">${pctTxt}</span>
+      <span class="spc-count">${countTxt}</span>
+    </div>`;
+  }).join('');
+}
+
 async function pollScan() {
   try {
     const d = await api('GET', 'api/v1/db/status');
-    const badge = document.getElementById('scan-badge');
-    if (S.isAdmin && d.locked) {
-      let locStr = '';
-      if (d.scanningVpaths?.length) {
-        locStr = ' · ' + d.scanningVpaths.map(s => {
-          if (!s.dir) return s.vpath;
-          const parts = s.dir.split('/').filter(Boolean);
-          return parts.slice(-2).join('/');
-        }).join('  |  ');
-      }
-      badge.textContent = `Scanning… ${d.totalFileCount.toLocaleString()} files${locStr}`;
-      badge.classList.add('show');
-      scanTimer = setTimeout(pollScan, 3500);
-    } else {
-      badge.classList.remove('show');
-    }
     // Populate S.vpaths from status if checkSession() didn't do it yet
     if (d.vpaths && d.vpaths.length && !S.vpaths.length) {
       S.vpaths = d.vpaths;
       if (!S.djVpaths.length) S.djVpaths = [...S.vpaths];
-      if (S.view === 'autodj') viewAutoDJ(); // re-render to show source pills
+      if (S.view === 'autodj') viewAutoDJ();
+    }
+    if (S.isAdmin && d.locked) {
+      try {
+        const prog = await api('GET', 'api/v1/admin/db/scan/progress');
+        _renderScanProgress(prog);
+      } catch(_) {
+        // fallback: plain badge text if progress endpoint fails
+        _renderScanProgress([{ vpath: 'Scanning…', pct: null, scanned: d.totalFileCount || 0, expected: null, currentFile: null }]);
+      }
+      scanTimer = setTimeout(pollScan, 3000);
+    } else {
+      _renderScanProgress([]);
     }
   } catch(_) {}
 }
