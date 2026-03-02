@@ -665,6 +665,12 @@ reflects the exact playback state at all times.
 - Player-left gap: 12 → 16 px.
 - Title font: 16 → 18 px; artist: 14 → 15 px; album: 12 → 13 px.
 
+### Mini Spectrum — Inverted Butterfly
+- Frequency axis flipped so bass meets in the centre and treble spreads to the
+  outer edges (was: treble at centre, bass outside). The tall low-frequency
+  bars now sit directly adjacent to the VU needle dials, making the meters
+  more readable alongside the spectrum.
+
 ### Theme Label
 - The "dark mode" label in the sidebar toggle renamed to **Blue** to reflect
   the navy/blue palette (a true black dark mode is a future TODO).
