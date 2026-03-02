@@ -957,6 +957,14 @@ const dbView = Vue.component('db-view', {
                       <div class="sc-label">ReplayGain Tagged</div>
                     </div>
                     <div class="stat-chip">
+                      <div class="sc-num" style="color:var(--accent)">{{(dbStats.withCue||0).toLocaleString()}}</div>
+                      <div class="sc-label">CUE Sheet Files</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num" style="color:var(--t2)">{{(dbStats.cueUnchecked||0).toLocaleString()}}</div>
+                      <div class="sc-label">CUE Not Yet Scanned</div>
+                    </div>
+                    <div class="stat-chip">
                       <div class="sc-num">{{(dbStats.addedLast7Days||0).toLocaleString()}}</div>
                       <div class="sc-label">Added Last 7 Days</div>
                     </div>
