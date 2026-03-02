@@ -45,6 +45,7 @@ let djTimer      = null;
 let scrobbleTimer = null;
 let audioCtx     = null;   // shared Web Audio context (initialised by VIZ.open)
 let _audioGain   = null;   // Web Audio gain node — set once in ensureAudio
+let _pannerNode  = null;   // StereoPannerNode for L/R balance
 let _sleepTimer  = null;   // setInterval handle for sleep countdown
 let _xfadeEl     = null;   // second audio element used for crossfade
 let _xfadeGainIv = null;   // setInterval handle for crossfade gain ramp
@@ -972,6 +973,377 @@ const MINI_SPEC = (() => {
   };
 })();
 
+// ── VU NEEDLE METERS (player bar) ─────────────────────────────
+const VU_NEEDLE = (() => {
+  let rafId = null;
+  let _mode = localStorage.getItem('vu-mode') || 'spec'; // 'spec' | 'needle'
+
+  // Per-channel ballistics state
+  let vuL = -25, vuR = -25;
+  let lastClipL = null, lastClipR = null;
+  let lastTs    = null;
+
+  let REF_LEVEL      = -13;   // dBFS that maps to 0 VU  (adjustable via knob)
+  const PEAK_HOLD_MS = 1000;
+  const PEAK_FADE_MS = 5000;
+  const CLIP_VU      = 2.5;   // VU level that trips the peak lamp
+  const TAU          = 0.300; // ballistic time constant (s ~300 ms)
+
+  // Piecewise VU-level → needle angle table (degrees, 0 = straight up, +ve = clockwise)
+  const ANGLE_TABLE = [
+    [-25,-25],[-20,-23],[-10,-16],[-7,-12],
+    [-5,-8],[-3,-3],[-2,0],[-1,3.5],
+    [0,8],[1,13],[2,18],[3,25],
+  ];
+
+  function vuToAngle(vu) {
+    const v = Math.max(-25, Math.min(3, vu));
+    for (let i = 1; i < ANGLE_TABLE.length; i++) {
+      if (v <= ANGLE_TABLE[i][0]) {
+        const t = (v - ANGLE_TABLE[i-1][0]) / (ANGLE_TABLE[i][0] - ANGLE_TABLE[i-1][0]);
+        return ANGLE_TABLE[i-1][1] + t * (ANGLE_TABLE[i][1] - ANGLE_TABLE[i-1][1]);
+      }
+    }
+    return ANGLE_TABLE[ANGLE_TABLE.length - 1][1];
+  }
+
+  function rmsToVU(analyser) {
+    const buf = new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(buf);
+    let sq = 0;
+    for (let i = 0; i < buf.length; i++) sq += buf[i] * buf[i];
+    const rms = Math.sqrt(sq / buf.length);
+    if (rms < 1e-10) return -Infinity;
+    return 20 * Math.log10(rms) - REF_LEVEL;
+  }
+
+  // Virtual canvas coordinate space (width × height in virtual units)
+  const VW = 200, VH = 120;
+  const CX = 100, CY = VH + 30; // needle pivot 30vu below canvas bottom
+  const R  = 130;                // arc radius from pivot
+
+  // Convert VU dial angle (° from vertical) → canvas arc radians
+  const toRad = deg => (deg - 90) * Math.PI / 180;
+
+  function drawDial(canvas, label, vu, peakIntensity) {
+    const dpr = window.devicePixelRatio || 1;
+    const W   = canvas.clientWidth  * dpr;
+    const H   = canvas.clientHeight * dpr;
+    if (W < 2 || H < 2) return;
+    if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+    const ctx  = canvas.getContext('2d');
+    const sx   = W / VW, sy = H / VH;
+    const dark = !document.documentElement.classList.contains('light');
+
+    ctx.save();
+    ctx.scale(sx, sy);
+
+    // ── Background ──────────────────────────────────────────────
+    const bg = ctx.createRadialGradient(CX, 40, 10, CX, 60, 160);
+    if (dark) { bg.addColorStop(0,'#1e2440'); bg.addColorStop(1,'#0d1526'); }
+    else      { bg.addColorStop(0,'#f7f7fc'); bg.addColorStop(1,'#e9e9f4'); }
+    ctx.fillStyle = bg;
+    ctx.beginPath(); ctx.roundRect(0, 0, VW, VH, 7); ctx.fill();
+
+    // Bezel
+    ctx.strokeStyle = dark ? '#2a3a5e' : 'rgba(0,0,0,.08)';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.roundRect(0.25, 0.25, VW-0.5, VH-0.5, 7); ctx.stroke();
+
+    // ── Coloured arc band: green → yellow → red ─────────────────
+    const aS = toRad(-25), aE = toRad(25);
+    const ag = ctx.createLinearGradient(
+      CX+Math.cos(aS)*R, CY+Math.sin(aS)*R,
+      CX+Math.cos(aE)*R, CY+Math.sin(aE)*R
+    );
+    if (dark) {
+      ag.addColorStop(0,'#22c55e'); ag.addColorStop(0.65,'#fbbf24'); ag.addColorStop(1,'#f87171');
+    } else {
+      ag.addColorStop(0,'#16a34a'); ag.addColorStop(0.65,'#d97706'); ag.addColorStop(1,'#dc2626');
+    }
+    ctx.strokeStyle = ag; ctx.lineWidth = 3; ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.arc(CX, CY, R, aS, aE); ctx.stroke();
+
+    // Thin inner guide arc
+    ctx.strokeStyle = dark ? 'rgba(139,92,246,.12)' : 'rgba(109,60,230,.18)';
+    ctx.lineWidth = 0.75;
+    ctx.beginPath(); ctx.arc(CX, CY, R-15, aS, aE); ctx.stroke();
+
+    // ── Tick marks + numeric labels ──────────────────────────────
+    const mCol = dark ? '#8888b0' : '#555570';
+    const pCol = dark ? '#f87171' : '#dc2626';
+    const marks = [
+      {vu:-20,main:true, txt:'20'},{vu:-10,main:true, txt:'10'},
+      {vu: -7,main:false,txt:'7' },{vu: -5,main:false,txt:'5' },
+      {vu: -3,main:false,txt:'3' },{vu: -2,main:true, txt:'2' },
+      {vu:  0,main:true, txt:'0' },{vu:  1,main:false,txt:'1' },
+      {vu:  2,main:false,txt:'2' },{vu:  3,main:true, txt:'3' },
+    ];
+    marks.forEach(m => {
+      const rad  = toRad(vuToAngle(m.vu));
+      const tLen = m.main ? 11 : 6;
+      const oR = R - 6, iR = oR - tLen;
+      ctx.strokeStyle = m.vu > 0 ? pCol : mCol;
+      ctx.lineWidth   = m.main ? 1.5 : 1;
+      ctx.beginPath();
+      ctx.moveTo(CX+Math.cos(rad)*oR, CY+Math.sin(rad)*oR);
+      ctx.lineTo(CX+Math.cos(rad)*iR, CY+Math.sin(rad)*iR);
+      ctx.stroke();
+      if (m.main) {
+        const lR = iR - 9;
+        ctx.fillStyle = m.vu > 0 ? pCol : mCol;
+        ctx.font = 'bold 8px system-ui,sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(m.txt, CX+Math.cos(rad)*lR, CY+Math.sin(rad)*lR);
+      }
+    });
+
+    // ± signs outside arc ends
+    const sR = R + 12;
+    ctx.font = 'bold 12px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = mCol;
+    ctx.fillText('−', CX+Math.cos(toRad(-29))*sR, CY+Math.sin(toRad(-29))*sR);
+    ctx.fillStyle = pCol;
+    ctx.fillText('+', CX+Math.cos(toRad(29))*sR,  CY+Math.sin(toRad(29))*sR);
+
+    // "AroundMyRoom" brand
+    ctx.fillStyle = dark ? 'rgba(139,92,246,.65)' : 'rgba(109,60,230,.55)';
+    ctx.font = '600 9px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('AroundMyRoom', CX, VH - 48);
+
+    // "VU" logo (bottom centre)
+    ctx.fillStyle = dark ? 'rgba(139,92,246,.55)' : 'rgba(109,60,230,.45)';
+    ctx.font = 'bold 10px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('VU', CX, VH - 7);
+
+    // Channel label (top corner)
+    ctx.fillStyle = dark ? 'rgba(139,92,246,.85)' : 'rgba(109,60,230,.70)';
+    ctx.font = 'bold 13px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, label === 'L' ? 16 : VW-16, 12);
+
+    // ── Peak lamp ────────────────────────────────────────────────
+    const lampX = CX, lampY = 10, lampRad = 5;
+    if (peakIntensity > 0 && dark) {
+      // Glow halo — dark mode only
+      const glow = ctx.createRadialGradient(lampX, lampY, 0, lampX, lampY, lampRad*4);
+      glow.addColorStop(0, `rgba(255,60,60,${(0.3+peakIntensity*0.55).toFixed(2)})`);
+      glow.addColorStop(1, 'rgba(255,60,60,0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.arc(lampX, lampY, lampRad*4, 0, 2*Math.PI); ctx.fill();
+    }
+    if (dark) {
+      ctx.fillStyle = peakIntensity > 0
+        ? `rgba(255,${Math.round(70-peakIntensity*50)},${Math.round(70-peakIntensity*50)},${(0.3+peakIntensity*0.7).toFixed(2)})`
+        : '#16213e';
+    } else {
+      // Light mode: plain solid dot, no glow — red fades cleanly into resting colour
+      ctx.fillStyle = peakIntensity > 0
+        ? `rgba(220,38,38,${(0.25+peakIntensity*0.75).toFixed(2)})`
+        : '#c8c8dc';
+    }
+    ctx.beginPath(); ctx.arc(lampX, lampY, lampRad, 0, 2*Math.PI); ctx.fill();
+    ctx.strokeStyle = dark ? '#2a3a5e' : 'rgba(0,0,0,.12)'; ctx.lineWidth = 0.75; ctx.stroke();
+
+    // ── Needle ───────────────────────────────────────────────────
+    const ang  = toRad(vuToAngle(vu));
+    const nTip = R - 8, nTail = 14;
+    ctx.save();
+    ctx.shadowColor = dark ? 'rgba(0,0,0,.8)' : 'rgba(0,0,0,.3)';
+    ctx.shadowBlur = 4; ctx.shadowOffsetX = 1.5; ctx.shadowOffsetY = 1.5;
+    ctx.strokeStyle = dark ? '#f87171' : '#dc2626';
+    ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(CX+Math.cos(ang+Math.PI)*nTail, CY+Math.sin(ang+Math.PI)*nTail);
+    ctx.lineTo(CX+Math.cos(ang)*nTip,          CY+Math.sin(ang)*nTip);
+    ctx.stroke();
+    ctx.restore();
+
+    // Pivot cap
+    ctx.fillStyle = dark ? '#3a4e72' : '#9090a8';
+    ctx.beginPath(); ctx.arc(CX, CY, 5, 0, 2*Math.PI); ctx.fill();
+    ctx.fillStyle = dark ? '#8888b0' : '#c8c8dc';
+    ctx.beginPath(); ctx.arc(CX, CY, 2.5, 0, 2*Math.PI); ctx.fill();
+
+    ctx.restore();
+  }
+
+  function _drawIdle() {
+    const cL = document.getElementById('vu-dial-L');
+    const cR = document.getElementById('vu-dial-R');
+    if (cL) drawDial(cL, 'L', -25, 0);
+    if (cR) drawDial(cR, 'R', -25, 0);
+  }
+
+  // ── Ref-level knob ──────────────────────────────────────────
+  function drawKnob(canvas) {
+    const dpr = window.devicePixelRatio || 1;
+    const S   = Math.round(canvas.offsetWidth * dpr);
+    if (S < 4) return;
+    if (canvas.width !== S || canvas.height !== S) { canvas.width = S; canvas.height = S; }
+    const ctx  = canvas.getContext('2d');
+    const dark = !document.documentElement.classList.contains('light');
+    const cx = S/2, cy = S/2;
+    const outerR = S/2 - dpr;
+    const capR   = outerR * 0.68;
+    const arcR   = outerR - 2*dpr;
+
+    ctx.clearRect(0, 0, S, S);
+
+    // Outer bezel
+    const rim = ctx.createRadialGradient(cx-outerR*.3, cy-outerR*.3, outerR*.1, cx, cy, outerR);
+    if (dark) { rim.addColorStop(0,'#3a4e72'); rim.addColorStop(1,'#0d1526'); }
+    else      { rim.addColorStop(0,'#d0d0e8'); rim.addColorStop(1,'#9090a8'); }
+    ctx.fillStyle = rim;
+    ctx.beginPath(); ctx.arc(cx, cy, outerR, 0, 2*Math.PI); ctx.fill();
+
+    // Inner cap
+    const cap = ctx.createRadialGradient(cx-capR*.2, cy-capR*.3, capR*.05, cx, cy, capR);
+    if (dark) { cap.addColorStop(0,'#2a3a5e'); cap.addColorStop(1,'#16213e'); }
+    else      { cap.addColorStop(0,'#f0f0fa'); cap.addColorStop(1,'#c4c4d8'); }
+    ctx.fillStyle = cap;
+    ctx.beginPath(); ctx.arc(cx, cy, capR, 0, 2*Math.PI); ctx.fill();
+
+    // Sweep arc track
+    const sA = 3*Math.PI/4;         // 135° = 7:30 (CCW min = -20 dBFS)
+    const eA = sA + 3*Math.PI/2;    // 135°+270° = 4:30 (CW max = -10 dBFS)
+    ctx.strokeStyle = dark ? 'rgba(255,255,255,.07)' : 'rgba(0,0,0,.09)';
+    ctx.lineWidth = 2.5*dpr; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(cx, cy, arcR, sA, eA); ctx.stroke();
+
+    // Sweep arc fill (current value)
+    const t  = (-10 - REF_LEVEL) / 10;      // 0 = -10 dBFS (left), 1 = -20 dBFS (right=red)
+    const vA = sA + t * 3*Math.PI/2;
+    ctx.strokeStyle = dark ? '#8b5cf6' : '#6d3ce6';
+    ctx.lineWidth = 2.5*dpr; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(cx, cy, arcR, sA, vA); ctx.stroke();
+
+    // Indicator dot on cap face
+    const indR = capR * 0.57;
+    ctx.fillStyle = dark ? '#8b5cf6' : '#6d3ce6';
+    ctx.beginPath();
+    ctx.arc(cx + Math.cos(vA)*indR, cy + Math.sin(vA)*indR, 2.5*dpr, 0, 2*Math.PI);
+    ctx.fill();
+  }
+
+  function initKnob() {
+    const knob = document.getElementById('vu-ref-knob');
+    if (!knob) return;
+    drawKnob(knob);
+    let dragging = false, startX = 0, startVal = REF_LEVEL;
+
+    knob.addEventListener('mousedown', e => {
+      dragging = true; startX = e.clientX; startVal = REF_LEVEL;
+      e.preventDefault(); e.stopPropagation();
+    });
+    knob.addEventListener('click', e => e.stopPropagation());
+    window.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const delta = (e.clientX - startX) / 15;  // right = lower REF_LEVEL (more red)
+      REF_LEVEL = Math.min(-10, Math.max(-20, Math.round((startVal - delta) * 2) / 2));
+      knob.title = `Drag left/right · peak ref: ${REF_LEVEL} dBFS`;
+      drawKnob(knob);
+    });
+    window.addEventListener('mouseup', () => { dragging = false; });
+
+    knob.addEventListener('touchstart', e => {
+      dragging = true; startX = e.touches[0].clientX; startVal = REF_LEVEL;
+      e.preventDefault(); e.stopPropagation();
+    }, {passive:false});
+    window.addEventListener('touchmove', e => {
+      if (!dragging) return;
+      const delta = (e.touches[0].clientX - startX) / 15;
+      REF_LEVEL = Math.min(-10, Math.max(-20, Math.round((startVal - delta) * 2) / 2));
+      knob.title = `Drag left/right · peak ref: ${REF_LEVEL} dBFS`;
+      drawKnob(knob);
+    }, {passive:false});
+    window.addEventListener('touchend', () => { dragging = false; });
+
+    // Redraw on theme toggle
+    new MutationObserver(() => drawKnob(knob))
+      .observe(document.documentElement, {attributes:true, attributeFilter:['class']});
+  }
+
+  function drawFrame(ts) {
+    if (!rafId) return;
+    if (!audioCtx || !analyserL || !analyserR) { rafId = requestAnimationFrame(drawFrame); return; }
+    const dt    = lastTs !== null ? Math.min((ts - lastTs) / 1000, 0.1) : 0.016;
+    lastTs      = ts;
+    const rawL  = rmsToVU(analyserL);
+    const rawR  = rmsToVU(analyserR);
+    const tgtL  = isFinite(rawL) ? Math.max(-25, rawL) : -25;
+    const tgtR  = isFinite(rawR) ? Math.max(-25, rawR) : -25;
+    const alpha = 1 - Math.exp(-dt / TAU);
+    vuL += alpha * (tgtL - vuL);
+    vuR += alpha * (tgtR - vuR);
+    if (vuL >= CLIP_VU) lastClipL = ts;
+    if (vuR >= CLIP_VU) lastClipR = ts;
+    function lampI(lc) {
+      if (lc === null) return 0;
+      const age = ts - lc;
+      if (age <= PEAK_HOLD_MS) return 1;
+      return Math.max(0, 1 - (age - PEAK_HOLD_MS) / PEAK_FADE_MS);
+    }
+    const cL = document.getElementById('vu-dial-L');
+    const cR = document.getElementById('vu-dial-R');
+    if (cL) drawDial(cL, 'L', vuL, lampI(lastClipL));
+    if (cR) drawDial(cR, 'R', vuR, lampI(lastClipR));
+    rafId = requestAnimationFrame(drawFrame);
+  }
+
+  function _start() {
+    if (!rafId) { lastTs = null; rafId = requestAnimationFrame(drawFrame); }
+  }
+  function _stop() {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    lastTs = null;
+    const cL = document.getElementById('vu-dial-L');
+    const cR = document.getElementById('vu-dial-R');
+    if (cL) { const c = cL.getContext('2d'); c.clearRect(0, 0, cL.width, cL.height); }
+    if (cR) { const c = cR.getContext('2d'); c.clearRect(0, 0, cR.width, cR.height); }
+  }
+  function _applyMode(startIfPlaying) {
+    const wrap   = document.getElementById('vu-needle-wrap');
+    const spec   = document.getElementById('mini-spec');
+    const needle = _mode === 'needle';
+    if (wrap) wrap.classList.toggle('hidden', !needle);
+    if (spec) spec.classList.toggle('hidden',  needle);
+    document.body.classList.toggle('vu-needle-mode', needle);
+    if (needle) { MINI_SPEC.stop(); if (startIfPlaying) _start(); else _drawIdle(); }
+    else        { _stop(); if (startIfPlaying) MINI_SPEC.start(); }
+    localStorage.setItem('vu-mode', _mode);
+  }
+
+  return {
+    get mode() { return _mode; },
+    start()  { if (_mode === 'needle') _start(); else MINI_SPEC.start(); },
+    stop()   { if (_mode === 'needle') _stop();  else MINI_SPEC.stop();  },
+    toggle() {
+      _mode = (_mode === 'needle') ? 'spec' : 'needle';
+      _applyMode(audioEl && !audioEl.paused);
+    },
+    init() {
+      const row = document.getElementById('vu-spec-row');
+      if (row) row.addEventListener('click', e => {
+        // Only toggle when clicking directly on a dial canvas — not center strip
+        const id = e.target && e.target.id;
+        if (id === 'vu-dial-L' || id === 'vu-dial-R' || id === 'mini-spec' || e.target === row) this.toggle();
+      });
+      // Block clicks on center logo area from bubbling to the row toggle
+      const center = document.querySelector('.vu-center-logo');
+      if (center) center.addEventListener('click', e => e.stopPropagation());
+      // Restore saved display state (no draw loop yet — wait for play event)
+      const wrap   = document.getElementById('vu-needle-wrap');
+      const spec   = document.getElementById('mini-spec');
+      const needle = _mode === 'needle';
+      if (wrap) wrap.classList.toggle('hidden', !needle);
+      if (spec) spec.classList.toggle('hidden',  needle);
+      document.body.classList.toggle('vu-needle-mode', needle);
+      if (needle) _drawIdle();
+      initKnob();
+    },
+  };
+})();
+
 // ── BUTTERCHURN VISUALIZER + SPECTRUM ────────────────────────
 const VIZ = (() => {
   let visualizer = null, analyserNode = null;
@@ -1027,10 +1399,13 @@ const VIZ = (() => {
     src.connect(gain);
     let _node = gain;
     for (const f of eqFilters) { _node.connect(f); _node = f; }
-    _node.connect(analyserNode);      // butterchurn (mono mix)
-    _node.connect(splitter);          // split into L + R
-    splitter.connect(analyserL, 0);   // left  channel
-    splitter.connect(analyserR, 1);   // right channel
+    _pannerNode = audioCtx.createStereoPanner();
+    _pannerNode.pan.value = parseFloat(localStorage.getItem('ms2_balance') || '0');
+    _node.connect(_pannerNode);
+    _pannerNode.connect(analyserNode);    // butterchurn (mono mix)
+    _pannerNode.connect(splitter);        // split into L + R
+    splitter.connect(analyserL, 0);       // left  channel
+    splitter.connect(analyserR, 1);       // right channel
     analyserNode.connect(audioCtx.destination);
   }
 
@@ -3224,7 +3599,7 @@ function _doXfadeHandoff(nextIdx) {
   _attachAudioListeners(audioEl);
   // The new element is already playing — 'play' won't re-fire, so kick the
   // VU meter and icon sync manually.
-  MINI_SPEC.start();
+  VU_NEEDLE.start();
   syncPlayIcons();
 
   if (!s) return;
@@ -3414,6 +3789,7 @@ function showApp() {
   // Guarantee a save on F5 / tab close
   window.addEventListener('beforeunload', persistQueue);
   pollScan();
+  VU_NEEDLE.init();
   // Fetch ping to get transcode server info + vpath metadata
   api('GET', 'api/v1/ping').then(d => {
     if (d.transcode) {
@@ -3543,7 +3919,7 @@ document.getElementById('logout-btn').addEventListener('click', () => {
   audioEl.pause();
   audioEl.removeAttribute('src');
   audioEl.load();
-  MINI_SPEC.stop();
+  VU_NEEDLE.stop();
   syncPlayIcons();  // guarantee ▶ icon before login screen appears
   S.token = ''; S.username = '';
   localStorage.removeItem('ms2_token'); localStorage.removeItem('ms2_user');
@@ -3841,8 +4217,8 @@ function _syncQueueLabel() {
 }
 
 // ── AUDIO EVENT HANDLERS (named so they can be moved to a swapped element) ──
-function _onAudioPlay()  { syncPlayIcons(); MINI_SPEC.start(); }
-function _onAudioPause() { syncPlayIcons(); MINI_SPEC.stop();  }
+function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); }
+function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  }
 function _onAudioEnded() {
   if (S.sleepMins === -1) {
     S.sleepMins = 0;
@@ -4046,8 +4422,31 @@ document.getElementById('prog-track').addEventListener('click', e => {
   const r = e.currentTarget.getBoundingClientRect();
   if (audioEl.duration) audioEl.currentTime = ((e.clientX - r.left) / r.width) * audioEl.duration;
 });
-document.getElementById('volume').addEventListener('input', e => { audioEl.volume = e.target.value / 100; });
+document.getElementById('volume').addEventListener('input', e => { audioEl.volume = e.target.value / 100; _setVolPct(e.target.value); });
 audioEl.volume = 0.8;
+function _setVolPct(val) {
+  const el = document.getElementById('vol-pct');
+  if (el) el.textContent = Math.round(val) + '%';
+}
+_setVolPct(80);
+
+// ── Balance slider ───────────────────────────────────────────
+(function initBalance() {
+  const saved = parseFloat(localStorage.getItem('ms2_balance') || '0');
+  const el    = document.getElementById('balance');
+  if (el) el.value = Math.round(saved * 100);
+})();
+document.getElementById('balance').addEventListener('input', e => {
+  const v = parseInt(e.target.value, 10);
+  if (_pannerNode) _pannerNode.pan.value = v / 100;
+  localStorage.setItem('ms2_balance', v / 100);
+});
+document.getElementById('balance').addEventListener('dblclick', () => {
+  const el = document.getElementById('balance');
+  el.value = 0;
+  if (_pannerNode) _pannerNode.pan.value = 0;
+  localStorage.removeItem('ms2_balance');
+});
 
 let _preMuteVol = 0.8;
 document.getElementById('mute-btn').addEventListener('click', () => {
@@ -4055,12 +4454,14 @@ document.getElementById('mute-btn').addEventListener('click', () => {
     _preMuteVol = audioEl.volume;
     audioEl.volume = 0;
     document.getElementById('volume').value = 0;
+    _setVolPct(0);
     document.getElementById('mute-btn').classList.add('muted');
     document.getElementById('vol-icon-on').classList.add('hidden');
     document.getElementById('vol-icon-off').classList.remove('hidden');
   } else {
     audioEl.volume = _preMuteVol;
     document.getElementById('volume').value = Math.round(_preMuteVol * 100);
+    _setVolPct(Math.round(_preMuteVol * 100));
     document.getElementById('mute-btn').classList.remove('muted');
     document.getElementById('vol-icon-on').classList.remove('hidden');
     document.getElementById('vol-icon-off').classList.add('hidden');
@@ -4197,7 +4598,7 @@ function applyTheme(light) {
   const track = document.getElementById('theme-track');
   const label = document.getElementById('theme-label');
   if (track) track.classList.toggle('lit', light);
-  if (label) label.textContent = light ? 'Light Mode' : 'Dark Mode';
+  if (label) label.textContent = light ? 'Light Mode' : 'Blue';
   localStorage.setItem('ms2_theme', light ? 'light' : 'dark');
 }
 
