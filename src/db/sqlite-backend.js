@@ -44,6 +44,20 @@ export function init(dbDirectory) {
       user TEXT NOT NULL, expires INTEGER, token TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_sp_expires ON shared_playlists(expires);
+
+    CREATE TABLE IF NOT EXISTS scan_errors (
+      guid      TEXT NOT NULL PRIMARY KEY,
+      filepath  TEXT NOT NULL,
+      vpath     TEXT NOT NULL,
+      error_type TEXT NOT NULL,
+      error_msg  TEXT,
+      stack      TEXT,
+      first_seen INTEGER NOT NULL,
+      last_seen  INTEGER NOT NULL,
+      count      INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_se_last_seen ON scan_errors(last_seen);
+    CREATE INDEX IF NOT EXISTS idx_se_vpath    ON scan_errors(vpath);
   `);
   // Migration: add cuepoints column for databases created before this feature
   try { db.exec('ALTER TABLE files ADD COLUMN cuepoints TEXT'); } catch (_e) {}
@@ -500,4 +514,42 @@ export function removeEternalSharedPlaylists() {
 
 export function removeSharedPlaylistsByUser(username) {
   db.prepare('DELETE FROM shared_playlists WHERE user = ?').run(username);
+}
+
+// ── Scan Errors ─────────────────────────────────────────────────────────────
+
+/**
+ * Upsert a scan error.  If an entry with the same guid already exists, its
+ * last_seen timestamp and detection count are updated instead of creating a
+ * duplicate row.  guid = md5(relativeFilePath + '|' + errorType) so the same
+ * problem recurs as count increments rather than flooding the table.
+ */
+export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stack) {
+  const now = Math.floor(Date.now() / 1000);
+  const existing = db.prepare('SELECT count FROM scan_errors WHERE guid = ?').get(guid);
+  if (existing) {
+    db.prepare('UPDATE scan_errors SET last_seen = ?, count = count + 1 WHERE guid = ?').run(now, guid);
+  } else {
+    db.prepare(
+      'INSERT INTO scan_errors (guid, filepath, vpath, error_type, error_msg, stack, first_seen, last_seen, count) VALUES (?,?,?,?,?,?,?,?,1)'
+    ).run(guid, filepath, vpath, errorType, errorMsg || '', stack || '', now, now);
+  }
+}
+
+export function getScanErrors() {
+  return db.prepare('SELECT * FROM scan_errors ORDER BY last_seen DESC').all();
+}
+
+export function clearScanErrors() {
+  db.prepare('DELETE FROM scan_errors').run();
+}
+
+/** Remove entries whose last_seen is older than retentionHours. */
+export function pruneScanErrors(retentionHours) {
+  const cutoff = Math.floor(Date.now() / 1000) - retentionHours * 3600;
+  db.prepare('DELETE FROM scan_errors WHERE last_seen < ?').run(cutoff);
+}
+
+export function getScanErrorCount() {
+  return db.prepare('SELECT COUNT(*) AS cnt FROM scan_errors').get().cnt;
 }

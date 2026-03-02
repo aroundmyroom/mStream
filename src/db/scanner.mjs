@@ -77,9 +77,51 @@ async function insertEntries(song) {
   });
 }
 
+/**
+ * Report a scan error back to the mStream server database for persistent
+ * auditing.  The GUID = md5(relativeFilePath + '|' + errorType) so the same
+ * recurring problem on the same file increments its count instead of creating
+ * duplicate rows.  Errors here must never crash or stall the scanner.
+ */
+async function reportError(absoluteFilepath, errorType, errorMsg, stack) {
+  try {
+    const rel = absoluteFilepath
+      ? path.relative(loadJson.directory, absoluteFilepath)
+      : '';
+    const guid = crypto.createHash('md5').update(`${rel}|${errorType}`).digest('hex');
+    await ax({
+      method: 'POST',
+      url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/report-error`,
+      headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+      responseType: 'json',
+      data: {
+        guid,
+        filepath: rel,
+        vpath: loadJson.vpath,
+        errorType,
+        errorMsg:  String(errorMsg  || '').slice(0, 500),
+        stack:     String(stack     || '').slice(0, 2000)
+      }
+    });
+  } catch (_err) {
+    // error reporting must never crash the scanner
+  }
+}
+
 run();
 async function run() {
   try {
+    // Prune stale error entries before starting — respects the configured retention window.
+    try {
+      await ax({
+        method: 'POST',
+        url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/prune-errors`,
+        headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+        responseType: 'json',
+        data: { vpath: loadJson.vpath }
+      });
+    } catch (_e) { /* non-critical — prune fail should not abort scan */ }
+
     await recursiveScan(loadJson.directory);
 
     await ax({
@@ -155,6 +197,7 @@ async function recursiveScan(dir) {
             try {
               songInfo = (await parseFile(filepath, { skipCovers: false })).common;
             } catch (_e) {
+              await reportError(filepath, 'art', `Failed to parse file for embedded art: ${_e.message}`, _e.stack);
               songInfo = {};
             }
             songInfo.filePath = path.relative(loadJson.directory, filepath);
@@ -188,13 +231,17 @@ async function recursiveScan(dir) {
                 }
                 if (pts.length > 1) cuepoints = JSON.stringify(pts);
               }
-            } catch (_e) { /* non-critical */ }
+            } catch (_e) {
+              await reportError(filepath, 'cue', `Embedded cue sheet parse failed: ${_e.message}`, _e.stack);
+            }
             // Fallback: sidecar .cue file alongside the audio file
             if (cuepoints === '[]') {
               try {
                 const sidecar = parseSidecarCue(filepath);
                 if (sidecar) cuepoints = JSON.stringify(sidecar);
-              } catch (_e) { /* non-critical */ }
+              } catch (_e) {
+                await reportError(filepath, 'cue', `Sidecar .cue file parse failed: ${_e.message}`, _e.stack);
+              }
             }
             await ax({
               method: 'POST',
@@ -208,6 +255,7 @@ async function recursiveScan(dir) {
       } catch (err) {
         // console.log(err)
         console.error(`Warning: failed to add file ${filepath} to database: ${err.message}`);
+        await reportError(filepath, 'insert', err.message, err.stack);
       }
 
       // pause
@@ -272,6 +320,7 @@ async function parseMyFile(thisSong, modified) {
     fmtInfo = parsed.format || {};
   } catch (err) {
     console.error(`Warning: metadata parse error on ${thisSong}: ${err.message}`);
+    await reportError(thisSong, 'parse', err.message, err.stack);
     songInfo = {track: { no: null, of: null }, disk: { no: null, of: null }};
   }
 
@@ -297,14 +346,20 @@ async function parseMyFile(thisSong, modified) {
         songInfo.cuepoints = JSON.stringify(cuePoints);
       }
     }
-  } catch (_e) { /* non-critical — cue extraction failed */ }
+  } catch (_e) {
+    // non-critical — embedded cue extraction failed
+    await reportError(thisSong, 'cue', `Embedded cue sheet parse failed: ${_e.message}`, _e.stack);
+  }
 
   // Fallback: sidecar .cue file alongside the audio file
   if (!songInfo.cuepoints) {
     try {
       const sidecar = parseSidecarCue(thisSong);
       if (sidecar) songInfo.cuepoints = JSON.stringify(sidecar);
-    } catch (_e) { /* non-critical */ }
+    } catch (_e) {
+      // non-critical
+      await reportError(thisSong, 'cue', `Sidecar .cue file parse failed: ${_e.message}`, _e.stack);
+    }
   }
 
   await getAlbumArt(songInfo);
@@ -359,6 +414,7 @@ async function getAlbumArt(songInfo) {
       await compressAlbumArt(originalFileBuffer, songInfo.aaFile);
     } catch (err) {
       console.error(`Warning: failed to compress album art for ${songInfo.filePath}: ${err.message}`);
+      await reportError(path.join(loadJson.directory, songInfo.filePath), 'art', `Failed to compress album art: ${err.message}`, err.stack);
     }
   }
 }

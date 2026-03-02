@@ -317,6 +317,15 @@ export async function editCompressImages(val) {
   config.program.scanOptions.compressImage = val;
 }
 
+export async function editScanErrorRetention(hours) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
+  loadConfig.scanOptions.scanErrorRetentionHours = hours;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.scanOptions.scanErrorRetentionHours = hours;
+}
+
 export async function editWriteLogs(val) {
   const loadConfig = await loadFile(config.configFile);
   loadConfig.writeLogs = val;
