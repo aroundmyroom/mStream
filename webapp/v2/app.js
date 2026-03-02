@@ -899,77 +899,165 @@ const EQ_PRESETS = {
 
 // ── MINI SPECTRUM (player bar) ──────────────────────────────
 const MINI_SPEC = (() => {
-  let rafId = null;
+  let rafId    = null;
+  let idleRaf  = null;
+  let idlePhase = 0;
+  const BARS    = 80;
+  const HOLD_MS = 1200;  // peak tick hold time before falling
+  const GRAVITY = 0.7;   // peak fall acceleration (units/s²) — gravity feel (#2)
+  const REL_TAU = 0.30;  // bar release time constant in seconds (#1)
 
-  function draw() {
+  // Ballistic bar levels [0-1], separate from raw FFT data (#1)
+  const barL = new Float32Array(BARS);
+  const barR = new Float32Array(BARS);
+  // Peak state: val, ts of last hit, fall velocity (#2)
+  const pkL = Array.from({length: BARS}, () => ({val:0, ts:0, vel:0}));
+  const pkR = Array.from({length: BARS}, () => ({val:0, ts:0, vel:0}));
+
+  let lastTs = 0;
+
+  // Idle breathing glow shown when stopped but in spec mode (#8)
+  function drawIdle(ts = 0) {
     const canvas = document.getElementById('mini-spec');
-    if (!canvas) { rafId = null; return; }  // clear stale handle so start() can restart
-    // Only run when audio context is ready
+    if (!canvas || canvas.classList.contains('hidden')) { idleRaf = null; return; }
+    const dpr = window.devicePixelRatio || 1;
+    const W = canvas.clientWidth * dpr, H = canvas.clientHeight * dpr;
+    if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+    // Floor line
+    ctx.fillStyle = 'rgba(255,255,255,.05)';
+    ctx.fillRect(0, H - dpr, W, dpr);
+    // Slow breathing gradient (#8)
+    idlePhase += 0.012;
+    const glow = 0.025 + 0.018 * Math.sin(idlePhase);
+    const grad = ctx.createLinearGradient(0, 0, W, 0);
+    grad.addColorStop(0,   'rgba(139,92,246,0)');
+    grad.addColorStop(0.5, `rgba(139,92,246,${glow.toFixed(3)})`);
+    grad.addColorStop(1,   'rgba(139,92,246,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    idleRaf = requestAnimationFrame(drawIdle);
+  }
+
+  function draw(ts = 0) {
+    const canvas = document.getElementById('mini-spec');
+    if (!canvas) { rafId = null; return; }
     if (!audioCtx || !analyserL || !analyserR) { rafId = requestAnimationFrame(draw); return; }
-    const aL = analyserL;
-    const aR = analyserR;
+    const dt = lastTs ? Math.min((ts - lastTs) / 1000, 0.1) : 0.016;
+    lastTs = ts;
 
     const dpr = window.devicePixelRatio || 1;
     const W   = canvas.clientWidth  * dpr;
     const H   = canvas.clientHeight * dpr;
     if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
 
-    const ctx = canvas.getContext('2d');
-    const BARS = 80;  // per channel
-    const GAP  = 1.5 * dpr;
-    const cg   = 2 * dpr;          // centre divider
-    const hw   = (W - cg) / 2;
-    const barW = (hw - GAP * (BARS - 1)) / BARS;
-    const baseline = H;  // bottom of canvas — bars grow upward
+    const ctx      = canvas.getContext('2d');
+    const GAP      = 1.5 * dpr;
+    const cg       = 2 * dpr;
+    const hw       = (W - cg) / 2;
+    const barW     = (hw - GAP * (BARS - 1)) / BARS;
+    const baseline = H;
+    const relDecay = Math.exp(-dt / REL_TAU);  // frame-rate-independent release (#1)
 
     ctx.clearRect(0, 0, W, H);
 
-    const dL = new Uint8Array(aL.frequencyBinCount);
-    const dR = new Uint8Array(aR.frequencyBinCount);
-    aL.getByteFrequencyData(dL);
-    aR.getByteFrequencyData(dR);
+    // Subtle floor line anchoring bars (#5)
+    ctx.fillStyle = 'rgba(255,255,255,.05)';
+    ctx.fillRect(0, H - dpr, W, dpr);
 
+    const rawL = new Uint8Array(analyserL.frequencyBinCount);
+    const rawR = new Uint8Array(analyserR.frequencyBinCount);
+    analyserL.getByteFrequencyData(rawL);
+    analyserR.getByteFrequencyData(rawR);
+
+    // Log scale from 40 Hz — better mid-range spread, less bass dominance (#6)
     function logBin(i, binCount) {
-      const freq = Math.pow(2, (Math.log2(20) + (Math.log2(20000) - Math.log2(20)) * i / BARS));
+      const freq = Math.pow(2, Math.log2(40) + (Math.log2(20000) - Math.log2(40)) * i / BARS);
       return Math.min(Math.floor(freq / (audioCtx.sampleRate / 2) * binCount), binCount - 1);
     }
 
-    // Draw one side; reverse = true mirrors freq axis
-    function side(data, startX, reverse) {
+    function side(rawData, startX, reverse, bars, pk) {
       for (let i = 0; i < BARS; i++) {
         const bi  = reverse ? (BARS - 1 - i) : i;
-        const v   = data[logBin(bi, data.length)] / 255;
-        const barH = Math.max(1, v * baseline * 0.92);
-        const x   = startX + i * (barW + GAP);
-        const hue = (1 - v) * 200;
-        const r   = Math.min(barW * .4, 2.5 * dpr);
+        const raw = rawData[logBin(bi, rawData.length)] / 255;
+        // Soft height compression — tanh-like: more headroom for peak ticks (#7)
+        const v   = Math.pow(raw, 0.82);
 
+        // Ballistics: instant attack, exponential release (#1)
+        bars[i] = v > bars[i] ? v : bars[i] * relDecay + v * (1 - relDecay);
+        if (bars[i] < 0.001) bars[i] = 0;
+
+        const bv   = bars[i];
+        const barH = Math.max(1, bv * baseline * 0.92);
+        const x    = startX + i * (barW + GAP);
+        const hue  = (1 - bv) * 200;
+        const rMax = Math.min(barW * .4, 2.5 * dpr);
+        const r    = barH > rMax * 2 ? rMax : 0;  // only round when bar is tall enough (#4)
+
+        // Bar gradient
         const grd = ctx.createLinearGradient(0, baseline, 0, baseline - barH);
         grd.addColorStop(0, `hsla(${hue},100%,48%,.85)`);
         grd.addColorStop(1, `hsla(${hue+80},100%,72%,.75)`);
         ctx.fillStyle = grd;
         ctx.beginPath();
-        ctx.roundRect(x, baseline - barH, barW, barH, [r, r, 0, 0]);
+        if (r > 0) ctx.roundRect(x, baseline - barH, barW, barH, [r, r, 0, 0]);
+        else       ctx.rect(x, baseline - barH, barW, barH);
         ctx.fill();
+
+        // Peak-hold tick with gravity-accelerated fall (#2)
+        if (v >= pk[i].val) {
+          pk[i].val = v; pk[i].ts = ts; pk[i].vel = 0;
+        } else if (ts - pk[i].ts > HOLD_MS) {
+          pk[i].vel += GRAVITY * dt;      // accelerate downward
+          pk[i].val  = Math.max(0, pk[i].val - pk[i].vel * dt);
+        }
+
+        const ph = pk[i].val;
+        if (ph > 0.015) {
+          const py      = baseline - ph * baseline * 0.92;
+          // Colour fades from bright-white toward the bar hue as it falls (#3)
+          const falling  = ts - pk[i].ts > HOLD_MS ? Math.min(1, pk[i].vel / 1.2) : 0;
+          const tickHue  = (1 - ph) * 200 + 60 * (1 - falling);
+          const tickL    = 80 - falling * 25;
+          const tickA    = (Math.min(1, ph * 2) * (0.95 - falling * 0.35)).toFixed(2);
+          ctx.fillStyle  = `hsla(${tickHue},100%,${tickL}%,${tickA})`;
+          ctx.fillRect(x, py - 1.5 * dpr, barW, 1.5 * dpr);
+        }
       }
     }
 
     // L: treble left → bass at centre
-    side(dL, 0, true);
+    side(rawL, 0, true, barL, pkL);
     // centre gap
     ctx.fillStyle = 'rgba(255,255,255,.04)';
     ctx.fillRect(hw, 0, cg, H);
     // R: bass at centre → treble right
-    side(dR, hw + cg, false);
+    side(rawR, hw + cg, false, barR, pkR);
 
     rafId = requestAnimationFrame(draw);
   }
 
+  function _reset() {
+    barL.fill(0); barR.fill(0);
+    pkL.forEach(p => { p.val = 0; p.ts = 0; p.vel = 0; });
+    pkR.forEach(p => { p.val = 0; p.ts = 0; p.vel = 0; });
+    lastTs = 0;
+  }
+
   return {
-    start() { if (!rafId) draw(); },
-    stop()  { if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-               const c = document.getElementById('mini-spec');
-               if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height); } },
+    start() {
+      if (idleRaf) { cancelAnimationFrame(idleRaf); idleRaf = null; }
+      if (!rafId) draw();
+    },
+    stop() {
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      _reset();
+      const c = document.getElementById('mini-spec');
+      if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); }
+      // Start idle breathing glow if canvas is visible (#8)
+      if (!idleRaf) { idlePhase = 0; drawIdle(); }
+    },
   };
 })();
 
