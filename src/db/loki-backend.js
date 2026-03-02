@@ -130,6 +130,14 @@ export function updateFileArt(filepath, vpath, aaFile, scanId) {
   }
 }
 
+export function updateFileCue(filepath, vpath, cuepoints) {
+  const dbFile = fileCollection.findOne({ '$and': [{ 'filepath': { '$eq': filepath } }, { 'vpath': { '$eq': vpath } }] });
+  if (dbFile) {
+    dbFile.cuepoints = cuepoints;
+    fileCollection.update(dbFile);
+  }
+}
+
 export function insertFile(fileData) {
   const result = fileCollection.insert(fileData);
   return mapId(result);
