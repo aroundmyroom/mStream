@@ -665,6 +665,16 @@ reflects the exact playback state at all times.
 - Player-left gap: 12 → 16 px.
 - Title font: 16 → 18 px; artist: 14 → 15 px; album: 12 → 13 px.
 
+### localStorage Persistence (F5 safe)
+- **Volume** — saved to `localStorage('ms2_vol')` on every slider change;
+  restored on load (default 80). `_preMuteVol` seeded from the same value so
+  unmuting after a refresh restores the correct level.
+- **Balance** — already saved to `ms2_balance`; panner node wired from it in
+  `ensureAudio()` (was already correct).
+- **VU ref-level knob** — `REF_LEVEL` now initialises from
+  `localStorage('ms2_ref')` (default −13 dBFS) and is saved on every drag
+  event (both mouse and touch).
+
 ### Mini Spectrum — Inverted Butterfly
 - Frequency axis flipped so bass meets in the centre and treble spreads to the
   outer edges (was: treble at centre, bass outside). The tall low-frequency

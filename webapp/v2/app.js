@@ -983,7 +983,7 @@ const VU_NEEDLE = (() => {
   let lastClipL = null, lastClipR = null;
   let lastTs    = null;
 
-  let REF_LEVEL      = -13;   // dBFS that maps to 0 VU  (adjustable via knob)
+  let REF_LEVEL      = parseFloat(localStorage.getItem('ms2_ref') || '-13');   // dBFS that maps to 0 VU  (adjustable via knob)
   const PEAK_HOLD_MS = 1000;
   const PEAK_FADE_MS = 5000;
   const CLIP_VU      = 2.5;   // VU level that trips the peak lamp
@@ -1241,6 +1241,7 @@ const VU_NEEDLE = (() => {
       const delta = (e.clientX - startX) / 15;  // right = lower REF_LEVEL (more red)
       REF_LEVEL = Math.min(-10, Math.max(-20, Math.round((startVal - delta) * 2) / 2));
       knob.title = `Drag left/right · peak ref: ${REF_LEVEL} dBFS`;
+      localStorage.setItem('ms2_ref', REF_LEVEL);
       drawKnob(knob);
     });
     window.addEventListener('mouseup', () => { dragging = false; });
@@ -1254,6 +1255,7 @@ const VU_NEEDLE = (() => {
       const delta = (e.touches[0].clientX - startX) / 15;
       REF_LEVEL = Math.min(-10, Math.max(-20, Math.round((startVal - delta) * 2) / 2));
       knob.title = `Drag left/right · peak ref: ${REF_LEVEL} dBFS`;
+      localStorage.setItem('ms2_ref', REF_LEVEL);
       drawKnob(knob);
     }, {passive:false});
     window.addEventListener('touchend', () => { dragging = false; });
@@ -4422,13 +4424,22 @@ document.getElementById('prog-track').addEventListener('click', e => {
   const r = e.currentTarget.getBoundingClientRect();
   if (audioEl.duration) audioEl.currentTime = ((e.clientX - r.left) / r.width) * audioEl.duration;
 });
-document.getElementById('volume').addEventListener('input', e => { audioEl.volume = e.target.value / 100; _setVolPct(e.target.value); });
-audioEl.volume = 0.8;
+document.getElementById('volume').addEventListener('input', e => {
+  audioEl.volume = e.target.value / 100;
+  _setVolPct(e.target.value);
+  localStorage.setItem('ms2_vol', e.target.value);
+});
+(function initVolume() {
+  const saved = parseInt(localStorage.getItem('ms2_vol') || '80', 10);
+  audioEl.volume = saved / 100;
+  const el = document.getElementById('volume');
+  if (el) el.value = saved;
+  _setVolPct(saved);
+}());
 function _setVolPct(val) {
   const el = document.getElementById('vol-pct');
   if (el) el.textContent = Math.round(val) + '%';
 }
-_setVolPct(80);
 
 // ── Balance slider ───────────────────────────────────────────
 (function initBalance() {
@@ -4448,7 +4459,7 @@ document.getElementById('balance').addEventListener('dblclick', () => {
   localStorage.removeItem('ms2_balance');
 });
 
-let _preMuteVol = 0.8;
+let _preMuteVol = parseFloat(localStorage.getItem('ms2_vol') || '80') / 100;
 document.getElementById('mute-btn').addEventListener('click', () => {
   if (audioEl.volume > 0) {
     _preMuteVol = audioEl.volume;
