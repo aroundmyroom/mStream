@@ -204,6 +204,8 @@ a{color:inherit;text-decoration:none;}
 :root.light .sidebar{box-shadow:2px 0 12px rgba(0,0,0,.06);}
 :root.light .player{box-shadow:0 -2px 12px rgba(0,0,0,.06);}
 :root.light .queue-panel{box-shadow:-2px 0 12px rgba(0,0,0,.06);}
+:root.light .prog-track{background:rgba(0,0,0,.18);}
+:root.light .cue-tick::after{box-shadow:0 2px 10px rgba(0,0,0,.18);}
 
 /* ── CONTENT ───────────────────────────────────────────────── */
 .content{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width:0;}
@@ -598,11 +600,49 @@ a{color:inherit;text-decoration:none;}
 .player-progress{display:flex;align-items:center;gap:8px;width:100%;}
 .player-progress span{font-size:10px;color:var(--t2);flex-shrink:0;min-width:32px;}
 .player-progress span:last-child{text-align:right;}
-.prog-track{flex:1;height:3px;border-radius:99px;background:var(--border2);cursor:pointer;position:relative;transition:height .15s;}
-.prog-track:hover{height:5px;}
+.prog-track{flex:1;height:6px;border-radius:99px;background:var(--border2);cursor:pointer;position:relative;transition:height .15s;}
+.prog-track:hover{height:8px;}
 .prog-fill{height:100%;border-radius:99px;background:var(--primary);pointer-events:none;}
 .prog-thumb{position:absolute;top:50%;right:-4px;width:10px;height:10px;border-radius:50%;background:#fff;transform:translateY(-50%) scale(0);transition:transform .15s;pointer-events:none;}
 .prog-track:hover .prog-thumb{transform:translateY(-50%) scale(1);}
+.cue-markers{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index:3;}
+/* Each tick: visible colored bar + tooltip. Hit zone wider than visual. */
+.cue-tick{
+  position:absolute;top:0;bottom:0;width:12px;
+  display:block;transform:translateX(-50%);
+  pointer-events:auto;cursor:pointer;
+  background:transparent;
+  border:none;padding:0;
+}
+/* The visible stem - full height of the hit zone */
+.cue-tick::before{
+  content:'';
+  position:absolute;top:0;bottom:0;left:50%;margin-left:-2px;
+  width:4px;
+  background:rgba(255,190,30,.9);
+  border-radius:2px;
+  transition:background .1s;
+}
+.cue-tick:hover::before{background:var(--primary);}
+/* Light mode: use dark purple stem so it's visible on white background */
+:root.light .cue-tick::before{background:rgba(109,60,230,.8);}
+:root.light .cue-tick:hover::before{background:var(--primary);}
+/* Tooltip above the bar */
+.cue-tick::after{
+  content:attr(data-label);
+  position:absolute;
+  bottom:calc(100% + 8px);
+  left:50%;transform:translateX(-50%);
+  background:var(--raised);color:var(--t1);
+  font-size:11px;line-height:1.4;padding:4px 9px;
+  border-radius:6px;white-space:nowrap;
+  opacity:0;pointer-events:none;
+  transition:opacity .15s;
+  border:1px solid var(--border2);
+  box-shadow:0 2px 10px rgba(0,0,0,.5);
+  z-index:100;
+}
+.cue-tick:hover::after{opacity:1;}
 .player-right{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;}
 .dj-light{font-size:9px;font-weight:800;letter-spacing:.5px;padding:3px 7px;border-radius:99px;background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;animation:dj-pulse 1.6s ease-in-out infinite;}
 @keyframes dj-pulse{0%,100%{opacity:1}50%{opacity:.55}}

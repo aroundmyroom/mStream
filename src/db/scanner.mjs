@@ -64,7 +64,8 @@ async function insertEntries(song) {
     "ts": Math.floor(Date.now() / 1000),
     "sID": loadJson.scanId,
     "replaygainTrackDb": song.replaygain_track_gain ? song.replaygain_track_gain.dB : null,
-    "genre": song.genre ? String(song.genre) : null
+    "genre": song.genre ? String(song.genre) : null,
+    "cuepoints": song.cuepoints || null
   };
 
   await ax({
@@ -139,30 +140,70 @@ async function recursiveScan(dir) {
           }
         });
 
-        if (dbFileInfo.data._needsArt) {
-          // File exists but has no art — run art detection only, don't touch ts.
-          // We need to re-parse metadata to catch embedded art (e.g. WAV ID3 tags),
-          // then fall back to directory images if nothing is embedded.
-          let songInfo;
-          try {
-            songInfo = (await parseFile(filepath, { skipCovers: false })).common;
-          } catch (_e) {
-            songInfo = {};
-          }
-          songInfo.filePath = path.relative(loadJson.directory, filepath);
-          await getAlbumArt(songInfo);
-          if (songInfo.aaFile) {
-            await ax({
-              method: 'POST',
-              url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-art`,
-              headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
-              responseType: 'json',
-              data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, aaFile: songInfo.aaFile, scanId: loadJson.scanId }
-            });
-          }
-        } else if (Object.entries(dbFileInfo.data).length === 0) {
+        if (Object.entries(dbFileInfo.data).length === 0) {
+          // New file — full parse + insert (cuepoints extracted inside parseMyFile)
           const songInfo = await parseMyFile(filepath, stat.mtime.getTime());
           await insertEntries(songInfo);
+        } else {
+          // File already in DB — run targeted updates for anything still missing
+
+          if (dbFileInfo.data._needsArt) {
+            // File exists but has no art — run art detection only, don't touch ts.
+            // We need to re-parse metadata to catch embedded art (e.g. WAV ID3 tags),
+            // then fall back to directory images if nothing is embedded.
+            let songInfo;
+            try {
+              songInfo = (await parseFile(filepath, { skipCovers: false })).common;
+            } catch (_e) {
+              songInfo = {};
+            }
+            songInfo.filePath = path.relative(loadJson.directory, filepath);
+            await getAlbumArt(songInfo);
+            if (songInfo.aaFile) {
+              await ax({
+                method: 'POST',
+                url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-art`,
+                headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+                responseType: 'json',
+                data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, aaFile: songInfo.aaFile, scanId: loadJson.scanId }
+              });
+            }
+          }
+
+          if (dbFileInfo.data._needsCue) {
+            // cuepoints IS NULL — first time we check this file for an embedded cue sheet.
+            // Always writes back ('[]' sentinel or actual JSON) so this file is skipped next scan.
+            let cuepoints = '[]';
+            try {
+              const parsed = await parseFile(filepath, { skipCovers: true });
+              const cue = parsed.common?.cuesheet;
+              const sampleRate = parsed.format?.sampleRate || null;
+              if (cue && Array.isArray(cue.tracks) && cue.tracks.length && sampleRate) {
+                const pts = [];
+                for (const t of cue.tracks) {
+                  if (t.number === 170) continue;
+                  const idx1 = Array.isArray(t.indexes) && t.indexes.find(i => i.number === 1);
+                  if (!idx1) continue;
+                  pts.push({ no: t.number, title: t.title || null, t: Math.round((idx1.offset / sampleRate) * 100) / 100 });
+                }
+                if (pts.length > 1) cuepoints = JSON.stringify(pts);
+              }
+            } catch (_e) { /* non-critical */ }
+            // Fallback: sidecar .cue file alongside the audio file
+            if (cuepoints === '[]') {
+              try {
+                const sidecar = parseSidecarCue(filepath);
+                if (sidecar) cuepoints = JSON.stringify(sidecar);
+              } catch (_e) { /* non-critical */ }
+            }
+            await ax({
+              method: 'POST',
+              url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-cue`,
+              headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+              responseType: 'json',
+              data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, cuepoints }
+            });
+          }
         }
       } catch (err) {
         // console.log(err)
@@ -179,10 +220,56 @@ function timeout(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Parse a sidecar .cue file alongside an audio file.
+// Returns [{no, title, t}] (t = seconds) or null.
+// Only applies to single-FILE cue sheets where the FILE entry matches this audio file.
+function parseSidecarCue(audioFilePath) {
+  const dir  = path.dirname(audioFilePath);
+  const base = path.basename(audioFilePath, path.extname(audioFilePath));
+
+  // Prefer exact-basename match, then fall back to sole .cue in the directory
+  let cuePath = path.join(dir, base + '.cue');
+  if (!fs.existsSync(cuePath)) {
+    let cueFiles;
+    try { cueFiles = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.cue')); } catch (_e) { return null; }
+    if (cueFiles.length !== 1) return null;
+    cuePath = path.join(dir, cueFiles[0]);
+  }
+
+  let content;
+  try { content = fs.readFileSync(cuePath, 'utf8'); } catch (_e) { return null; }
+
+  // Only handle single-FILE cue sheets whose FILE line references this audio file
+  const fileLines = [...content.matchAll(/^FILE\s+"([^"]+)"/gim)];
+  if (fileLines.length !== 1) return null;
+  const cueRef = path.basename(fileLines[0][1]);
+  if (cueRef.toLowerCase() !== path.basename(audioFilePath).toLowerCase()) return null;
+
+  // Parse TRACK / TITLE / INDEX 01 MM:SS:FF
+  const tracks = [];
+  let cur = null;
+  for (const line of content.split(/\r?\n/)) {
+    const trackM = line.match(/^\s*TRACK\s+(\d+)\s+AUDIO/i);
+    if (trackM) { cur = { no: parseInt(trackM[1], 10), title: null }; continue; }
+    if (!cur) continue;
+    const titleM = line.match(/^\s*TITLE\s+"(.*)"/i);
+    if (titleM) { cur.title = titleM[1]; continue; }
+    const idxM = line.match(/^\s*INDEX\s+01\s+(\d+):(\d+):(\d+)/i);
+    if (idxM) {
+      const t = parseInt(idxM[1], 10) * 60 + parseInt(idxM[2], 10) + parseInt(idxM[3], 10) / 75;
+      tracks.push({ no: cur.no, title: cur.title, t: Math.round(t * 100) / 100 });
+      cur = null;
+    }
+  }
+  return tracks.length > 1 ? tracks : null;
+}
+
 async function parseMyFile(thisSong, modified) {
-  let songInfo;
+  let songInfo, fmtInfo = {};
   try {
-    songInfo = (await parseFile(thisSong, { skipCovers: loadJson.skipImg })).common;
+    const parsed = await parseFile(thisSong, { skipCovers: loadJson.skipImg });
+    songInfo = parsed.common;
+    fmtInfo = parsed.format || {};
   } catch (err) {
     console.error(`Warning: metadata parse error on ${thisSong}: ${err.message}`);
     songInfo = {track: { no: null, of: null }, disk: { no: null, of: null }};
@@ -192,8 +279,35 @@ async function parseMyFile(thisSong, modified) {
   songInfo.filePath = path.relative(loadJson.directory, thisSong);
   songInfo.format = getFileType(thisSong);
   songInfo.hash = await calculateHash(thisSong);
-  await getAlbumArt(songInfo);
 
+  // Extract embedded cue sheet (present in single-file FLAC/WAV album rips)
+  try {
+    const cue = songInfo.cuesheet;
+    const sampleRate = fmtInfo.sampleRate || null;
+    if (cue && Array.isArray(cue.tracks) && cue.tracks.length && sampleRate) {
+      const cuePoints = [];
+      for (const t of cue.tracks) {
+        if (t.number === 170) continue; // 0xAA = lead-out marker
+        const idx1 = Array.isArray(t.indexes) && t.indexes.find(i => i.number === 1);
+        if (!idx1) continue;
+        const seconds = idx1.offset / sampleRate;
+        cuePoints.push({ no: t.number, title: t.title || null, t: Math.round(seconds * 100) / 100 });
+      }
+      if (cuePoints.length > 1) {
+        songInfo.cuepoints = JSON.stringify(cuePoints);
+      }
+    }
+  } catch (_e) { /* non-critical — cue extraction failed */ }
+
+  // Fallback: sidecar .cue file alongside the audio file
+  if (!songInfo.cuepoints) {
+    try {
+      const sidecar = parseSidecarCue(thisSong);
+      if (sidecar) songInfo.cuepoints = JSON.stringify(sidecar);
+    } catch (_e) { /* non-critical */ }
+  }
+
+  await getAlbumArt(songInfo);
   return songInfo;
 }
 
