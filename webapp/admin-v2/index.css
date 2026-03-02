@@ -599,3 +599,47 @@ tr:hover td { background: var(--raised); }
   .se-detail    { padding: .75rem; }
 }
 
+
+/* ── Scan Progress ─────────────────────────────────────────────────── */
+.sp-container { display: flex; flex-direction: column; gap: .6rem; margin-top: 1rem; }
+.sp-card {
+  border: 1px solid var(--border2); border-radius: 8px;
+  padding: .75rem 1rem; background: var(--raised);
+  border-left: 3px solid var(--green);
+}
+.sp-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; font-size: .85rem; }
+.sp-live-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0;
+  animation: sp-pulse 1.4s ease-in-out infinite;
+}
+@keyframes sp-pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+.sp-vpath { font-weight: 700; color: var(--t1); }
+.sp-pct-badge {
+  font-size: .78rem; font-weight: 700; padding: .1rem .45rem; border-radius: 99px;
+  background: rgba(52,211,153,.15); color: var(--green); border: 1px solid rgba(52,211,153,.3);
+}
+.sp-firstscan-badge {
+  font-size: .78rem; font-weight: 600; padding: .1rem .45rem; border-radius: 99px;
+  background: rgba(139,92,246,.12); color: var(--primary); border: 1px solid rgba(139,92,246,.25);
+}
+.sp-spacer { flex: 1; }
+.sp-eta { font-size: .78rem; color: var(--t2); }
+.sp-rate { font-size: .78rem; color: var(--accent); font-weight: 600; }
+.sp-track {
+  position: relative; height: 6px; background: var(--border); border-radius: 99px;
+  overflow: hidden; margin-bottom: .45rem;
+}
+.sp-fill { height: 100%; background: var(--green); border-radius: 99px; transition: width .8s ease-out; }
+.sp-fill-indeterminate {
+  position: absolute; inset: 0; width: 40%;
+  background: linear-gradient(90deg, transparent, var(--primary), transparent);
+  animation: sp-shimmer 1.8s ease-in-out infinite;
+}
+@keyframes sp-shimmer { 0% { transform: translateX(-250%); } 100% { transform: translateX(350%); } }
+.sp-counts { font-size: .8rem; color: var(--t2); display: flex; gap: 1rem; margin-bottom: .3rem; }
+.sp-elapsed { margin-left: auto; color: var(--t3); }
+.sp-current-file {
+  display: flex; align-items: center; gap: .35rem;
+  font-size: .76rem; color: var(--t3);
+}
+.sp-filepath { word-break: break-all; color: var(--t2); }

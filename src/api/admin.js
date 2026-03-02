@@ -14,6 +14,7 @@ import * as db from '../db/manager.js';
 import { joiValidate } from '../util/validation.js';
 
 import { getTransAlgos, getTransCodecs, getTransBitrates } from '../api/transcode.js';
+import * as scanProgress from '../state/scan-progress.js';
 
 export function setup(mstream) {
   mstream.all('/api/v1/admin/{*path}', (req, res, next) => {
@@ -231,6 +232,10 @@ export function setup(mstream) {
 
   mstream.get("/api/v1/admin/db/scan/stats", (req, res) => {
     res.json(db.getStats());
+  });
+
+  mstream.get('/api/v1/admin/db/scan/progress', (req, res) => {
+    res.json(scanProgress.getAll());
   });
 
   // ── Scan Error Audit ──────────────────────────────────────────────────────────

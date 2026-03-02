@@ -5,6 +5,8 @@ import { nanoid } from 'nanoid';
 import jwt from 'jsonwebtoken';
 import * as config from '../state/config.js';
 import { getDirname } from '../util/esm-helpers.js';
+import * as db from '../db/manager.js';
+import * as scanProgress from '../state/scan-progress.js';
 
 const __dirname = getDirname(import.meta.url);
 
@@ -72,6 +74,9 @@ function runScan(scanObj) {
       .map(v => config.program.folders[v].root)
   };
 
+  const baseline = db.countFilesByVpath(scanObj.vpath) || 0;
+  scanProgress.startScan(scanObj.id, scanObj.vpath, baseline > 0 ? baseline : null);
+
   const forkedScan = child.fork(path.join(__dirname, './scanner.mjs'), [JSON.stringify(jsonLoad)], { silent: true });
   winston.info(`File scan started on ${jsonLoad.directory}`);
   runningTasks.add(forkedScan);
@@ -91,6 +96,7 @@ function runScan(scanObj) {
 
   forkedScan.on('close', (code) => {
     winston.info(`File scan completed with code ${code}`);
+    scanProgress.finish(scanObj.id);
     runningTasks.delete(forkedScan);
     vpathLimiter.delete(scanObj.vpath);
     currentScanDirs.delete(scanObj.vpath);
