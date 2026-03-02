@@ -675,6 +675,27 @@ reflects the exact playback state at all times.
   `localStorage('ms2_ref')` (default −13 dBFS) and is saved on every drag
   event (both mouse and touch).
 
+### Mini Spectrum — 8-point quality pass
+Eight improvements applied to the spectrum analyser:
+
+1. **Ballistics** — instant attack, frame-rate-independent exponential release
+   (τ = 300 ms). Bars feel physical instead of twitchy.
+2. **Gravity-accelerated peak fall** — after the hold period the tick
+   accelerates downward like a real physical object rather than dropping at a
+   fixed rate.
+3. **Peak tick colour shift** — while holding the tick is bright white-yellow;
+   as it falls it blends toward the bar's own hue, giving a visual cue of age.
+4. **Corner-radius guard** — `roundRect` only applied when the bar is tall
+   enough that the radius doesn't eat the whole bar.
+5. **Floor line** — subtle 1 px semi-transparent baseline anchors the display
+   when music is quiet.
+6. **Frequency range 40 Hz floor** — log scale starts at 40 Hz instead of
+   20 Hz; better mid-range spread, less bass-bar dominance in the centre.
+7. **Soft height compression** — `pow(v, 0.82)` applied to raw FFT values
+   so loud signals don't always slam the ceiling; more headroom for peak ticks.
+8. **Idle breathing glow** — when playback stops in spectrum mode a slow
+   purple breathing gradient plays on the canvas instead of a blank rectangle.
+
 ### Mini Spectrum — Inverted Butterfly
 - Frequency axis flipped so bass meets in the centre and treble spreads to the
   outer edges (was: treble at centre, bass outside). The tall low-frequency
