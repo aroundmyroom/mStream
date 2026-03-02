@@ -622,8 +622,63 @@ reflects the exact playback state at all times.
 
 ---
 
+## Player Bar Redesign — VU Meters, Balance, Volume Groups
+
+### VU Needle Meters
+- Full VU needle-meter module (`VU_NEEDLE`) added alongside the existing mini
+  spectrum analyser. Click the centre strip to toggle between modes; the
+  chosen mode persists in `localStorage('vu-mode')`.
+- Two canvas dials (L/R) with ballistic needle physics, arc zone colouring
+  (green → yellow → red), segment LED scale, and a peak-hold lamp.
+- Lamp glow is dark-mode-only; light mode shows a plain solid dot.
+- Both dial canvases and the spectrum canvas sit inside a fixed-height (90px)
+  `position:relative` container so the player bar never shifts when switching
+  modes — each element is `position:absolute` and is hidden via
+  `visibility:hidden` (not `display:none`) to keep layout stable.
+- **Ref-level knob** — a 34 px canvas knob between the two dials lets the user
+  drag left/right to adjust the peak reference level (−10 to −20 dBFS).
+  Drag right = more deflection/red. Center-logo clicks are blocked from
+  triggering the mode toggle.
+- **F5 / restore fix** — `VIZ.initAudio()` is called inside `_onAudioPlay()`
+  so the analyser nodes always exist before the draw loop starts.
+
+### Audio Chain — Stereo Balance
+- A `StereoPannerNode` (`_pannerNode`) is inserted after the EQ band, before
+  the analyser splitter. Value restores from `localStorage('ms2_balance')`.
+
+### Player-Right Redesign
+- Rebuilt as two labeled column groups separated by a 1 px divider:
+  - **Balance** group — EQ + DJ-light buttons above, Balance label, L/slider/R.
+  - **Volume** group — Visualiser + Queue buttons above, Volume label,
+    mute/slider/vol-%.
+- Buttons are 38 × 38 px (`pright-btn`) with 19 × 19 SVG icons.
+- Volume slider has a 4 px track, 14 px thumb, max-width 200 px.
+- Live volume percentage label (`#vol-pct`) updates on input.
+- Balance slider resets to centre on double-click; value stored in
+  `localStorage('ms2_balance')`.
+- The "C" display label next to the balance slider was removed (no practical
+  use); the `_setBalVal` helper and the broken `#bal-val` click listener were
+  cleaned up from the JS.
+
+### Album Art / Song Info
+- Thumbnail enlarged from 64 px → 104 px (responsive: 72 px).
+- Player-left gap: 12 → 16 px.
+- Title font: 16 → 18 px; artist: 14 → 15 px; album: 12 → 13 px.
+
+### Theme Label
+- The "dark mode" label in the sidebar toggle renamed to **Blue** to reflect
+  the navy/blue palette (a true black dark mode is a future TODO).
+
+### Light Mode Sync
+- VU arc colours, guide arc, peak lamp, background gradient, and knob arc all
+  mapped to GUIv2 light-mode CSS tokens so both themes look consistent.
+
+---
+
 ## Pending
 
 - **Song ratings UI** — the DB column and Auto-DJ `minRating` filter exist;
   there is currently no way to set ratings from within v2 (star widget saves
   via the rate panel but no dedicated "Rated songs" browse view exists).
+- **True dark mode** — a full black/grey palette (separate from the current
+  blue theme) is planned but requires broader CSS variable changes.
