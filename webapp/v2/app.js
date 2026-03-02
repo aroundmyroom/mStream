@@ -954,13 +954,13 @@ const MINI_SPEC = (() => {
       }
     }
 
-    // L: bass left → treble at centre
-    side(dL, 0, false);
+    // L: treble left → bass at centre
+    side(dL, 0, true);
     // centre gap
     ctx.fillStyle = 'rgba(255,255,255,.04)';
     ctx.fillRect(hw, 0, cg, H);
-    // R: treble at centre → bass right (mirrored)
-    side(dR, hw + cg, true);
+    // R: bass at centre → treble right
+    side(dR, hw + cg, false);
 
     rafId = requestAnimationFrame(draw);
   }
