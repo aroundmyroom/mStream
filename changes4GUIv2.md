@@ -59,11 +59,12 @@
   duration shown.
 - **Right side** — Mute, Volume slider, EQ button, Queue button (with live
   count badge), Visualizer button, DJ active pill.
-- **VU-meter mini-spec canvas** — a real-time frequency bar canvas sits as an
-  `position: absolute` overlay at the top of the player bar.  Bars grow
-  upward from the bottom of the canvas.  Positioned 13 px left of centre
-  (`translateX(calc(-50% - 13px))`).  Width `min(640px, 70%)`, height 36 px,
-  opacity 0.7 (1.0 on hover).
+- **VU / Spectrum strip** — a fixed-height 90 px `vu-spec-row` container sits
+  at the top of the player-left column.  It holds two `position:absolute`
+  elements — the mini spectrum canvas (`#mini-spec`) and the VU needle wrap
+  (`#vu-needle-wrap`).  Only one is visible at a time (`visibility:hidden`
+  keeps layout stable on the inactive one).  Click anywhere on the strip to
+  toggle between modes; choice persists in `localStorage('vu-mode')`.
 
 ---
 
@@ -643,8 +644,12 @@ reflects the exact playback state at all times.
   so the analyser nodes always exist before the draw loop starts.
 
 ### Audio Chain — Stereo Balance
-- A `StereoPannerNode` (`_pannerNode`) is inserted after the EQ band, before
-  the analyser splitter. Value restores from `localStorage('ms2_balance')`.
+- A `StereoPannerNode` (`_pannerNode`) is inserted **after** the EQ band and
+  **after** the analyser taps, so balance never affects VU meter or spectrum
+  levels.  Full chain:
+  `src → gain(1.25) → eq[0..7] → analyserNode (butterchurn tap) + splitter
+  (L/R spectrum taps) → StereoPannerNode → destination`.
+- Value restores from `localStorage('ms2_balance')`.
 
 ### Player-Right Redesign
 - Rebuilt as two labeled column groups separated by a 1 px divider:
@@ -709,6 +714,145 @@ Eight improvements applied to the spectrum analyser:
 ### Light Mode Sync
 - VU arc colours, guide arc, peak lamp, background gradient, and knob arc all
   mapped to GUIv2 light-mode CSS tokens so both themes look consistent.
+
+---
+
+## Idle & Drain Animation States
+
+### Mini Spectrum
+- **Idle breathing glow** — when playback stops (or on page load before the
+  first track plays) in spectrum mode, a slow sine-wave ripple of low bars
+  plays continuously with a purple breathing gradient overlay.  Driven by a
+  dedicated `idleRaf` RAF loop separate from the main draw loop.
+- **Drain** — when a track is paused/stopped, a `_draining` flag is set
+  instead of killing the draw loop immediately.  The draw loop feeds silence
+  so bars fall naturally under their ballistic release curve before idle kicks
+  in.  Once all bars fall below the floor threshold the drain loop exits and
+  `drawIdle()` takes over.
+
+### VU Needle Meters
+- **Idle parking** — `_drawIdle()` paints both needles parked at the far-left
+  (−∞ position) instead of leaving blank canvases.
+- **Drain** — `_vuDraining` flag keeps the RAF alive on pause.  Needles fall
+  under their normal ballistic TAU (300 ms) to −24.5 VU, then hand off to
+  `_drawIdle()`.  The real audio-level feed is silenced during drain so the
+  fall is smooth and deterministic regardless of the track's last loudness.
+
+---
+
+## Light Mode Overhaul
+
+The `:root.light` palette and all light-mode override rules were substantially
+revised to use a consistent lavender-gray language instead of near-white.
+
+### Palette changes (`webapp/v2/style.css`)
+| Token | Value | Role |
+|---|---|---|
+| `--bg` | `#e8e8f2` | Main content area — medium lavender-gray |
+| `--surface` | `#f2f2fa` | Sidebar / player / queue panels |
+| `--raised` | `#e4e4ef` | Raised elements over surface |
+| `--card` | `#dcdcec` | Cards over bg |
+| `--primary` | `#6d3ce6` | Accent purple (darker than dark-mode `#8b5cf6`) |
+| `--t1` | `#0c0c1a` | Primary text |
+| `--t2` | `#42425e` | Secondary text |
+| `--t3` | `#7878a0` | Tertiary/label text |
+
+### Component overrides added
+- **Sidebar** — vertical gradient `#eae8f8 → #e8e8f4` + purple-tinted
+  right border + subtle drop shadow.
+- **Player bar** — top-to-bottom gradient `#eceaf8 → #e4e2f0`, purple glow
+  separator line (no hard `border-top`), ambient upward shadow.
+- **Queue panel** — matching gradient + purple-tinted left border + shadow.
+- **Content header** — downward gradient `#dddaf0 → #e4e4f0` + border +
+  purple-tinted box-shadow.
+- **Song rows** — hover `rgba(109,60,230,.07)`, playing `rgba(109,60,230,.10)`.
+- **Nav items** — hover `rgba(100,80,200,.09)`, active `rgba(109,60,230,.13)`.
+- **Control buttons** (`.ctrl-btn`) — hover `rgba(109,60,230,.10)`,
+  active/playing `rgba(109,60,230,.15)`.
+- **Vol/balance sliders** — track colour `rgba(109,60,230,.18)`.
+- **Album cards** — resting `box-shadow:0 2px 8px rgba(0,0,0,.10)`.
+- **Queue items** — hover + active backgrounds matching nav items.
+- **VU / spectrum strip** — glassy gradient border, white inset highlight,
+  ambient shadow (see Player Bar Visual Integration).
+
+---
+
+## Content Header Depth
+
+The content-area header (`.content-header`) was flat and looked disconnected
+from the visually richer sidebar and player.
+
+- **Dark** — purple wash `linear-gradient(180deg,rgba(139,92,246,.07) 0%,
+  transparent 100%)` composited over `var(--bg)`, downward ambient shadow,
+  purple hairline at the bottom border.
+- **Light** — downward gradient `#dddaf0 → #e4e4f0`, purple-tinted
+  `border-bottom`, matching two-layer box-shadow.
+- `position:relative; z-index:1` so the shadow appears above the scrollable
+  content area.
+
+---
+
+## Player Bar Visual Integration
+
+The player bar (`.player` + VU/spectrum strip + controls area) was redesigned
+to feel cohesive with the rest of the UI instead of a flat "80s" panel.
+
+### Dark mode
+- **`.player`** — `background: linear-gradient(180deg, var(--surface) 0%,
+  var(--raised) 100%)`.  Hard `border-top` removed; replaced with a
+  `box-shadow` that draws: a purple glow hairline at the top edge
+  (`0 -1px 0 rgba(139,92,246,.18)`), a large upward ambient shadow
+  (`0 -12px 40px rgba(0,0,0,.35)`), and an inset top highlight
+  (`inset 0 1px 0 rgba(139,92,246,.10)`).
+- **`.vu-needle-wrap`** — opaque `var(--raised)` fill replaced with a
+  near-transparent purple-tinted glass gradient.  Purple-hued border
+  (`rgba(139,92,246,.15)`), inset top-edge highlight, subtle drop shadow.
+- **`.vu-spec-row`** — ambient ring outline
+  (`0 0 0 1px rgba(139,92,246,.10)`) + vertical drop shadow.
+- **`.player-thumb`** — three-layer floating shadow (deep `0 8px 24px`,
+  close `0 2px 6px`, 1px inset highlight ring).
+- **`.player-center`** — very subtle frosted glass card
+  (`background: rgba(255,255,255,.03)`, `border-radius:16px`, inset top
+  highlight) groups the controls without hard borders.
+- **`.vol-divider`** — replaced flat `var(--border)` with a
+  `linear-gradient` that fades in/out through `rgba(139,92,246,.25)`,
+  making the divider feel like part of the palette.
+
+### Light mode
+- All of the above has matching `:root.light` overrides using the `#6d3ce6`
+  palette (see *Light Mode Overhaul*).
+- VU/spec strip uses a white inset highlight instead of the dark-mode opaque
+  one, giving a glassy appearance on the light background.
+
+---
+
+## OS Colour Scheme Auto-Detection
+
+mStream v2 now honours the `prefers-color-scheme` media feature so the
+correct theme loads on a first visit without any action from the user.
+
+### Logic (`webapp/v2/app.js`)
+- `applyTheme(light, persist = true)` gains a second parameter.
+  - `persist = true` (default) — writes `ms2_theme` to `localStorage` as
+    before.
+  - `persist = false` — applies the theme visually without touching storage,
+    so the user's explicit choice is never overwritten by OS changes.
+- A `matchMedia('(prefers-color-scheme: dark)')` listener is registered at
+  module load.  When the OS colour scheme changes it calls
+  `applyTheme(!e.matches, false)` **only if `ms2_theme` is absent from
+  localStorage** — i.e. the user has not yet made an explicit choice.
+- On init, if `ms2_theme` is not in storage the theme is set from the OS
+  media query (`persist = false`); if it is present the stored value wins
+  as before.
+
+### Behaviour matrix
+| Condition | Result |
+|---|---|
+| Fresh visit, OS = dark | Dark mode (no entry written to localStorage) |
+| Fresh visit, OS = light | Light mode (no entry written to localStorage) |
+| User clicks toggle | Theme flips and is saved to localStorage |
+| OS changes after user clicked toggle | No effect — stored preference wins |
+| User clears localStorage | OS preference takes over again |
 
 ---
 
