@@ -863,3 +863,111 @@ correct theme loads on a first visit without any action from the user.
   via the rate panel but no dedicated "Rated songs" browse view exists).
 - **True dark mode** — a full black/grey palette (separate from the current
   blue theme) is planned but requires broader CSS variable changes.
+
+---
+
+## Player Bar Redesign & RTW 1206 PPM Meter
+
+### Player Bar Layout Overhaul
+
+The player bar (`<footer class="player">`) was rebuilt as a proper CSS grid
+with three columns and three rows:
+
+| Column | Content |
+|---|---|
+| 1 `minmax(0,1fr)` | Album art + song info (rows 1–3) |
+| 2 `auto` | Playback controls + utility icons (row 1) |
+| 3 `min(468px,38%)` | VU / spectrum strip (rows 1–3, right column) |
+
+The progress timeline occupies `grid-column:1/3; grid-row:2` and the
+volume/balance row occupies `grid-column:1/3; grid-row:3`, so the VU
+column spans the full bar height without interacting with the timeline.
+
+Changes from the old layout:
+- `--player` height increased from `180px` to `210px` to accommodate the
+  three-row grid.
+- Utility icons (EQ, visualizer, queue) moved from the right `player-right`
+  block into the centre `player-controls` row, separated from playback
+  controls by a thin `ctrl-sep` divider (`1px`, `22px` tall,
+  `rgba(139,92,246,.22)`).
+- `player-right` now contains only the balance and volume sliders.
+- `vu-spec-row` promoted to `grid-column:3; grid-row:1/4` — a permanent
+  right column rather than a full-width strip below the controls.
+- A `border-left:1px solid rgba(139,92,246,.12)` separates the VU column
+  from the rest of the bar in dark mode; light mode uses `rgba(109,60,230,.16)`.
+- Responsive: VU column is hidden below 860 px (`display:none`; the player
+  collapses to a two-column grid).
+- Album art thumb resized from 104 × 104 to 88 × 88 px to suit the tighter row.
+- `player::before` ambient radial halo added (purple glow centred on play button).
+- Progress bar fill changed from flat `var(--primary)` to a
+  `linear-gradient(90deg, --primary, --accent)` for a livelier look.
+
+### VU Needle Redesign
+
+The analogue VU needle dials were redesigned for the new narrower column:
+
+- **Sweep widened** from ±25° to ±55°, filling the available canvas width.
+- **Angle table** updated to match the new range (−25 VU → −55°;
+  +3 VU → +55°).
+- **Transparent face** — the radial gradient fill was removed; the player bar
+  background shows through the canvas.  Only a faint stroke ring provides
+  bezel depth.
+- **Pivot at canvas bottom** — `CY = VH = 120`, so the needle tail just exits
+  below the canvas edge and is clipped naturally.
+- **Arc radius reduced** from 130 to 108 virtual units to stay within the
+  taller sweep.
+- **`±` signs** repositioned inward (`R−5`) so they stay in-canvas at ±57°.
+- **Brand text** brightened (`rgba(180,150,255,.90)`, `700` weight).
+- **`VU` label** raised to `VH−12` so it's clear of the pivot.
+- Background fill and glass-card CSS removed from `.vu-needle-wrap` in both
+  dark and light themes.
+
+### RTW 1206 PPM as 3rd Visualisation Mode
+
+A horizontal Peak Programme Meter is added alongside the spectrum and VU
+needle — mode cycle: `spec → needle → ppm → spec`, persisted in
+`localStorage('vu-mode')`.
+
+**Layout**
+
+A `<div id="vu-ppm-wrap">` sibling is added inside `#vu-spec-row`, overlaid
+via `position:absolute; top:24px; left:0; width:100%; height:100%`.  Inside
+it lives a single `<canvas id="vu-ppm">` that is drawn every animation frame.
+
+**Meter geometry** (virtual 200 × 64 coordinate space):
+
+| Zone | Detail |
+|---|---|
+| Rows | L on top (`y=2`), R below (`y=19`), 13 virt-px tall each |
+| Segments | 44, spanning −40 dBFS (`i=0`) to +3 dBFS (`i=43`) |
+| Colours | Green ≤ −9, yellow −8..−2, red ≥ −1 (vivid hex: `#2ee87a`, `#f5c842`, `#ff5555`) |
+| Unlit | `rgba(…, .12)` ghost squares |
+| Scale | dB ticks at −40, −30, −20, −10, −5, 0, +3 |
+| Brand | `RTW` text, bottom-left of scale |
+
+**Ballistics** (real dBFS, no VU offset):
+
+```
+peakToDBFS()  →  raw dBFS from getFloatTimeDomainData
+attack τ  = 5 ms  (near-instant LED response)
+release τ = 1.5 s
+peak hold = 2 s, then 2 s fade
+```
+
+**Brightness slider**
+
+A hairline slider (`BS_H = 2 virt-px`) is drawn inside the canvas below the
+dB scale.  A ☀ icon marks the low-brightness end.  Dragging the lollipop
+thumb adjusts `ppmBrightness` (0.0–1.0, default `0.38`), persisted in
+`localStorage('ms2_ppm_bright')`.  The effective alpha applied to all segments
+is `0.22 + ppmBrightness × 0.78`, giving a true 0.22–1.0 range.
+
+Slider zone click/drag events stop propagation so they don't trigger mode
+switching; clicks outside the slider zone bubble through and do switch modes.
+
+### Idle Spectrum Animation Tweak
+
+The full-canvas breathing purple glow wash that overlaid the idle mini-spectrum
+was removed.  Bars now breathe via alpha alone (`0.18 + 0.50 × wave × breath`)
+against the transparent canvas/player background, which looks cleaner and
+reduces the visual noise when nothing is playing.
