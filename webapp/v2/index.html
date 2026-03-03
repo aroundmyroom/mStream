@@ -518,48 +518,31 @@
         <button id="repeat-btn" class="ctrl-btn ctrl-sm" title="Repeat">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17,1 21,5 17,9"/><path d="M3,11V9a4,4,0,0,1,4-4h14"/><polyline points="7,23 3,19 7,15"/><path d="M21,13v2a4,4,0,0,1-4,4H3"/></svg>
         </button>
-      </div>
-      <div class="player-progress">
-        <span id="time-cur">0:00</span>
-        <div id="prog-track" class="prog-track">
-          <div id="prog-fill" class="prog-fill"><div id="prog-thumb" class="prog-thumb"></div></div>
-          <div id="cue-markers" class="cue-markers"></div>
-        </div>
-        <span id="time-total">0:00</span>
-      </div>
-      <div id="vu-spec-row" class="vu-spec-row" title="Click to switch: spectrum / VU meters">
-        <canvas id="mini-spec" class="mini-spec"></canvas>
-        <div id="vu-needle-wrap" class="vu-needle-wrap hidden">
-          <canvas id="vu-dial-L" class="vu-dial"></canvas>
-          <div class="vu-center-logo">
-            <svg width="22" height="22" viewBox="72 33 76 89" style="pointer-events:none">
-              <polygon fill="#6684B2" points="75,118.5 75,35.5 96,48.5 96,118.5"/>
-              <polygon fill="#26477B" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/>
-              <polygon fill="#6684B2" points="124,118.5 124,48.5 145,35.5 145,118.5"/>
-            </svg>
-            <canvas id="vu-ref-knob" class="vu-ref-knob" title="Drag up/down · peak ref: -13 dBFS"></canvas>
-            <span class="vu-center-name" style="pointer-events:none">mStream</span>
-          </div>
-          <canvas id="vu-dial-R" class="vu-dial"></canvas>
-        </div>
+        <div class="ctrl-sep"></div>
+        <!-- Utility icons: right of separator -->
+        <span id="dj-light" class="dj-light hidden" title="Auto-DJ active">DJ</span>
+        <span id="sleep-light" class="sleep-light hidden" title="Sleep timer active">💤 <span id="sleep-countdown"></span></span>
+        <button id="eq-btn" class="ctrl-btn ctrl-sm" title="Equalizer">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="4" y1="4" x2="4" y2="20"/><circle cx="4" cy="10" r="2.5"/>
+            <line x1="12" y1="4" x2="12" y2="20"/><circle cx="12" cy="17" r="2.5"/>
+            <line x1="20" y1="4" x2="20" y2="20"/><circle cx="20" cy="8" r="2.5"/>
+          </svg>
+        </button>
+        <button id="viz-open-btn" class="ctrl-btn ctrl-sm" title="Visualizer">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+        <button id="queue-btn" class="ctrl-btn ctrl-sm" title="Queue">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          <span id="queue-count" class="q-count"></span>
+        </button>
       </div>
     </div>
 
-    <!-- Right: volume + extras -->
+    <!-- Right: volume + balance -->
     <div class="player-right">
       <div class="vol-wrap">
         <div class="vol-group">
-          <div class="pright-icons">
-            <span id="dj-light" class="dj-light hidden" title="Auto-DJ active">DJ</span>
-            <span id="sleep-light" class="sleep-light hidden" title="Sleep timer active">💤 <span id="sleep-countdown"></span></span>
-            <button id="eq-btn" class="ctrl-btn pright-btn" title="Equalizer">
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <line x1="4" y1="4" x2="4" y2="20"/><circle cx="4" cy="10" r="2.5"/>
-                <line x1="12" y1="4" x2="12" y2="20"/><circle cx="12" cy="17" r="2.5"/>
-                <line x1="20" y1="4" x2="20" y2="20"/><circle cx="20" cy="8" r="2.5"/>
-              </svg>
-            </button>
-          </div>
           <span class="vol-group-lbl">Balance <button id="bal-center-btn" class="bal-center-btn" title="Reset to centre">⊙</button></span>
           <div class="bal-row">
             <span class="bal-lbl">L</span>
@@ -569,15 +552,6 @@
         </div>
         <div class="vol-divider"></div>
         <div class="vol-group">
-          <div class="pright-icons">
-            <button id="viz-open-btn" class="ctrl-btn pright-btn" title="Visualizer">
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            </button>
-            <button id="queue-btn" class="ctrl-btn pright-btn" title="Queue">
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-              <span id="queue-count" class="q-count"></span>
-            </button>
-          </div>
           <span class="vol-group-lbl">Volume</span>
           <div class="vol-row">
             <button id="mute-btn" class="mute-btn" title="Mute / Unmute">
@@ -588,6 +562,37 @@
             <span class="vol-pct" id="vol-pct">80%</span>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Full-width progress timeline -->
+    <div class="player-progress">
+      <span id="time-cur">0:00</span>
+      <div id="prog-track" class="prog-track">
+        <div id="prog-fill" class="prog-fill"><div id="prog-thumb" class="prog-thumb"></div></div>
+        <div id="cue-markers" class="cue-markers"></div>
+      </div>
+      <span id="time-total">0:00</span>
+    </div>
+
+    <!-- Full-width VU / spectrum strip -->
+    <div id="vu-spec-row" class="vu-spec-row" title="Click to switch: spectrum / VU meters / PPM">
+      <canvas id="mini-spec" class="mini-spec"></canvas>
+      <div id="vu-needle-wrap" class="vu-needle-wrap hidden">
+        <canvas id="vu-dial-L" class="vu-dial"></canvas>
+        <div class="vu-center-logo">
+          <svg width="22" height="22" viewBox="72 33 76 89" style="pointer-events:none">
+            <polygon fill="#6684B2" points="75,118.5 75,35.5 96,48.5 96,118.5"/>
+            <polygon fill="#26477B" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/>
+            <polygon fill="#6684B2" points="124,118.5 124,48.5 145,35.5 145,118.5"/>
+          </svg>
+          <canvas id="vu-ref-knob" class="vu-ref-knob" title="Drag up/down · peak ref: -13 dBFS"></canvas>
+          <span class="vu-center-name" style="pointer-events:none">mStream</span>
+        </div>
+        <canvas id="vu-dial-R" class="vu-dial"></canvas>
+      </div>
+      <div id="vu-ppm-wrap" class="vu-ppm-wrap hidden">
+        <canvas id="vu-ppm" class="vu-ppm"></canvas>
       </div>
     </div>
   </footer>
