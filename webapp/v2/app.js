@@ -5097,6 +5097,176 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
   applyTheme(!document.documentElement.classList.contains('light'));
 });
 
+// ── EASTER EGG ──────────────────────────────────────────────
+// Invisible 6×6 pixel at sidebar/content/player corner.
+// Click → full VU spectrum appears above player bar with
+// "AroundMyRoom's Version" bursting out as the centrepiece.
+window.EGG = (() => {
+  const LABEL  = "AroundMyRoom\u2019s Version";
+  const H      = 100;   // canvas CSS + buffer height
+  const BARS   = 52;
+  const DECAY  = 0.84;  // bar falloff multiplier per frame
+  const PEAK_HOLD   = 55;  // frames to hold peak dot
+  const PEAK_DECAY  = 0.92;
+
+  let raf = null, active = false;
+  let smoothed  = new Float32Array(BARS);
+  let peaks     = new Float32Array(BARS);
+  let peakTimer = new Int32Array(BARS);
+
+  // Map bar index → FFT bin (logarithmic frequency scale)
+  function barBin(i, totalBins) {
+    const minF = 40, maxF = 18000;
+    const nyq  = 22050;
+    const freq = minF * Math.pow(maxF / minF, i / (BARS - 1));
+    return Math.min(Math.round(freq / nyq * totalBins), totalBins - 1);
+  }
+
+  function draw() {
+    if (!active) return;
+    raf = requestAnimationFrame(draw);
+
+    const cv = document.getElementById('egg-canvas');
+    if (!cv) return;
+    if (cv.width !== window.innerWidth) cv.width = window.innerWidth;
+    const W  = cv.width;
+    const cx = cv.getContext('2d');
+
+    cx.clearRect(0, 0, W, H);
+
+    // Content column bounds
+    const sideEl    = document.querySelector('.sidebar');
+    const queueEl   = document.getElementById('queue-panel');
+    const colLeft   = sideEl  ? sideEl.getBoundingClientRect().right  : 236;
+    const queueRect = queueEl ? queueEl.getBoundingClientRect()        : null;
+    const colRight  = (queueRect && queueRect.width > 20) ? queueRect.left : W;
+    const colW      = colRight - colLeft;
+    if (colW < 20) return;
+
+    // Clip to content column
+    cx.save();
+    cx.beginPath();
+    cx.rect(colLeft, 0, colW, H);
+    cx.clip();
+
+    // Gather FFT data
+    const rawData   = new Uint8Array(analyserL ? analyserL.frequencyBinCount : 1024);
+    if (analyserL) analyserL.getByteFrequencyData(rawData);
+    const totalBins = rawData.length;
+
+    const bw  = colW / BARS;
+    const gap = Math.max(2, Math.round(bw * 0.18));
+
+    for (let i = 0; i < BARS; i++) {
+      // Average a small range around the log-mapped bin
+      const b0 = barBin(i,       totalBins);
+      const b1 = barBin(i + 1,   totalBins);
+      let sum = 0, cnt = 0;
+      for (let b = b0; b <= Math.min(b1, totalBins - 1); b++) { sum += rawData[b]; cnt++; }
+      const raw = cnt ? sum / cnt / 255 : 0;
+
+      // Smooth falloff
+      smoothed[i] = Math.max(raw, smoothed[i] * DECAY);
+
+      // Peak hold
+      if (smoothed[i] >= peaks[i]) { peaks[i] = smoothed[i]; peakTimer[i] = PEAK_HOLD; }
+      else if (peakTimer[i] > 0)   { peakTimer[i]--; }
+      else                          { peaks[i] *= PEAK_DECAY; }
+
+      const amp = smoothed[i];
+      const bh  = amp * H;
+      if (bh < 0.5) continue;
+
+      const x = Math.round(colLeft + i * bw);
+      const barW = Math.max(Math.round(bw) - gap, 1);
+
+      // Classic VU colour: green → yellow → red based on amplitude
+      const hue = amp < 0.55 ? 110 - amp * 30
+                : amp < 0.80 ? 75  - (amp - 0.55) / 0.25 * 50
+                :               20  - (amp - 0.80) / 0.20 * 20;
+      const sat  = 90 + amp * 10;
+      const lite = 45 + amp * 15;
+
+      // Glow
+      cx.shadowColor = `hsla(${hue},${sat}%,${lite + 20}%,0.7)`;
+      cx.shadowBlur  = 6 + amp * 10;
+
+      const grd = cx.createLinearGradient(0, H - bh, 0, H);
+      grd.addColorStop(0, `hsla(${hue},${sat}%,${lite + 18}%,1)`);
+      grd.addColorStop(1, `hsla(${hue - 10},${sat}%,${lite - 10}%,0.85)`);
+      cx.fillStyle = grd;
+      cx.fillRect(x, H - bh, barW, bh);
+
+      // Peak dot
+      if (peaks[i] > 0.04) {
+        const py = H - peaks[i] * H - 2;
+        cx.fillStyle = `hsla(${hue},100%,88%,0.95)`;
+        cx.fillRect(x, py, barW, 2);
+      }
+    }
+
+    cx.shadowBlur = 0;
+
+    // ── CENTREPIECE LABEL ──
+    const tx = colLeft + colW / 2;
+    const ty = H * 0.52;
+
+    // Step 1: ghost outline so text shape is always faintly readable
+    cx.globalCompositeOperation = 'source-over';
+    cx.font = 'bold 36px "Courier New",monospace';
+    cx.textAlign    = 'center';
+    cx.textBaseline = 'middle';
+    cx.globalAlpha  = 0.06;
+    cx.fillStyle    = '#ffffff';
+    cx.fillText(LABEL, tx, ty);
+    cx.globalAlpha  = 1;
+
+    // Step 2: source-atop = text painted only where bars exist
+    cx.globalCompositeOperation = 'source-atop';
+    const tgrd = cx.createLinearGradient(colLeft, 0, colRight, 0);
+    tgrd.addColorStop(0,    'hsla(110,100%,85%,1)');
+    tgrd.addColorStop(0.45, 'hsla(60, 100%,85%,1)');
+    tgrd.addColorStop(0.65, 'hsla(30, 100%,80%,1)');
+    tgrd.addColorStop(1,    'hsla(0,  100%,75%,1)');
+    cx.fillStyle   = tgrd;
+    cx.shadowColor = 'rgba(255,220,100,0.9)';
+    cx.shadowBlur  = 14;
+    cx.fillText(LABEL, tx, ty);
+    cx.shadowBlur  = 0;
+
+    cx.globalCompositeOperation = 'source-over';
+    cx.restore();
+  }
+
+  function show() {
+    smoothed.fill(0); peaks.fill(0); peakTimer.fill(0);
+    const cv = document.getElementById('egg-canvas');
+    cv.style.display = 'block';
+    cv.width  = window.innerWidth;
+    cv.height = H;
+    active = true;
+    cancelAnimationFrame(raf);
+    draw();
+  }
+
+  function hide() {
+    active = false;
+    cancelAnimationFrame(raf);
+    const cv = document.getElementById('egg-canvas');
+    if (cv) cv.style.display = 'none';
+  }
+
+  const _epx = document.getElementById('egg-pixel');
+  if (_epx) _epx.addEventListener('click', () => { active ? hide() : show(); });
+
+  // Click anywhere else on the page to dismiss
+  document.addEventListener('click', e => {
+    if (active && e.target !== document.getElementById('egg-pixel')) hide();
+  });
+
+  return { toggle() { active ? hide() : show(); } };
+})();
+
 // Keyboard shortcuts
 document.addEventListener('keydown', e => {
   if (['INPUT','TEXTAREA'].includes(e.target.tagName)) return;
