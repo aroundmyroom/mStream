@@ -971,3 +971,49 @@ The full-canvas breathing purple glow wash that overlaid the idle mini-spectrum
 was removed.  Bars now breathe via alpha alone (`0.18 + 0.50 × wave × breath`)
 against the transparent canvas/player background, which looks cleaner and
 reduces the visual noise when nothing is playing.
+
+---
+
+## VU / PPM — Balance-Aware Metering
+
+Previously the `analyserL` / `analyserR` nodes tapped the signal **before** the
+`StereoPannerNode`, so the VU needle and PPM meters were always centred
+regardless of the balance slider position.
+
+The audio graph is now:
+
+```
+src → gain → EQ[0..7] → analyserNode (butterchurn, pre-pan)
+                      └→ _pannerNode → destination
+                                    └→ splitter → analyserL / analyserR
+```
+
+The Butterchurn visualizer still taps pre-pan (so the visual reacts to the full
+stereo field, not the listener-side pan), while the VU/PPM analysers tap
+**post-pan** — panning left now moves the left needle up and the right needle
+down, exactly as expected on a real mixer.
+
+---
+
+## Queue Panel — Reopen Tab
+
+When the queue panel is collapsed with the `<` button, a small `>` tab appears
+fixed to the right edge of the viewport (centred vertically).  Clicking it
+calls `toggleQueue()` and reopens the panel, after which the tab disappears.
+
+**Implementation details:**
+
+- `#qp-reopen-tab` button is placed at the top of `#queue-panel` in the DOM so
+  the CSS selector `.queue-panel.collapsed #qp-reopen-tab` can drive its
+  visibility.
+- `position:fixed; right:0` escapes the panel's `overflow:hidden` (which is
+  required for the collapse animation).
+- Styled as a 28 × 52 px rounded-left pill matching `var(--surface)` and
+  `var(--border)`, with a `>` chevron SVG.
+
+---
+
+## Queue Panel — Width
+
+`--qp-width` increased from `320px` to `488px` to better align the queue
+panel's left edge with the PPM/VU meter column in the player bar.

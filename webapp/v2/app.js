@@ -1863,14 +1863,14 @@ const VIZ = (() => {
     for (const f of eqFilters) { _node.connect(f); _node = f; }
     _pannerNode = audioCtx.createStereoPanner();
     _pannerNode.pan.value = parseFloat(localStorage.getItem('ms2_balance') || '0');
-    // Tap analysers BEFORE panner so balance never affects VU meters or spectrum levels
+    // Butterchurn tap stays pre-pan (visualizer unaffected by balance)
     _node.connect(analyserNode);          // butterchurn tap (pre-pan)
-    _node.connect(splitter);              // L+R spectrum tap (pre-pan)
-    splitter.connect(analyserL, 0);       // left  channel
-    splitter.connect(analyserR, 1);       // right channel
-    // Panner only affects the actual speaker output
+    // VU/PPM analysers tap POST-panner so balance is reflected on the meters
     _node.connect(_pannerNode);
     _pannerNode.connect(audioCtx.destination);
+    _pannerNode.connect(splitter);        // post-pan L+R tap
+    splitter.connect(analyserL, 0);       // left  channel (balance-aware)
+    splitter.connect(analyserR, 1);       // right channel (balance-aware)
   }
 
   function setPresetLabel() {
@@ -4410,6 +4410,7 @@ document.getElementById('repeat-btn').addEventListener('click', () => {
 // Queue toggle (player bar button)
 document.getElementById('queue-btn').addEventListener('click', toggleQueue);
 // Collapse button inside queue panel
+document.getElementById('qp-reopen-tab').addEventListener('click', toggleQueue);
 document.getElementById('qp-close-btn').addEventListener('click', () => {
   document.getElementById('queue-panel').classList.add('collapsed');
   document.getElementById('queue-btn').classList.remove('active');
