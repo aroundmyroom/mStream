@@ -915,8 +915,9 @@ const MINI_SPEC = (() => {
   const pkR = Array.from({length: BARS}, () => ({val:0, ts:0, vel:0}));
 
   let lastTs = 0;
+  let _draining = false;  // true while bars fall to floor after pause/stop
 
-  // Idle breathing glow shown when stopped but in spec mode (#8)
+  // Idle state: parked bars with ripple wave + breathing glow when stopped
   function drawIdle(ts = 0) {
     const canvas = document.getElementById('mini-spec');
     if (!canvas || canvas.classList.contains('hidden')) { idleRaf = null; return; }
@@ -925,25 +926,58 @@ const MINI_SPEC = (() => {
     if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, W, H);
+
+    const GAP  = 1.5 * dpr;
+    const cg   = 2 * dpr;
+    const hw   = (W - cg) / 2;
+    const barW = (hw - GAP * (BARS - 1)) / BARS;
+
+    idlePhase += 0.018;
+    const breath = 0.5 + 0.5 * Math.sin(idlePhase);  // 0..1 breathing cycle
+
+    // Bars: gentle ripple wave — height 6..18px range riding the breath
+    for (let side = 0; side < 2; side++) {
+      const startX = side === 0 ? 0 : hw + cg;
+      // mirror wave so it looks symmetric from centre
+      for (let i = 0; i < BARS; i++) {
+        const bi    = side === 0 ? (BARS - 1 - i) : i;  // symmetric from centre
+        // slow sine ripple across bars + breathing modulation
+        const wave  = 0.5 + 0.5 * Math.sin(bi * 0.18 + idlePhase * 0.7);
+        const v     = 0.04 + 0.10 * wave * breath + 0.02 * Math.sin(bi * 0.35 - idlePhase);
+        const barH  = Math.max(2 * dpr, v * H);
+        const x     = startX + i * (barW + GAP);
+        const alpha = (0.25 + 0.35 * wave * breath).toFixed(2);
+        ctx.fillStyle = `rgba(100,140,230,${alpha})`;
+        ctx.fillRect(x, H - barH, barW, barH);
+      }
+    }
+
     // Floor line
-    ctx.fillStyle = 'rgba(255,255,255,.05)';
+    ctx.fillStyle = 'rgba(255,255,255,.08)';
     ctx.fillRect(0, H - dpr, W, dpr);
-    // Slow breathing gradient (#8)
-    idlePhase += 0.012;
-    const glow = 0.025 + 0.018 * Math.sin(idlePhase);
+
+    // Centre divider
+    ctx.fillStyle = 'rgba(255,255,255,.05)';
+    ctx.fillRect(hw, 0, cg, H);
+
+    // Breathing glow — clearly visible purple wash
+    const glow = (0.06 + 0.07 * breath).toFixed(3);
     const grad = ctx.createLinearGradient(0, 0, W, 0);
     grad.addColorStop(0,   'rgba(139,92,246,0)');
-    grad.addColorStop(0.5, `rgba(139,92,246,${glow.toFixed(3)})`);
+    grad.addColorStop(0.3, `rgba(139,92,246,${glow})`);
+    grad.addColorStop(0.5, `rgba(139,92,246,${(parseFloat(glow)*1.4).toFixed(3)})`);
+    grad.addColorStop(0.7, `rgba(139,92,246,${glow})`);
     grad.addColorStop(1,   'rgba(139,92,246,0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
+
     idleRaf = requestAnimationFrame(drawIdle);
   }
 
   function draw(ts = 0) {
     const canvas = document.getElementById('mini-spec');
     if (!canvas) { rafId = null; return; }
-    if (!audioCtx || !analyserL || !analyserR) { rafId = requestAnimationFrame(draw); return; }
+    if (!_draining && (!audioCtx || !analyserL || !analyserR)) { rafId = requestAnimationFrame(draw); return; }
     const dt = lastTs ? Math.min((ts - lastTs) / 1000, 0.1) : 0.016;
     lastTs = ts;
 
@@ -966,15 +1000,19 @@ const MINI_SPEC = (() => {
     ctx.fillStyle = 'rgba(255,255,255,.05)';
     ctx.fillRect(0, H - dpr, W, dpr);
 
-    const rawL = new Uint8Array(analyserL.frequencyBinCount);
-    const rawR = new Uint8Array(analyserR.frequencyBinCount);
-    analyserL.getByteFrequencyData(rawL);
-    analyserR.getByteFrequencyData(rawR);
+    const rawL = new Uint8Array(analyserL ? analyserL.frequencyBinCount : 128);
+    const rawR = new Uint8Array(analyserR ? analyserR.frequencyBinCount : 128);
+    // When draining (paused): feed silence so bars fall via ballistics
+    if (!_draining && analyserL && analyserR) {
+      analyserL.getByteFrequencyData(rawL);
+      analyserR.getByteFrequencyData(rawR);
+    }
 
     // Log scale from 40 Hz — better mid-range spread, less bass dominance (#6)
+    const sampleRate = audioCtx ? audioCtx.sampleRate : 44100;
     function logBin(i, binCount) {
       const freq = Math.pow(2, Math.log2(40) + (Math.log2(20000) - Math.log2(40)) * i / BARS);
-      return Math.min(Math.floor(freq / (audioCtx.sampleRate / 2) * binCount), binCount - 1);
+      return Math.min(Math.floor(freq / (sampleRate / 2) * binCount), binCount - 1);
     }
 
     function side(rawData, startX, reverse, bars, pk) {
@@ -1035,6 +1073,19 @@ const MINI_SPEC = (() => {
     // R: bass at centre → treble right
     side(rawR, hw + cg, false, barR, pkR);
 
+    // While draining: check if all bars + peaks settled → switch to idle
+    if (_draining) {
+      const settled = barL.every(v => v < 0.005) && barR.every(v => v < 0.005) &&
+                      pkL.every(p => p.val < 0.01) && pkR.every(p => p.val < 0.01);
+      if (settled) {
+        rafId = null;
+        _draining = false;
+        _reset();
+        if (!idleRaf) { idlePhase = 0; drawIdle(); }
+        return;
+      }
+    }
+
     rafId = requestAnimationFrame(draw);
   }
 
@@ -1047,16 +1098,19 @@ const MINI_SPEC = (() => {
 
   return {
     start() {
+      _draining = false;
       if (idleRaf) { cancelAnimationFrame(idleRaf); idleRaf = null; }
       if (!rafId) draw();
     },
     stop() {
-      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-      _reset();
-      const c = document.getElementById('mini-spec');
-      if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); }
-      // Start idle breathing glow if canvas is visible (#8)
-      if (!idleRaf) { idlePhase = 0; drawIdle(); }
+      if (idleRaf) { cancelAnimationFrame(idleRaf); idleRaf = null; }
+      // Let bars fall naturally to floor before switching to idle
+      _draining = true;
+      // Ensure draw loop is running (it may not be if audio context not ready)
+      if (!rafId) {
+        _reset();
+        idlePhase = 0; drawIdle();
+      }
     },
   };
 })();
@@ -1386,10 +1440,8 @@ const VU_NEEDLE = (() => {
   function _stop() {
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
     lastTs = null;
-    const cL = document.getElementById('vu-dial-L');
-    const cR = document.getElementById('vu-dial-R');
-    if (cL) { const c = cL.getContext('2d'); c.clearRect(0, 0, cL.width, cL.height); }
-    if (cR) { const c = cR.getContext('2d'); c.clearRect(0, 0, cR.width, cR.height); }
+    vuL = -25; vuR = -25;
+    _drawIdle();   // park needle at minimum instead of clearing blank
   }
   function _applyMode(startIfPlaying) {
     const wrap   = document.getElementById('vu-needle-wrap');
@@ -1429,6 +1481,7 @@ const VU_NEEDLE = (() => {
       if (spec) spec.classList.toggle('hidden',  needle);
       document.body.classList.toggle('vu-needle-mode', needle);
       if (needle) _drawIdle();
+      else        MINI_SPEC.stop();  // start idle breathing on page load in spec mode
       initKnob();
     },
   };
