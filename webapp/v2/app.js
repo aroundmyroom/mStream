@@ -4767,14 +4767,22 @@ document.getElementById('pl-save-name').addEventListener('keydown', e => {
 document.getElementById('atp-cancel').addEventListener('click', () => hideModal('atp-modal'));
 
 // ── THEME ─────────────────────────────────────────────────────
-function applyTheme(light) {
+// persist=true  → user chose explicitly, save to localStorage
+// persist=false → OS-driven, don't overwrite a future explicit choice
+function applyTheme(light, persist = true) {
   document.documentElement.classList.toggle('light', light);
   const track = document.getElementById('theme-track');
   const label = document.getElementById('theme-label');
   if (track) track.classList.toggle('lit', light);
   if (label) label.textContent = light ? 'Light Mode' : 'Blue';
-  localStorage.setItem('ms2_theme', light ? 'light' : 'dark');
+  if (persist) localStorage.setItem('ms2_theme', light ? 'light' : 'dark');
 }
+
+// Follow OS colour scheme when the user hasn't stored an explicit preference
+const _osDark = window.matchMedia('(prefers-color-scheme: dark)');
+_osDark.addEventListener('change', e => {
+  if (!localStorage.getItem('ms2_theme')) applyTheme(!e.matches, false);
+});
 
 document.getElementById('theme-toggle').addEventListener('click', () => {
   applyTheme(!document.documentElement.classList.contains('light'));
@@ -4823,8 +4831,13 @@ try {
 
 // ── INIT ─────────────────────────────────────────────────────
 (async () => {
-  // Apply saved theme before anything renders (prevents flash)
-  applyTheme(localStorage.getItem('ms2_theme') === 'light');
+  // Apply saved theme before anything renders (prevents flash).
+  // If no explicit preference stored, honour the OS colour scheme.
+  const _savedTheme = localStorage.getItem('ms2_theme');
+  applyTheme(
+    _savedTheme ? _savedTheme === 'light' : !window.matchMedia('(prefers-color-scheme: dark)').matches,
+    !!_savedTheme   // only persist if the user had already made an explicit choice
+  );
 
   // Hide classic UI login link unless explicitly enabled
   if (localStorage.getItem('ms2_show_classic') !== '1') {
