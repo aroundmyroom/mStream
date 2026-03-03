@@ -15,7 +15,7 @@
   --primary-d:rgba(139,92,246,.15); --primary-g:rgba(139,92,246,.4);
   --accent:#60a5fa; --green:#34d399; --red:#f87171; --yellow:#fbbf24;
   --t1:#eeeeff; --t2:#8888b0; --t3:#6070a0; --t4:#2a3a5e;
-  --sidebar:236px; --player:210px; --r:7px; --r2:12px; --qp-width:320px;
+  --sidebar:236px; --player:210px; --r:7px; --r2:12px; --qp-width:488px;
   --theme-icon-moon:block; --theme-icon-sun:none;
 }
 
@@ -558,6 +558,28 @@ a{color:inherit;text-decoration:none;}
   transition:width .28s cubic-bezier(.4,0,.2,1),border-color .28s;
 }
 .queue-panel.collapsed{width:0;border-left-color:transparent;}
+
+/* Reopen tab — only visible when queue is collapsed */
+#qp-reopen-tab{
+  display:none;
+  position:fixed;
+  right:0; top:50%;
+  transform:translateY(-50%);
+  width:28px; height:52px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-right:none;
+  border-radius:8px 0 0 8px;
+  cursor:pointer;
+  align-items:center;
+  justify-content:center;
+  color:var(--t2);
+  transition:background .15s,color .15s;
+  z-index:200;
+  padding:0;
+}
+#qp-reopen-tab:hover{background:var(--hover);color:var(--t1);}
+.queue-panel.collapsed #qp-reopen-tab{display:flex;}
 
 /* Now Playing card */
 .qp-now-playing{
