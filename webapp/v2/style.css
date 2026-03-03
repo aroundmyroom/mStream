@@ -15,7 +15,7 @@
   --primary-d:rgba(139,92,246,.15); --primary-g:rgba(139,92,246,.4);
   --accent:#60a5fa; --green:#34d399; --red:#f87171; --yellow:#fbbf24;
   --t1:#eeeeff; --t2:#8888b0; --t3:#6070a0; --t4:#2a3a5e;
-  --sidebar:236px; --player:180px; --r:7px; --r2:12px; --qp-width:320px;
+  --sidebar:236px; --player:210px; --r:7px; --r2:12px; --qp-width:320px;
   --theme-icon-moon:block; --theme-icon-sun:none;
 }
 
@@ -199,23 +199,26 @@ a{color:inherit;text-decoration:none;}
 :root.light .player{
   background:linear-gradient(180deg,#eceaf8 0%,#e4e2f0 100%);
   border-top:none;
-  box-shadow:0 -1px 0 rgba(109,60,230,.22), 0 -10px 32px rgba(80,60,160,.14), inset 0 1px 0 rgba(109,60,230,.10);
+  box-shadow:0 -1px 0 rgba(109,60,230,.24), 0 -16px 50px rgba(80,60,160,.16), inset 0 1px 0 rgba(109,60,230,.12);
+}
+:root.light .player::before{
+  background:radial-gradient(ellipse 40% 80% at 50% 50%,rgba(109,60,230,.08) 0%,transparent 65%);
+}
+:root.light .player-progress{
+  border-top:1px solid rgba(109,60,230,.14);
 }
 :root.light .vu-needle-wrap{
-  background:linear-gradient(180deg,rgba(109,60,230,.07) 0%,rgba(109,60,230,.02) 100%);
-  border:0.5px solid rgba(109,60,230,.20);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.70), 0 2px 8px rgba(80,60,160,.12);
+  background:none;
+  border:none;
+  box-shadow:none;
 }
 :root.light .vu-spec-row{
-  box-shadow:0 0 0 1px rgba(109,60,230,.12), 0 3px 14px rgba(80,60,160,.14);
+  border-left:1px solid rgba(109,60,230,.16);
 }
 :root.light .player-thumb{
   box-shadow:0 8px 24px rgba(0,0,0,.18), 0 2px 6px rgba(0,0,0,.10), 0 0 0 1px rgba(109,60,230,.12);
 }
-:root.light .player-center{
-  background:rgba(109,60,230,.04);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.80);
-}
+/* player-center has no glass card — transparent in both modes */
 :root.light .vol-divider{
   background:linear-gradient(180deg,transparent,rgba(109,60,230,.22) 30%,rgba(109,60,230,.22) 70%,transparent);
 }
@@ -617,43 +620,74 @@ a{color:inherit;text-decoration:none;}
 
 /* ── PLAYER BAR ────────────────────────────────────────────── */
 .player{
-  grid-area:player;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
-  align-items:center;padding:8px 20px 18px 20px;padding-right:48px;
+  grid-area:player;
+  display:grid;
+  /*
+   * col 1 : art + song info  (1fr, fills remaining space)
+   * col 2 : play controls    (auto — icon btns + sep + shuffle/prev/play/next/repeat)
+   * col 3 : VU / spectrum    (capped 468px, shrinks to 38% at narrow widths)
+   * row 1 : 1fr  — art / controls
+   * row 2 : auto — progress timeline (cols 1-2 only)
+   * row 3 : auto — vol + balance strip (cols 1-2 only)
+   */
+  grid-template-columns: minmax(0,1fr) auto min(468px, 38%);
+  grid-template-rows: 1fr auto auto;
+  column-gap:20px; row-gap:0;
+  padding:10px 16px 8px 20px;
   background:linear-gradient(180deg,var(--surface) 0%,var(--raised) 100%);
-  border-top:none;
-  /* glowing separator line instead of hard border */
-  box-shadow:0 -1px 0 rgba(139,92,246,.18), 0 -12px 40px rgba(0,0,0,.35), inset 0 1px 0 rgba(139,92,246,.10);
-  gap:16px;
+  box-shadow:
+    0 -1px 0 rgba(139,92,246,.20),
+    0 -24px 60px rgba(0,0,0,.45),
+    inset 0 1px 0 rgba(139,92,246,.14);
   position:relative;
+}
+/* Radial ambient halo centred on the play button */
+.player::before{
+  content:'';
+  position:absolute;inset:0;
+  background:radial-gradient(ellipse 45% 90% at 50% 38%,rgba(139,92,246,.14) 0%,transparent 65%);
+  pointer-events:none;
+  z-index:0;
 }
 .mini-spec{
   position:absolute;top:0;left:0;
   width:100%;height:100%;
   pointer-events:none;
-  border-radius:4px;
-  opacity:0.7;
+  border-radius:2px;
+  opacity:0.85;
   transition:opacity .3s;
 }
 .mini-spec:hover{opacity:1;}
-.vu-spec-row{width:100%;cursor:pointer;flex-shrink:0;margin-top:6px;position:relative;height:90px;
-  border-radius:10px;
-  /* ambient glow behind the entire VU/spec strip */
-  box-shadow:0 0 0 1px rgba(139,92,246,.10), 0 4px 20px rgba(0,0,0,.22);
+/*
+ * VU / spectrum column — col 3, spans all 3 rows.
+ * align-self:end + margin-bottom:31px (= half of row-3 height ~62px)
+ * pins the canvas BOTTOM to the center of row 3 = same y as vol/balance sliders.
+ */
+.vu-spec-row{
+  grid-column:3;
+  grid-row:1/4;
+  cursor:pointer;
+  position:relative;
+  border-left:1px solid rgba(139,92,246,.12);
+  height:110px;
+  align-self:end;
+  margin-bottom:31px;
+  width:100%;
 }
 .vu-spec-row:hover .mini-spec{opacity:1;}
 .vu-needle-wrap{
   position:absolute;top:0;left:0;
   display:flex;gap:6px;width:100%;height:100%;align-items:stretch;
-  /* glassy, no opaque box — blends with player gradient */
-  background:linear-gradient(180deg,rgba(139,92,246,.06) 0%,rgba(15,52,96,.18) 100%);
-  border:0.5px solid rgba(139,92,246,.15);
-  border-radius:10px;padding:4px;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 0 2px 12px rgba(0,0,0,.25);
+  background:none;
+  border:none;border-radius:0;padding:4px;
+  box-shadow:none;
 }
 /* Use visibility to hide inactive VU elements — keeps them in layout so height never shifts */
 #mini-spec.hidden{display:block!important;visibility:hidden!important;pointer-events:none!important;}
 #vu-needle-wrap.hidden{display:flex!important;visibility:hidden!important;pointer-events:none!important;}
 .vu-dial{flex:1;min-width:0;height:100%;border-radius:6px;}
+.vu-ppm-wrap{position:absolute;top:24px;left:0;width:100%;height:100%;}
+.vu-ppm{display:block;width:100%;height:100%;}
 .vu-center-logo{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   flex-shrink:0;width:68px;gap:4px;overflow:hidden;
@@ -675,13 +709,14 @@ a{color:inherit;text-decoration:none;}
   color:var(--t2);text-shadow:0 0 9px rgba(139,92,246,.5);
   white-space:nowrap;opacity:0.88;
 }
-body.vu-needle-mode .eq-panel{bottom:188px;}
-.player-left{display:flex;align-items:center;gap:16px;min-width:0;cursor:pointer;}
+body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
+/* player-left: col 1, row 1 */
+.player-left{grid-column:1;grid-row:1;display:flex;align-items:center;gap:14px;min-width:0;cursor:pointer;z-index:1;align-self:center;}
 .player-left:hover .player-thumb{box-shadow:0 0 0 2px var(--primary);transition:box-shadow .18s;}
 /* album art thumb — floating depth */
-.player-thumb{width:104px;height:104px;flex-shrink:0;border-radius:var(--r);overflow:hidden;background:var(--raised);
+.player-thumb{width:88px;height:88px;flex-shrink:0;border-radius:var(--r);overflow:hidden;background:var(--raised);
   display:flex;align-items:center;justify-content:center;
-  box-shadow:0 8px 24px rgba(0,0,0,.40), 0 2px 6px rgba(0,0,0,.3), 0 0 0 1px rgba(255,255,255,.05);
+  box-shadow:0 8px 24px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.32), 0 0 0 1px rgba(255,255,255,.07);
   transition:box-shadow .18s;
 }
 .player-thumb img{width:100%;height:100%;object-fit:cover;}
@@ -695,14 +730,12 @@ body.vu-needle-mode .eq-panel{bottom:188px;}
 .player-stars-row .ps-on{color:var(--yellow);}
 .player-stars-row .ps-off{color:var(--t4);}
 .player-stars-row:hover .ps-off{color:var(--t3);}
+/* Controls — col 2, row 1 */
 .player-center{
-  display:flex;flex-direction:column;align-items:center;gap:0;
-  width:min(680px,42vw);min-width:0;
-  /* subtle glass card around controls */
-  background:rgba(255,255,255,.03);
-  border-radius:16px;
-  padding:0 8px;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.06);
+  grid-column:2;grid-row:1;
+  display:flex;align-items:center;justify-content:center;
+  align-self:center;
+  z-index:1;
 }
 .player-controls{display:flex;align-items:center;gap:6px;}
 
@@ -741,12 +774,21 @@ body.vu-needle-mode .eq-panel{bottom:188px;}
   box-shadow:0 0 0 8px var(--primary-d),0 4px 18px rgba(139,92,246,.45);
 }
 .play-main:active{transform:scale(.9);box-shadow:0 0 0 4px var(--primary-d);}
-.player-progress{display:flex;align-items:center;gap:8px;width:100%;}
-.player-progress span{font-size:10px;color:var(--t2);flex-shrink:0;min-width:32px;}
+/* Progress timeline — cols 1-2 (not VU col), row 2 */
+.player-progress{
+  grid-column:1/3;
+  grid-row:2;
+  display:flex;align-items:center;gap:10px;
+  padding:6px 0 4px;
+  border-top:1px solid rgba(139,92,246,.10);
+  z-index:1;
+}
+.player-progress span{font-size:11px;color:var(--t2);flex-shrink:0;min-width:34px;font-variant-numeric:tabular-nums;}
 .player-progress span:last-child{text-align:right;}
-.prog-track{flex:1;height:6px;border-radius:99px;background:var(--border2);cursor:pointer;position:relative;transition:height .15s;}
-.prog-track:hover{height:8px;}
-.prog-fill{height:100%;border-radius:99px;background:var(--primary);pointer-events:none;position:relative;overflow:visible;}
+.prog-track{flex:1;height:5px;border-radius:99px;background:rgba(255,255,255,.08);cursor:pointer;position:relative;transition:height .15s;}
+.prog-track:hover{height:7px;}
+/* Gradient fill — purple to accent blue, feels alive across the full width */
+.prog-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--primary) 0%,var(--accent) 100%);pointer-events:none;position:relative;overflow:visible;}
 .prog-thumb{position:absolute;right:-6px;top:50%;width:12px;height:12px;border-radius:50%;background:var(--primary);border:2.5px solid rgba(255,255,255,.85);box-shadow:0 1px 6px rgba(0,0,0,.5);transform:translateY(-50%);transition:width .15s,height .15s,right .15s,box-shadow .15s;pointer-events:none;}
 .prog-track:hover .prog-thumb{width:15px;height:15px;right:-7.5px;box-shadow:0 1px 10px var(--primary-g);}
 :root.light .prog-thumb{border-color:var(--surface);}
@@ -788,7 +830,10 @@ body.vu-needle-mode .eq-panel{bottom:188px;}
   z-index:100;
 }
 .cue-tick:hover::after{opacity:1;}
-.player-right{display:flex;align-items:center;justify-content:flex-end;min-width:0;}
+/* player-right: vol + balance — cols 1-2, row 3 */
+.player-right{grid-column:1/3;grid-row:3;display:flex;align-items:center;justify-content:flex-end;min-width:0;z-index:1;padding:2px 0 8px;}
+/* ctrl-sep: thin vertical divider between utility icons and playback controls */
+.ctrl-sep{width:1px;height:22px;background:rgba(139,92,246,.22);flex-shrink:0;margin:0 4px;}
 .pright-icons{display:flex;align-items:center;justify-content:center;gap:2px;}
 .pright-btn{width:38px;height:38px;border-radius:10px;opacity:.8;}
 .pright-btn:hover{opacity:1;background:var(--hover);}
@@ -799,7 +844,7 @@ body.vu-needle-mode .eq-panel{bottom:188px;}
 .q-count{position:absolute;top:0;right:0;font-size:8px;min-width:14px;height:14px;line-height:14px;text-align:center;background:var(--primary);color:#fff;border-radius:99px;padding:0 3px;display:none;}
 .q-count.show{display:block;}
 #queue-btn{position:relative;}
-.vol-wrap{display:flex;flex-direction:row;align-items:center;gap:0;width:100%;max-width:340px;}
+.vol-wrap{display:flex;flex-direction:row;align-items:center;gap:0;width:100%;max-width:340px;margin-right:30px;}
 .vol-group{display:flex;flex-direction:column;align-items:center;gap:4px;flex:1;min-width:0;}
 .vol-group-lbl{font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--t3);text-align:center;}
 .bal-row{display:flex;align-items:center;gap:4px;width:100%;}
@@ -807,7 +852,7 @@ body.vu-needle-mode .eq-panel{bottom:188px;}
 .vol-divider{width:1px;height:52px;background:linear-gradient(180deg,transparent,rgba(139,92,246,.25) 30%,rgba(139,92,246,.25) 70%,transparent);flex-shrink:0;margin:0 14px;}
 .bal-center-btn{
   background:none;border:none;padding:0 0 0 3px;cursor:pointer;
-  color:var(--t3);font-size:11px;line-height:1;vertical-align:middle;
+  color:var(--t3);font-size:11px;line-height:1;vertical-align:text-top;
   opacity:.6;transition:opacity .15s, color .15s;
 }
 .bal-center-btn:hover{opacity:1;color:var(--primary);}
@@ -1124,19 +1169,24 @@ body.vu-needle-mode .eq-panel{bottom:188px;}
 @media(max-width:1366px){
   :root{--qp-width:280px;--sidebar:200px;}
 }
-/* Responsive: stack vertically on phones */
+/* Responsive: shrink VU column on medium screens */
 @media(max-width:1024px){
   :root{--qp-width:280px;--sidebar:200px;}
-  .player{padding:0 12px;gap:10px;}
-  .player-thumb{width:72px;height:72px;}
+  .player{padding:8px 12px 0 12px;column-gap:10px;}
+  .player-thumb{width:64px;height:64px;}
   .player-controls{gap:3px;}
   .ctrl-sm{width:28px;height:28px;}
   .ctrl-nav{width:34px;height:34px;}
   .play-main{width:42px;height:42px;}
-  .player-right{gap:7px;}
   .vol-wrap{max-width:none;}
   .pright-btn{width:34px;height:34px;}
   .eq-panel{width:min(640px,98vw);}
+}
+@media(max-width:860px){
+  /* Hide VU column on small screens */
+  .vu-spec-row{display:none;}
+  .player{grid-template-columns:minmax(0,1fr) auto;}
+  .player-progress,.player-right{grid-column:1/-1;}
 }
 @media(max-width:600px){
   .song-row.mp-row{grid-template-columns:36px 48px 1fr auto auto auto;}

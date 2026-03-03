@@ -946,7 +946,7 @@ const MINI_SPEC = (() => {
         const v     = 0.04 + 0.10 * wave * breath + 0.02 * Math.sin(bi * 0.35 - idlePhase);
         const barH  = Math.max(2 * dpr, v * H);
         const x     = startX + i * (barW + GAP);
-        const alpha = (0.25 + 0.35 * wave * breath).toFixed(2);
+        const alpha = (0.18 + 0.50 * wave * breath).toFixed(2);
         ctx.fillStyle = `rgba(100,140,230,${alpha})`;
         ctx.fillRect(x, H - barH, barW, barH);
       }
@@ -960,17 +960,7 @@ const MINI_SPEC = (() => {
     ctx.fillStyle = 'rgba(255,255,255,.05)';
     ctx.fillRect(hw, 0, cg, H);
 
-    // Breathing glow — clearly visible purple wash
-    const glow = (0.06 + 0.07 * breath).toFixed(3);
-    const grad = ctx.createLinearGradient(0, 0, W, 0);
-    grad.addColorStop(0,   'rgba(139,92,246,0)');
-    grad.addColorStop(0.3, `rgba(139,92,246,${glow})`);
-    grad.addColorStop(0.5, `rgba(139,92,246,${(parseFloat(glow)*1.4).toFixed(3)})`);
-    grad.addColorStop(0.7, `rgba(139,92,246,${glow})`);
-    grad.addColorStop(1,   'rgba(139,92,246,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
-
+    // No full-canvas fill — bars breathe via alpha alone, background shows through
     idleRaf = requestAnimationFrame(drawIdle);
   }
 
@@ -1118,13 +1108,24 @@ const MINI_SPEC = (() => {
 // ── VU NEEDLE METERS (player bar) ─────────────────────────────
 const VU_NEEDLE = (() => {
   let rafId = null;
-  let _mode = localStorage.getItem('vu-mode') || 'spec'; // 'spec' | 'needle'
+  let _mode = localStorage.getItem('vu-mode') || 'spec'; // 'spec' | 'needle' | 'ppm'
 
   // Per-channel ballistics state
   let vuL = -25, vuR = -25;
   let lastClipL = null, lastClipR = null;
   let lastTs    = null;
   let _vuDraining = false;  // true while needles fall to idle after pause
+
+  // PPM (Peak Programme Meter) — fast attack, slow release, peak hold
+  // valL/valR stored as raw dBFS (-40 silence … 0 full-scale)
+  let ppmL = -40, ppmR = -40;
+  let ppmPkL = -40, ppmPkR = -40;
+  let ppmPkTsL = null, ppmPkTsR = null;
+  const TAU_PPM_ATK  = 0.005;   // 5 ms attack (near-instant)
+  const TAU_PPM_REL  = 1.500;   // 1.5 s release
+  const PPM_HOLD_MS  = 2000;    // peak hold duration
+  const PPM_FADE_MS  = 2000;    // peak fade after hold
+  let ppmBrightness  = parseFloat(localStorage.getItem('ms2_ppm_bright') || '0.38');
 
   let REF_LEVEL      = parseFloat(localStorage.getItem('ms2_ref') || '-13');   // dBFS that maps to 0 VU  (adjustable via knob)
   const PEAK_HOLD_MS = 1000;
@@ -1134,9 +1135,9 @@ const VU_NEEDLE = (() => {
 
   // Piecewise VU-level → needle angle table (degrees, 0 = straight up, +ve = clockwise)
   const ANGLE_TABLE = [
-    [-25,-25],[-20,-23],[-10,-16],[-7,-12],
-    [-5,-8],[-3,-3],[-2,0],[-1,3.5],
-    [0,8],[1,13],[2,18],[3,25],
+    [-25,-55],[-20,-50],[-10,-35],[-7,-27],
+    [-5,-20],[-3,-10],[-2,-4],[-1,4],
+    [0,12],[1,24],[2,38],[3,55],
   ];
 
   function vuToAngle(vu) {
@@ -1160,12 +1161,25 @@ const VU_NEEDLE = (() => {
     return 20 * Math.log10(rms) - REF_LEVEL;
   }
 
-  // Virtual canvas coordinate space (width × height in virtual units)
-  const VW = 200, VH = 120;
-  const CX = 100, CY = VH + 30; // needle pivot 30vu below canvas bottom
-  const R  = 130;                // arc radius from pivot
+  // True-peak measurement for PPM ballistics — returns raw dBFS (no VU offset)
+  function peakToDBFS(analyser) {
+    const buf = new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(buf);
+    let pk = 0;
+    for (let i = 0; i < buf.length; i++) { const a = Math.abs(buf[i]); if (a > pk) pk = a; }
+    if (pk < 1e-10) return -Infinity;
+    return 20 * Math.log10(pk);  // dBFS: 0 = full scale
+  }
 
-  // Convert VU dial angle (° from vertical) → canvas arc radians
+  // Virtual canvas space: VW=200, VH=120 (face only — 5:3 landscape)
+  // CX=100, CY=VH=120 — pivot at absolute bottom-centre of face (AKAI-style).
+  // Needle tail (nTail) extends below y=120 → clipped by canvas edge naturally.
+  // R=108: arc spans x≈12–188 (88% of VW) with ±55° sweep.
+  // Non-uniform scale (sx=W/VW, sy=H/VH) fills canvas exactly — no gutters.
+  const VW = 200, VH = 120;
+  const CX = 100, CY = VH;  // pivot at bottom centre, y=120
+  const R  = 108;            // arc radius — arc top at y=12, ends at y≈58
+
   const toRad = deg => (deg - 90) * Math.PI / 180;
 
   function drawDial(canvas, label, vu, peakIntensity) {
@@ -1174,27 +1188,27 @@ const VU_NEEDLE = (() => {
     const H   = canvas.clientHeight * dpr;
     if (W < 2 || H < 2) return;
     if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
-    const ctx  = canvas.getContext('2d');
-    const sx   = W / VW, sy = H / VH;
+    const ctx = canvas.getContext('2d');
+
+    // Non-uniform scale: virtual face (VW×VH) maps exactly to canvas (W×H).
+    // CY=VH=120 → pivot at bottom edge. Tail (nTail=10) exits below → clipped.
+    const sx = W / VW;
+    const sy = H / VH;
     const dark = !document.documentElement.classList.contains('light');
 
+    ctx.clearRect(0, 0, W, H);
     ctx.save();
     ctx.scale(sx, sy);
 
-    // ── Background ──────────────────────────────────────────────
-    const bg = ctx.createRadialGradient(CX, 40, 10, CX, 60, 160);
-    if (dark) { bg.addColorStop(0,'#1e2440'); bg.addColorStop(1,'#0d1526'); }
-    else      { bg.addColorStop(0,'#f7f7fc'); bg.addColorStop(1,'#e9e9f4'); }
-    ctx.fillStyle = bg;
-    ctx.beginPath(); ctx.roundRect(0, 0, VW, VH, 7); ctx.fill();
-
-    // Bezel
-    ctx.strokeStyle = dark ? '#2a3a5e' : 'rgba(0,0,0,.08)';
+    // ── No face fill — canvas is transparent, player bar bg shows through ──
+    // Only a faint inner shadow ring gives the bezel a subtle depth without
+    // creating a separate visible "layer" over the player background.
+    ctx.strokeStyle = dark ? 'rgba(139,92,246,.10)' : 'rgba(0,0,0,.06)';
     ctx.lineWidth = 0.5;
     ctx.beginPath(); ctx.roundRect(0.25, 0.25, VW-0.5, VH-0.5, 7); ctx.stroke();
 
-    // ── Coloured arc band: green → yellow → red ─────────────────
-    const aS = toRad(-25), aE = toRad(25);
+    // ── Arc band: green → yellow → red ──────────────────────────
+    const aS = toRad(-55), aE = toRad(55);
     const ag = ctx.createLinearGradient(
       CX+Math.cos(aS)*R, CY+Math.sin(aS)*R,
       CX+Math.cos(aE)*R, CY+Math.sin(aE)*R
@@ -1207,12 +1221,11 @@ const VU_NEEDLE = (() => {
     ctx.strokeStyle = ag; ctx.lineWidth = 3; ctx.lineCap = 'butt';
     ctx.beginPath(); ctx.arc(CX, CY, R, aS, aE); ctx.stroke();
 
-    // Thin inner guide arc
     ctx.strokeStyle = dark ? 'rgba(139,92,246,.12)' : 'rgba(109,60,230,.18)';
     ctx.lineWidth = 0.75;
     ctx.beginPath(); ctx.arc(CX, CY, R-15, aS, aE); ctx.stroke();
 
-    // ── Tick marks + numeric labels ──────────────────────────────
+    // ── Tick marks + labels ──────────────────────────────────────
     const mCol = dark ? '#8888b0' : '#555570';
     const pCol = dark ? '#f87171' : '#dc2626';
     const marks = [
@@ -1241,25 +1254,25 @@ const VU_NEEDLE = (() => {
       }
     });
 
-    // ± signs outside arc ends
-    const sR = R + 12;
+    // ± signs — inward of arc ends so they stay in-canvas
+    const sR = R - 5;
     ctx.font = 'bold 12px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillStyle = mCol;
-    ctx.fillText('−', CX+Math.cos(toRad(-29))*sR, CY+Math.sin(toRad(-29))*sR);
+    ctx.fillText('\u2212', CX+Math.cos(toRad(-57))*sR, CY+Math.sin(toRad(-57))*sR);
     ctx.fillStyle = pCol;
-    ctx.fillText('+', CX+Math.cos(toRad(29))*sR,  CY+Math.sin(toRad(29))*sR);
+    ctx.fillText('+', CX+Math.cos(toRad(57))*sR, CY+Math.sin(toRad(57))*sR);
 
-    // "AroundMyRoom" brand
-    ctx.fillStyle = dark ? 'rgba(139,92,246,.65)' : 'rgba(109,60,230,.55)';
-    ctx.font = '600 9px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    // Brand + VU text
+    ctx.fillStyle = dark ? 'rgba(180,150,255,.90)' : 'rgba(109,60,230,.75)';
+    ctx.font = '700 10px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.letterSpacing = '0.5px';
     ctx.fillText('AroundMyRoom', CX, VH - 48);
-
-    // "VU" logo (bottom centre)
+    ctx.letterSpacing = '0px';
     ctx.fillStyle = dark ? 'rgba(139,92,246,.55)' : 'rgba(109,60,230,.45)';
-    ctx.font = 'bold 10px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('VU', CX, VH - 7);
+    ctx.font = 'bold 10px system-ui,sans-serif';
+    ctx.fillText('VU', CX, VH - 12);
 
-    // Channel label (top corner)
+    // Channel label
     ctx.fillStyle = dark ? 'rgba(139,92,246,.85)' : 'rgba(109,60,230,.70)';
     ctx.font = 'bold 13px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(label, label === 'L' ? 16 : VW-16, 12);
@@ -1267,7 +1280,6 @@ const VU_NEEDLE = (() => {
     // ── Peak lamp ────────────────────────────────────────────────
     const lampX = CX, lampY = 10, lampRad = 5;
     if (peakIntensity > 0 && dark) {
-      // Glow halo — dark mode only
       const glow = ctx.createRadialGradient(lampX, lampY, 0, lampX, lampY, lampRad*4);
       glow.addColorStop(0, `rgba(255,60,60,${(0.3+peakIntensity*0.55).toFixed(2)})`);
       glow.addColorStop(1, 'rgba(255,60,60,0)');
@@ -1279,7 +1291,6 @@ const VU_NEEDLE = (() => {
         ? `rgba(255,${Math.round(70-peakIntensity*50)},${Math.round(70-peakIntensity*50)},${(0.3+peakIntensity*0.7).toFixed(2)})`
         : '#16213e';
     } else {
-      // Light mode: plain solid dot, no glow — red fades cleanly into resting colour
       ctx.fillStyle = peakIntensity > 0
         ? `rgba(220,38,38,${(0.25+peakIntensity*0.75).toFixed(2)})`
         : '#c8c8dc';
@@ -1287,9 +1298,9 @@ const VU_NEEDLE = (() => {
     ctx.beginPath(); ctx.arc(lampX, lampY, lampRad, 0, 2*Math.PI); ctx.fill();
     ctx.strokeStyle = dark ? '#2a3a5e' : 'rgba(0,0,0,.12)'; ctx.lineWidth = 0.75; ctx.stroke();
 
-    // ── Needle ───────────────────────────────────────────────────
+    // ── Needle — pivots at CY=VH=120 (bottom edge). Tail exits below canvas. ──
     const ang  = toRad(vuToAngle(vu));
-    const nTip = R - 8, nTail = 14;
+    const nTip = R - 8, nTail = 10;
     ctx.save();
     ctx.shadowColor = dark ? 'rgba(0,0,0,.8)' : 'rgba(0,0,0,.3)';
     ctx.shadowBlur = 4; ctx.shadowOffsetX = 1.5; ctx.shadowOffsetY = 1.5;
@@ -1297,24 +1308,221 @@ const VU_NEEDLE = (() => {
     ctx.lineWidth = 1.5; ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(CX+Math.cos(ang+Math.PI)*nTail, CY+Math.sin(ang+Math.PI)*nTail);
-    ctx.lineTo(CX+Math.cos(ang)*nTip,          CY+Math.sin(ang)*nTip);
+    ctx.lineTo(CX+Math.cos(ang)*nTip,           CY+Math.sin(ang)*nTip);
     ctx.stroke();
     ctx.restore();
 
-    // Pivot cap
+    // ── Pivot cap — at bottom centre (CY=VH), upper semicircle visible ──
     ctx.fillStyle = dark ? '#3a4e72' : '#9090a8';
     ctx.beginPath(); ctx.arc(CX, CY, 5, 0, 2*Math.PI); ctx.fill();
-    ctx.fillStyle = dark ? '#8888b0' : '#c8c8dc';
-    ctx.beginPath(); ctx.arc(CX, CY, 2.5, 0, 2*Math.PI); ctx.fill();
+    ctx.strokeStyle = dark ? '#4a5e82' : '#b0b0c4';
+    ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = dark ? '#c8c8e0' : '#e0e0f0';
+    ctx.beginPath(); ctx.arc(CX, CY, 2, 0, 2*Math.PI); ctx.fill();
 
     ctx.restore();
   }
 
+
+  // ── RTW 1206-style PPM (Peak Programme Meter) — horizontal ─────────────────
+  // Two horizontal bar rows: L on top, R on bottom.
+  // 44 segments spanning −40 to +3 dBFS (1 dB/seg), values in raw dBFS.
+  // Transparent background — seamlessly matches the player bar.
+  function drawPPM(canvas, valL, valR, pkValL, pkValR, pkFadeL, pkFadeR) {
+    const dpr = window.devicePixelRatio || 1;
+    const W   = canvas.clientWidth  * dpr;
+    const H   = canvas.clientHeight * dpr;
+    if (W < 2 || H < 2) return;
+    if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+    const ctx  = canvas.getContext('2d');
+    const dark = !document.documentElement.classList.contains('light');
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.save();
+
+    // Virtual space — extra height at bottom for the brightness slider
+    const VW = 200, VH = 64;
+    const sx = W / VW, sy = H / VH;
+    ctx.scale(sx, sy);
+
+    // Layout
+    const LPAD   = 11;               // space for 'L'/'R' labels
+    const BAR_X  = LPAD + 1;         // bars start x = 12
+    const BAR_W  = VW - BAR_X - 2;   // available bar length ≈ 186 virt-px
+    const ROW_H  = 13;               // height of each meter row
+    const ROW_YL = 2;                // top of L row
+    const ROW_YR = ROW_YL + ROW_H + 4; // top of R row
+    const SCL_Y  = ROW_YR + ROW_H + 2; // baseline of scale labels
+
+    // Brightness slider geometry
+    const BS_Y   = SCL_Y + 8;        // top of brightness track
+    const BS_H   = 2;                // track height (thin line)
+    const BS_X   = BAR_X + 14;       // leave room for ☀ label
+    const BS_W   = BAR_W - 14;       // track width
+
+    // 44 segments: i=0 → −40 dBFS … i=43 → +3 dBFS
+    const N      = 44;
+    const MIN_DB = -40;
+    const UNIT_W = BAR_W / N;        // ≈ 4.23 virt-px per segment
+    const SEG_W  = UNIT_W * 0.82;    // 18% gap between segments
+
+    // Colour zones (dBFS):  green ≤ −9  |  yellow −8..−2  |  red ≥ −1
+    // Vivid fully-saturated LED colours — brightness is controlled purely via globalAlpha
+    function segColor(i, lit) {
+      const db = MIN_DB + i;
+      if (db >= -1) return lit
+        ? (dark ? '#ff5555' : '#cc2222')
+        : (dark ? 'rgba(255,60,60,.12)'  : 'rgba(180,30,30,.07)');
+      if (db >= -8) return lit
+        ? (dark ? '#f5c842' : '#c08800')
+        : (dark ? 'rgba(240,180,40,.12)' : 'rgba(180,120,0,.07)');
+      return lit
+        ? (dark ? '#2ee87a' : '#0aaa44')
+        : (dark ? 'rgba(40,210,100,.12)' : 'rgba(10,150,50,.07)');
+    }
+
+    // Brightness: clamp so even the low end is always visible (0.22 floor)
+    ctx.globalAlpha = 0.22 + ppmBrightness * 0.78;
+    function drawRow(rowY, val, pkVal, pkFade) {
+      const litCount = val <= MIN_DB ? -1 : Math.min(N - 1, Math.floor(val - MIN_DB));
+      for (let i = 0; i < N; i++) {
+        const x = BAR_X + i * UNIT_W;
+        ctx.fillStyle = segColor(i, i <= litCount);
+        ctx.beginPath(); ctx.roundRect(x, rowY, SEG_W, ROW_H, 0.6); ctx.fill();
+      }
+      // Peak hold — bright segment that fades after hold time
+      if (pkFade > 0.01) {
+        const pkIdx = Math.min(N - 1, Math.max(0, Math.round(pkVal - MIN_DB)));
+        const a     = (pkFade * 0.92).toFixed(2);
+        const db    = MIN_DB + pkIdx;
+        ctx.fillStyle = db >= -1
+          ? `rgba(255,120,120,${a})`
+          : db >= -8 ? `rgba(245,210,80,${a})`
+                     : `rgba(60,235,130,${a})`;
+        ctx.beginPath(); ctx.roundRect(BAR_X + pkIdx * UNIT_W, rowY, SEG_W, ROW_H, 0.6); ctx.fill();
+      }
+    }
+    drawRow(ROW_YL, valL, pkValL, pkFadeL);
+    drawRow(ROW_YR, valR, pkValR, pkFadeR);
+    ctx.globalAlpha = 1;
+
+    // Channel labels
+    ctx.fillStyle = dark ? 'rgba(180,150,255,.80)' : 'rgba(109,60,230,.65)';
+    ctx.font = 'bold 8px system-ui,sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('L', LPAD / 2, ROW_YL + ROW_H / 2);
+    ctx.fillText('R', LPAD / 2, ROW_YR + ROW_H / 2);
+
+    // dB scale below both bars
+    const scaleMarks = [-40, -30, -20, -10, -5, 0, 3];
+    ctx.font = '5px system-ui,sans-serif';
+    ctx.textBaseline = 'top';
+    scaleMarks.forEach(db => {
+      const cx = BAR_X + (db - MIN_DB) * UNIT_W + SEG_W / 2;
+      const isRed = db >= -1, isYel = db >= -8;
+      ctx.fillStyle = isRed ? (dark ? 'rgba(205,95,95,.48)'    : 'rgba(185,50,50,.42)')
+                    : isYel ? (dark ? 'rgba(192,158,55,.50)'   : 'rgba(165,115,10,.44)')
+                            : (dark ? 'rgba(170,185,200,.52)'  : 'rgba(60,60,80,.50)');
+      ctx.fillRect(cx - 0.25, SCL_Y - 1.5, 0.5, 1.5);
+      const lbl = db === 3 ? '+3' : String(db);
+      ctx.textAlign = db <= -30 ? 'left' : db >= 3 ? 'right' : 'center';
+      ctx.fillText(lbl, cx, SCL_Y);
+    });
+
+    // 'RTW' brand — left of brightness slider area
+    ctx.fillStyle = dark ? 'rgba(139,92,246,.32)' : 'rgba(109,60,230,.22)';
+    ctx.font = 'bold 4px system-ui,sans-serif';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('RTW', BAR_X, SCL_Y);
+
+    // ── Brightness slider ────────────────────────────────────────────
+    const accentLit  = dark ? 'rgba(139,92,246,.85)'  : 'rgba(109,60,230,.80)';
+    const accentDim  = dark ? 'rgba(139,92,246,.16)'  : 'rgba(109,60,230,.12)';
+    const thumbColor = dark ? 'rgba(220,210,255,.92)' : 'rgba(90,50,200,.90)';
+
+    // Sun icon (dim output end marker)
+    ctx.fillStyle = dark ? 'rgba(190,185,210,.45)' : 'rgba(80,60,130,.40)';
+    ctx.font = '6px system-ui,sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('☀', BAR_X + 6, BS_Y + BS_H / 2);
+
+    // Track background
+    ctx.fillStyle = accentDim;
+    ctx.beginPath(); ctx.roundRect(BS_X, BS_Y, BS_W, BS_H, BS_H / 2); ctx.fill();
+
+    // Filled portion
+    const fillW = Math.max(BS_H, ppmBrightness * BS_W);
+    ctx.fillStyle = accentLit;
+    ctx.beginPath(); ctx.roundRect(BS_X, BS_Y, fillW, BS_H, BS_H / 2); ctx.fill();
+
+    // Thumb
+    const thumbR = BS_H * 2.2;  // larger than track — lollipop handle
+    ctx.fillStyle = thumbColor;
+    ctx.beginPath(); ctx.arc(BS_X + fillW, BS_Y + BS_H / 2, thumbR, 0, 2 * Math.PI); ctx.fill();
+
+    ctx.restore();
+  }
+
+  // Brightness slider interaction for the PPM canvas
+  function initPPMBrightness() {
+    const canvas = document.getElementById('vu-ppm');
+    if (!canvas) return;
+    // These mirror the virtual layout in drawPPM (VH=64)
+    const VH        = 64;
+    const BS_VY     = 40;  // generous hit zone starting above BS_Y(42)
+    const BS_VH     = 14;  // covers 40–54 in virt-px, catches the 2px-tall track
+    const BAR_X_F   = 12 + 14;   // BS_X in virt-px (BAR_X + sun-icon space)
+    const BAR_W_F   = 186 - 14;  // BS_W in virt-px
+
+    let dragging = false;
+
+    function normY(e) {
+      const rect = canvas.getBoundingClientRect();
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      return (clientY - rect.top) / rect.height;
+    }
+    function inSlider(e) {
+      const ny = normY(e);
+      return ny >= BS_VY / VH && ny <= (BS_VY + BS_VH) / VH;
+    }
+    function applyX(e) {
+      const rect = canvas.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const normX = ((clientX - rect.left) / rect.width * 200 - BAR_X_F) / BAR_W_F;
+      ppmBrightness = Math.max(0.0, Math.min(1.0, normX));
+      localStorage.setItem('ms2_ppm_bright', ppmBrightness.toFixed(3));
+      if (!rafId) _drawIdle();
+    }
+
+    // Only block clicks in the slider zone from reaching the row toggle handler
+    canvas.addEventListener('click', e => { if (inSlider(e)) e.stopPropagation(); });
+
+    canvas.addEventListener('mousedown', e => {
+      if (!inSlider(e)) return;
+      dragging = true; applyX(e); e.preventDefault(); e.stopPropagation();
+    });
+    window.addEventListener('mousemove',  e => { if (dragging) applyX(e); });
+    window.addEventListener('mouseup',    () => { dragging = false; });
+
+    canvas.addEventListener('touchstart', e => {
+      if (!inSlider(e)) return;
+      dragging = true; applyX(e); e.preventDefault(); e.stopPropagation();
+    }, {passive: false});
+    window.addEventListener('touchmove',  e => { if (dragging) applyX(e); }, {passive: false});
+    window.addEventListener('touchend',   () => { dragging = false; });
+  }
+
   function _drawIdle() {
-    const cL = document.getElementById('vu-dial-L');
-    const cR = document.getElementById('vu-dial-R');
-    if (cL) drawDial(cL, 'L', -25, 0);
-    if (cR) drawDial(cR, 'R', -25, 0);
+    if (_mode === 'needle') {
+      const cL = document.getElementById('vu-dial-L');
+      const cR = document.getElementById('vu-dial-R');
+      if (cL) drawDial(cL, 'L', -25, 0);
+      if (cR) drawDial(cR, 'R', -25, 0);
+    }
+    if (_mode === 'ppm') {
+      const cP = document.getElementById('vu-ppm');
+      if (cP) drawPPM(cP, -40, -40, -40, -40, 0, 0);
+    }
   }
 
   // ── Ref-level knob ──────────────────────────────────────────
@@ -1431,16 +1639,45 @@ const VU_NEEDLE = (() => {
       if (age <= PEAK_HOLD_MS) return 1;
       return Math.max(0, 1 - (age - PEAK_HOLD_MS) / PEAK_FADE_MS);
     }
-    const cL = document.getElementById('vu-dial-L');
-    const cR = document.getElementById('vu-dial-R');
-    if (cL) drawDial(cL, 'L', vuL, lampI(lastClipL));
-    if (cR) drawDial(cR, 'R', vuR, lampI(lastClipR));
+    // PPM true-peak ballistics (fast attack, slow release) — values in dBFS
+    const rawPkL   = (_vuDraining || !analyserL) ? -Infinity : peakToDBFS(analyserL);
+    const rawPkR   = (_vuDraining || !analyserR) ? -Infinity : peakToDBFS(analyserR);
+    const tgtPL    = isFinite(rawPkL) ? Math.max(-40, rawPkL) : -40;
+    const tgtPR    = isFinite(rawPkR) ? Math.max(-40, rawPkR) : -40;
+    const alphaAtk = 1 - Math.exp(-dt / TAU_PPM_ATK);
+    const alphaRel = 1 - Math.exp(-dt / TAU_PPM_REL);
+    ppmL = tgtPL > ppmL ? ppmL + alphaAtk * (tgtPL - ppmL) : ppmL + alphaRel * (tgtPL - ppmL);
+    ppmR = tgtPR > ppmR ? ppmR + alphaAtk * (tgtPR - ppmR) : ppmR + alphaRel * (tgtPR - ppmR);
+    if (!_vuDraining) {
+      if (ppmL >= ppmPkL) { ppmPkL = ppmL; ppmPkTsL = ts; }
+      if (ppmR >= ppmPkR) { ppmPkR = ppmR; ppmPkTsR = ts; }
+    }
+    function ppmLampI(lc) {
+      if (lc === null) return 0;
+      const age = ts - lc;
+      if (age <= PPM_HOLD_MS) return 1;
+      return Math.max(0, 1 - (age - PPM_HOLD_MS) / PPM_FADE_MS);
+    }
+    if (_mode === 'needle') {
+      const cL = document.getElementById('vu-dial-L');
+      const cR = document.getElementById('vu-dial-R');
+      if (cL) drawDial(cL, 'L', vuL, lampI(lastClipL));
+      if (cR) drawDial(cR, 'R', vuR, lampI(lastClipR));
+    }
+    if (_mode === 'ppm') {
+      const cP = document.getElementById('vu-ppm');
+      if (cP) drawPPM(cP, ppmL, ppmR, ppmPkL, ppmPkR, ppmLampI(ppmPkTsL), ppmLampI(ppmPkTsR));
+    }
     // Once drained to near-minimum, switch to static idle frame
-    if (_vuDraining && Math.max(vuL, vuR) > -24.5) { rafId = requestAnimationFrame(drawFrame); return; }
+    const _drainThresh = _mode === 'ppm' ? Math.max(ppmL, ppmR) > -39 : Math.max(vuL, vuR) > -24.5;
+    if (_vuDraining && _drainThresh) { rafId = requestAnimationFrame(drawFrame); return; }
     if (_vuDraining) {
       rafId = null;
       _vuDraining = false;
       vuL = -25; vuR = -25;
+      ppmL = -40; ppmR = -40;
+      ppmPkL = -40; ppmPkR = -40;
+      ppmPkTsL = null; ppmPkTsR = null;
       _drawIdle();
       return;
     }
@@ -1458,45 +1695,50 @@ const VU_NEEDLE = (() => {
   }
   function _applyMode(startIfPlaying) {
     _vuDraining = false;
-    const wrap   = document.getElementById('vu-needle-wrap');
-    const spec   = document.getElementById('mini-spec');
-    const needle = _mode === 'needle';
-    if (wrap) wrap.classList.toggle('hidden', !needle);
-    if (spec) spec.classList.toggle('hidden',  needle);
-    document.body.classList.toggle('vu-needle-mode', needle);
-    if (needle) { MINI_SPEC.stop(); if (startIfPlaying) _start(); else _drawIdle(); }
-    else        { _stop(); if (startIfPlaying) MINI_SPEC.start(); }
+    const wrap = document.getElementById('vu-needle-wrap');
+    const spec = document.getElementById('mini-spec');
+    const ppmW = document.getElementById('vu-ppm-wrap');
+    if (wrap) wrap.classList.toggle('hidden', _mode !== 'needle');
+    if (spec) spec.classList.toggle('hidden', _mode !== 'spec');
+    if (ppmW) ppmW.classList.toggle('hidden', _mode !== 'ppm');
+    document.body.classList.toggle('vu-needle-mode', _mode === 'needle');
+    if (_mode === 'spec') { _stop(); if (startIfPlaying) MINI_SPEC.start(); }
+    else                  { MINI_SPEC.stop(); if (startIfPlaying) _start(); else _drawIdle(); }
     localStorage.setItem('vu-mode', _mode);
   }
 
   return {
     get mode() { return _mode; },
-    start()  { if (_mode === 'needle') _start(); else MINI_SPEC.start(); },
-    stop()   { if (_mode === 'needle') _stop();  else MINI_SPEC.stop();  },
+    start()  { if (_mode === 'spec') MINI_SPEC.start(); else _start(); },
+    stop()   { if (_mode === 'spec') MINI_SPEC.stop();  else _stop();  },
     toggle() {
-      _mode = (_mode === 'needle') ? 'spec' : 'needle';
+      const MODES = ['spec', 'needle', 'ppm'];
+      _mode = MODES[(MODES.indexOf(_mode) + 1) % MODES.length];
       _applyMode(audioEl && !audioEl.paused);
     },
     init() {
       const row = document.getElementById('vu-spec-row');
       if (row) row.addEventListener('click', e => {
-        // Only toggle when clicking directly on a dial canvas — not center strip
+        // Toggle on dial, spectrum, PPM canvas (non-slider), or bare row background
         const id = e.target && e.target.id;
-        if (id === 'vu-dial-L' || id === 'vu-dial-R' || id === 'mini-spec' || e.target === row) this.toggle();
+        if (id === 'vu-dial-L' || id === 'vu-dial-R' || id === 'mini-spec' ||
+            id === 'vu-ppm'    || id === 'vu-ppm-wrap' || e.target === row) this.toggle();
       });
       // Block clicks on center logo area from bubbling to the row toggle
       const center = document.querySelector('.vu-center-logo');
       if (center) center.addEventListener('click', e => e.stopPropagation());
       // Restore saved display state (no draw loop yet — wait for play event)
-      const wrap   = document.getElementById('vu-needle-wrap');
-      const spec   = document.getElementById('mini-spec');
-      const needle = _mode === 'needle';
-      if (wrap) wrap.classList.toggle('hidden', !needle);
-      if (spec) spec.classList.toggle('hidden',  needle);
-      document.body.classList.toggle('vu-needle-mode', needle);
-      if (needle) _drawIdle();
-      else        MINI_SPEC.stop();  // start idle breathing on page load in spec mode
+      const wrap = document.getElementById('vu-needle-wrap');
+      const spec = document.getElementById('mini-spec');
+      const ppmW = document.getElementById('vu-ppm-wrap');
+      if (wrap) wrap.classList.toggle('hidden', _mode !== 'needle');
+      if (spec) spec.classList.toggle('hidden', _mode !== 'spec');
+      if (ppmW) ppmW.classList.toggle('hidden', _mode !== 'ppm');
+      document.body.classList.toggle('vu-needle-mode', _mode === 'needle');
+      if (_mode === 'needle' || _mode === 'ppm') _drawIdle();
+      else MINI_SPEC.stop();  // idle breathing on page load in spec mode
       initKnob();
+      initPPMBrightness();
     },
   };
 })();
