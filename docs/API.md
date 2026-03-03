@@ -88,6 +88,8 @@ http://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [/jukebox/push-to-client](API/jukebox_push-to-client.md)
 
+[/jukebox/sessions](API/jukebox_sessions.md) *(admin)*
+
 ## Download
 
 [/download](API/download.md)

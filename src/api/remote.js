@@ -14,6 +14,8 @@ import WebError from '../util/web-error.js';
 const clients = {};
 // Map code to JWT
 const codeTokenMap = {};
+// Map code to session start time (unix ms)
+const codeStartTime = {};
 const allowedCommands = [
   'next',
   'previous',
@@ -51,6 +53,7 @@ export function setupAfterAuth(mstream, server) {
     const code = nanoid(8);
     winston.info(`Websocket Connection Accepted With Code: ${code}`);
     clients[code] = connection;
+    codeStartTime[code] = Date.now();
 
     if (req.jwt) { codeTokenMap[code] = req.jwt; }
 
@@ -63,10 +66,26 @@ export function setupAfterAuth(mstream, server) {
 
     connection.on('close', (_connection) => {
       delete clients[code];
-      if (codeTokenMap[code]) {delete codeTokenMap[code];}
+      if (codeTokenMap[code])  { delete codeTokenMap[code]; }
+      if (codeStartTime[code]) { delete codeStartTime[code]; }
     });
   });
 
+
+  // GET /api/v1/jukebox/sessions — admin-only list of all active jukebox sessions
+  mstream.get('/api/v1/jukebox/sessions', (req, res) => {
+    if (config.program.lockAdmin === true) { return res.status(405).json({ error: 'Admin API Disabled' }); }
+    if (req.user.admin !== true)           { return res.status(403).json({ error: 'Forbidden' }); }
+
+    const sessions = Object.keys(clients).map(code => ({
+      code,
+      token:     codeTokenMap[code]  || null,
+      startTime: codeStartTime[code] || null,
+      url:       `/remote/${code}`,
+    }));
+
+    res.json({ sessions });
+  });
 
   mstream.post('/api/v1/jukebox/push-to-client', (req, res) => {
     const schema = Joi.object({
