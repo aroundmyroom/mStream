@@ -1124,6 +1124,7 @@ const VU_NEEDLE = (() => {
   let vuL = -25, vuR = -25;
   let lastClipL = null, lastClipR = null;
   let lastTs    = null;
+  let _vuDraining = false;  // true while needles fall to idle after pause
 
   let REF_LEVEL      = parseFloat(localStorage.getItem('ms2_ref') || '-13');   // dBFS that maps to 0 VU  (adjustable via knob)
   const PEAK_HOLD_MS = 1000;
@@ -1409,18 +1410,21 @@ const VU_NEEDLE = (() => {
 
   function drawFrame(ts) {
     if (!rafId) return;
-    if (!audioCtx || !analyserL || !analyserR) { rafId = requestAnimationFrame(drawFrame); return; }
+    if (!_vuDraining && (!audioCtx || !analyserL || !analyserR)) { rafId = requestAnimationFrame(drawFrame); return; }
     const dt    = lastTs !== null ? Math.min((ts - lastTs) / 1000, 0.1) : 0.016;
     lastTs      = ts;
-    const rawL  = rmsToVU(analyserL);
-    const rawR  = rmsToVU(analyserR);
+    // When draining: target is silence (-25 VU) so needles fall via ballistics
+    const rawL  = (_vuDraining || !analyserL) ? -Infinity : rmsToVU(analyserL);
+    const rawR  = (_vuDraining || !analyserR) ? -Infinity : rmsToVU(analyserR);
     const tgtL  = isFinite(rawL) ? Math.max(-25, rawL) : -25;
     const tgtR  = isFinite(rawR) ? Math.max(-25, rawR) : -25;
     const alpha = 1 - Math.exp(-dt / TAU);
     vuL += alpha * (tgtL - vuL);
     vuR += alpha * (tgtR - vuR);
-    if (vuL >= CLIP_VU) lastClipL = ts;
-    if (vuR >= CLIP_VU) lastClipR = ts;
+    if (!_vuDraining) {
+      if (vuL >= CLIP_VU) lastClipL = ts;
+      if (vuR >= CLIP_VU) lastClipR = ts;
+    }
     function lampI(lc) {
       if (lc === null) return 0;
       const age = ts - lc;
@@ -1431,19 +1435,29 @@ const VU_NEEDLE = (() => {
     const cR = document.getElementById('vu-dial-R');
     if (cL) drawDial(cL, 'L', vuL, lampI(lastClipL));
     if (cR) drawDial(cR, 'R', vuR, lampI(lastClipR));
+    // Once drained to near-minimum, switch to static idle frame
+    if (_vuDraining && Math.max(vuL, vuR) > -24.5) { rafId = requestAnimationFrame(drawFrame); return; }
+    if (_vuDraining) {
+      rafId = null;
+      _vuDraining = false;
+      vuL = -25; vuR = -25;
+      _drawIdle();
+      return;
+    }
     rafId = requestAnimationFrame(drawFrame);
   }
 
   function _start() {
+    _vuDraining = false;
     if (!rafId) { lastTs = null; rafId = requestAnimationFrame(drawFrame); }
   }
   function _stop() {
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-    lastTs = null;
-    vuL = -25; vuR = -25;
-    _drawIdle();   // park needle at minimum instead of clearing blank
+    // Let ballistics bring needle down gracefully instead of snapping to idle
+    _vuDraining = true;
+    if (!rafId) { lastTs = null; rafId = requestAnimationFrame(drawFrame); }
   }
   function _applyMode(startIfPlaying) {
+    _vuDraining = false;
     const wrap   = document.getElementById('vu-needle-wrap');
     const spec   = document.getElementById('mini-spec');
     const needle = _mode === 'needle';
