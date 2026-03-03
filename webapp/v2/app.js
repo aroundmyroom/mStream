@@ -1126,6 +1126,30 @@ const VU_NEEDLE = (() => {
   const PPM_HOLD_MS  = 2000;    // peak hold duration
   const PPM_FADE_MS  = 2000;    // peak fade after hold
   let ppmBrightness  = parseFloat(localStorage.getItem('ms2_ppm_bright') || '0.38');
+  let _bsAlpha       = 0;          // brightness-slider overlay opacity (0 = hidden)
+  let _bsFadeTimer   = null;       // timeout id for auto-hide
+  let _bsRaf         = null;       // rAF for smooth fade animation
+
+  // Fade slider out smoothly over ~800 ms
+  function _bsStartFade() {
+    cancelAnimationFrame(_bsRaf);
+    clearTimeout(_bsFadeTimer);
+    _bsFadeTimer = setTimeout(() => {
+      const step = () => {
+        _bsAlpha = Math.max(0, _bsAlpha - 0.03);
+        if (!rafId) _drawIdle();   // keep PPM canvas refreshing during fade
+        if (_bsAlpha > 0) _bsRaf = requestAnimationFrame(step);
+      };
+      _bsRaf = requestAnimationFrame(step);
+    }, 15000);
+  }
+
+  // Show slider and restart the 15 s idle timer
+  function _bsWake() {
+    cancelAnimationFrame(_bsRaf);
+    _bsAlpha = 1;
+    _bsStartFade();
+  }
 
   let REF_LEVEL      = parseFloat(localStorage.getItem('ms2_ref') || '-13');   // dBFS that maps to 0 VU  (adjustable via knob)
   const PEAK_HOLD_MS = 1000;
@@ -1435,30 +1459,61 @@ const VU_NEEDLE = (() => {
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.fillText('RTW', BAR_X, SCL_Y);
 
-    // ── Brightness slider ────────────────────────────────────────────
-    const accentLit  = dark ? 'rgba(139,92,246,.85)'  : 'rgba(109,60,230,.80)';
-    const accentDim  = dark ? 'rgba(139,92,246,.16)'  : 'rgba(109,60,230,.12)';
-    const thumbColor = dark ? 'rgba(220,210,255,.92)' : 'rgba(90,50,200,.90)';
+    // ── Brightness slider ─────────────────────────────────────────────
+    // Drawn OUTSIDE the virtual scale transform so the track and thumb
+    // are identical pixel-for-pixel to the vol/balance sliders.
+    if (_bsAlpha > 0.004) {
+      ctx.restore();   // pop the virtual scale — now in real canvas px
 
-    // Sun icon (dim output end marker)
-    ctx.fillStyle = dark ? 'rgba(190,185,210,.45)' : 'rgba(80,60,130,.40)';
-    ctx.font = '6px system-ui,sans-serif';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('☀', BAR_X + 6, BS_Y + BS_H / 2);
+      const RW        = W;                          // actual canvas width
+      const RH        = H;                          // actual canvas height
+      // Convert virtual anchor points to actual px
+      const rsx       = RW / VW;
+      const rsy       = RH / VH;
+      const R_BS_Y    = (BS_Y + BS_H / 2) * rsy + 3;   // +3px down
+      const R_BS_X    = BS_X * rsx - 31;                // -31px left
+      const R_BS_W    = BS_W * rsx;
+      const TRACK_H   = 3;                          // matches .bal-slider height
+      const THUMB_R   = 5.5;                        // matches .bal-slider thumb (11px ⌀)
 
-    // Track background
-    ctx.fillStyle = accentDim;
-    ctx.beginPath(); ctx.roundRect(BS_X, BS_Y, BS_W, BS_H, BS_H / 2); ctx.fill();
+      const accentLit  = dark ? 'rgba(139,92,246,.85)'  : 'rgba(109,60,230,.80)';
+      const accentDim  = dark ? 'rgba(139,92,246,.18)'  : 'rgba(109,60,230,.14)';
+      const thumbColor = dark ? '#c4b5fd' : '#6d28d9';   // --primary equivalent
 
-    // Filled portion
-    const fillW = Math.max(BS_H, ppmBrightness * BS_W);
-    ctx.fillStyle = accentLit;
-    ctx.beginPath(); ctx.roundRect(BS_X, BS_Y, fillW, BS_H, BS_H / 2); ctx.fill();
+      ctx.save();
+      ctx.globalAlpha = _bsAlpha;
 
-    // Thumb
-    const thumbR = BS_H * 2.2;  // larger than track — lollipop handle
-    ctx.fillStyle = thumbColor;
-    ctx.beginPath(); ctx.arc(BS_X + fillW, BS_Y + BS_H / 2, thumbR, 0, 2 * Math.PI); ctx.fill();
+      // Sun icon
+      ctx.fillStyle = dark ? 'rgba(190,185,210,.55)' : 'rgba(80,60,130,.50)';
+      ctx.font = `${Math.round(9 * rsy)}px system-ui,sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('☀', (BAR_X + 6) * rsx - 26, R_BS_Y);
+
+      // Track — full background
+      ctx.fillStyle = accentDim;
+      ctx.beginPath();
+      ctx.roundRect(R_BS_X, R_BS_Y - TRACK_H / 2, R_BS_W, TRACK_H, TRACK_H / 2);
+      ctx.fill();
+
+      // Track — filled portion
+      const fillW = Math.max(TRACK_H, ppmBrightness * R_BS_W);
+      ctx.fillStyle = accentLit;
+      ctx.beginPath();
+      ctx.roundRect(R_BS_X, R_BS_Y - TRACK_H / 2, fillW, TRACK_H, TRACK_H / 2);
+      ctx.fill();
+
+      // Thumb — perfect circle (no scale distortion)
+      ctx.fillStyle = thumbColor;
+      ctx.shadowColor = 'rgba(0,0,0,.35)';
+      ctx.shadowBlur  = 3;
+      ctx.beginPath();
+      ctx.arc(R_BS_X + fillW, R_BS_Y, THUMB_R, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      ctx.restore();
+      return;   // ctx.restore() already called above — skip the outer restore
+    }
 
     ctx.restore();
   }
@@ -1497,8 +1552,14 @@ const VU_NEEDLE = (() => {
     // Only block clicks in the slider zone from reaching the row toggle handler
     canvas.addEventListener('click', e => { if (inSlider(e)) e.stopPropagation(); });
 
+    // Wake brightness slider on hover over the PPM canvas
+    canvas.addEventListener('mousemove', e => {
+      if (inSlider(e)) _bsWake();
+    }, { passive: true });
+
     canvas.addEventListener('mousedown', e => {
       if (!inSlider(e)) return;
+      _bsWake();   // reset 15s timer while actively dragging
       dragging = true; applyX(e); e.preventDefault(); e.stopPropagation();
     });
     window.addEventListener('mousemove',  e => { if (dragging) applyX(e); });
@@ -1506,6 +1567,7 @@ const VU_NEEDLE = (() => {
 
     canvas.addEventListener('touchstart', e => {
       if (!inSlider(e)) return;
+      _bsWake();
       dragging = true; applyX(e); e.preventDefault(); e.stopPropagation();
     }, {passive: false});
     window.addEventListener('touchmove',  e => { if (dragging) applyX(e); }, {passive: false});
@@ -1739,6 +1801,7 @@ const VU_NEEDLE = (() => {
       else MINI_SPEC.stop();  // idle breathing on page load in spec mode
       initKnob();
       initPPMBrightness();
+      _bsStartFade();   // start 15 s hide countdown immediately
     },
   };
 })();
@@ -5241,7 +5304,9 @@ window.EGG = (() => {
   function show() {
     smoothed.fill(0); peaks.fill(0); peakTimer.fill(0);
     const cv = document.getElementById('egg-canvas');
-    cv.style.display = 'block';
+    cv.style.transition = '';
+    cv.style.opacity    = '1';
+    cv.style.display    = 'block';
     cv.width  = window.innerWidth;
     cv.height = H;
     active = true;
