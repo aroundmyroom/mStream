@@ -2935,65 +2935,127 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
   const azStrip     = body.querySelector('#az-strip');
   const grid        = body.querySelector('.album-grid');
 
-  // Pre-build HTML strings — use cleanName for display
-  const cardData = albumsClean.map((a, i) => {
+  // Lightweight data — no HTML pre-built; keeps memory lean for large libraries
+  const cardData = albumsClean.map((a, i) => ({
+    lc:     (a.cleanName || '').toLowerCase(),
+    letter: letterOfAlbum(a),
+    idx:    i,
+  }));
+
+  // Build HTML for a single card on demand
+  function buildCard(i) {
+    const a   = albumsClean[i];
     const name = a.cleanName;
     const art  = artUrl(a.album_art_file, 's');
-    return {
-      lc:     name.toLowerCase(),
-      letter: letterOfAlbum(a),
-      html: `<div class="album-card" data-i="${i}">
-        <div class="album-art">
-          ${art
-            ? `<img src="${art}" alt="${esc(name)}" loading="lazy" onerror="this.style.display='none'">`
-            : `<div class="no-art no-art-album"><div class="no-art-wave"><span></span><span></span><span></span><span></span><span></span></div><span class="no-art-label">no artwork</span></div>`}
-          <div class="play-ov"><svg width="30" height="30" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div>
-        </div>
-        <div class="album-meta">
-          <div class="album-name">${esc(name)}</div>
-          ${a.year ? `<div class="album-year">${a.year}</div>` : '<div class="album-year">&nbsp;</div>'}
-        </div>
-      </div>`
-    };
-  });
+    return `<div class="album-card" data-i="${i}">
+      <div class="album-art">
+        ${art
+          ? `<img src="${art}" alt="${esc(name)}" loading="lazy" onerror="this.style.display='none'">`
+          : `<div class="no-art no-art-album"><div class="no-art-wave"><span></span><span></span><span></span><span></span><span></span></div><span class="no-art-label">no artwork</span></div>`}
+        <div class="play-ov"><svg width="30" height="30" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div>
+      </div>
+      <div class="album-meta">
+        <div class="album-name">${esc(name)}</div>
+        ${a.year ? `<div class="album-year">${a.year}</div>` : '<div class="album-year">&nbsp;</div>'}
+      </div>
+    </div>`;
+  }
 
-  // Single delegated listener
+  // ── Virtual scroll ───────────────────────────────────────────
+  // Only cards within the visible viewport + BUFS buffer rows are in the DOM.
+  // Padding on the grid fakes the height of off-screen rows so the scrollbar
+  // and scrollTop behave exactly as if every card were rendered.
+  //
+  //  paddingTop    = fRow * (rowH + GAP)
+  //  paddingBottom = (numRows - lRow - 1) * (rowH + GAP)
+  //
+  const GAP  = 20;   // matches .album-grid gap: 20px
+  const BUFS = 3;    // buffer rows above + below viewport
+  let cols = 0, rowH = 0;
+  let vData = cardData;          // current active data slice (full / filtered / AZ)
+  let curFRow = -1, curLRow = -1;
+
+  // Measure one probe card to get real column count and row height
+  function measure() {
+    const gw = grid.clientWidth;
+    if (!gw) return false;
+    const probe = document.createElement('div');
+    probe.className = 'album-card';
+    probe.style.cssText = 'visibility:hidden;pointer-events:none;position:relative;';
+    probe.innerHTML = '<div class="album-art" style="aspect-ratio:1"></div>'
+                    + '<div class="album-meta"><div class="album-name">X</div>'
+                    + '<div class="album-year">&nbsp;</div></div>';
+    grid.appendChild(probe);
+    const pw = probe.offsetWidth;
+    rowH = probe.offsetHeight;
+    grid.removeChild(probe);
+    cols = pw > 0 ? Math.max(1, Math.round((gw + GAP) / (pw + GAP))) : 1;
+    return rowH > 0;
+  }
+
+  function renderWindow(force) {
+    if (!cols || !rowH) { if (!measure()) return; }
+    const nRows  = Math.ceil(vData.length / cols);
+    const sTop   = body.scrollTop;
+    const vH     = body.clientHeight;
+    const fRow   = Math.max(0, Math.floor(sTop / (rowH + GAP)) - BUFS);
+    const lRow   = Math.min(nRows - 1, Math.ceil((sTop + vH) / (rowH + GAP)) + BUFS);
+
+    if (!force && fRow === curFRow && lRow === curLRow) return;
+    curFRow = fRow; curLRow = lRow;
+
+    grid.style.paddingTop    = `${fRow * (rowH + GAP)}px`;
+    grid.style.paddingBottom = `${Math.max(0, nRows - lRow - 1) * (rowH + GAP)}px`;
+
+    const fIdx = fRow * cols;
+    const lIdx = Math.min(vData.length - 1, (lRow + 1) * cols - 1);
+    const html = [];
+    for (let i = fIdx; i <= lIdx; i++) html.push(buildCard(vData[i].idx));
+    grid.innerHTML = html.join('');
+  }
+
+  // Scroll: render on every scroll tick (cheap — only string-builds ~40 cards)
+  body.addEventListener('scroll', () => { if (grid.isConnected) renderWindow(false); });
+
+  // Resize: re-measure column count + row height when the grid width changes
+  let _roFrame = false;
+  const ro = new ResizeObserver(() => {
+    if (_roFrame || !grid.isConnected) return;
+    _roFrame = true;
+    requestAnimationFrame(() => {
+      _roFrame = false;
+      if (!grid.isConnected) { ro.disconnect(); return; }
+      if (measure()) { curFRow = -1; curLRow = -1; renderWindow(true); }
+    });
+  });
+  ro.observe(grid);
+
+  // Delegated click — works regardless of which cards are in the DOM
   grid.addEventListener('click', e => {
     const card = e.target.closest('.album-card');
     if (!card) return;
     const album = albums[parseInt(card.dataset.i)];
     if (!album) return;
-    const backFn = defaultArtist ? () => viewArtistAlbums(defaultArtist, artistVariants || [defaultArtist]) : () => viewAllAlbums();
+    const backFn = defaultArtist
+      ? () => viewArtistAlbums(defaultArtist, artistVariants || [defaultArtist])
+      : () => viewAllAlbums();
     viewAlbumSongs(album.name, album._rawArtist || defaultArtist, backFn);
   });
 
-  let _albTimer, _rafId, _activeLetter = null;
-  const CHUNK = 80;
+  // Switch the active data set + reset scroll + redraw
+  function setVData(data, label) {
+    vData = data;
+    curFRow = -1; curLRow = -1;
+    grid.style.paddingTop = '0';
+    grid.style.paddingBottom = '0';
+    body.scrollTop = 0;
+    matchCount.textContent = label || '';
+    renderWindow(true);
+  }
 
+  let _albTimer, _activeLetter = null;
   function setActiveAZ(letter) {
     body.querySelectorAll('.az-btn').forEach(b => b.classList.toggle('active', b.dataset.letter === letter));
-  }
-
-  function renderChunked(data) {
-    cancelAnimationFrame(_rafId);
-    grid.innerHTML = '';
-    matchCount.textContent = '';
-    filterClear.classList.add('hidden');
-    let pos = 0;
-    function step() {
-      grid.insertAdjacentHTML('beforeend', data.slice(pos, pos + CHUNK).map(c => c.html).join(''));
-      pos += CHUNK;
-      if (pos < data.length) _rafId = requestAnimationFrame(step);
-    }
-    step();
-  }
-
-  function renderFiltered(q) {
-    cancelAnimationFrame(_rafId);
-    const subset = cardData.filter(c => c.lc.includes(q));
-    grid.innerHTML = subset.map(c => c.html).join('');
-    filterClear.classList.remove('hidden');
-    matchCount.textContent = `${subset.length} result${subset.length !== 1 ? 's' : ''}`;
   }
 
   // A-Z strip
@@ -3001,21 +3063,18 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
     btn.addEventListener('click', () => {
       filterInput.value = '';
       azStrip.classList.remove('az-hidden');
+      filterClear.classList.add('hidden');
       const letter = btn.dataset.letter;
       if (_activeLetter === letter) {
         _activeLetter = null;
         setActiveAZ(null);
-        matchCount.textContent = '';
-        renderChunked(cardData);
+        setVData(cardData, '');
         return;
       }
       _activeLetter = letter;
       setActiveAZ(letter);
       const subset = cardData.filter(c => c.letter === letter);
-      cancelAnimationFrame(_rafId);
-      grid.innerHTML = subset.map(c => c.html).join('');
-      matchCount.textContent = `${subset.length} album${subset.length !== 1 ? 's' : ''}`;
-      body.scrollTop = 0;
+      setVData(subset, `${subset.length} album${subset.length !== 1 ? 's' : ''}`);
     });
   });
 
@@ -3026,10 +3085,17 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
       _activeLetter = null;
       setActiveAZ(null);
       azStrip.classList.toggle('az-hidden', !!q);
-      if (q) renderFiltered(q);
-      else { matchCount.textContent = ''; renderChunked(cardData); }
+      if (q) {
+        const subset = cardData.filter(c => c.lc.includes(q));
+        filterClear.classList.remove('hidden');
+        setVData(subset, `${subset.length} result${subset.length !== 1 ? 's' : ''}`);
+      } else {
+        filterClear.classList.add('hidden');
+        setVData(cardData, '');
+      }
     }, 150);
   });
+
   filterClear.addEventListener('click', () => {
     clearTimeout(_albTimer);
     _activeLetter = null;
@@ -3037,11 +3103,12 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
     filterInput.value = '';
     filterInput.focus();
     azStrip.classList.remove('az-hidden');
-    matchCount.textContent = '';
-    renderChunked(cardData);
+    filterClear.classList.add('hidden');
+    setVData(cardData, '');
   });
 
-  renderChunked(cardData);
+  // Initial render — defer one frame so the grid has layout dimensions
+  requestAnimationFrame(() => { if (grid.isConnected) renderWindow(true); });
 }
 
 async function viewAlbumSongs(albumName, artist, backFn) {
