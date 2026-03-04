@@ -973,6 +973,8 @@ const MINI_SPEC = (() => {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, W, H);
 
+    const cs2     = getComputedStyle(document.documentElement);
+    const colIdle = cs2.getPropertyValue('--primary').trim();
     const GAP  = 1.5 * dpr;
     const cg   = 2 * dpr;
     const hw   = (W - cg) / 2;
@@ -992,9 +994,11 @@ const MINI_SPEC = (() => {
         const v     = 0.04 + 0.10 * wave * breath + 0.02 * Math.sin(bi * 0.35 - idlePhase);
         const barH  = Math.max(2 * dpr, v * H);
         const x     = startX + i * (barW + GAP);
-        const alpha = (0.18 + 0.50 * wave * breath).toFixed(2);
-        ctx.fillStyle = `rgba(100,140,230,${alpha})`;
+        const alpha = 0.18 + 0.50 * wave * breath;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = colIdle;
         ctx.fillRect(x, H - barH, barW, barH);
+        ctx.globalAlpha = 1;
       }
     }
 
@@ -1032,6 +1036,10 @@ const MINI_SPEC = (() => {
 
     ctx.clearRect(0, 0, W, H);
 
+    const cs     = getComputedStyle(document.documentElement);
+    const colPri = cs.getPropertyValue('--primary').trim();
+    const colAcc = cs.getPropertyValue('--accent').trim();
+
     // Subtle floor line anchoring bars (#5)
     ctx.fillStyle = 'rgba(255,255,255,.05)';
     ctx.fillRect(0, H - dpr, W, dpr);
@@ -1065,14 +1073,13 @@ const MINI_SPEC = (() => {
         const bv   = bars[i];
         const barH = Math.max(1, bv * baseline * 0.92);
         const x    = startX + i * (barW + GAP);
-        const hue  = (1 - bv) * 200;
         const rMax = Math.min(barW * .4, 2.5 * dpr);
         const r    = barH > rMax * 2 ? rMax : 0;  // only round when bar is tall enough (#4)
 
         // Bar gradient
         const grd = ctx.createLinearGradient(0, baseline, 0, baseline - barH);
-        grd.addColorStop(0, `hsla(${hue},100%,48%,.85)`);
-        grd.addColorStop(1, `hsla(${hue+80},100%,72%,.75)`);
+        grd.addColorStop(0, colPri);
+        grd.addColorStop(1, colAcc);
         ctx.fillStyle = grd;
         ctx.beginPath();
         if (r > 0) ctx.roundRect(x, baseline - barH, barW, barH, [r, r, 0, 0]);
@@ -1090,13 +1097,11 @@ const MINI_SPEC = (() => {
         const ph = pk[i].val;
         if (ph > 0.015) {
           const py      = baseline - ph * baseline * 0.92;
-          // Colour fades from bright-white toward the bar hue as it falls (#3)
-          const falling  = ts - pk[i].ts > HOLD_MS ? Math.min(1, pk[i].vel / 1.2) : 0;
-          const tickHue  = (1 - ph) * 200 + 60 * (1 - falling);
-          const tickL    = 80 - falling * 25;
-          const tickA    = (Math.min(1, ph * 2) * (0.95 - falling * 0.35)).toFixed(2);
-          ctx.fillStyle  = `hsla(${tickHue},100%,${tickL}%,${tickA})`;
+          const tickA    = (Math.min(1, ph * 2) * 0.9).toFixed(2);
+          ctx.globalAlpha = parseFloat(tickA);
+          ctx.fillStyle  = colAcc;
           ctx.fillRect(x, py - 1.5 * dpr, barW, 1.5 * dpr);
+          ctx.globalAlpha = 1;
         }
       }
     }
@@ -4938,6 +4943,11 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'playback')  viewPlayback();
     else if (v === 'play-history') viewPlayHistory();
   });
+});
+
+// DJ light in player bar — click to open / close the Auto-DJ settings view
+document.getElementById('dj-light').addEventListener('click', () => {
+  if (S.view === 'autodj') { S.backFn?.(); } else { viewAutoDJ(); }
 });
 
 // Back button
