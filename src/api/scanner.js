@@ -1,3 +1,5 @@
+import path from 'path';
+import fs from 'fs';
 import * as db from '../db/manager.js';
 import * as config from '../state/config.js';
 import * as scanProgress from '../state/scan-progress.js';
@@ -67,6 +69,15 @@ export function setup(mstream) {
 
   mstream.post('/api/v1/scanner/finish-scan', (req, res) => {
     scanProgress.finish(req.body.scanId);
+    // Delete server-side waveform cache files for any tracks being pruned
+    try {
+      const cacheDir = config.program.storage.albumArtDirectory;
+      const staleHashes = db.getStaleFileHashes(req.body.vpath, req.body.scanId);
+      for (const hash of staleHashes) {
+        const wfPath = path.join(cacheDir, `wf-${hash}.json`);
+        if (fs.existsSync(wfPath)) fs.unlinkSync(wfPath);
+      }
+    } catch (_e) { /* non-critical — waveform cleanup must not abort scan */ }
     db.removeStaleFiles(req.body.vpath, req.body.scanId);
     db.saveFilesDB();
     res.json({});

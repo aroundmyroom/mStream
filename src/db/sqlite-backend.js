@@ -129,6 +129,22 @@ export function removeFileByPath(filepath, vpath) {
   db.prepare('DELETE FROM files WHERE filepath = ? AND vpath = ?').run(filepath, vpath);
 }
 
+export function getLiveArtFilenames() {
+  return db.prepare('SELECT DISTINCT aaFile FROM files WHERE aaFile IS NOT NULL')
+    .all().map(r => r.aaFile);
+}
+
+export function getLiveHashes() {
+  return db.prepare('SELECT DISTINCT hash FROM files WHERE hash IS NOT NULL')
+    .all().map(r => r.hash);
+}
+
+export function getStaleFileHashes(vpath, scanId) {
+  return db.prepare('SELECT hash FROM files WHERE vpath = ? AND sID != ? AND hash IS NOT NULL')
+    .all(vpath, scanId)
+    .map(r => r.hash);
+}
+
 export function removeStaleFiles(vpath, scanId) {
   db.prepare('DELETE FROM files WHERE vpath = ? AND sID != ?').run(vpath, scanId);
 }

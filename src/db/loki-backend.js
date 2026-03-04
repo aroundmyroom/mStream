@@ -155,6 +155,21 @@ export function removeFileByPath(filepath, vpath) {
   ]});
 }
 
+export function getLiveArtFilenames() {
+  return fileCollection.find({ aaFile: { $ne: null } }).map(f => f.aaFile).filter(Boolean);
+}
+
+export function getLiveHashes() {
+  return fileCollection.find({ hash: { $ne: null } }).map(f => f.hash).filter(Boolean);
+}
+
+export function getStaleFileHashes(vpath, scanId) {
+  return fileCollection.find({ '$and': [
+    { 'vpath': { '$eq': vpath } },
+    { 'sID':   { '$ne': scanId } }
+  ]}).map(f => f.hash).filter(Boolean);
+}
+
 export function removeStaleFiles(vpath, scanId) {
   fileCollection.findAndRemove({ '$and': [
     { 'vpath': { '$eq': vpath } },
