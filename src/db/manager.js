@@ -42,6 +42,9 @@ export function findFileByPath(filepath, vpath) { return backend.findFileByPath(
 export function updateFileScanId(file, scanId) { return backend.updateFileScanId(file, scanId); }
 export function insertFile(fileData) { return backend.insertFile(fileData); }
 export function removeFileByPath(filepath, vpath) { return backend.removeFileByPath(filepath, vpath); }
+export function getLiveArtFilenames() { return backend.getLiveArtFilenames(); }
+export function getLiveHashes() { return backend.getLiveHashes(); }
+export function getStaleFileHashes(vpath, scanId) { return backend.getStaleFileHashes(vpath, scanId); }
 export function removeStaleFiles(vpath, scanId) { return backend.removeStaleFiles(vpath, scanId); }
 export function removeFilesByVpath(vpath) { return backend.removeFilesByVpath(vpath); }
 export function countFilesByVpath(vpath) { return backend.countFilesByVpath(vpath); }

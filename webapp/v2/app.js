@@ -1332,10 +1332,24 @@ const VU_NEEDLE = (() => {
     ctx.fillStyle = pCol;
     ctx.fillText('+', CX+Math.cos(toRad(57))*sR, CY+Math.sin(toRad(57))*sR);
 
-    // Brand + VU text
-    ctx.fillStyle = dark ? 'rgba(180,150,255,.90)' : 'rgba(109,60,230,.75)';
+    // Brand text — colour tracks playback position like the waveform (primary→accent),
+    // static purple when paused.
     ctx.font = '700 10px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.letterSpacing = '0.5px';
+    if (!audioEl.paused && audioEl.duration > 0) {
+      const cs     = getComputedStyle(document.documentElement);
+      const colPri = cs.getPropertyValue('--primary').trim();
+      const colAcc = cs.getPropertyValue('--accent').trim();
+      const pct    = audioEl.currentTime / audioEl.duration;
+      // Shift the primary→accent gradient so the colour at CX equals lerp(primary,accent,pct)
+      // — identical to the waveform's played-region colour at this moment.
+      const grad = ctx.createLinearGradient(CX - pct * VW, 0, CX + (1 - pct) * VW, 0);
+      grad.addColorStop(0, colPri);
+      grad.addColorStop(1, colAcc);
+      ctx.fillStyle = grad;
+    } else {
+      ctx.fillStyle = dark ? 'rgba(180,150,255,.90)' : 'rgba(109,60,230,.75)';
+    }
     ctx.fillText('AroundMyRoom', CX, VH - 48);
     ctx.letterSpacing = '0px';
     ctx.fillStyle = dark ? 'rgba(139,92,246,.55)' : 'rgba(109,60,230,.45)';
@@ -5294,8 +5308,8 @@ function _syncQueueLabel() {
 }
 
 // ── AUDIO EVENT HANDLERS (named so they can be moved to a swapped element) ──
-function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); _startWaveformRaf(); }
-function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  _stopWaveformRaf(); }
+function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); _startWaveformRaf(); document.body.classList.add('audio-playing'); }
+function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  _stopWaveformRaf(); document.body.classList.remove('audio-playing'); }
 function _onAudioEnded() {
   if (S.sleepMins === -1) {
     S.sleepMins = 0;

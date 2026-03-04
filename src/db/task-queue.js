@@ -1,5 +1,6 @@
 import child from 'child_process';
 import path from 'path';
+import fs from 'fs';
 import winston from 'winston';
 import { nanoid } from 'nanoid';
 import jwt from 'jsonwebtoken';
@@ -101,7 +102,45 @@ function runScan(scanObj) {
     vpathLimiter.delete(scanObj.vpath);
     currentScanDirs.delete(scanObj.vpath);
     nextTask();
+    // When the last vpath finishes, clean up orphaned art and waveform files
+    if (runningTasks.size === 0 && taskQueue.length === 0) {
+      setImmediate(runOrphanCleanup);
+    }
   });
+}
+
+async function runOrphanCleanup() {
+  try {
+    const cacheDir = config.program.storage.albumArtDirectory;
+    if (!cacheDir || !fs.existsSync(cacheDir)) return;
+
+    // Collect all live references from the DB
+    const liveArt    = new Set(db.getLiveArtFilenames());   // aaFile values
+    const liveHashes = new Set(db.getLiveHashes());         // hash values
+
+    const WAVEFORM_RE   = /^wf-(.+)\.json$/;
+    const COMPRESSED_RE = /^z[^-]+-(.+)$/;
+
+    let deleted = 0;
+    for (const file of fs.readdirSync(cacheDir)) {
+      if (file === 'README.md') continue;
+      let orphaned = false;
+      const wfMatch = file.match(WAVEFORM_RE);
+      if (wfMatch) {
+        orphaned = !liveHashes.has(wfMatch[1]);
+      } else {
+        const m        = file.match(COMPRESSED_RE);
+        const baseName = m ? m[1] : file;
+        orphaned = !liveArt.has(baseName);
+      }
+      if (orphaned) {
+        try { fs.unlinkSync(path.join(cacheDir, file)); deleted++; } catch (_e) { /* skip */ }
+      }
+    }
+    if (deleted > 0) winston.info(`Post-scan cleanup: removed ${deleted} orphaned file(s) from image-cache`);
+  } catch (err) {
+    winston.warn(`Post-scan orphan cleanup failed: ${err.message}`);
+  }
 }
 
 export function scanVPath(vPath) {

@@ -30,11 +30,14 @@ console.log('Reading database…');
 const db = new DatabaseSync(DB_PATH, { open: true });
 db.exec('PRAGMA journal_mode=WAL');
 
-const rows = db.prepare('SELECT DISTINCT aaFile FROM files WHERE aaFile IS NOT NULL').all();
+const artRows  = db.prepare('SELECT DISTINCT aaFile FROM files WHERE aaFile IS NOT NULL').all();
+const hashRows = db.prepare('SELECT DISTINCT hash  FROM files WHERE hash   IS NOT NULL').all();
 db.close();
 
-const referenced = new Set(rows.map(r => r.aaFile));
+const referenced = new Set(artRows.map(r => r.aaFile));
+const liveHashes = new Set(hashRows.map(r => r.hash));
 console.log(`  ${referenced.size.toLocaleString()} unique album-art filenames referenced in DB`);
+console.log(`  ${liveHashes.size.toLocaleString()} unique file hashes in DB (for waveform cache)`);
 
 // ── Scan image-cache directory ────────────────────────────────────────────────
 console.log('Scanning image-cache…');
@@ -42,12 +45,19 @@ const allFiles = fs.readdirSync(ART_DIR).filter(f => f !== 'README.md');
 console.log(`  ${allFiles.length.toLocaleString()} total files in image-cache`);
 
 // ── Classify each file ────────────────────────────────────────────────────────
-// Compressed variants are named  z{X}-{original}  (e.g. "zl-abc123.jpeg")
-// They are orphaned if their base file is orphaned.
+// Compressed art variants are named  z{X}-{original}  (e.g. "zl-abc123.jpeg")
+// Waveform cache files are named     wf-{hash}.json
 const COMPRESSED_RE = /^z[^-]+-(.+)$/;
+const WAVEFORM_RE   = /^wf-(.+)\.json$/;
 
 const orphans = [];
 for (const file of allFiles) {
+  const wfMatch = file.match(WAVEFORM_RE);
+  if (wfMatch) {
+    // Waveform cache — orphaned if the hash is no longer in the DB
+    if (!liveHashes.has(wfMatch[1])) orphans.push(file);
+    continue;
+  }
   const m = file.match(COMPRESSED_RE);
   const baseName = m ? m[1] : file;          // strip "zl-" prefix if present
   if (!referenced.has(baseName)) {
