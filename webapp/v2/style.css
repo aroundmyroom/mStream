@@ -876,8 +876,8 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .pright-btn:hover{opacity:1;background:var(--hover);}
 .pright-btn.active{opacity:1;color:var(--primary);}
 .pright-btn.active:hover{background:var(--primary-d);}
-.dj-light{font-size:10px;font-weight:800;letter-spacing:.5px;padding:4px 9px;border-radius:99px;background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;animation:dj-pulse 1.6s ease-in-out infinite;}
-@keyframes dj-pulse{0%,100%{opacity:1}50%{opacity:.55}}
+.dj-light{font-size:10px;font-weight:800;letter-spacing:.5px;padding:4px 9px;border-radius:99px;background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;animation:dj-pulse 4s ease-in-out infinite;cursor:pointer;}
+@keyframes dj-pulse{0%,100%{opacity:1}50%{opacity:.5}}
 .q-count{position:absolute;top:0;right:0;font-size:8px;min-width:14px;height:14px;line-height:14px;text-align:center;background:var(--primary);color:#fff;border-radius:99px;padding:0 3px;display:none;}
 .q-count.show{display:block;}
 #queue-btn{position:relative;}
