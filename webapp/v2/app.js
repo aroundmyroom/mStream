@@ -58,6 +58,9 @@ let _xfadeFired  = false;  // true once crossfade has started for the current tr
 let _xfadeStartVol = 0;    // audioEl.volume at the moment crossfade began
 let _xfadeNextIdx  = -1;   // nextIdx stored for the ended-event handoff
 let _xfadeWired  = false;  // true once _xfadeEl is connected to Web Audio
+let _curElGain   = null;   // per-element GainNode for audioEl  — for scheduled swap
+let _nextElGain  = null;   // per-element GainNode for _xfadeEl — for scheduled swap
+let _gaplessTimer= null;   // setTimeout handle: starts xEl 80ms before end
 let _rgGainNode  = null;   // ReplayGain gain node — inserted before _audioGain
 let _waveformData = null;  // decoded waveform array [0..255] for current track
 let _waveformFp  = null;   // filepath matching _waveformData (avoids double-fetch)
@@ -1975,10 +1978,14 @@ const VIZ = (() => {
       f.gain.value = _savedEnabled ? (_savedGains[i] || 0) : 0;
       return f;
     });
-    // Wire: src → _rgGainNode → gain → eq[0..7] → analyserNode + splitter → destinations
+    // Wire: src → _curElGain → _rgGainNode → gain → eq[0..7] → analyserNode + splitter
+    // _curElGain is a per-element gain used for sample-accurate gapless tap switching.
     _rgGainNode = audioCtx.createGain();
     _rgGainNode.gain.value = 1.0;
-    src.connect(_rgGainNode);
+    _curElGain = audioCtx.createGain();
+    _curElGain.gain.value = 1.0;
+    src.connect(_curElGain);
+    _curElGain.connect(_rgGainNode);
     _rgGainNode.connect(gain);
     let _node = gain;
     for (const f of eqFilters) { _node.connect(f); _node = f; }
@@ -4583,6 +4590,11 @@ function _updateMediaSession(s) {
 }
 
 // ── GAPLESS PLAYBACK ──────────────────────────────────────────
+// Strategy: two Web Audio GainNodes, one per element. Both feed the same
+// downstream graph (they sum). We schedule an instantaneous gain swap at
+// the computed end-time using setValueAtTime — sample-accurate, no polling.
+// 80ms before end we start the pre-buffered xEl playing at gain=0 so
+// the audio pipeline is flowing when the scheduled swap fires at endAt.
 function _startGapless(nextIdx) {
   if (_xfadeFired) return;
   _xfadeFired    = true;
@@ -4591,13 +4603,43 @@ function _startGapless(nextIdx) {
   _syncQueueLabel();
   VIZ.initAudio();
   const xEl = _getOrCreateXfadeEl();
-  _connectXfadeToAudio();
+  _connectXfadeToAudio();  // creates _nextElGain at gain=0
   const next = S.queue[nextIdx];
   if (!next) { _xfadeFired = false; return; }
-  xEl.src    = mediaUrl(next.filepath);
-  xEl.volume = 0;   // silent until the handoff — _doXfadeHandoff restores volume
-  xEl.play().catch(() => {});
-  // No ramp — audioEl.ended fires _doXfadeHandoff which promotes xEl to audioEl
+  xEl.preload = 'auto';
+  xEl.src     = mediaUrl(next.filepath);
+  xEl.load();
+  xEl.volume  = audioEl.volume;
+
+  // Schedule setTimeout to fire 80ms before the track ends.
+  // At that moment: start xEl (pipeline flows at gain=0), then schedule
+  // the instantaneous gain flip at endAt using the Web Audio clock.
+  const WARMUP_MS = 80;
+  const remaining = audioEl.duration > 0 ? audioEl.duration - audioEl.currentTime : 5;
+  clearTimeout(_gaplessTimer);
+  _gaplessTimer = setTimeout(() => {
+    _gaplessTimer = null;
+    if (!_xfadeFired || !_xfadeEl || !audioCtx || !_curElGain || !_nextElGain) return;
+    const r = audioEl.duration - audioEl.currentTime;
+    if (r <= 0) return;
+    const endAt = audioCtx.currentTime + r;
+    // Use a 20ms linear ramp instead of a hard cut.
+    // 2ms is enough to kill high-frequency clicks but bass content (~50Hz =
+    // 20ms/cycle) can still be mid-peak and cause a thump. 20ms covers one
+    // full cycle of 50Hz so the waveform always passes through near-zero
+    // before the gain reaches 0.  20ms is below the threshold of perception
+    // as a deliberate fade — nobody hears it as a crossfade.
+    const RAMP = 0.020;
+    _curElGain.gain.cancelScheduledValues(audioCtx.currentTime);
+    _curElGain.gain.setValueAtTime(1.0, audioCtx.currentTime);  // pin current
+    _curElGain.gain.setValueAtTime(1.0, endAt);                 // hold until swap
+    _curElGain.gain.linearRampToValueAtTime(0.0, endAt + RAMP);
+    _nextElGain.gain.cancelScheduledValues(audioCtx.currentTime);
+    _nextElGain.gain.setValueAtTime(0.0, audioCtx.currentTime); // pin current
+    _nextElGain.gain.setValueAtTime(0.0, endAt);                // hold until swap
+    _nextElGain.gain.linearRampToValueAtTime(1.0, endAt + RAMP);
+    _xfadeEl.play().catch(() => {});  // flows at gain=0 until endAt
+  }, Math.max(0, remaining * 1000 - WARMUP_MS));
 }
 
 // ── CROSSFADE LOGIC ───────────────────────────────────────────
@@ -4622,7 +4664,12 @@ function _connectXfadeToAudio() {
   if (_xfadeWired || !_audioGain || !_xfadeEl) return;
   try {
     const xSrc = audioCtx.createMediaElementSource(_xfadeEl);
-    xSrc.connect(_rgGainNode ?? _audioGain);
+    // Each element gets its own GainNode so we can schedule an instantaneous
+    // volume swap on both at a computed Web Audio timestamp — sample-accurate.
+    _nextElGain = audioCtx.createGain();
+    _nextElGain.gain.value = 0;
+    xSrc.connect(_nextElGain);
+    _nextElGain.connect(_rgGainNode ?? _audioGain);
     _xfadeWired = true;
   } catch(e) { /* already connected or no audioCtx */ }
 }
@@ -4641,6 +4688,9 @@ function _startCrossfade(nextIdx) {
   VIZ.initAudio();               // ensure audioCtx + _audioGain exist
   const xEl  = _getOrCreateXfadeEl();
   _connectXfadeToAudio();         // wire xfadeEl into the Web Audio graph
+  // For crossfade, _nextElGain must be 1 so xEl.volume ramp controls output.
+  // (Gapless keeps _nextElGain at 0 and uses setValueAtTime scheduling.)
+  if (_nextElGain) { _nextElGain.gain.cancelScheduledValues(0); _nextElGain.gain.value = 1; }
   const next = S.queue[nextIdx];
   if (!next) { _xfadeFired = false; return; }
   xEl.src    = mediaUrl(next.filepath);
@@ -4683,6 +4733,16 @@ function _doXfadeHandoff(nextIdx) {
   _xfadeStartVol = 0;
   _xfadeWired    = false;
   _xfadeEl       = null;
+  clearTimeout(_gaplessTimer);
+  _gaplessTimer  = null;
+
+  // Swap per-element gain nodes: incoming element now owns _curElGain.
+  // Cancel any scheduled values and lock both gains into their final state.
+  const oldCurGain = _curElGain;
+  _curElGain  = _nextElGain;
+  _nextElGain = null;
+  if (_curElGain)  { _curElGain.gain.cancelScheduledValues(0);  _curElGain.gain.value  = 1; }
+  if (oldCurGain)  { oldCurGain.gain.cancelScheduledValues(0);  oldCurGain.gain.value  = 0; }
 
   S.idx = nextIdx;
   const s = S.queue[nextIdx];
@@ -4700,8 +4760,8 @@ function _doXfadeHandoff(nextIdx) {
 
   // Re-attach all permanent listeners to the new element
   _attachAudioListeners(audioEl);
-  // The new element is already playing — 'play' won't re-fire, so kick the
-  // VU meter and icon sync manually.
+  // Both gapless and crossfade: xEl is already playing (started before handoff).
+  if (audioEl.paused) audioEl.play().catch(() => {});
   VU_NEEDLE.start();
   syncPlayIcons();
 
@@ -4732,7 +4792,12 @@ function _resetXfade() {
   _xfadeWired    = false;
   clearInterval(_xfadeGainIv);
   _xfadeGainIv = null;
+  clearTimeout(_gaplessTimer);
+  _gaplessTimer = null;
   if (_xfadeEl) { _xfadeEl.pause(); _xfadeEl.src = ''; _xfadeEl = null; }
+  // Cancel any scheduled gain values and restore clean state
+  if (_nextElGain) { _nextElGain.gain.cancelScheduledValues(0); _nextElGain.gain.value = 0; _nextElGain = null; }
+  if (_curElGain)  { _curElGain.gain.cancelScheduledValues(0);  _curElGain.gain.value  = 1; }
   // Restore volume if the ramp was interrupted mid-way by a manual action
   if (wasActive && savedVol > 0) audioEl.volume = savedVol;
   // If we aborted a crossfade, re-sync the label back to Now Playing / Paused
@@ -5503,10 +5568,12 @@ function _onAudioTimeupdateUI() {
       if (nextIdx !== -1) _startCrossfade(nextIdx);
     }
   }
-  // Gapless playback: pre-buffer next track ~2 s before end when crossfade is off
+  // Gapless playback: pre-buffer next track ~8 s before end when crossfade is off.
+  // We need the buffer window to be large enough so the browser has time to
+  // fetch+decode the start of the next FLAC before audioEl fires 'ended'.
   if (S.gapless && S.crossfade === 0 && !_xfadeFired && audioEl.duration > 0) {
     const remaining = audioEl.duration - audioEl.currentTime;
-    if (remaining > 0 && remaining <= 2.0) {
+    if (remaining > 0 && remaining <= 8.0) {
       let nextIdx = -1;
       if (S.shuffle)                             nextIdx = Math.floor(Math.random() * S.queue.length);
       else if (S.repeat === 'one')               nextIdx = S.idx;
@@ -5516,6 +5583,8 @@ function _onAudioTimeupdateUI() {
       if (nextIdx !== -1) _startGapless(nextIdx);
     }
   }
+  // Gapless: scheduling is handled by _startGapless setTimeout + Web Audio
+  // setValueAtTime — no polling needed here.
   // Waveform scrubber: update shaded fill to reflect playback position
   _updateWaveformProgress();
   _updateSleepLight();
