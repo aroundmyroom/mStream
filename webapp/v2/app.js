@@ -11,8 +11,8 @@ const S = {
   repeat:   'off',   // 'off' | 'one' | 'all'
   autoDJ:   false,
   djIgnore: [],
-  djMinRating: 0,
-  djVpaths: [],       // [] means all selected
+  djMinRating: parseInt(localStorage.getItem('ms2_dj_min_rating') || '0', 10),
+  djVpaths: JSON.parse(localStorage.getItem('ms2_dj_vpaths') || 'null') || [],
   _djPrefetching: false, // true while prefetch request is in-flight
   vpathMeta: {},     // keyed by vpath: { type, parentVpath, filepathPrefix }
   playlists:[],
@@ -3524,7 +3524,10 @@ async function viewAutoDJ() {
     </div>`;
 
   document.getElementById('autodj-main-btn').onclick = () => setAutoDJ(!S.autoDJ);
-  document.getElementById('dj-min-rating').onchange = e => { S.djMinRating = parseInt(e.target.value); };
+  document.getElementById('dj-min-rating').onchange = e => {
+    S.djMinRating = parseInt(e.target.value);
+    localStorage.setItem('ms2_dj_min_rating', S.djMinRating);
+  };
 
   const pillsEl = document.getElementById('dj-vpaths');
   if (pillsEl) {
@@ -3543,6 +3546,7 @@ async function viewAutoDJ() {
         toast('At least one source must be active');
         return;
       }
+      localStorage.setItem('ms2_dj_vpaths', JSON.stringify(S.djVpaths));
       S.djIgnore = []; // reset play history when sources change
     });
   }
@@ -4200,6 +4204,10 @@ async function pollScan() {
     if (d.vpaths && d.vpaths.length && !S.vpaths.length) {
       S.vpaths = d.vpaths;
       if (!S.djVpaths.length) S.djVpaths = [...S.vpaths];
+      else {
+        S.djVpaths = S.djVpaths.filter(v => S.vpaths.includes(v));
+        if (!S.djVpaths.length) S.djVpaths = [...S.vpaths];
+      }
       if (S.view === 'autodj') viewAutoDJ();
     }
     if (S.isAdmin && d.locked) {
@@ -4223,7 +4231,9 @@ async function tryLogin(username, password) {
   S.token    = d.token;
   S.username = username;
   S.vpaths   = d.vpaths || [];
-  S.djVpaths = [...S.vpaths];  // default: all sources selected
+  // Only default to all vpaths if no saved selection exists
+  const _savedDjVpaths = JSON.parse(localStorage.getItem('ms2_dj_vpaths') || 'null');
+  S.djVpaths = (_savedDjVpaths && _savedDjVpaths.length) ? _savedDjVpaths : [...S.vpaths];
   localStorage.setItem('ms2_token', d.token);
   localStorage.setItem('token', d.token);   // mirror for admin panel compatibility
   localStorage.setItem('ms2_user',  username);
@@ -4242,7 +4252,14 @@ async function checkSession() {
     try {
       const d = await api('GET', 'api/v1/db/status');
       S.vpaths = d.vpaths || [];
-      if (S.djVpaths.length === 0) { S.djVpaths = [...S.vpaths]; }
+      // Restore saved djVpaths; filter out any vpaths no longer on this server,
+      // then fall back to all if none remain valid.
+      if (S.djVpaths.length === 0) {
+        S.djVpaths = [...S.vpaths];
+      } else {
+        S.djVpaths = S.djVpaths.filter(v => S.vpaths.includes(v));
+        if (S.djVpaths.length === 0) S.djVpaths = [...S.vpaths];
+      }
       // detect admin by trying the admin endpoint
       try {
         await api('GET', 'api/v1/admin/directories');
