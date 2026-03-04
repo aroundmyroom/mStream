@@ -11,8 +11,8 @@ const S = {
   repeat:   'off',   // 'off' | 'one' | 'all'
   autoDJ:   false,
   djIgnore: [],
-  djMinRating: parseInt(localStorage.getItem('ms2_dj_min_rating') || '0', 10),
-  djVpaths: JSON.parse(localStorage.getItem('ms2_dj_vpaths') || 'null') || [],
+  djMinRating: parseInt(localStorage.getItem('ms2_dj_min_rating_' + (localStorage.getItem('ms2_user') || '')) || '0', 10),
+  djVpaths: JSON.parse(localStorage.getItem('ms2_dj_vpaths_' + (localStorage.getItem('ms2_user') || '')) || 'null') || [],
   _djPrefetching: false, // true while prefetch request is in-flight
   vpathMeta: {},     // keyed by vpath: { type, parentVpath, filepathPrefix }
   playlists:[],
@@ -120,6 +120,7 @@ function toastError(msg, ms = 4000) {
 
 // ── QUEUE PERSISTENCE ───────────────────────────────────────
 function _queueKey() { return `ms2_queue_${S.username}`; }
+function _djKey(k)    { return `ms2_dj_${k}_${S.username || ''}`; }
 function persistQueue() {
   if (!S.username) return;
   try {
@@ -214,11 +215,16 @@ function starsHtml(rating, cls) {
   ).join('');
 }
 
+const _rateTimers = new Map();
 async function rateSong(filepath, rating) {
-  try {
-    await api('POST', 'api/v1/db/rate-song', { filepath, rating });
-    toast(rating ? `Rated ${Math.round(rating/2)} stars` : 'Rating removed');
-  } catch(e) { toast('Rating failed'); }
+  clearTimeout(_rateTimers.get(filepath));
+  _rateTimers.set(filepath, setTimeout(async () => {
+    _rateTimers.delete(filepath);
+    try {
+      await api('POST', 'api/v1/db/rate-song', { filepath, rating });
+      toast(rating ? `Rated ${Math.round(rating/2)} stars` : 'Rating removed');
+    } catch(e) { toast('Rating failed'); }
+  }, 400));
 }
 
 // ── ARTIST NORMALIZATION ──────────────────────────────────────
@@ -427,6 +433,7 @@ async function autoDJPrefetch() {
   try {
     const d = await _djApiCall();
     S.djIgnore = d.ignoreList;
+    localStorage.setItem(_djKey('ignore'), JSON.stringify(S.djIgnore));
     S.queue.push(norm(d.songs[0]));
     refreshQueueUI();
   } catch(e) { console.error('Auto-DJ prefetch failed:', e); }
@@ -438,6 +445,7 @@ async function autoDJFetch() {
   try {
     const d = await _djApiCall();
     S.djIgnore = d.ignoreList;
+    localStorage.setItem(_djKey('ignore'), JSON.stringify(S.djIgnore));
     const song = norm(d.songs[0]);
     S.queue.push(song);
     Player.playAt(S.queue.length - 1);
@@ -3526,7 +3534,7 @@ async function viewAutoDJ() {
   document.getElementById('autodj-main-btn').onclick = () => setAutoDJ(!S.autoDJ);
   document.getElementById('dj-min-rating').onchange = e => {
     S.djMinRating = parseInt(e.target.value);
-    localStorage.setItem('ms2_dj_min_rating', S.djMinRating);
+    localStorage.setItem(_djKey('min_rating'), S.djMinRating);
   };
 
   const pillsEl = document.getElementById('dj-vpaths');
@@ -3546,8 +3554,9 @@ async function viewAutoDJ() {
         toast('At least one source must be active');
         return;
       }
-      localStorage.setItem('ms2_dj_vpaths', JSON.stringify(S.djVpaths));
+      localStorage.setItem(_djKey('vpaths'), JSON.stringify(S.djVpaths));
       S.djIgnore = []; // reset play history when sources change
+      localStorage.removeItem(_djKey('ignore'));
     });
   }
 }
@@ -3961,12 +3970,13 @@ function setSleepTimer(mins) {
   S.sleepEndsAt = 0;
   _updateSleepLight();
 
-  if (mins === 0) return;
+  if (mins === 0) { localStorage.removeItem('ms2_sleep_ends'); return; }
 
   if (mins === -1) {
     // End of current song — trigger when 'ended' fires next
     S.sleepMins = -1;
     S.sleepEndsAt = -1;
+    localStorage.setItem('ms2_sleep_ends', '-1');
     toast('Sleep: will stop after this song');
     _updateSleepLight();
     return;
@@ -3974,6 +3984,7 @@ function setSleepTimer(mins) {
 
   S.sleepMins = mins;
   S.sleepEndsAt = Date.now() + mins * 60000;
+  localStorage.setItem('ms2_sleep_ends', String(S.sleepEndsAt));
   toast(`Sleep timer set · ${mins} min`);
   _updateSleepLight();
 
@@ -4232,8 +4243,9 @@ async function tryLogin(username, password) {
   S.username = username;
   S.vpaths   = d.vpaths || [];
   // Only default to all vpaths if no saved selection exists
-  const _savedDjVpaths = JSON.parse(localStorage.getItem('ms2_dj_vpaths') || 'null');
-  S.djVpaths = (_savedDjVpaths && _savedDjVpaths.length) ? _savedDjVpaths : [...S.vpaths];
+  const _savedDjVpaths = JSON.parse(localStorage.getItem(_djKey('vpaths')) || 'null');
+  S.djVpaths = (_savedDjVpaths && _savedDjVpaths.length) ? _savedDjVpaths.filter(v => S.vpaths.includes(v)).concat() : [...S.vpaths];
+  if (S.djVpaths.length === 0) S.djVpaths = [...S.vpaths];
   localStorage.setItem('ms2_token', d.token);
   localStorage.setItem('token', d.token);   // mirror for admin panel compatibility
   localStorage.setItem('ms2_user',  username);
@@ -4278,7 +4290,12 @@ async function checkSession() {
     if (r.ok) {
       const d = await r.json().catch(() => ({}));
       S.vpaths   = d.vpaths || [];
-      S.djVpaths = [...S.vpaths];
+      if (S.djVpaths.length === 0) {
+        S.djVpaths = [...S.vpaths];
+      } else {
+        S.djVpaths = S.djVpaths.filter(v => S.vpaths.includes(v));
+        if (S.djVpaths.length === 0) S.djVpaths = [...S.vpaths];
+      }
       // User authenticated via cookie (e.g. arrived from classic UI).
       // Extract the token from the cookie so WS connections and token-based
       // API calls work correctly — the cookie is NOT httpOnly so JS can read it.
@@ -4332,10 +4349,17 @@ function showApp() {
   viewRecent();
   refreshQueueUI();
   restoreQueue();
+  // Restore Auto-DJ play history before re-enabling so the DJ doesn't re-play recent songs
+  const _savedIgnore = JSON.parse(localStorage.getItem(_djKey('ignore')) || 'null');
+  if (_savedIgnore) S.djIgnore = _savedIgnore;
   // Restore auto-DJ state from previous session
   if (localStorage.getItem('ms2_autodj')) { setAutoDJ(true, /*skipAutoStart=*/true); }
   // Guarantee a save on F5 / tab close
   window.addEventListener('beforeunload', persistQueue);
+  // Restore sleep timer if still running from a previous session
+  const _savedSleepEnds = parseInt(localStorage.getItem('ms2_sleep_ends') || '0');
+  if (_savedSleepEnds === -1) { setSleepTimer(-1); }
+  else if (_savedSleepEnds > Date.now()) { setSleepTimer(Math.ceil((_savedSleepEnds - Date.now()) / 60000)); }
   pollScan();
   VU_NEEDLE.init();
   // Fetch ping to get transcode server info + vpath metadata
@@ -4971,10 +4995,12 @@ document.getElementById('prog-track').addEventListener('click', e => {
   const r = e.currentTarget.getBoundingClientRect();
   if (audioEl.duration) audioEl.currentTime = ((e.clientX - r.left) / r.width) * audioEl.duration;
 });
+let _volSaveTimer = null;
 document.getElementById('volume').addEventListener('input', e => {
   audioEl.volume = e.target.value / 100;
   _setVolPct(e.target.value);
-  localStorage.setItem('ms2_vol', e.target.value);
+  clearTimeout(_volSaveTimer);
+  _volSaveTimer = setTimeout(() => localStorage.setItem('ms2_vol', e.target.value), 300);
 });
 (function initVolume() {
   const saved = parseInt(localStorage.getItem('ms2_vol') || '80', 10);
