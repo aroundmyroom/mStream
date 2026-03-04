@@ -4547,8 +4547,14 @@ function _rgbToHsl(r, g, b) {
   return [h, s, l];
 }
 
+function _resetAlbumArtTheme() {
+  document.documentElement.style.removeProperty('--primary');
+  document.documentElement.style.removeProperty('--accent');
+}
+
 function _applyAlbumArtTheme(url) {
-  if (!url || url === _lastThemeUrl) return;
+  if (!url) { _resetAlbumArtTheme(); _lastThemeUrl = null; return; }
+  if (url === _lastThemeUrl) return;
   _lastThemeUrl = url;
   const img = new Image();
   img.crossOrigin = 'anonymous';
@@ -4559,20 +4565,31 @@ function _applyAlbumArtTheme(url) {
       const cx  = cv.getContext('2d');
       cx.drawImage(img, 0, 0, 8, 8);
       const px  = cx.getImageData(0, 0, 8, 8).data;
-      // Find the most vibrant pixel (highest saturation)
+      // Find the most vibrant pixel (highest saturation), ignoring near-white/near-black
       let bestS = -1, bestH = 0, bestL = 0.5;
       for (let i = 0; i < px.length; i += 4) {
         const [h, s, l] = _rgbToHsl(px[i], px[i+1], px[i+2]);
+        // Skip pixels that are too light (>0.88) or too dark (<0.08) — they carry no real hue
+        if (l > 0.88 || l < 0.08) continue;
         if (s > bestS) { bestS = s; bestH = h; bestL = l; }
       }
-      // Clamp lightness so the accent is neither too dark nor washed out
-      const l = Math.min(Math.max(bestL, 0.40), 0.70);
-      const s = Math.max(bestS, 0.40);
-      const primary = `hsl(${Math.round(bestH * 360)},${Math.round(s * 100)}%,${Math.round(l * 100)}%)`;
+      // If the art is essentially colourless (greyscale / white / black cover),
+      // remove any previous override and let the CSS defaults take over.
+      if (bestS < 0.18) { _resetAlbumArtTheme(); return; }
+      // Clamp lightness so colours are neither too dark nor washed out
+      const l  = Math.min(Math.max(bestL, 0.42), 0.68);
+      const s  = Math.min(Math.max(bestS, 0.45), 0.90);
+      const hDeg = Math.round(bestH * 360);
+      // Accent: rotate hue 35° and slightly shift lightness for contrast
+      const aHDeg = (hDeg + 35) % 360;
+      const aL    = Math.min(Math.max(l + (l < 0.55 ? 0.10 : -0.06), 0.42), 0.72);
+      const primary = `hsl(${hDeg},${Math.round(s * 100)}%,${Math.round(l * 100)}%)`;
+      const accent  = `hsl(${aHDeg},${Math.round(s * 100)}%,${Math.round(aL * 100)}%)`;
       document.documentElement.style.setProperty('--primary', primary);
+      document.documentElement.style.setProperty('--accent',  accent);
     } catch(_e) {}
   };
-  img.onerror = () => {};
+  img.onerror = () => { _resetAlbumArtTheme(); };
   img.src = url;
 }
 
