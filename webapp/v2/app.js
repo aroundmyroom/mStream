@@ -1031,6 +1031,7 @@ const MINI_SPEC = (() => {
 
     const cs2     = getComputedStyle(document.documentElement);
     const colIdle = cs2.getPropertyValue('--primary').trim();
+    const dark    = !document.documentElement.classList.contains('light');
     const GAP  = 1.5 * dpr;
     const cg   = 2 * dpr;
     const hw   = (W - cg) / 2;
@@ -1059,11 +1060,11 @@ const MINI_SPEC = (() => {
     }
 
     // Floor line
-    ctx.fillStyle = 'rgba(255,255,255,.08)';
+    ctx.fillStyle = dark ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.12)';
     ctx.fillRect(0, H - dpr, W, dpr);
 
     // Centre divider
-    ctx.fillStyle = 'rgba(255,255,255,.05)';
+    ctx.fillStyle = dark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.08)';
     ctx.fillRect(hw, 0, cg, H);
 
     // No full-canvas fill — bars breathe via alpha alone, background shows through
@@ -1095,9 +1096,10 @@ const MINI_SPEC = (() => {
     const cs     = getComputedStyle(document.documentElement);
     const colPri = cs.getPropertyValue('--primary').trim();
     const colAcc = cs.getPropertyValue('--accent').trim();
+    const dark   = !document.documentElement.classList.contains('light');
 
     // Subtle floor line anchoring bars (#5)
-    ctx.fillStyle = 'rgba(255,255,255,.05)';
+    ctx.fillStyle = dark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.10)';
     ctx.fillRect(0, H - dpr, W, dpr);
 
     const rawL = new Uint8Array(analyserL ? analyserL.frequencyBinCount : 128);
@@ -1165,7 +1167,7 @@ const MINI_SPEC = (() => {
     // L: treble left → bass at centre
     side(rawL, 0, true, barL, pkL);
     // centre gap
-    ctx.fillStyle = 'rgba(255,255,255,.04)';
+    ctx.fillStyle = dark ? 'rgba(255,255,255,.04)' : 'rgba(0,0,0,.08)';
     ctx.fillRect(hw, 0, cg, H);
     // R: bass at centre → treble right
     side(rawR, hw + cg, false, barR, pkR);
@@ -4491,11 +4493,12 @@ function _drawWaveform() {
   ctx.restore();
 
   // Pass 2 — unplayed region: clip right of splitX, fill dim
+  const dark = !document.documentElement.classList.contains('light');
   ctx.save();
   ctx.beginPath();
   ctx.rect(splitX, 0, W - splitX, H);
   ctx.clip();
-  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.fillStyle = dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.20)';
   for (let i = 0; i < data.length; i++) {
     const x    = (i / data.length) * W;
     const barH = Math.max(2, (data[i] / 255) * midY * 1.8);
