@@ -6,6 +6,7 @@ import * as db from '../db/manager.js';
 import * as config from '../state/config.js';
 import { joiValidate } from '../util/validation.js';
 import WebError from '../util/web-error.js';
+import { mergeGenreRows } from '../util/genre-merge.js';
 
 function renderMetadataObj(row) {
   return {
@@ -22,7 +23,8 @@ function renderMetadataObj(row) {
       "rating": row.rating ? row.rating : null,
       "play-count": row.playCount ? row.playCount : null,
       "last-played": row.lastPlayed ? row.lastPlayed : null,
-      "replaygain-track": row.replaygainTrack ? row.replaygainTrack : null
+      "genre": row.genre || null,
+      "replaygain-track-db": row.replaygainTrackDb != null ? row.replaygainTrackDb : null
     }
   };
 }
@@ -296,7 +298,8 @@ export function setup(mstream) {
     const results = db.getAllFilesWithMetadata(req.user.vpaths, req.user.username, {
       ignoreVPaths: req.body.ignoreVPaths,
       minRating: req.body.minRating,
-      filepathPrefix: req.body.filepathPrefix || null
+      filepathPrefix: req.body.filepathPrefix || null,
+      artists: Array.isArray(req.body.artists) ? req.body.artists : undefined
     });
 
     const count = results.length;
@@ -343,5 +346,57 @@ export function setup(mstream) {
     } catch (_e) {
       res.json({ cuepoints: [] });
     }
+  });
+
+  // ── GENRE BROWSING ────────────────────────────────────────────
+  mstream.get('/api/v1/db/genres', (req, res) => {
+    const { genres } = mergeGenreRows(db.getGenres(req.user.vpaths));
+    res.json({ genres });
+  });
+
+  mstream.post('/api/v1/db/genres', (req, res) => {
+    const { genres } = mergeGenreRows(db.getGenres(req.user.vpaths, req.body.ignoreVPaths));
+    res.json({ genres });
+  });
+
+  mstream.post('/api/v1/db/genre/songs', (req, res) => {
+    const schema = Joi.object({
+      genre: Joi.string().required(),
+      ignoreVPaths: Joi.array().items(Joi.string()).optional()
+    });
+    joiValidate(schema, req.body);
+    // Re-derive the rawMap so we know which DB genre strings belong to this
+    // merged display genre (handles "House, Trance, Chillout" multi-values).
+    const { rawMap } = mergeGenreRows(db.getGenres(req.user.vpaths, req.body.ignoreVPaths));
+    // Exact lookup first; case-insensitive fallback in case capitalisation drifts.
+    let rawSet = rawMap.get(req.body.genre);
+    if (!rawSet) {
+      const needle = req.body.genre.toLowerCase();
+      for (const [k, v] of rawMap) {
+        if (k.toLowerCase() === needle) { rawSet = v; break; }
+      }
+    }
+    if (!rawSet || rawSet.size === 0) return res.json([]);
+    const results = db.getSongsByGenreRaw(rawSet, req.user.vpaths, req.user.username, req.body.ignoreVPaths);
+    res.json(results.map(renderMetadataObj));
+  });
+
+  // ── DECADE BROWSING ───────────────────────────────────────────
+  mstream.get('/api/v1/db/decades', (req, res) => {
+    res.json({ decades: db.getDecades(req.user.vpaths) });
+  });
+
+  mstream.post('/api/v1/db/decades', (req, res) => {
+    res.json({ decades: db.getDecades(req.user.vpaths, req.body.ignoreVPaths) });
+  });
+
+  mstream.post('/api/v1/db/decade/albums', (req, res) => {
+    const schema = Joi.object({
+      decade: Joi.number().integer().required(),
+      ignoreVPaths: Joi.array().items(Joi.string()).optional()
+    });
+    joiValidate(schema, req.body);
+    const albums = db.getAlbumsByDecade(Number(req.body.decade), req.user.vpaths, req.body.ignoreVPaths);
+    res.json({ albums });
   });
 }

@@ -1268,3 +1268,49 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .upload-file-status{font-size:13px;flex-shrink:0;}
 .upload-progress{height:3px;background:var(--border);border-radius:2px;overflow:hidden;}
 .upload-progress-bar{height:100%;background:var(--primary);border-radius:2px;width:0%;transition:width .15s;}
+
+/* ── WAVEFORM SCRUBBER ──────────────────────────────────────── */
+/* Canvas overlays the prog-track, extends vertically beyond the 5px bar, sits ABOVE fill */
+.waveform-canvas{
+  position:absolute;
+  left:0;
+  top:50%;
+  width:100%;                 /* canvas is a replaced element — must set width explicitly */
+  height:48px;
+  transform:translateY(-50%);
+  pointer-events:none;
+  z-index:2;                  /* above fill(z:1) so waves are always visible */
+  border-radius:4px;
+}
+/* Fill stays below canvas; thumb (now a direct child of prog-track) must be above canvas */
+#prog-fill{position:relative;z-index:1;}
+/* Thumb is a sibling of prog-fill — JS sets left:pct%; transform centres it on that point */
+#prog-thumb{
+  position:absolute;
+  left:0;right:auto;
+  top:50%;
+  transform:translateX(-50%) translateY(-50%);
+  z-index:4;                  /* above canvas(z:2) and cue-markers(z:3) */
+}
+.prog-track:hover #prog-thumb{width:15px;height:15px;box-shadow:0 1px 10px var(--primary-g);}
+/* When waveform data is loaded the canvas shows played/unplayed — hide the plain gradient bar */
+.prog-track.wf-active #prog-fill{background:transparent;}
+
+/* ── GENRE VIEW ─────────────────────────────────────────────── */
+.genre-grid{display:flex;flex-wrap:wrap;gap:10px;padding:20px;}
+.genre-chip{display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--surface);border:1px solid var(--border);border-radius:99px;font-size:13px;font-weight:500;color:var(--t1);cursor:pointer;transition:background .15s,border-color .15s;}
+.genre-chip:hover{background:var(--primary-d);border-color:var(--primary);color:var(--primary);}
+.genre-cnt{font-size:11px;color:var(--t3);background:var(--raised);border-radius:99px;padding:1px 7px;}
+
+/* ── DECADE VIEW ────────────────────────────────────────────── */
+.decade-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:16px;padding:20px;}
+.decade-card{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:20px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);font-size:22px;font-weight:700;color:var(--t1);cursor:pointer;transition:background .15s,transform .15s,box-shadow .15s;}
+.decade-card:hover{background:var(--primary-d);border-color:var(--primary);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.35);}
+.decade-stat{font-size:11px;font-weight:400;color:var(--t3);}
+
+.settings-input{background:var(--raised);border:1px solid var(--border2);border-radius:var(--r);padding:7px 10px;color:var(--t1);font-size:13px;width:100%;font-family:inherit;}
+.settings-input:focus{outline:none;border-color:var(--primary);}
+.btn-primary{display:inline-flex;align-items:center;gap:6px;padding:10px 22px;background:var(--primary);color:#fff;border:none;border-radius:var(--r);font-size:13px;font-weight:600;cursor:pointer;margin-top:8px;transition:background .15s;}
+.btn-primary:hover{background:var(--primary-h);}
+.btn-primary:disabled{opacity:.55;cursor:default;}
+

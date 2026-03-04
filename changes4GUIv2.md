@@ -1048,3 +1048,53 @@ Both values are restored when the page loads and when `checkSession()` runs.
 Saved vpaths are validated against the server's current vpath list on every
 load; any entry that no longer exists is silently removed, and the selection
 falls back to "all" if nothing valid remains.
+
+
+---
+
+## Waveform Display *(GitHub Copilot, 2026-03-04)*
+
+A waveform canvas is drawn in the player bar progress area while a song is playing.
+
+- Peaks are generated server-side via ffmpeg and cached in `localStorage` (`wf:` prefix) so they survive page reloads.
+- The canvas is split into played (left) and unplayed (right) halves using clip regions; both use the `--primary → --accent` gradient.
+- A 60 fps RAF loop keeps the split point in sync with playback position.
+- `restoreQueue()` on page load triggers a waveform fetch for the currently queued track.
+- When waveform data is present, the normal gradient fill bar is hidden (`background: transparent`).
+
+---
+
+## Genre Browsing *(GitHub Copilot, 2026-03-04)*
+
+New sidebar section listing genres from the library.
+
+- Genres are normalised before display: multi-value fields (`"Pop/Rock"`, `"Disco, Funk"`) are split on `,`, `;`, and `/`; near-duplicate spellings are merged by canonical key; genres with fewer than 10 songs are folded into the most word-similar larger genre.
+- The "richest" spelling (most spaces/hyphens) wins the display name — `"New Wave"` beats `"NewWave"`, `"Synth-Pop"` beats `"Synthpop"`.
+- Clicking a genre loads all matching songs. Songs tagged with multi-value strings appear in each constituent genre.
+
+API: `/api/v1/db/genres` · `/api/v1/db/genre/songs`
+
+---
+
+## Decade Browsing *(GitHub Copilot, 2026-03-04)*
+
+New sidebar section listing decades (1960s, 1970s, …) with song counts.
+
+- Clicking a decade shows an album grid for that decade using virtual scroll.
+- Albums are fetched via a `GROUP BY album, artist` DB query with indexes on `year`, making the query fast on large libraries.
+
+API: `/api/v1/db/decades` · `/api/v1/db/decade/albums`
+
+---
+
+## Auto-DJ — Similar Artists Mode *(GitHub Copilot, 2026-03-04)*
+
+A toggle in the Auto-DJ settings panel enables Similar Artists mode.
+
+- When active, each Auto-DJ pick calls `GET /api/v1/lastfm/similar-artists` for the currently playing artist.
+- The returned artist list is passed as the `artists` filter to `POST /api/v1/db/random-songs`, biasing picks towards similar artists in the local library.
+- A toast confirms the result: `"Similar to David Bowie: Iggy Pop, Lou Reed, T. Rex +17 more"`.
+- Falls back to unrestricted random if Last.fm returns no results or the call fails, with a toast explaining why.
+- Toggle state is persisted in `localStorage` (`ms2_dj_similar_<user>`).
+
+API: `/api/v1/lastfm/similar-artists`

@@ -79,7 +79,7 @@ Scribble.prototype.MakeSession = function (username, callback) {
 }
 
 Scribble.prototype.GetArtistInfo = function (artist, callback) {
-  const path = '/2.0/?method=artist.getInfo&artist=' + artist + '&api_key=' + this.apiKey + '&format=json'
+  const path = '/2.0/?method=artist.getInfo&artist=' + encodeURIComponent(artist) + '&api_key=' + this.apiKey + '&format=json'
   sendGet(path, function (ret) {
     if (typeof (callback) === 'function')
       {callback(ret)}
@@ -88,7 +88,7 @@ Scribble.prototype.GetArtistInfo = function (artist, callback) {
 
 Scribble.prototype.GetSimilarArtists = function (artist, callback, limit) {
   const amt = limit || 50;
-  const path = '/2.0/?method=artist.getSimilar&artist=' + artist + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
+  const path = '/2.0/?method=artist.getSimilar&artist=' + encodeURIComponent(artist) + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
   sendGet(path, function (ret) {
     if (typeof (callback) === 'function')
       {callback(ret)}
@@ -97,7 +97,7 @@ Scribble.prototype.GetSimilarArtists = function (artist, callback, limit) {
 
 Scribble.prototype.GetArtistEvents = function (artist, callback, limit) {
   const amt = limit || 50;
-  const path = '/2.0/?method=artist.getevents&artist=' + artist + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
+  const path = '/2.0/?method=artist.getevents&artist=' + encodeURIComponent(artist) + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
   sendGet(path, function (ret) {
     if (typeof (callback) === 'function')
       {callback(ret)}
@@ -106,7 +106,7 @@ Scribble.prototype.GetArtistEvents = function (artist, callback, limit) {
 
 Scribble.prototype.GetArtistTopAlbums = function (artist, callback, limit) {
   const amt = limit || 50;
-  const path = '/2.0/?method=artist.gettopalbums&artist=' + artist + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
+  const path = '/2.0/?method=artist.gettopalbums&artist=' + encodeURIComponent(artist) + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
   sendGet(path, function (ret) {
     if (typeof (callback) === 'function')
       {callback(ret)}
@@ -115,7 +115,7 @@ Scribble.prototype.GetArtistTopAlbums = function (artist, callback, limit) {
 
 Scribble.prototype.GetArtistTopTracks = function (artist, callback, limit) {
   const amt = limit || 50;
-  const path = '/2.0/?method=artist.gettoptracks&artist=' + artist + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
+  const path = '/2.0/?method=artist.gettoptracks&artist=' + encodeURIComponent(artist) + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
   sendGet(path, function (ret) {
     if (typeof (callback) === 'function')
       {callback(ret)}
@@ -124,7 +124,7 @@ Scribble.prototype.GetArtistTopTracks = function (artist, callback, limit) {
 
 Scribble.prototype.GetSimilarSongs = function (song, callback, limit) {
   const amt = limit || 50;
-  const path = '/2.0/?method=track.getSimilar&artist=' + song.artist + '&track=' + song.track + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
+  const path = '/2.0/?method=track.getSimilar&artist=' + encodeURIComponent(song.artist) + '&track=' + encodeURIComponent(song.track) + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
   sendGet(path, function (ret) {
     if (typeof (callback) === 'function')
       {callback(ret)}
