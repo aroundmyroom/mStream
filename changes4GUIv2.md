@@ -1017,3 +1017,34 @@ calls `toggleQueue()` and reopens the panel, after which the tab disappears.
 
 `--qp-width` increased from `320px` to `488px` to better align the queue
 panel's left edge with the PPM/VU meter column in the player bar.
+
+---
+
+## Player Bar — Volume / Balance Alignment
+
+- `.player-right` gains `padding-right:13px` so the right edge of the volume
+  bar aligns with the right edge of the seek / progress bar.
+- `.vol-pct` (`min-width`) raised to `34px` to match the time-display spans,
+  and `margin-left:4px` added so the percentage text right-aligns under the
+  end-time stamp.
+- Font size of volume %, "BALANCE" label and L / R labels unified to `11px`
+  (same as the seek-bar time display).
+- All three elements changed from `var(--t3)` to `var(--t2)` to match the
+  colour of the time display.
+
+---
+
+## Auto-DJ — Persistent Settings
+
+The Auto-DJ source selection and minimum-rating filter are now persisted across
+page reloads via `localStorage`:
+
+| Key | Content |
+|---|---|
+| `ms2_dj_vpaths` | JSON array of selected vpath names |
+| `ms2_dj_min_rating` | integer rating threshold (0 = Any) |
+
+Both values are restored when the page loads and when `checkSession()` runs.
+Saved vpaths are validated against the server's current vpath list on every
+load; any entry that no longer exists is silently removed, and the selection
+falls back to "all" if nothing valid remains.
