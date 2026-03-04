@@ -1269,6 +1269,25 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .upload-progress{height:3px;background:var(--border);border-radius:2px;overflow:hidden;}
 .upload-progress-bar{height:100%;background:var(--primary);border-radius:2px;width:0%;transition:width .15s;}
 
+/* ── WAVEFORM STATUS LINE ───────────────────────────────────── */
+/* Lives as first child of .player-right; margin-right:auto pushes vol/balance right */
+.wf-status{
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.8px;
+  text-transform:uppercase;
+  color:var(--t2);
+  white-space:nowrap;
+  align-self:flex-start;  /* top of player-right = same row as BALANCE/VOLUME labels */
+  margin-top:3px;         /* matches the 2px top padding + slight optical offset */
+  margin-right:auto;      /* shoves vol/balance controls to the far right */
+  padding-left:44px;      /* aligns with the start of the progress bar track */
+  opacity:0;
+  transition:opacity .3s;
+  pointer-events:none;
+}
+.wf-status.visible{ opacity:1; }
+
 /* ── WAVEFORM SCRUBBER ──────────────────────────────────────── */
 /* Canvas overlays the prog-track, extends vertically beyond the 5px bar, sits ABOVE fill */
 .waveform-canvas{
