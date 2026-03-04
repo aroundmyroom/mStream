@@ -78,6 +78,10 @@
 - **Queue persistence** — the full queue (songs + index + playback position)
   is saved to `localStorage('ms2_queue_<username>')` every 5 s while
   playing and restored on next login.  A toast confirms restoration.
+- **Drag-and-drop reordering** — every queue row has a 6-dot grip handle
+  (visible on hover) on its left edge.  Rows can be dragged to any position;
+  the array and the current `S.idx` pointer are updated immediately and
+  persisted to `localStorage`.
 
 ---
 
@@ -188,6 +192,25 @@ for two purely client-side features — no server or config changes required.
 - "End of song" mode is checked in the `ended` event handler — playback
   stops cleanly at the natural track boundary.
 - Timer state is intentionally **not** persisted (resets on page reload).
+
+### Gapless Playback
+- Toggle in the Playback Settings panel.  When enabled and crossfade is set
+  to 0, the next track is silently prebuffered and scheduled for a
+  sample-accurate handoff at the exact track boundary.
+- **Mechanism** — two `GainNode`s (`_curElGain`, `_nextElGain`) both feed the
+  same downstream graph.  The Web Audio clock is used to schedule
+  `linearRampToValueAtTime` calls that ramp the outgoing gain from `1 → 0`
+  and the incoming gain from `0 → 1` over 20 ms, centred on the computed
+  `endAt` timestamp.  The 20 ms ramp covers one full cycle of a 50 Hz bass
+  wave, eliminating both the click and bass thump that shorter ramps produce.
+- An 80 ms `setTimeout` fires before `endAt` and starts the prebuffered
+  element playing at gain 0 so the audio pipeline is already flowing when
+  the scheduled swap fires — no cold-start latency at the boundary.
+- The prebuffer window opens when ≤ 8 s remain on the current track.
+  If the remaining time is < 80 ms the timer fires immediately.
+- `_resetXfade()` cancels any scheduled Web Audio values and clears the
+  timer if the user skips or stops mid-ramp.
+- Setting is persisted in `localStorage` (`ms2_gapless_<username>`).
 
 ---
 
@@ -701,6 +724,18 @@ Eight improvements applied to the spectrum analyser:
 8. **Idle breathing glow** — when playback stops in spectrum mode a slow
    purple breathing gradient plays on the canvas instead of a blank rectangle.
 
+### Mini Spectrum — Theme Colours
+
+Bar gradients and peak ticks use the live CSS variables `--primary` and
+`--accent` so they update instantly when the theme changes (or when dynamic
+album-art colouring rewrites those variables).
+
+- **Bar gradient** — `createLinearGradient` from `--primary` at the baseline
+  to `--accent` at the bar tip, recomputed every frame.
+- **Peak-hold tick** — filled with `--accent` at an opacity that tracks the
+  tick's height.
+- **Idle breathing glow** — uses `--primary` for the bar colour.
+
 ### Mini Spectrum — Inverted Butterfly
 - Frequency axis flipped so bass meets in the centre and treble spreads to the
   outer edges (was: treble at centre, bass outside). The tall low-frequency
@@ -740,6 +775,33 @@ Eight improvements applied to the spectrum analyser:
 
 ---
 
+## Dynamic Album-Art Colour Theming *(GitHub Copilot, 2026-03-04)*
+
+When a track with album art begins playing, the UI's `--primary` and `--accent`
+CSS variables are rewritten to colours sampled from the artwork, so the
+spectrum bars, waveform, progress-fill gradient, and VU brand text all shift
+to match the current album.
+
+- The art image is drawn onto a hidden 8×8 canvas and every pixel is examined
+  in HSL space.
+- Near-white (lightness > 0.88) and near-black (lightness < 0.08) pixels are
+  **skipped** — they carry no real hue and polluted results on light covers.
+- If the most saturated surviving pixel has saturation < 0.18 the art is
+  considered colourless and any previous variable override is **removed**,
+  restoring the CSS defaults.  This prevents white or greyscale sleeves from
+  forcing a random faint hue.
+- Otherwise `--primary` is set from the winning pixel's hue and `--accent` is
+  derived from the same hue rotated 35° with a slight lightness shift, keeping
+  the two colours related but distinct.
+- When the track has no album art, or the image fails to load, both variables
+  are removed and the CSS defaults take over — there is no carryover from the
+  previous track.
+- The function is a no-op if the URL has not changed since the last call
+  (`_lastThemeUrl` guard), so switching from paused to playing never
+  redundantly re-samples.
+
+---
+
 ## Light Mode Overhaul
 
 The `:root.light` palette and all light-mode override rules were substantially
@@ -756,6 +818,19 @@ revised to use a consistent lavender-gray language instead of near-white.
 | `--t1` | `#0c0c1a` | Primary text |
 | `--t2` | `#42425e` | Secondary text |
 | `--t3` | `#7878a0` | Tertiary/label text |
+
+### Canvas element light-mode fixes
+
+Several canvas-drawn elements were using hardcoded `rgba(255,255,255,…)` alpha
+colours for decorative lines, which were invisible against the light player
+background:
+
+- **Spectrum floor line and centre divider** — now `rgba(0,0,0,.12/.08)` in
+  light mode (both idle and active draw loops).
+- **Waveform unplayed region** — see *Waveform Display* section above.
+
+The VU dial (`drawDial`) was already fully branched on `dark`/light and
+needed no changes.
 
 ### Component overrides added
 - **Sidebar** — vertical gradient `#eae8f8 → #e8e8f4` + purple-tinted
@@ -1061,6 +1136,14 @@ A waveform canvas is drawn in the player bar progress area while a song is playi
 - A 60 fps RAF loop keeps the split point in sync with playback position.
 - `restoreQueue()` on page load triggers a waveform fetch for the currently queued track.
 - When waveform data is present, the normal gradient fill bar is hidden (`background: transparent`).
+- **Sub-vpath fix** — files whose vpath is a child folder of a larger indexed
+  root (e.g. `12-inches` mapping to a subfolder inside `Music`) were returning
+  a 404 when requesting waveform data.  The server now iterates all configured
+  `folders` to find the owning root, re-resolves `relativePath` under that
+  root, and uses the correct DB hash as the cache key.
+- **Light-mode unplayed colour** — the unplayed bar region uses
+  `rgba(0,0,0,0.20)` in light mode instead of the white `rgba(255,255,255,0.18)`
+  that was invisible against the light player background.
 
 ---
 

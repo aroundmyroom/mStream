@@ -92,6 +92,7 @@ Written by `_uKey(k)` → resolved to `ms2_<k>_<username>`.
 | `vu_mode` | `'spec'` \| `'needle'` \| `'ppm'` | `'spec'` | VU meter display mode |
 | `ppm_bright` | float `0.0`–`1.0` | `0.38` | PPM canvas brightness |
 | `ref` | float `-20`–`-10` | `-13` | VU reference level in dBFS |
+| `gapless` | `'1'` / absent | absent | Gapless playback enabled |
 
 ---
 
