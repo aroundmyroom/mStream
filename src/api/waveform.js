@@ -1,5 +1,6 @@
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import ffmpeg from 'fluent-ffmpeg';
 import * as config from '../state/config.js';
 import * as db from '../db/manager.js';
@@ -44,13 +45,40 @@ export function setup(mstream) {
       throw new WebError('Access denied or file not found', 403);
     }
 
-    const fileRow = db.findFileByPath(pathInfo.relativePath, pathInfo.vpath);
-    if (!fileRow) throw new WebError('File not found in DB', 404);
+    // Primary DB lookup (file indexed under this vpath)
+    let fileRow = db.findFileByPath(pathInfo.relativePath, pathInfo.vpath);
 
-    // Cache in the album-art directory, keyed by file hash
+    // Fallback: file may be indexed under a different (parent) vpath.
+    // E.g. vpath "12-inches" → /media/music/12 inches A-Z is a sub-dir of
+    // vpath "Music" → /media/music, so the DB row lives under Music.
+    // Iterate all folder roots to find the one that owns this physical path,
+    // then re-do the lookup with the correct vpath + relativePath.
+    if (!fileRow) {
+      const allFolders = config.program.folders || {};
+      for (const [fvpath, folder] of Object.entries(allFolders)) {
+        if (fvpath === pathInfo.vpath) continue;   // already tried this one
+        const root = folder.root;
+        const normRoot = root.endsWith(path.sep) ? root : root + path.sep;
+        if (pathInfo.fullPath.startsWith(normRoot)) {
+          const rel = path.relative(root, pathInfo.fullPath);
+          fileRow = db.findFileByPath(rel, fvpath);
+          if (fileRow) break;
+        }
+      }
+    }
+
+    // Last resort: confirm the physical file at least exists on disk
+    if (!fileRow && !fs.existsSync(pathInfo.fullPath)) {
+      throw new WebError('File not found', 404);
+    }
+
+    // Cache in the album-art directory.
+    // Prefer the DB hash (content-based, shareable across vpaths/duplicates).
+    // Fall back to md5(fullPath) only when the file isn't indexed at all.
     const cacheDir  = config.program.storage.albumArtDirectory;
-    const cacheKey  = fileRow.hash ? `wf-${fileRow.hash}.json` : null;
-    const cachePath = cacheKey ? path.join(cacheDir, cacheKey) : null;
+    const cacheHash = fileRow?.hash ?? crypto.createHash('md5').update(pathInfo.fullPath).digest('hex');
+    const cacheKey  = `wf-${cacheHash}.json`;
+    const cachePath = path.join(cacheDir, cacheKey);
 
     if (cachePath && fs.existsSync(cachePath)) {
       try {
