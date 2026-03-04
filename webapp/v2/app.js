@@ -4348,6 +4348,10 @@ async function _fetchWaveform(filepath) {
   _waveformData = null;
   _waveformFp   = null;
   _drawWaveform();  // clear canvas while loading
+
+  const wfStatus = document.getElementById('wf-status');
+  if (wfStatus) { wfStatus.textContent = 'Generating waveform…'; wfStatus.classList.add('visible'); }
+
   try {
     const d = await api('GET', `api/v1/db/waveform?filepath=${encodeURIComponent(filepath)}`);
     if (d.waveform && d.waveform.length > 0) {
@@ -4357,7 +4361,9 @@ async function _fetchWaveform(filepath) {
       _drawWaveform();
       if (!audioEl.paused) _startWaveformRaf();
     }
-  } catch(_e) { /* waveform unavailable — silent fail */ }
+  } catch(_e) { /* waveform unavailable — silent fail */ } finally {
+    if (wfStatus) { wfStatus.textContent = ''; wfStatus.classList.remove('visible'); }
+  }
 }
 
 function _drawWaveform() {
