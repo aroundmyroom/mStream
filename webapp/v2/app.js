@@ -565,7 +565,14 @@ function refreshQueueUI() {
   list.innerHTML = S.queue.map((s, i) => {
     const isActive = i === S.idx;
     return `
-      <div class="q-item${isActive ? ' q-active' : ''}" data-qi="${i}">
+      <div class="q-item${isActive ? ' q-active' : ''}" data-qi="${i}" draggable="true">
+        <div class="q-drag-handle" title="Drag to reorder">
+          <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" opacity=".7">
+            <circle cx="3" cy="2.5" r="1.2"/><circle cx="7" cy="2.5" r="1.2"/>
+            <circle cx="3" cy="7"   r="1.2"/><circle cx="7" cy="7"   r="1.2"/>
+            <circle cx="3" cy="11.5" r="1.2"/><circle cx="7" cy="11.5" r="1.2"/>
+          </svg>
+        </div>
         <div class="q-num">${isActive
           ? `<svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`
           : i + 1}
@@ -583,18 +590,64 @@ function refreshQueueUI() {
       </div>`;
   }).join('');
 
+  let _dragSrc = null;
+
   list.querySelectorAll('.q-item').forEach(el => {
     el.addEventListener('click', e => {
-      if (e.target.closest('.q-remove')) return;
+      if (e.target.closest('.q-remove') || e.target.closest('.q-drag-handle')) return;
       Player.playAt(parseInt(el.dataset.qi));
     });
+
+    // ── drag-and-drop reorder ──
+    el.addEventListener('dragstart', e => {
+      _dragSrc = parseInt(el.dataset.qi);
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', _dragSrc);
+      setTimeout(() => el.classList.add('q-dragging'), 0);
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('q-dragging');
+      list.querySelectorAll('.q-drag-over').forEach(e => e.classList.remove('q-drag-over'));
+    });
+    el.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (!el.classList.contains('q-drag-over')) {
+        list.querySelectorAll('.q-drag-over').forEach(e => e.classList.remove('q-drag-over'));
+        el.classList.add('q-drag-over');
+      }
+    });
+    el.addEventListener('dragleave', e => {
+      if (!el.contains(e.relatedTarget)) el.classList.remove('q-drag-over');
+    });
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      const to = parseInt(el.dataset.qi);
+      if (_dragSrc === null || _dragSrc === to) { _dragSrc = null; return; }
+      const from = _dragSrc;
+      _dragSrc = null;
+
+      // Splice song from→to
+      const [moved] = S.queue.splice(from, 1);
+      S.queue.splice(to, 0, moved);
+
+      // Keep S.idx pointing at the same track
+      if      (S.idx === from)                       S.idx = to;
+      else if (from < S.idx && to >= S.idx)          S.idx--;
+      else if (from > S.idx && to <= S.idx)          S.idx++;
+
+      persistQueue();
+      refreshQueueUI();
+    });
   });
+
   list.querySelectorAll('.q-remove').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
       const i = parseInt(btn.dataset.qi);
       S.queue.splice(i, 1);
       if (S.idx >= i && S.idx > 0) S.idx--;
+      persistQueue();
       refreshQueueUI();
     });
   });
