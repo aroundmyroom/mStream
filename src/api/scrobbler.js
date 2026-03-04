@@ -88,6 +88,25 @@ export function setup(mstream) {
     }
   });
 
+  mstream.get('/api/v1/lastfm/similar-artists', (req, res) => {
+    if (!req.query.artist) return res.json({ artists: [] });
+    Scrobbler.GetSimilarArtists(
+      String(req.query.artist),
+      (data) => {
+        try {
+          const artists = (data?.similarartists?.artist || [])
+            .slice(0, 20)
+            .map(a => a.name)
+            .filter(Boolean);
+          res.json({ artists });
+        } catch (_e) {
+          res.json({ artists: [] });
+        }
+      },
+      20
+    );
+  });
+
   mstream.post('/api/v1/lastfm/test-login', async (req, res) => {
     const schema = Joi.object({
       username: Joi.string().required(),

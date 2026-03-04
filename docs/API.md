@@ -30,7 +30,7 @@ To stream a file you need a three pieces  of information:
 
 To stream a file create a URL with the following structure
 ```
-http://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
+https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 ```
 
 
@@ -83,6 +83,14 @@ http://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 [/db/rated](API/db_rated.md)
 
 [/db/random-songs](API/db_random-songs.md)
+
+[/db/genres, /db/genre/songs](API/db_genres.md) — normalised genre list + songs by genre *(GitHub Copilot, 2026-03-04)*
+
+[/db/decades, /db/decade/albums](API/db_decades.md) — decade list + albums by decade *(GitHub Copilot, 2026-03-04)*
+
+## Last.fm
+
+[/lastfm/similar-artists](API/lastfm_similar-artists.md) *(GitHub Copilot, 2026-03-04)*
 
 ## JukeBox
 

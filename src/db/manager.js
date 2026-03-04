@@ -61,6 +61,11 @@ export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths) { return
 export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths) { return backend.getRecentlyPlayed(vpaths, username, limit, ignoreVPaths); }
 export function getMostPlayed(vpaths, username, limit, ignoreVPaths) { return backend.getMostPlayed(vpaths, username, limit, ignoreVPaths); }
 export function getAllFilesWithMetadata(vpaths, username, opts) { return backend.getAllFilesWithMetadata(vpaths, username, opts); }
+export function getGenres(vpaths, ignoreVPaths) { return backend.getGenres(vpaths, ignoreVPaths); }
+export function getSongsByGenre(genre, vpaths, username, ignoreVPaths) { return backend.getSongsByGenre(genre, vpaths, username, ignoreVPaths); }
+export function getSongsByGenreRaw(rawGenres, vpaths, username, ignoreVPaths) { return backend.getSongsByGenreRaw(rawGenres, vpaths, username, ignoreVPaths); }
+export function getDecades(vpaths, ignoreVPaths) { return backend.getDecades(vpaths, ignoreVPaths); }
+export function getAlbumsByDecade(decade, vpaths, ignoreVPaths) { return backend.getAlbumsByDecade(decade, vpaths, ignoreVPaths); }
 
 // User Metadata
 export function findUserMetadata(hash, username) { return backend.findUserMetadata(hash, username); }

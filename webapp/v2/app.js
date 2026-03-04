@@ -37,6 +37,11 @@ const S = {
   crossfade: parseInt(localStorage.getItem('ms2_crossfade_' + (localStorage.getItem('ms2_user') || '')) || '0'),
   sleepMins: 0,        // 0 = off; remaining minutes when active
   sleepEndsAt: 0,      // Date.now() ms timestamp when sleep fires
+  // Playback quality
+  rgEnabled: localStorage.getItem('ms2_rg_'      + (localStorage.getItem('ms2_user') || '')) === '1',
+  gapless:   localStorage.getItem('ms2_gapless_' + (localStorage.getItem('ms2_user') || '')) === '1',
+  // Auto-DJ: similar-artists mode
+  djSimilar: localStorage.getItem('ms2_dj_similar_' + (localStorage.getItem('ms2_user') || '')) === '1',
 };
 
 let audioEl = document.getElementById('audio');
@@ -53,6 +58,9 @@ let _xfadeFired  = false;  // true once crossfade has started for the current tr
 let _xfadeStartVol = 0;    // audioEl.volume at the moment crossfade began
 let _xfadeNextIdx  = -1;   // nextIdx stored for the ended-event handoff
 let _xfadeWired  = false;  // true once _xfadeEl is connected to Web Audio
+let _rgGainNode  = null;   // ReplayGain gain node — inserted before _audioGain
+let _waveformData = null;  // decoded waveform array [0..255] for current track
+let _waveformFp  = null;   // filepath matching _waveformData (avoids double-fetch)
 let _cuePoints         = [];    // cue sheet track markers for the current file
 let _cueMarkersRendered = false; // true once tick marks have been drawn for current file
 let analyserL    = null;   // left-channel analyser
@@ -160,6 +168,7 @@ function restoreQueue() {
       Player.updateBar();
       highlightRow();
       loadCuePoints(s.filepath);
+      _fetchWaveform(s.filepath);
       if (data.time > 1) {
         audioEl.addEventListener('loadedmetadata', () => {
           audioEl.currentTime = data.time;
@@ -301,6 +310,8 @@ const Player = {
     VIZ.initAudio();   // ensure AudioContext + analysers exist BEFORE play fires
     audioEl.play().catch(() => {});
     loadCuePoints(s.filepath);
+    _applyRGGain(s);
+    _fetchWaveform(s.filepath);
     this.updateBar();
     highlightRow();
     refreshQueueUI();
@@ -387,6 +398,10 @@ const Player = {
     }
     // sync visualizer song info
     VIZ.songChanged();
+    // Media Session API (OS lock-screen / notification controls)
+    _updateMediaSession(s);
+    // Dynamic album-art colour theming
+    _applyAlbumArtTheme(artUrl(s['album-art'], 'l'));
   },
 };
 
@@ -404,6 +419,26 @@ async function _djApiCall() {
     selected.every(v => meta[v]?.parentVpath) &&
     new Set(selected.map(v => meta[v].parentVpath)).size === 1;
 
+  // Similar-artists mode: bias towards artists similar to the current track
+  let artistFilter;
+  if (S.djSimilar && S.queue[S.idx]?.artist) {
+    const currentArtist = S.queue[S.idx].artist;
+    try {
+      const d = await api('GET', `api/v1/lastfm/similar-artists?artist=${encodeURIComponent(currentArtist)}`);
+      if (d.artists && d.artists.length > 0) {
+        artistFilter = d.artists;
+        console.log(`[AutoDJ] Last.fm similar to "${currentArtist}":`, artistFilter);
+        toast(`Similar to ${currentArtist}: ${artistFilter.slice(0, 3).join(', ')}${artistFilter.length > 3 ? ` +${artistFilter.length - 3} more` : ''}`);
+      } else {
+        console.warn(`[AutoDJ] Last.fm returned no similar artists for "${currentArtist}" — playing random`);
+        toast(`Similar Artists: no results for ${currentArtist}, playing random`);
+      }
+    } catch (_e) {
+      console.error(`[AutoDJ] Last.fm call failed for "${currentArtist}":`, _e);
+      toast(`Similar Artists: Last.fm error, playing random`);
+    }
+  }
+
   if (allChildSameParent) {
     const parentVpath = meta[selected[0]].parentVpath;
     // Combine prefixes with OR is not supported cleanly; for a single child
@@ -415,6 +450,7 @@ async function _djApiCall() {
       minRating:     S.djMinRating || undefined,
       ignoreVPaths:  ignoreVPaths.length > 0 ? ignoreVPaths : undefined,
       filepathPrefix: filepathPrefix || undefined,
+      artists:       artistFilter,
     });
   }
 
@@ -423,6 +459,7 @@ async function _djApiCall() {
     ignoreList:   S.djIgnore,
     minRating:    S.djMinRating || undefined,
     ignoreVPaths: ignoreVPaths.length > 0 ? ignoreVPaths : undefined,
+    artists:      artistFilter,
   });
 }
 
@@ -1866,8 +1903,11 @@ const VIZ = (() => {
       f.gain.value = _savedEnabled ? (_savedGains[i] || 0) : 0;
       return f;
     });
-    // Wire: src → gain → eq[0..7] → analyserNode + splitter → destinations
-    src.connect(gain);
+    // Wire: src → _rgGainNode → gain → eq[0..7] → analyserNode + splitter → destinations
+    _rgGainNode = audioCtx.createGain();
+    _rgGainNode.gain.value = 1.0;
+    src.connect(_rgGainNode);
+    _rgGainNode.connect(gain);
     let _node = gain;
     for (const f of eqFilters) { _node.connect(f); _node = f; }
     _pannerNode = audioCtx.createStereoPanner();
@@ -3529,6 +3569,16 @@ async function viewAutoDJ() {
             <option value="10" ${S.djMinRating===10?'selected':''}>★★★★★ (5 stars)</option>
           </select>
         </div>
+        <div class="autodj-opt-row">
+          <div>
+            <div class="autodj-opt-label">Similar Artists Mode</div>
+            <div class="autodj-opt-hint">Use Last.fm to bias AutoDJ towards artists similar to what's playing</div>
+          </div>
+          <label class="toggle-sw">
+            <input type="checkbox" id="dj-similar" ${S.djSimilar ? 'checked' : ''}>
+            <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
+          </label>
+        </div>
       </div>
     </div>`;
 
@@ -3537,6 +3587,13 @@ async function viewAutoDJ() {
     S.djMinRating = parseInt(e.target.value);
     localStorage.setItem(_djKey('min_rating'), S.djMinRating);
   };
+  document.getElementById('dj-similar').addEventListener('change', e => {
+    S.djSimilar = e.target.checked;
+    S.djSimilar
+      ? localStorage.setItem(_uKey('dj_similar'), '1')
+      : localStorage.removeItem(_uKey('dj_similar'));
+    toast(S.djSimilar ? 'Similar Artists: On' : 'Similar Artists: Off');
+  });
 
   const pillsEl = document.getElementById('dj-vpaths');
   if (pillsEl) {
@@ -3562,9 +3619,156 @@ async function viewAutoDJ() {
   }
 }
 
+// ── GENRE VIEW ────────────────────────────────────────────────
+
+/**
+ * Lightweight virtual-scroll album grid.
+ * Renders only the rows within the viewport (+ BUFS buffer rows).
+ * @param {Array}    albums    - raw album objects from the API
+ * @param {Function} buildCard - (album) => HTML string for one card
+ * @param {Function} onClick   - (album, cardEl) => called on card click
+ */
+function _mountAlbumVScroll(albums, buildCard, onClick) {
+  const GAP = 20, BUFS = 3;
+  let cols = 0, rowH = 0, fRow = -1, lRow = -1;
+
+  const body = document.getElementById('content-body');
+  body.innerHTML = '<div class="album-grid" id="vgrid"></div>';
+  const grid = document.getElementById('vgrid');
+
+  function measure() {
+    const gw = grid.clientWidth;
+    if (!gw) return false;
+    const probe = document.createElement('div');
+    probe.className = 'album-card';
+    probe.style.cssText = 'visibility:hidden;pointer-events:none;position:relative';
+    probe.innerHTML = '<div class="album-art" style="aspect-ratio:1"></div>'
+                    + '<div class="album-info"><div class="album-name">X</div></div>';
+    grid.appendChild(probe);
+    rowH = probe.offsetHeight;
+    const pw = probe.offsetWidth;
+    grid.removeChild(probe);
+    cols = pw > 0 ? Math.max(1, Math.round((gw + GAP) / (pw + GAP))) : 1;
+    return rowH > 0;
+  }
+
+  function render(force) {
+    if (!cols || !rowH) { if (!measure()) return; }
+    const nRows = Math.ceil(albums.length / cols);
+    const sTop  = body.scrollTop;
+    const vH    = body.clientHeight;
+    const nF    = Math.max(0, Math.floor(sTop / (rowH + GAP)) - BUFS);
+    const nL    = Math.min(nRows - 1, Math.ceil((sTop + vH) / (rowH + GAP)) + BUFS);
+    if (!force && nF === fRow && nL === lRow) return;
+    fRow = nF; lRow = nL;
+    grid.style.paddingTop    = `${fRow * (rowH + GAP)}px`;
+    grid.style.paddingBottom = `${Math.max(0, nRows - lRow - 1) * (rowH + GAP)}px`;
+    const html = [];
+    for (let i = fRow * cols; i <= Math.min(albums.length - 1, (lRow + 1) * cols - 1); i++) {
+      html.push(buildCard(albums[i], i));
+    }
+    grid.innerHTML = html.join('');
+  }
+
+  body.addEventListener('scroll', () => { if (grid.isConnected) render(false); });
+  const ro = new ResizeObserver(() => requestAnimationFrame(() => {
+    if (!grid.isConnected) { ro.disconnect(); return; }
+    if (measure()) { fRow = -1; lRow = -1; render(true); }
+  }));
+  ro.observe(grid);
+  grid.addEventListener('click', e => {
+    const card = e.target.closest('.album-card');
+    if (card) onClick(albums[parseInt(card.dataset.i)], card);
+  });
+
+  render(true);
+}
+
+async function viewGenres() {
+  setTitle('Genres'); setBack(null); setNavActive('genres'); S.view = 'genres';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+  setBody('<div class="loading-state"></div>');
+  try {
+    const d = await api('GET', 'api/v1/db/genres');
+    if (!d.genres || d.genres.length === 0) {
+      setBody('<div class="info-panel"><h2>No Genres</h2><p class="info-hint">Your library has no genre tags. Tag your files to use this view.</p></div>');
+      return;
+    }
+    const items = d.genres.map(g =>
+      `<button class="genre-chip" data-genre="${esc(g.genre)}">${esc(g.genre)}<span class="genre-cnt">${g.cnt}</span></button>`
+    ).join('');
+    setBody(`<div class="genre-grid">${items}</div>`);
+    document.querySelectorAll('.genre-chip').forEach(el =>
+      el.addEventListener('click', () => viewGenreSongs(el.dataset.genre))
+    );
+  } catch(e) { setBody('<div class="info-panel"><p class="info-hint">Failed to load genres.</p></div>'); }
+}
+
+async function viewGenreSongs(genre) {
+  setTitle(genre); setBack(viewGenres); setNavActive('genres'); S.view = 'genres';
+  setBody('<div class="loading-state"></div>');
+  try {
+    const songs = await api('POST', 'api/v1/db/genre/songs', { genre });
+    showSongs(songs.map(norm));
+  } catch(e) { setBody('<div class="info-panel"><p class="info-hint">Failed to load songs.</p></div>'); }
+}
+
+// ── DECADE VIEW ────────────────────────────────────────────────
+async function viewDecades() {
+  setTitle('Decades'); setBack(null); setNavActive('decades'); S.view = 'decades';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+  setBody('<div class="loading-state"></div>');
+  try {
+    const d = await api('GET', 'api/v1/db/decades');
+    if (!d.decades || d.decades.length === 0) {
+      setBody('<div class="info-panel"><h2>No Year Data</h2><p class="info-hint">Your library has no year tags. Tag your files to use this view.</p></div>');
+      return;
+    }
+    const items = d.decades.map(row => {
+      const label = row.decade ? `${row.decade}s` : 'Unknown';
+      return `<button class="decade-card" data-decade="${row.decade}">${esc(label)}<span class="decade-stat">${row.cnt} tracks · ${row.albums} albums</span></button>`;
+    }).join('');
+    setBody(`<div class="decade-grid">${items}</div>`);
+    document.querySelectorAll('.decade-card').forEach(el => {
+      const dec = el.dataset.decade;
+      const lbl = dec ? `${dec}s` : 'Unknown';
+      el.addEventListener('click', () => viewDecadeAlbums(parseInt(dec), lbl));
+    });
+  } catch(e) { setBody('<div class="info-panel"><p class="info-hint">Failed to load decades.</p></div>'); }
+}
+
+async function viewDecadeAlbums(decade, label) {
+  setTitle(label || `${decade}s`); setBack(viewDecades); setNavActive('decades'); S.view = 'decades';
+  setBody('<div class="loading-state"></div>');
+  try {
+    const d = await api('POST', 'api/v1/db/decade/albums', { decade });
+    if (!d.albums || d.albums.length === 0) { setBody('<div class="info-panel"><p class="info-hint">No albums found.</p></div>'); return; }
+    document.getElementById('play-all-btn').onclick = null;
+    document.getElementById('add-all-btn').onclick  = null;
+
+    _mountAlbumVScroll(
+      d.albums,
+      (a, i) => {
+        const u   = artUrl(a.album_art_file, 's');
+        const art = u ? `<img src="${u}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">` : noArtHtml();
+        return `<div class="album-card" data-i="${i}">
+          <div class="album-art">${art}<div class="play-ov"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg></div></div>
+          <div class="album-info"><div class="album-name">${esc(a.name)}</div><div class="album-meta">${esc(a.artist||'')}${a.year ? ' · ' + a.year : ''}</div></div>
+        </div>`;
+      },
+      (a) => viewAlbumSongs(a.name, a.artist || undefined, () => viewDecadeAlbums(decade, label))
+    );
+  } catch(e) { setBody('<div class="info-panel"><p class="info-hint">Failed to load albums.</p></div>'); }
+}
+
+// ── SMART PLAYLIST ─────────────────────────────────────────────
+
 // ── TRANSCODE ─────────────────────────────────────────────────
 function viewTranscode() {
-  setTitle('Transcode'); setBack(null); setNavActive('transcode'); S.view = 'transcode';
   S.curSongs = [];
   document.getElementById('play-all-btn').onclick = null;
   document.getElementById('add-all-btn').onclick  = null;
@@ -3938,6 +4142,48 @@ function viewPlayback() {
         </div>
       </div>
 
+      <!-- ── REPLAYGAIN ── -->
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">🔊</div>
+          <div>
+            <div class="playback-section-title">ReplayGain Normalisation</div>
+            <div class="playback-section-desc">Equalise perceived loudness across tracks using embedded ReplayGain values (requires tagged files).</div>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Loudness Normalisation</div>
+            <div class="playback-row-hint">Applies the track's ReplayGain value as a gain adjustment</div>
+          </div>
+          <label class="toggle-sw">
+            <input type="checkbox" id="rg-enable" ${S.rgEnabled ? 'checked' : ''}>
+            <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- ── GAPLESS PLAYBACK ── -->
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">▶▶</div>
+          <div>
+            <div class="playback-section-title">Gapless Playback</div>
+            <div class="playback-section-desc">Pre-buffer the next track so it starts instantly with no silence. Works when Crossfade is set to 0.</div>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Gapless Mode</div>
+            <div class="playback-row-hint">Requires crossfade = 0; overridden by crossfade when > 0</div>
+          </div>
+          <label class="toggle-sw">
+            <input type="checkbox" id="gapless-enable" ${S.gapless ? 'checked' : ''}>
+            <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
+          </label>
+        </div>
+      </div>
+
     </div>`);
 
   // Crossfade slider
@@ -3960,6 +4206,21 @@ function viewPlayback() {
   });
   const cancelBtn = document.getElementById('sleep-cancel-btn');
   if (cancelBtn) cancelBtn.addEventListener('click', () => { setSleepTimer(0); viewPlayback(); });
+
+  // ReplayGain toggle
+  document.getElementById('rg-enable').addEventListener('change', e => {
+    S.rgEnabled = e.target.checked;
+    S.rgEnabled ? localStorage.setItem(_uKey('rg'), '1') : localStorage.removeItem(_uKey('rg'));
+    if (S.queue[S.idx]) _applyRGGain(S.queue[S.idx]);
+    toast(S.rgEnabled ? 'Loudness normalisation: On' : 'Loudness normalisation: Off');
+  });
+
+  // Gapless toggle
+  document.getElementById('gapless-enable').addEventListener('change', e => {
+    S.gapless = e.target.checked;
+    S.gapless ? localStorage.setItem(_uKey('gapless'), '1') : localStorage.removeItem(_uKey('gapless'));
+    toast(S.gapless ? 'Gapless playback: On' : 'Gapless playback: Off');
+  });
 }
 
 // ── SLEEP TIMER LOGIC ─────────────────────────────────────────
@@ -4044,6 +4305,223 @@ function _sleepFadeOut() {
   }, stepMs);
 }
 
+// ── REPLAYGAIN ────────────────────────────────────────────────
+function _applyRGGain(s) {
+  if (!_rgGainNode) return;
+  if (S.rgEnabled && s && s.replaygain != null) {
+    _rgGainNode.gain.value = Math.pow(10, Number(s.replaygain) / 20);
+  } else {
+    _rgGainNode.gain.value = 1.0;
+  }
+}
+
+// ── WAVEFORM SCRUBBER ─────────────────────────────────────────
+// ── WAVEFORM LOCALSTORAGE CACHE ───────────────────────────────
+// Key prefix; value is a JSON array of 800 integers (0-255), ~2 KB each.
+const _WF_LS_PREFIX = 'wf:';
+function _wfLsGet(filepath) {
+  try {
+    const raw = localStorage.getItem(_WF_LS_PREFIX + filepath);
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) && arr.length > 0 ? arr : null;
+  } catch (_e) { return null; }
+}
+function _wfLsSet(filepath, data) {
+  try { localStorage.setItem(_WF_LS_PREFIX + filepath, JSON.stringify(data)); } catch (_e) {}
+}
+
+async function _fetchWaveform(filepath) {
+  if (!filepath) { _waveformData = null; _waveformFp = null; _drawWaveform(); return; }
+  if (_waveformFp === filepath) { _drawWaveform(); return; }   // in-memory cache
+
+  // Check localStorage before going to the server
+  const cached = _wfLsGet(filepath);
+  if (cached) {
+    _waveformData = cached;
+    _waveformFp   = filepath;
+    _drawWaveform();
+    if (!audioEl.paused) _startWaveformRaf();
+    return;
+  }
+
+  _waveformData = null;
+  _waveformFp   = null;
+  _drawWaveform();  // clear canvas while loading
+  try {
+    const d = await api('GET', `api/v1/db/waveform?filepath=${encodeURIComponent(filepath)}`);
+    if (d.waveform && d.waveform.length > 0) {
+      _waveformData = d.waveform;
+      _waveformFp   = filepath;
+      _wfLsSet(filepath, d.waveform);   // persist for future page loads
+      _drawWaveform();
+      if (!audioEl.paused) _startWaveformRaf();
+    }
+  } catch(_e) { /* waveform unavailable — silent fail */ }
+}
+
+function _drawWaveform() {
+  const canvas = document.getElementById('waveform-canvas');
+  if (!canvas) return;
+  const W = canvas.offsetWidth;
+  const H = canvas.offsetHeight;
+  if (W <= 0 || H <= 0) return;
+  // Only resize backing store when dimensions change — avoids clearing at 60 fps
+  if (canvas.width !== W)  canvas.width  = W;
+  if (canvas.height !== H) canvas.height = H;
+  // Toggle .wf-active so CSS hides the plain gradient fill while canvas is active
+  const track = canvas.parentElement;
+  if (track) track.classList.toggle('wf-active', !!(_waveformData && _waveformData.length));
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  if (!_waveformData || _waveformData.length === 0) return;
+
+  const data   = _waveformData;
+  const pct    = audioEl.duration > 0 ? audioEl.currentTime / audioEl.duration : 0;
+  const splitX = pct * W;
+  const midY   = H / 2;
+  const barW   = W / data.length;
+  const drawW  = Math.max(1, barW > 2 ? barW - 1 : barW);
+
+  // Read theme colours from CSS variables so the waveform respects light/dark mode
+  const cs      = getComputedStyle(document.documentElement);
+  const colPri  = cs.getPropertyValue('--primary').trim();   // e.g. #8b5cf6
+  const colAcc  = cs.getPropertyValue('--accent').trim();    // e.g. #60a5fa
+  // Gradient matches the progress-fill bar: --primary left → --accent right
+  const grad = ctx.createLinearGradient(0, 0, W, 0);
+  grad.addColorStop(0, colPri);
+  grad.addColorStop(1, colAcc);
+
+  // Pass 1 — played region: clip left of splitX, fill with gradient
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, splitX, H);
+  ctx.clip();
+  ctx.fillStyle = grad;
+  for (let i = 0; i < data.length; i++) {
+    const x    = (i / data.length) * W;
+    const barH = Math.max(2, (data[i] / 255) * midY * 1.8);
+    ctx.fillRect(x, midY - barH / 2, drawW, barH);
+  }
+  ctx.restore();
+
+  // Pass 2 — unplayed region: clip right of splitX, fill dim
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(splitX, 0, W - splitX, H);
+  ctx.clip();
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  for (let i = 0; i < data.length; i++) {
+    const x    = (i / data.length) * W;
+    const barH = Math.max(2, (data[i] / 255) * midY * 1.8);
+    ctx.fillRect(x, midY - barH / 2, drawW, barH);
+  }
+  ctx.restore();
+}
+
+function _updateWaveformProgress() {
+  const canvas = document.getElementById('waveform-canvas');
+  if (!canvas || !_waveformData) return;
+  _drawWaveform();
+}
+
+// ── WAVEFORM RAF LOOP — drives smooth real-time split during playback ─────────
+let _waveformRaf = null;
+function _startWaveformRaf() {
+  if (_waveformRaf) return;
+  (function loop() {
+    _drawWaveform();
+    _waveformRaf = requestAnimationFrame(loop);
+  }());
+}
+function _stopWaveformRaf() {
+  if (_waveformRaf) { cancelAnimationFrame(_waveformRaf); _waveformRaf = null; }
+  _drawWaveform(); // final redraw at resting position
+}
+
+// ── DYNAMIC ALBUM-ART COLOUR THEMING ─────────────────────────
+let _lastThemeUrl = null;
+
+function _rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h, s, l = (max + min) / 2;
+  if (max === min) { h = s = 0; }
+  else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch(max) {
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+      case g: h = ((b - r) / d + 2) / 6; break;
+      default: h = ((r - g) / d + 4) / 6;
+    }
+  }
+  return [h, s, l];
+}
+
+function _applyAlbumArtTheme(url) {
+  if (!url || url === _lastThemeUrl) return;
+  _lastThemeUrl = url;
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    try {
+      const cv  = document.createElement('canvas');
+      cv.width  = 8; cv.height = 8;
+      const cx  = cv.getContext('2d');
+      cx.drawImage(img, 0, 0, 8, 8);
+      const px  = cx.getImageData(0, 0, 8, 8).data;
+      // Find the most vibrant pixel (highest saturation)
+      let bestS = -1, bestH = 0, bestL = 0.5;
+      for (let i = 0; i < px.length; i += 4) {
+        const [h, s, l] = _rgbToHsl(px[i], px[i+1], px[i+2]);
+        if (s > bestS) { bestS = s; bestH = h; bestL = l; }
+      }
+      // Clamp lightness so the accent is neither too dark nor washed out
+      const l = Math.min(Math.max(bestL, 0.40), 0.70);
+      const s = Math.max(bestS, 0.40);
+      const primary = `hsl(${Math.round(bestH * 360)},${Math.round(s * 100)}%,${Math.round(l * 100)}%)`;
+      document.documentElement.style.setProperty('--primary', primary);
+    } catch(_e) {}
+  };
+  img.onerror = () => {};
+  img.src = url;
+}
+
+// ── MEDIA SESSION API ─────────────────────────────────────────
+function _updateMediaSession(s) {
+  if (!('mediaSession' in navigator) || !s) return;
+  try {
+    const artwork = [];
+    const u = artUrl(s['album-art'], 'l');
+    if (u) artwork.push({ src: location.origin + u, sizes: '512x512', type: 'image/jpeg' });
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title:  s.title  || s.filepath?.split('/').pop() || '',
+      artist: s.artist || '',
+      album:  s.album  || '',
+      artwork
+    });
+  } catch(_e) {}
+}
+
+// ── GAPLESS PLAYBACK ──────────────────────────────────────────
+function _startGapless(nextIdx) {
+  if (_xfadeFired) return;
+  _xfadeFired    = true;
+  _xfadeNextIdx  = nextIdx;
+  _xfadeStartVol = audioEl.volume;
+  _syncQueueLabel();
+  VIZ.initAudio();
+  const xEl = _getOrCreateXfadeEl();
+  _connectXfadeToAudio();
+  const next = S.queue[nextIdx];
+  if (!next) { _xfadeFired = false; return; }
+  xEl.src    = mediaUrl(next.filepath);
+  xEl.volume = 0;   // silent until the handoff — _doXfadeHandoff restores volume
+  xEl.play().catch(() => {});
+  // No ramp — audioEl.ended fires _doXfadeHandoff which promotes xEl to audioEl
+}
+
 // ── CROSSFADE LOGIC ───────────────────────────────────────────
 // _xfadeEl is connected to the SAME Web Audio graph as audioEl (both go
 // through _audioGain → EQ → analysers → destination).  It starts the next
@@ -4066,7 +4544,7 @@ function _connectXfadeToAudio() {
   if (_xfadeWired || !_audioGain || !_xfadeEl) return;
   try {
     const xSrc = audioCtx.createMediaElementSource(_xfadeEl);
-    xSrc.connect(_audioGain);
+    xSrc.connect(_rgGainNode ?? _audioGain);
     _xfadeWired = true;
   } catch(e) { /* already connected or no audioCtx */ }
 }
@@ -4150,6 +4628,10 @@ function _doXfadeHandoff(nextIdx) {
   syncPlayIcons();
 
   if (!s) return;
+
+  // Apply ReplayGain and load waveform for the incoming track
+  _applyRGGain(s);
+  _fetchWaveform(s.filepath);
 
   // Update UI / persistence (mirrors Player.playAt without touching audio)
   Player.updateBar();
@@ -4381,6 +4863,19 @@ function showApp() {
     S.canUpload = !d.noUpload;
     if (d.supportedAudioFiles) S.supportedAudioFiles = d.supportedAudioFiles;
   }).catch(() => { S.transInfo = { serverEnabled: false }; });
+
+  // Register Media Session action handlers (OS lock-screen controls)
+  if ('mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.setActionHandler('play',         () => { VIZ.initAudio(); audioEl.play().catch(() => {}); });
+      navigator.mediaSession.setActionHandler('pause',        () => audioEl.pause());
+      navigator.mediaSession.setActionHandler('nexttrack',    () => Player.next());
+      navigator.mediaSession.setActionHandler('previoustrack', () => Player.prev());
+      navigator.mediaSession.setActionHandler('seekto', (e) => {
+        if (e.seekTime != null && audioEl.duration) audioEl.currentTime = e.seekTime;
+      });
+    } catch(_e) {}
+  }
 }
 function showLogin() {
   document.getElementById('login-screen').style.display = '';
@@ -4414,6 +4909,8 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'played')  viewPlayed();
     else if (v === 'files')   { S.feDirStack = []; viewFiles('', false); }
     else if (v === 'autodj')  viewAutoDJ();
+    else if (v === 'genres')        viewGenres();
+    else if (v === 'decades')       viewDecades();
     else if (v === 'transcode') viewTranscode();
     else if (v === 'jukebox')   viewJukebox();
     else if (v === 'apps')      viewApps();
@@ -4791,8 +5288,8 @@ function _syncQueueLabel() {
 }
 
 // ── AUDIO EVENT HANDLERS (named so they can be moved to a swapped element) ──
-function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); }
-function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  }
+function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); _startWaveformRaf(); }
+function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  _stopWaveformRaf(); }
 function _onAudioEnded() {
   if (S.sleepMins === -1) {
     S.sleepMins = 0;
@@ -4807,6 +5304,7 @@ function _onAudioEnded() {
     _doXfadeHandoff(_xfadeNextIdx);
     return;
   }
+  _stopWaveformRaf();
   Player.next();
 }
 function _onAudioError() {
@@ -4891,6 +5389,8 @@ function _onAudioTimeupdateUI() {
   if (_cuePoints.length && !_cueMarkersRendered) renderCueMarkers();
   const pct = (audioEl.currentTime / audioEl.duration) * 100;
   document.getElementById('prog-fill').style.width = pct + '%';
+  const _progThumb = document.getElementById('prog-thumb');
+  if (_progThumb) _progThumb.style.left = pct + '%';
   document.getElementById('time-cur').textContent   = fmt(audioEl.currentTime);
   document.getElementById('time-total').textContent = fmt(audioEl.duration);
   if (S.autoDJ && S.idx === S.queue.length - 1 &&
@@ -4920,6 +5420,21 @@ function _onAudioTimeupdateUI() {
       if (nextIdx !== -1) _startCrossfade(nextIdx);
     }
   }
+  // Gapless playback: pre-buffer next track ~2 s before end when crossfade is off
+  if (S.gapless && S.crossfade === 0 && !_xfadeFired && audioEl.duration > 0) {
+    const remaining = audioEl.duration - audioEl.currentTime;
+    if (remaining > 0 && remaining <= 2.0) {
+      let nextIdx = -1;
+      if (S.shuffle)                             nextIdx = Math.floor(Math.random() * S.queue.length);
+      else if (S.repeat === 'one')               nextIdx = S.idx;
+      else if (S.idx < S.queue.length - 1)       nextIdx = S.idx + 1;
+      else if (S.repeat === 'all')               nextIdx = 0;
+      else if (S.autoDJ && S.queue.length > S.idx + 1) nextIdx = S.idx + 1;
+      if (nextIdx !== -1) _startGapless(nextIdx);
+    }
+  }
+  // Waveform scrubber: update shaded fill to reflect playback position
+  _updateWaveformProgress();
   _updateSleepLight();
 }
 

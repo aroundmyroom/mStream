@@ -29,13 +29,15 @@
   | `ignoreVPaths` | `string[]` | Exclude songs from these virtual paths. |
   | `minRating` | `integer` | Only consider songs with a rating ≥ this value (0–10 scale, matches `POST /api/v1/db/rate-song`). |
   | `filepathPrefix` | `string\|null` | Restrict candidates to songs whose filepath starts with this prefix. Used to limit Auto-DJ to a specific vpath sub-folder. |
+  | `artists` | `string[]` | When provided, only songs whose artist is in this list are considered. Used by the Auto-DJ Similar Artists mode (see [`/api/v1/lastfm/similar-artists`](lastfm_similar-artists.md)). |
 
   ```json
   {
     "ignoreList": [3, 17, 42],
     "ignorePercentage": 0.5,
     "ignoreVPaths": ["Audiobooks"],
-    "minRating": 6
+    "minRating": 6,
+    "artists": ["Iggy Pop", "Lou Reed", "T. Rex"]
   }
   ```
 

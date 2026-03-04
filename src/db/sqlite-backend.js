@@ -24,6 +24,10 @@ export function init(dbDirectory) {
     CREATE INDEX IF NOT EXISTS idx_files_vpath ON files(vpath);
     CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash);
     CREATE INDEX IF NOT EXISTS idx_files_ts ON files(ts);
+    CREATE INDEX IF NOT EXISTS idx_files_year ON files(year);
+    CREATE INDEX IF NOT EXISTS idx_files_genre ON files(genre);
+    CREATE INDEX IF NOT EXISTS idx_files_album ON files(album);
+    CREATE INDEX IF NOT EXISTS idx_files_artist ON files(artist);
 
     CREATE TABLE IF NOT EXISTS user_metadata (
       hash TEXT NOT NULL, user TEXT NOT NULL,
@@ -410,9 +414,90 @@ export function getAllFilesWithMetadata(vpaths, username, opts) {
     params.push(opts.minRating);
   }
 
+  // Filter by specific artists (used by Similar-Artists Auto-DJ)
+  if (opts.artists && Array.isArray(opts.artists) && opts.artists.length > 0) {
+    const aIn = inClause('f.artist', opts.artists);
+    sql += ` AND ${aIn.sql}`;
+    params.push(...aIn.params);
+  }
+
   const rows = db.prepare(sql).all(...params);
   return rows.map(mapFileRow);
 }
+
+export function getGenres(vpaths, ignoreVPaths) {
+  const filtered = vpathFilter(vpaths, ignoreVPaths);
+  if (filtered.length === 0) return [];
+  const vIn = inClause('vpath', filtered);
+  return db.prepare(
+    `SELECT genre, COUNT(*) AS cnt FROM files WHERE ${vIn.sql} AND genre IS NOT NULL AND genre != '' GROUP BY genre ORDER BY genre COLLATE NOCASE`
+  ).all(...vIn.params);
+}
+
+export function getSongsByGenre(genre, vpaths, username, ignoreVPaths) {
+  const filtered = vpathFilter(vpaths, ignoreVPaths);
+  if (filtered.length === 0) return [];
+  const vIn = inClause('f.vpath', filtered);
+  const rows = db.prepare(`
+    SELECT f.rowid AS id, f.*, um.rating
+    FROM files f
+    LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
+    WHERE ${vIn.sql} AND f.genre = ?
+    ORDER BY f.artist COLLATE NOCASE, f.album COLLATE NOCASE, f.disk, f.track
+  `).all(username, ...vIn.params, genre);
+  return rows.map(mapFileRow);
+}
+
+/**
+ * Fetch songs matching any of the given raw DB genre strings.
+ * rawGenres is the full Set/Array from mergeGenreRows().rawMap — it contains
+ * the original multi-value strings (e.g. "House, Trance, Chillout") as well
+ * as single-tag values so an exact IN clause is sufficient.
+ */
+export function getSongsByGenreRaw(rawGenres, vpaths, username, ignoreVPaths) {
+  const filtered = vpathFilter(vpaths, ignoreVPaths);
+  if (filtered.length === 0) return [];
+  const genreList = [...rawGenres];
+  if (genreList.length === 0) return [];
+  const vIn    = inClause('f.vpath', filtered);
+  const gIn    = inClause('f.genre', genreList);
+  const rows = db.prepare(`
+    SELECT f.rowid AS id, f.*, um.rating
+    FROM files f
+    LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
+    WHERE ${vIn.sql} AND ${gIn.sql}
+    ORDER BY f.artist COLLATE NOCASE, f.album COLLATE NOCASE, f.disk, f.track
+  `).all(username, ...vIn.params, ...gIn.params);
+  return rows.map(mapFileRow);
+}
+
+export function getDecades(vpaths, ignoreVPaths) {
+  const filtered = vpathFilter(vpaths, ignoreVPaths);
+  if (filtered.length === 0) return [];
+  const vIn = inClause('vpath', filtered);
+  return db.prepare(
+    `SELECT (year / 10 * 10) AS decade, COUNT(*) AS cnt, COUNT(DISTINCT album) AS albums FROM files WHERE ${vIn.sql} AND year >= 1900 AND year <= 2030 GROUP BY decade ORDER BY decade`
+  ).all(...vIn.params);
+}
+
+export function getAlbumsByDecade(decade, vpaths, ignoreVPaths) {
+  const filtered = vpathFilter(vpaths, ignoreVPaths);
+  if (filtered.length === 0) return [];
+  const vIn = inClause('vpath', filtered);
+  // GROUP BY album+artist so SQLite deduplicates — no JS loop needed.
+  // MIN(year) picks a representative year; MAX(aaFile) prefers a non-null art file.
+  return db.prepare(`
+    SELECT album AS name,
+           MAX(aaFile) AS album_art_file,
+           MIN(year)   AS year,
+           artist
+    FROM files
+    WHERE ${vIn.sql} AND album IS NOT NULL AND year >= ? AND year <= ?
+    GROUP BY album, artist
+    ORDER BY MIN(year), album COLLATE NOCASE
+  `).all(...vIn.params, decade, decade + 9);
+}
+
 
 // User Metadata
 export function findUserMetadata(hash, username) {

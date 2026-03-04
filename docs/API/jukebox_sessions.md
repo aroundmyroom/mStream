@@ -67,7 +67,7 @@
 
   ```sh
   CODE=$(curl -s -H "x-access-token: $ADMIN_TOKEN" \
-    http://mstream.local:3000/api/v1/jukebox/sessions \
+    https://mstream.local:3000/api/v1/jukebox/sessions \
     | jq -r '.sessions | sort_by(.startTime) | last | .url')
   # $CODE is now e.g. /remote/aB3xYz9p
   ```
