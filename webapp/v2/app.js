@@ -26,15 +26,15 @@ const S = {
   supportedAudioFiles: {},  // populated from ping
   // Transcode
   transInfo:    null,  // { serverEnabled, defaultCodec, defaultBitrate, defaultAlgorithm }
-  transEnabled: !!localStorage.getItem('ms2_trans'),
-  transCodec:   localStorage.getItem('ms2_trans_codec')   || '',
-  transBitrate: localStorage.getItem('ms2_trans_bitrate') || '',
-  transAlgo:    localStorage.getItem('ms2_trans_algo')    || '',
+  transEnabled: !!localStorage.getItem('ms2_trans_'         + (localStorage.getItem('ms2_user') || '')),
+  transCodec:   localStorage.getItem('ms2_trans_codec_'    + (localStorage.getItem('ms2_user') || '')) || '',
+  transBitrate: localStorage.getItem('ms2_trans_bitrate_'  + (localStorage.getItem('ms2_user') || '')) || '',
+  transAlgo:    localStorage.getItem('ms2_trans_algo_'     + (localStorage.getItem('ms2_user') || '')) || '',
   // Jukebox
   jukeWs:   null,
   jukeCode: null,
   // Playback
-  crossfade: parseInt(localStorage.getItem('ms2_crossfade') || '0'),
+  crossfade: parseInt(localStorage.getItem('ms2_crossfade_' + (localStorage.getItem('ms2_user') || '')) || '0'),
   sleepMins: 0,        // 0 = off; remaining minutes when active
   sleepEndsAt: 0,      // Date.now() ms timestamp when sleep fires
 };
@@ -121,6 +121,7 @@ function toastError(msg, ms = 4000) {
 // ── QUEUE PERSISTENCE ───────────────────────────────────────
 function _queueKey() { return `ms2_queue_${S.username}`; }
 function _djKey(k)    { return `ms2_dj_${k}_${S.username || ''}`; }
+function _uKey(k)     { return `ms2_${k}_${S.username || ''}`; }
 function persistQueue() {
   if (!S.username) return;
   try {
@@ -455,7 +456,7 @@ async function autoDJFetch() {
 
 function setAutoDJ(on, skipAutoStart) {
   S.autoDJ = on;
-  localStorage.setItem('ms2_autodj', on ? '1' : '');
+  localStorage.setItem(_uKey('autodj'), on ? '1' : '');
   document.getElementById('dj-light').classList.toggle('hidden', !on);
   // update autodj page if visible
   const btn = document.querySelector('.autodj-toggle');
@@ -1116,7 +1117,7 @@ const MINI_SPEC = (() => {
 // ── VU NEEDLE METERS (player bar) ─────────────────────────────
 const VU_NEEDLE = (() => {
   let rafId = null;
-  let _mode = localStorage.getItem('vu-mode') || 'spec'; // 'spec' | 'needle' | 'ppm'
+  let _mode = localStorage.getItem(_uKey('vu_mode')) || 'spec'; // 'spec' | 'needle' | 'ppm'
 
   // Per-channel ballistics state
   let vuL = -25, vuR = -25;
@@ -1133,7 +1134,7 @@ const VU_NEEDLE = (() => {
   const TAU_PPM_REL  = 1.500;   // 1.5 s release
   const PPM_HOLD_MS  = 2000;    // peak hold duration
   const PPM_FADE_MS  = 2000;    // peak fade after hold
-  let ppmBrightness  = parseFloat(localStorage.getItem('ms2_ppm_bright') || '0.38');
+  let ppmBrightness  = parseFloat(localStorage.getItem(_uKey('ppm_bright')) || '0.38');
   let _bsAlpha       = 0;          // brightness-slider overlay opacity (0 = hidden)
   let _bsFadeTimer   = null;       // timeout id for auto-hide
   let _bsRaf         = null;       // rAF for smooth fade animation
@@ -1159,7 +1160,7 @@ const VU_NEEDLE = (() => {
     _bsStartFade();
   }
 
-  let REF_LEVEL      = parseFloat(localStorage.getItem('ms2_ref') || '-13');   // dBFS that maps to 0 VU  (adjustable via knob)
+  let REF_LEVEL      = parseFloat(localStorage.getItem(_uKey('ref')) || '-13');   // dBFS that maps to 0 VU  (adjustable via knob)
   const PEAK_HOLD_MS = 1000;
   const PEAK_FADE_MS = 5000;
   const CLIP_VU      = 2.5;   // VU level that trips the peak lamp
@@ -1553,7 +1554,7 @@ const VU_NEEDLE = (() => {
       const clientX = e.touches ? e.touches[0].clientX : e.clientX;
       const normX = ((clientX - rect.left) / rect.width * 200 - BAR_X_F) / BAR_W_F;
       ppmBrightness = Math.max(0.0, Math.min(1.0, normX));
-      localStorage.setItem('ms2_ppm_bright', ppmBrightness.toFixed(3));
+      localStorage.setItem(_uKey('ppm_bright'), ppmBrightness.toFixed(3));
       if (!rafId) _drawIdle();
     }
 
@@ -1662,7 +1663,7 @@ const VU_NEEDLE = (() => {
       const delta = (e.clientX - startX) / 15;  // right = lower REF_LEVEL (more red)
       REF_LEVEL = Math.min(-10, Math.max(-20, Math.round((startVal - delta) * 2) / 2));
       knob.title = `Drag left/right · peak ref: ${REF_LEVEL} dBFS`;
-      localStorage.setItem('ms2_ref', REF_LEVEL);
+      localStorage.setItem(_uKey('ref'), REF_LEVEL);
       drawKnob(knob);
     });
     window.addEventListener('mouseup', () => { dragging = false; });
@@ -1676,7 +1677,7 @@ const VU_NEEDLE = (() => {
       const delta = (e.touches[0].clientX - startX) / 15;
       REF_LEVEL = Math.min(-10, Math.max(-20, Math.round((startVal - delta) * 2) / 2));
       knob.title = `Drag left/right · peak ref: ${REF_LEVEL} dBFS`;
-      localStorage.setItem('ms2_ref', REF_LEVEL);
+      localStorage.setItem(_uKey('ref'), REF_LEVEL);
       drawKnob(knob);
     }, {passive:false});
     window.addEventListener('touchend', () => { dragging = false; });
@@ -1774,7 +1775,7 @@ const VU_NEEDLE = (() => {
     document.body.classList.toggle('vu-needle-mode', _mode === 'needle');
     if (_mode === 'spec') { _stop(); if (startIfPlaying) MINI_SPEC.start(); }
     else                  { MINI_SPEC.stop(); if (startIfPlaying) _start(); else _drawIdle(); }
-    localStorage.setItem('vu-mode', _mode);
+    localStorage.setItem(_uKey('vu_mode'), _mode);
   }
 
   return {
@@ -1855,8 +1856,8 @@ const VIZ = (() => {
     const splitter = audioCtx.createChannelSplitter(2);
     const src      = audioCtx.createMediaElementSource(audioEl);
     // Build 8-band EQ filter chain and apply saved settings
-    const _savedGains   = JSON.parse(localStorage.getItem('ms2_eq')    || 'null') || Array(8).fill(0);
-    const _savedEnabled = localStorage.getItem('ms2_eq_on') !== 'false';
+    const _savedGains   = JSON.parse(localStorage.getItem(_uKey('eq'))    || 'null') || Array(8).fill(0);
+    const _savedEnabled = localStorage.getItem(_uKey('eq_on')) !== 'false';
     eqFilters = EQ_BANDS.map((b, i) => {
       const f = audioCtx.createBiquadFilter();
       f.type = b.type;
@@ -1870,7 +1871,7 @@ const VIZ = (() => {
     let _node = gain;
     for (const f of eqFilters) { _node.connect(f); _node = f; }
     _pannerNode = audioCtx.createStereoPanner();
-    _pannerNode.pan.value = parseFloat(localStorage.getItem('ms2_balance') || '0');
+    _pannerNode.pan.value = parseFloat(localStorage.getItem(_uKey('balance')) || '0');
     // Butterchurn tap stays pre-pan (visualizer unaffected by balance)
     _node.connect(analyserNode);          // butterchurn tap (pre-pan)
     // VU/PPM analysers tap POST-panner so balance is reflected on the meters
@@ -1924,7 +1925,7 @@ const VIZ = (() => {
 
   // ── SPECTRUM RENDERER — 7 modes, click canvas to cycle ────
   const SPEC_MODES = ['Bar Spectrum','Mirror Bars','Radial','Oscilloscope','Waterfall','VU Needles','Lissajous'];
-  let specStyleIdx = parseInt(localStorage.getItem('ms2_spec_style') || '0') % SPEC_MODES.length;
+  let specStyleIdx = parseInt(localStorage.getItem(_uKey('spec_style')) || '0') % SPEC_MODES.length;
   let specLabelAlpha = 0;         // fade-out alpha for mode label overlay
   let waterfallRows = null;       // pixel row buffer for waterfall mode
   let waterfallPos  = 0;
@@ -2304,7 +2305,7 @@ const VIZ = (() => {
     // click anywhere on spectrum canvas to cycle modes
     canvas._specClick = () => {
       specStyleIdx = (specStyleIdx + 1) % SPEC_MODES.length;
-      localStorage.setItem('ms2_spec_style', specStyleIdx);
+      localStorage.setItem(_uKey('spec_style'), specStyleIdx);
       specLabelAlpha = 1.0;
       peakL.fill(0); peakVelL.fill(0);
       peakR.fill(0); peakVelR.fill(0);
@@ -3628,7 +3629,7 @@ function viewTranscode() {
   const optsEl = document.getElementById('tc-opts');
   document.getElementById('tc-enable').onchange = e => {
     S.transEnabled = e.target.checked;
-    S.transEnabled ? localStorage.setItem('ms2_trans', '1') : localStorage.removeItem('ms2_trans');
+    S.transEnabled ? localStorage.setItem(_uKey('trans'), '1') : localStorage.removeItem(_uKey('trans'));
     optsEl.classList.toggle('dimmed', !S.transEnabled);
     // Reload current song with new URL scheme
     if (S.queue[S.idx]) {
@@ -3641,15 +3642,15 @@ function viewTranscode() {
   };
   document.getElementById('tc-codec').onchange = e => {
     S.transCodec = e.target.value;
-    e.target.value ? localStorage.setItem('ms2_trans_codec', e.target.value) : localStorage.removeItem('ms2_trans_codec');
+    e.target.value ? localStorage.setItem(_uKey('trans_codec'), e.target.value) : localStorage.removeItem(_uKey('trans_codec'));
   };
   document.getElementById('tc-bitrate').onchange = e => {
     S.transBitrate = e.target.value;
-    e.target.value ? localStorage.setItem('ms2_trans_bitrate', e.target.value) : localStorage.removeItem('ms2_trans_bitrate');
+    e.target.value ? localStorage.setItem(_uKey('trans_bitrate'), e.target.value) : localStorage.removeItem(_uKey('trans_bitrate'));
   };
   document.getElementById('tc-algo').onchange = e => {
     S.transAlgo = e.target.value;
-    e.target.value ? localStorage.setItem('ms2_trans_algo', e.target.value) : localStorage.removeItem('ms2_trans_algo');
+    e.target.value ? localStorage.setItem(_uKey('trans_algo'), e.target.value) : localStorage.removeItem(_uKey('trans_algo'));
   };
 }
 
@@ -3946,7 +3947,7 @@ function viewPlayback() {
     const v = parseInt(xfSlider.value);
     xfVal.textContent = v === 0 ? 'Off' : v + 's';
     S.crossfade = v;
-    localStorage.setItem('ms2_crossfade', v);
+    localStorage.setItem(_uKey('crossfade'), v);
   });
 
   // Sleep presets
@@ -3970,13 +3971,13 @@ function setSleepTimer(mins) {
   S.sleepEndsAt = 0;
   _updateSleepLight();
 
-  if (mins === 0) { localStorage.removeItem('ms2_sleep_ends'); return; }
+  if (mins === 0) { localStorage.removeItem(_uKey('sleep_ends')); return; }
 
   if (mins === -1) {
     // End of current song — trigger when 'ended' fires next
     S.sleepMins = -1;
     S.sleepEndsAt = -1;
-    localStorage.setItem('ms2_sleep_ends', '-1');
+    localStorage.setItem(_uKey('sleep_ends'), '-1');
     toast('Sleep: will stop after this song');
     _updateSleepLight();
     return;
@@ -3984,7 +3985,7 @@ function setSleepTimer(mins) {
 
   S.sleepMins = mins;
   S.sleepEndsAt = Date.now() + mins * 60000;
-  localStorage.setItem('ms2_sleep_ends', String(S.sleepEndsAt));
+  localStorage.setItem(_uKey('sleep_ends'), String(S.sleepEndsAt));
   toast(`Sleep timer set · ${mins} min`);
   _updateSleepLight();
 
@@ -4353,11 +4354,11 @@ function showApp() {
   const _savedIgnore = JSON.parse(localStorage.getItem(_djKey('ignore')) || 'null');
   if (_savedIgnore) S.djIgnore = _savedIgnore;
   // Restore auto-DJ state from previous session
-  if (localStorage.getItem('ms2_autodj')) { setAutoDJ(true, /*skipAutoStart=*/true); }
+  if (localStorage.getItem(_uKey('autodj'))) { setAutoDJ(true, /*skipAutoStart=*/true); }
   // Guarantee a save on F5 / tab close
   window.addEventListener('beforeunload', persistQueue);
   // Restore sleep timer if still running from a previous session
-  const _savedSleepEnds = parseInt(localStorage.getItem('ms2_sleep_ends') || '0');
+  const _savedSleepEnds = parseInt(localStorage.getItem(_uKey('sleep_ends')) || '0');
   if (_savedSleepEnds === -1) { setSleepTimer(-1); }
   else if (_savedSleepEnds > Date.now()) { setSleepTimer(Math.ceil((_savedSleepEnds - Date.now()) / 60000)); }
   pollScan();
@@ -4643,12 +4644,12 @@ document.getElementById('player-stars').addEventListener('click', e => {
 
 // ── EQUALIZER ────────────────────────────────────────────────
 const EQ = (() => {
-  let gains   = JSON.parse(localStorage.getItem('ms2_eq')    || 'null') || Array(8).fill(0);
-  let enabled = localStorage.getItem('ms2_eq_on') !== 'false';
+  let gains   = JSON.parse(localStorage.getItem(_uKey('eq'))    || 'null') || Array(8).fill(0);
+  let enabled = localStorage.getItem(_uKey('eq_on')) !== 'false';
 
   function save() {
-    localStorage.setItem('ms2_eq', JSON.stringify(gains));
-    localStorage.setItem('ms2_eq_on', enabled ? 'true' : 'false');
+    localStorage.setItem(_uKey('eq'), JSON.stringify(gains));
+    localStorage.setItem(_uKey('eq_on'), enabled ? 'true' : 'false');
   }
 
   function applyToFilters() {
@@ -5000,10 +5001,10 @@ document.getElementById('volume').addEventListener('input', e => {
   audioEl.volume = e.target.value / 100;
   _setVolPct(e.target.value);
   clearTimeout(_volSaveTimer);
-  _volSaveTimer = setTimeout(() => localStorage.setItem('ms2_vol', e.target.value), 300);
+  _volSaveTimer = setTimeout(() => localStorage.setItem(_uKey('vol'), e.target.value), 300);
 });
 (function initVolume() {
-  const saved = parseInt(localStorage.getItem('ms2_vol') || '80', 10);
+  const saved = parseInt(localStorage.getItem(_uKey('vol')) || '80', 10);
   audioEl.volume = saved / 100;
   const el = document.getElementById('volume');
   if (el) el.value = saved;
@@ -5016,29 +5017,29 @@ function _setVolPct(val) {
 
 // ── Balance slider ───────────────────────────────────────────
 (function initBalance() {
-  const saved = parseFloat(localStorage.getItem('ms2_balance') || '0');
+  const saved = parseFloat(localStorage.getItem(_uKey('balance')) || '0');
   const el    = document.getElementById('balance');
   if (el) el.value = Math.round(saved * 100);
 })();
 document.getElementById('balance').addEventListener('input', e => {
   const v = parseInt(e.target.value, 10);
   if (_pannerNode) _pannerNode.pan.value = v / 100;
-  localStorage.setItem('ms2_balance', v / 100);
+  localStorage.setItem(_uKey('balance'), v / 100);
 });
 document.getElementById('balance').addEventListener('dblclick', () => {
   const el = document.getElementById('balance');
   el.value = 0;
   if (_pannerNode) _pannerNode.pan.value = 0;
-  localStorage.removeItem('ms2_balance');
+  localStorage.removeItem(_uKey('balance'));
 });
 document.getElementById('bal-center-btn').addEventListener('click', () => {
   const el = document.getElementById('balance');
   el.value = 0;
   if (_pannerNode) _pannerNode.pan.value = 0;
-  localStorage.removeItem('ms2_balance');
+  localStorage.removeItem(_uKey('balance'));
 });
 
-let _preMuteVol = parseFloat(localStorage.getItem('ms2_vol') || '80') / 100;
+let _preMuteVol = parseFloat(localStorage.getItem(_uKey('vol')) || '80') / 100;
 document.getElementById('mute-btn').addEventListener('click', () => {
   if (audioEl.volume > 0) {
     _preMuteVol = audioEl.volume;
@@ -5191,13 +5192,13 @@ function applyTheme(light, persist = true) {
   const label = document.getElementById('theme-label');
   if (track) track.classList.toggle('lit', light);
   if (label) label.textContent = light ? 'Light Mode' : 'Blue';
-  if (persist) localStorage.setItem('ms2_theme', light ? 'light' : 'dark');
+  if (persist) localStorage.setItem(_uKey('theme'), light ? 'light' : 'dark');
 }
 
 // Follow OS colour scheme when the user hasn't stored an explicit preference
 const _osDark = window.matchMedia('(prefers-color-scheme: dark)');
 _osDark.addEventListener('change', e => {
-  if (!localStorage.getItem('ms2_theme')) applyTheme(!e.matches, false);
+  if (!localStorage.getItem(_uKey('theme'))) applyTheme(!e.matches, false);
 });
 
 document.getElementById('theme-toggle').addEventListener('click', () => {
@@ -5483,7 +5484,7 @@ try {
 (async () => {
   // Apply saved theme before anything renders (prevents flash).
   // If no explicit preference stored, honour the OS colour scheme.
-  const _savedTheme = localStorage.getItem('ms2_theme');
+  const _savedTheme = localStorage.getItem(_uKey('theme'));
   applyTheme(
     _savedTheme ? _savedTheme === 'light' : !window.matchMedia('(prefers-color-scheme: dark)').matches,
     !!_savedTheme   // only persist if the user had already made an explicit choice
