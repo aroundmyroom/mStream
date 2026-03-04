@@ -5163,27 +5163,85 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
 
 // ── EASTER EGG ──────────────────────────────────────────────
 // Invisible 6×6 pixel at sidebar/content/player corner.
-// Click → full VU spectrum appears above player bar with
-// "AroundMyRoom's Version" bursting out as the centrepiece.
+// Click → full LED spectrum appears above the player bar.
+// Left channel: "AroundMyRoom" is baked into the bar segments —
+// the word is revealed from bottom to top as audio level rises.
+// At 100% all bars the full word is readable in the coloured segments.
 window.EGG = (() => {
-  const LABEL  = "AroundMyRoom\u2019s Version";
-  const H      = 100;   // canvas CSS + buffer height
-  const BARS   = 52;
-  const DECAY  = 0.84;  // bar falloff multiplier per frame
-  const PEAK_HOLD   = 55;  // frames to hold peak dot
+  const H           = 180;
+  const BARS        = 90;
+  const DECAY       = 0.84;
+  const PEAK_HOLD   = 55;
   const PEAK_DECAY  = 0.92;
 
-  let raf = null, active = false;
-  let smoothed  = new Float32Array(BARS);
-  let peaks     = new Float32Array(BARS);
-  let peakTimer = new Int32Array(BARS);
+  // Offscreen text masks — rebuilt whenever channel pixel width changes
+  // L channel: "AroundMyRoom" centred
+  // R channel: "mStream" left-aligned
+  let textMask  = null, textMaskW = 0, textMaskH = 0;
+  let rMask     = null, rMaskW   = 0, rMaskH    = 0;
 
-  // Map bar index → FFT bin (logarithmic frequency scale)
+  let raf = null, active = false;
+  // [0..BARS-1] = L,  [BARS..2*BARS-1] = R
+  let smoothed  = new Float32Array(BARS * 2);
+  let peaks     = new Float32Array(BARS * 2);
+  let peakTimer = new Int32Array(BARS * 2);
+
   function barBin(i, totalBins) {
-    const minF = 40, maxF = 18000;
-    const nyq  = 22050;
+    const minF = 40, maxF = 18000, nyq = 22050;
     const freq = minF * Math.pow(maxF / minF, i / (BARS - 1));
     return Math.min(Math.round(freq / nyq * totalBins), totalBins - 1);
+  }
+
+  // Build an alpha mask from text onto a channel-sized offscreen canvas.
+  // label   : text to render
+  // align   : 'center' | 'left'
+  // returns : { mask: Uint8Array, w, h }
+  function buildMask(label, align, w, h) {
+    const mc = document.createElement('canvas');
+    mc.width = w; mc.height = h;
+    const mx = mc.getContext('2d');
+    mx.clearRect(0, 0, w, h);
+    mx.textBaseline = 'middle';
+    // Bold Arial/Helvetica: thick rectangular strokes, wide letterforms —
+    // ideal for LED segment masks (not squished like Impact, not puffy like Arial Black)
+    const face = '"Helvetica Neue","Arial","Liberation Sans",sans-serif';
+    let fs = Math.floor(h * 0.72);
+    mx.font = `900 ${fs}px ${face}`;
+    const maxW = (align === 'left' || align === 'right') ? w * 0.96 : w * 0.94;
+    while (mx.measureText(label).width > maxW && fs > 8) {
+      fs--;
+      mx.font = `900 ${fs}px ${face}`;
+    }
+    mx.textAlign = align;
+    const drawX  = align === 'left'  ? w * 0.025
+                 : align === 'right' ? w * 0.975
+                 : w / 2;
+    mx.fillStyle = '#ffffff';
+    mx.fillText(label, drawX, h / 2);
+    const id  = mx.getImageData(0, 0, w, h);
+    const buf = new Uint8Array(w * h);
+    for (let p = 0; p < w * h; p++) buf[p] = id.data[p * 4 + 3];
+    return { mask: buf, w, h };
+  }
+
+  function ensureMasks(lw, rw, h) {
+    if (textMaskW !== lw || textMaskH !== h || !textMask) {
+      const r = buildMask('AroundMyRoom', 'left', lw, h);
+      textMask = r.mask; textMaskW = r.w; textMaskH = r.h;
+    }
+    if (rMaskW !== rw || rMaskH !== h || !rMask) {
+      const r = buildMask('mStream', 'right', rw, h);
+      rMask = r.mask; rMaskW = r.w; rMaskH = r.h;
+    }
+  }
+
+  // Returns true when the given canvas point falls inside a letter stroke.
+  // edgeX : left pixel edge of the channel in canvas space
+  function sampleMask(mask, mW, mH, canvX, edgeX, segMidY) {
+    if (!mask) return false;
+    const px = Math.min(Math.max(Math.round(canvX - edgeX), 0), mW - 1);
+    const py = Math.min(Math.max(Math.round(segMidY),       0), mH - 1);
+    return mask[py * mW + px] > 55;
   }
 
   function draw() {
@@ -5195,7 +5253,6 @@ window.EGG = (() => {
     if (cv.width !== window.innerWidth) cv.width = window.innerWidth;
     const W  = cv.width;
     const cx = cv.getContext('2d');
-
     cx.clearRect(0, 0, W, H);
 
     // Content column bounds
@@ -5207,103 +5264,108 @@ window.EGG = (() => {
     const colW      = colRight - colLeft;
     if (colW < 20) return;
 
-    // Clip to content column
     cx.save();
     cx.beginPath();
     cx.rect(colLeft, 0, colW, H);
     cx.clip();
 
-    // Gather FFT data
-    const rawData   = new Uint8Array(analyserL ? analyserL.frequencyBinCount : 1024);
-    if (analyserL) analyserL.getByteFrequencyData(rawData);
-    const totalBins = rawData.length;
+    // FFT data — separate L and R
+    const fftSize = analyserL ? analyserL.frequencyBinCount : 1024;
+    const rawL    = new Uint8Array(fftSize);
+    const rawR    = new Uint8Array(fftSize);
+    if (analyserL) analyserL.getByteFrequencyData(rawL);
+    if (analyserR) analyserR.getByteFrequencyData(rawR);
 
-    const bw  = colW / BARS;
-    const gap = Math.max(2, Math.round(bw * 0.18));
+    const SEG_H    = 2;
+    const SEG_GAP  = 1;
+    const SEG_STEP = SEG_H + SEG_GAP;
+    const MAX_SEGS = Math.floor(H / SEG_STEP);
+    const CG       = 10;
+    const halfW    = (colW - CG) / 2;
+    const bw       = halfW / BARS;
+    const barW     = Math.max(Math.round(bw * 0.44), 2);
 
-    for (let i = 0; i < BARS; i++) {
-      // Average a small range around the log-mapped bin
-      const b0 = barBin(i,       totalBins);
-      const b1 = barBin(i + 1,   totalBins);
-      let sum = 0, cnt = 0;
-      for (let b = b0; b <= Math.min(b1, totalBins - 1); b++) { sum += rawData[b]; cnt++; }
-      const raw = cnt ? sum / cnt / 255 : 0;
+    // Ensure both masks match current channel pixel dimensions
+    ensureMasks(Math.ceil(halfW), Math.ceil(halfW), H);
 
-      // Smooth falloff
-      smoothed[i] = Math.max(raw, smoothed[i] * DECAY);
+    // ── Draw one channel ─────────────────────────────────────
+    // mask / mW / mH / maskEdge : text-mask params (pass null mask for none)
+    function drawChannel(rawData, offset, startX, flip, mask, mW, mH, maskEdge) {
+      for (let i = 0; i < BARS; i++) {
+        const si = offset + i;
+        const b0 = barBin(i,     fftSize);
+        const b1 = barBin(i + 1, fftSize);
+        let sum = 0, cnt = 0;
+        for (let b = b0; b <= Math.min(b1, fftSize - 1); b++) { sum += rawData[b]; cnt++; }
+        const raw = cnt ? sum / cnt / 255 : 0;
 
-      // Peak hold
-      if (smoothed[i] >= peaks[i]) { peaks[i] = smoothed[i]; peakTimer[i] = PEAK_HOLD; }
-      else if (peakTimer[i] > 0)   { peakTimer[i]--; }
-      else                          { peaks[i] *= PEAK_DECAY; }
+        smoothed[si] = Math.max(raw, smoothed[si] * DECAY);
+        if (smoothed[si] >= peaks[si]) { peaks[si] = smoothed[si]; peakTimer[si] = PEAK_HOLD; }
+        else if (peakTimer[si] > 0)    { peakTimer[si]--; }
+        else                            { peaks[si] *= PEAK_DECAY; }
 
-      const amp = smoothed[i];
-      const bh  = amp * H;
-      if (bh < 0.5) continue;
+        const amp  = smoothed[si];
+        const segs = Math.floor(Math.min(amp * 1.25, 1.0) * MAX_SEGS);
+        if (segs < 1) continue;
 
-      const x = Math.round(colLeft + i * bw);
-      const barW = Math.max(Math.round(bw) - gap, 1);
+        const col = flip ? (BARS - 1 - i) : i;
+        const x   = startX + col * bw + (bw - barW) / 2;
+        const xMid = x + barW * 0.5;   // horizontal centre of this bar column
 
-      // Classic VU colour: green → yellow → red based on amplitude
-      const hue = amp < 0.55 ? 110 - amp * 30
-                : amp < 0.80 ? 75  - (amp - 0.55) / 0.25 * 50
-                :               20  - (amp - 0.80) / 0.20 * 20;
-      const sat  = 90 + amp * 10;
-      const lite = 45 + amp * 15;
+        const topT    = segs / MAX_SEGS;
+        const glowHue = topT < 0.55 ? 110 - topT * 100
+                      : topT < 0.80 ? 10  - (topT - 0.55) / 0.25 * 5
+                      : 5;
 
-      // Glow
-      cx.shadowColor = `hsla(${hue},${sat}%,${lite + 20}%,0.7)`;
-      cx.shadowBlur  = 6 + amp * 10;
+        for (let s = 0; s < segs; s++) {
+          const segTop = H - (s + 1) * SEG_STEP + SEG_GAP;
+          const segMid = segTop + SEG_H * 0.5;
+          const t      = s / MAX_SEGS;
+          const segHue = t < 0.55 ? 110 - t * 100
+                       : t < 0.80 ? 10  - (t - 0.55) / 0.25 * 5
+                       : 5;
 
-      const grd = cx.createLinearGradient(0, H - bh, 0, H);
-      grd.addColorStop(0, `hsla(${hue},${sat}%,${lite + 18}%,1)`);
-      grd.addColorStop(1, `hsla(${hue - 10},${sat}%,${lite - 10}%,0.85)`);
-      cx.fillStyle = grd;
-      cx.fillRect(x, H - bh, barW, bh);
+          // Check whether this segment's pixel lands inside a letter stroke
+          if (mask && sampleMask(mask, mW, mH, xMid, maskEdge, segMid)) {
+            // ── Letter segment: cyan #00F5FF — max contrast on green/yellow/red ──
+            cx.shadowColor = 'rgba(0,245,255,0.90)';
+            cx.shadowBlur  = 8;
+            cx.fillStyle   = `rgba(0,245,255,${0.80 + t * 0.20})`;
+          } else {
+            // ── Normal segment: green → yellow → red hue ──
+            cx.shadowColor = `hsla(${glowHue},90%,65%,0.45)`;
+            cx.shadowBlur  = 3 + amp * 7;
+            cx.fillStyle   = `hsla(${segHue},95%,${52 + t * 12}%,${0.65 + t * 0.35})`;
+          }
+          cx.fillRect(Math.round(x), segTop, barW, SEG_H);
+        }
 
-      // Peak dot
-      if (peaks[i] > 0.04) {
-        const py = H - peaks[i] * H - 2;
-        cx.fillStyle = `hsla(${hue},100%,88%,0.95)`;
-        cx.fillRect(x, py, barW, 2);
+        // Peak hold segment
+        if (peaks[si] > 0.04) {
+          const ps   = Math.floor(Math.min(peaks[si] * 1.25, 1.0) * MAX_SEGS);
+          const py   = H - ps * SEG_STEP - SEG_H;
+          const pt   = ps / MAX_SEGS;
+          const phue = pt < 0.55 ? 110 - pt * 100 : pt < 0.80 ? 10 : 5;
+          cx.shadowBlur = 0;
+          cx.fillStyle  = `hsla(${phue},100%,92%,0.95)`;
+          cx.fillRect(Math.round(x), py, barW, SEG_H);
+        }
       }
     }
 
+    const rStart = colLeft + halfW + CG;
+    // L: treble outer-left → bass at centre  | mStream mask
+    drawChannel(rawL, 0,    colLeft, true,  rMask,    rMaskW,    rMaskH,    colLeft);
+    // R: bass at centre → treble outer-right | AroundMyRoom mask (left-aligned)
+    drawChannel(rawR, BARS, rStart,  false, textMask, textMaskW, textMaskH, rStart);
+
     cx.shadowBlur = 0;
-
-    // ── CENTREPIECE LABEL ──
-    const tx = colLeft + colW / 2;
-    const ty = H * 0.52;
-
-    // Step 1: ghost outline so text shape is always faintly readable
-    cx.globalCompositeOperation = 'source-over';
-    cx.font = 'bold 36px "Courier New",monospace';
-    cx.textAlign    = 'center';
-    cx.textBaseline = 'middle';
-    cx.globalAlpha  = 0.06;
-    cx.fillStyle    = '#ffffff';
-    cx.fillText(LABEL, tx, ty);
-    cx.globalAlpha  = 1;
-
-    // Step 2: source-atop = text painted only where bars exist
-    cx.globalCompositeOperation = 'source-atop';
-    const tgrd = cx.createLinearGradient(colLeft, 0, colRight, 0);
-    tgrd.addColorStop(0,    'hsla(110,100%,85%,1)');
-    tgrd.addColorStop(0.45, 'hsla(60, 100%,85%,1)');
-    tgrd.addColorStop(0.65, 'hsla(30, 100%,80%,1)');
-    tgrd.addColorStop(1,    'hsla(0,  100%,75%,1)');
-    cx.fillStyle   = tgrd;
-    cx.shadowColor = 'rgba(255,220,100,0.9)';
-    cx.shadowBlur  = 14;
-    cx.fillText(LABEL, tx, ty);
-    cx.shadowBlur  = 0;
-
-    cx.globalCompositeOperation = 'source-over';
     cx.restore();
   }
 
   function show() {
     smoothed.fill(0); peaks.fill(0); peakTimer.fill(0);
+    textMaskW = 0; rMaskW = 0;  // force mask rebuild with fresh column dimensions
     const cv = document.getElementById('egg-canvas');
     cv.style.transition = '';
     cv.style.opacity    = '1';
