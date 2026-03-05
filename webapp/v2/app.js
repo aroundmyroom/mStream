@@ -656,7 +656,7 @@ function refreshQueueUI() {
   });
 
   const active = list.querySelector('.q-active');
-  if (active) active.scrollIntoView({ block: 'nearest' });
+  if (active) active.scrollIntoView({ block: 'center', behavior: 'smooth' });
   _syncQueueLabel();
 }
 
