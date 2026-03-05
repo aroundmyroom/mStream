@@ -42,7 +42,7 @@ const S = {
   gapless:   localStorage.getItem('ms2_gapless_' + (localStorage.getItem('ms2_user') || '')) === '1',
   // Auto-DJ: similar-artists mode
   djSimilar: localStorage.getItem('ms2_dj_similar_' + (localStorage.getItem('ms2_user') || '')) === '1',
-  djArtistHistory: [],  // rolling list of last N distinct artists — used as ignoreArtists cooldown
+  djArtistHistory: JSON.parse(localStorage.getItem('ms2_dj_artist_history_' + (localStorage.getItem('ms2_user') || '')) || 'null') || [],  // rolling list of last N distinct artists — persisted across reloads
 };
 
 let audioEl = document.getElementById('audio');
@@ -271,12 +271,14 @@ const Player = {
     S.queue = [...songs];
     S.djIgnore = [];
     S.djArtistHistory = [];
+    localStorage.removeItem(_djKey('artist_history'));
     this.playAt(start ?? 0);
   },
   playSingle(song) {
     S.queue = [song];
     S.djIgnore = [];
     S.djArtistHistory = [];
+    localStorage.removeItem(_djKey('artist_history'));
     this.playAt(0);
   },
   // Add to queue; if nothing is playing yet, start immediately
@@ -480,6 +482,7 @@ function _djPushArtistHistory(artist) {
   S.djArtistHistory = S.djArtistHistory.filter(a => a.toLowerCase() !== norm);
   S.djArtistHistory.push(artist.trim());
   if (S.djArtistHistory.length > DJ_ARTIST_COOLDOWN) S.djArtistHistory.shift();
+  localStorage.setItem(_djKey('artist_history'), JSON.stringify(S.djArtistHistory));
 }
 
 async function autoDJPrefetch() {
@@ -3715,6 +3718,7 @@ async function viewAutoDJ() {
       S.djIgnore = []; // reset play history when sources change
       S.djArtistHistory = [];
       localStorage.removeItem(_djKey('ignore'));
+      localStorage.removeItem(_djKey('artist_history'));
     });
   }
 }
@@ -5698,10 +5702,45 @@ function _reloadFromPosition(attempt) {
 }
 
 // (error, stalled, playing, canplay, timeupdate × 2 are all registered via _attachAudioListeners above)
-document.getElementById('prog-track').addEventListener('click', e => {
-  const r = e.currentTarget.getBoundingClientRect();
-  if (audioEl.duration) audioEl.currentTime = ((e.clientX - r.left) / r.width) * audioEl.duration;
-});
+// Seek arrow + time bubble on the player-bar progress track
+// Arrow is a DOM element: CSS fixes its vertical position, JS only ever sets left.
+(function initSeekPreview() {
+  const track     = document.getElementById('prog-track');
+  const container = track.closest('.player-progress');
+
+  // Triangle arrow — vertical position set in CSS (bottom:7px), never touched by JS
+  const arrow = document.createElement('div');
+  arrow.className = 'seek-arrow';
+  container.appendChild(arrow);
+
+  // Time bubble
+  const bubble = document.createElement('div');
+  bubble.className = 'seek-preview';
+  container.appendChild(bubble);
+
+  function onMove(e) {
+    const onCue = e.target.closest('.cue-tick');
+    const tRect = track.getBoundingClientRect();
+    const cRect = container.getBoundingClientRect();
+    const pct   = Math.max(0, Math.min(1, (e.clientX - tRect.left) / tRect.width));
+    const xPx   = tRect.left - cRect.left + pct * tRect.width;
+    // Only left is set — vertical is governed by CSS alone
+    arrow.style.left = xPx + 'px';
+    arrow.classList.toggle('sa-cue', !!onCue);
+    arrow.classList.add('sa-show');
+    if (onCue) { bubble.classList.remove('sp-show'); return; }
+    bubble.style.left = xPx + 'px';
+    if (audioEl.duration) { bubble.textContent = fmt(pct * audioEl.duration); bubble.classList.add('sp-show'); }
+  }
+  function onLeave() { arrow.classList.remove('sa-show'); bubble.classList.remove('sp-show'); }
+  container.addEventListener('mousemove', onMove);
+  container.addEventListener('mouseleave', onLeave);
+  container.addEventListener('click', e => {
+    if (e.target.closest('.cue-tick')) return;
+    const r = track.getBoundingClientRect();
+    if (audioEl.duration) audioEl.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * audioEl.duration;
+  });
+}());
 let _volSaveTimer = null;
 document.getElementById('volume').addEventListener('input', e => {
   audioEl.volume = e.target.value / 100;
@@ -5786,9 +5825,44 @@ document.getElementById('np-play-btn').addEventListener('click', () => Player.to
 document.getElementById('np-prev-btn').addEventListener('click', () => Player.prev());
 document.getElementById('np-next-btn').addEventListener('click', () => Player.next());
 document.getElementById('np-prog-track').addEventListener('click', e => {
-  const r = e.currentTarget.getBoundingClientRect();
-  if (audioEl.duration) audioEl.currentTime = ((e.clientX - r.left) / r.width) * audioEl.duration;
+  // NP modal seek is now handled by the container click in initNpSeekPreview.
+  // Keep this as a direct fallback for any programmatic calls.
 });
+// Seek arrow + time bubble on the NP-modal progress track
+(function initNpSeekPreview() {
+  const track     = document.getElementById('np-prog-track');
+  const container = track.closest('.np-progress');
+
+  const arrow = document.createElement('div');
+  arrow.className = 'seek-arrow';
+  container.appendChild(arrow);
+
+  const bubble = document.createElement('div');
+  bubble.className = 'seek-preview';
+  container.appendChild(bubble);
+
+  function onMove(e) {
+    const onCue = e.target.closest('.cue-tick');
+    const tRect = track.getBoundingClientRect();
+    const cRect = container.getBoundingClientRect();
+    const pct   = Math.max(0, Math.min(1, (e.clientX - tRect.left) / tRect.width));
+    const xPx   = tRect.left - cRect.left + pct * tRect.width;
+    arrow.style.left = xPx + 'px';
+    arrow.classList.toggle('sa-cue', !!onCue);
+    arrow.classList.add('sa-show');
+    if (onCue) { bubble.classList.remove('sp-show'); return; }
+    bubble.style.left = xPx + 'px';
+    if (audioEl.duration) { bubble.textContent = fmt(pct * audioEl.duration); bubble.classList.add('sp-show'); }
+  }
+  function onLeave() { arrow.classList.remove('sa-show'); bubble.classList.remove('sp-show'); }
+  container.addEventListener('mousemove', onMove);
+  container.addEventListener('mouseleave', onLeave);
+  container.addEventListener('click', e => {
+    if (e.target.closest('.cue-tick')) return;
+    const r = track.getBoundingClientRect();
+    if (audioEl.duration) audioEl.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * audioEl.duration;
+  });
+}());
 document.getElementById('np-viz-btn').addEventListener('click', () => { hideNPModal(); VIZ.open(); });
 
 // Visualizer
