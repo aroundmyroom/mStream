@@ -114,13 +114,20 @@ export function updateFileCue(filepath, vpath, cuepoints) {
 }
 
 export function insertFile(fileData) {
+  // If this hash already exists under a different vpath, inherit that ts so the
+  // file doesn't appear as "newly added" just because a new vpath was created.
+  let ts = fileData.ts ?? null;
+  if (fileData.hash) {
+    const existing = db.prepare('SELECT ts FROM files WHERE hash = ? AND ts IS NOT NULL LIMIT 1').get(fileData.hash);
+    if (existing) { ts = existing.ts; }
+  }
   const stmt = db.prepare(`INSERT INTO files (title, artist, year, album, filepath, format, track, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const result = stmt.run(
     fileData.title ?? null, fileData.artist ?? null, fileData.year ?? null, fileData.album ?? null,
     fileData.filepath, fileData.format ?? null, fileData.track ?? null, fileData.disk ?? null,
     fileData.modified ?? null, fileData.hash ?? null, fileData.aaFile ?? null, fileData.vpath,
-    fileData.ts ?? null, fileData.sID ?? null, fileData.replaygainTrackDb ?? null, fileData.genre ?? null, fileData.cuepoints ?? null
+    ts, fileData.sID ?? null, fileData.replaygainTrackDb ?? null, fileData.genre ?? null, fileData.cuepoints ?? null
   );
   return { ...fileData, id: Number(result.lastInsertRowid) };
 }

@@ -565,6 +565,9 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .autodj-opts h4{font-size:12px;font-weight:700;letter-spacing:.5px;color:var(--t2);text-transform:uppercase;margin-bottom:14px;}
 .autodj-opt-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;}
 .autodj-opt-row:last-child{border-bottom:none;}
+/* Stacking variant — label above, control below full-width (used for pills row) */
+.autodj-opt-col{flex-direction:column;align-items:flex-start;gap:10px;}
+.autodj-opt-col .dj-vpath-pills{justify-content:flex-start;width:100%;}
 .dj-vpath-pills{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;}
 .dj-vpath-pill{
   padding:5px 13px;border-radius:99px;font-size:12px;font-weight:600;
@@ -723,7 +726,6 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
   grid-row:1/4;
   cursor:pointer;
   position:relative;
-  border-left:1px solid rgba(139,92,246,.12);
   height:110px;
   align-self:end;
   margin-bottom:31px;
@@ -853,7 +855,7 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
   position:relative;
   cursor:none;
 }
-.player-progress span{font-size:11px;color:var(--t2);flex-shrink:0;min-width:34px;font-variant-numeric:tabular-nums;}
+.player-progress span{font-size:11px;color:var(--t2);flex-shrink:0;min-width:38px;font-variant-numeric:tabular-nums;cursor:pointer;user-select:none;}
 .player-progress span:last-child{text-align:right;}
 .prog-track{flex:1;height:5px;border-radius:99px;background:rgba(255,255,255,.08);position:relative;}
 /* Gradient fill — purple to accent blue, feels alive across the full width */
@@ -1147,8 +1149,13 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 #np-rate-clear:hover{color:var(--red);}
 .np-rate-row .rate-stars span{color:var(--t4);transition:color .12s;cursor:pointer;}
 .np-rate-row .rate-stars span.lit{color:var(--yellow);}
+.np-scrobble-status{font-size:12.5px;padding:2px 0;min-height:1.5em;opacity:0;transition:opacity .8s ease;}
+.np-scrobble-ok{opacity:1;color:#7ecb7e;}
+.np-scrobble-err{opacity:1;color:var(--red,#e05a5a);}
 .np-progress{display:flex;align-items:center;gap:10px;width:100%;position:relative;cursor:none;}
-.np-progress span{font-size:12px;color:var(--t2);flex-shrink:0;min-width:36px;}
+/* Time spans are clickable — restore cursor despite the cursor:none on the container */
+#np-time-cur,#np-time-total{cursor:pointer;}
+.np-progress span{font-size:12px;color:var(--t2);flex-shrink:0;min-width:40px;cursor:pointer;user-select:none;}
 .np-progress span:last-child{text-align:right;}
 .np-controls{display:flex;align-items:center;justify-content:center;gap:20px;}
 .np-controls .ctrl-nav{width:54px;height:54px;opacity:.9;}

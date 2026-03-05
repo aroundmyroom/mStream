@@ -144,6 +144,12 @@ export function updateFileCue(filepath, vpath, cuepoints) {
 }
 
 export function insertFile(fileData) {
+  // If this hash already exists under a different vpath, inherit that ts so the
+  // file doesn't appear as "newly added" just because a new vpath was created.
+  if (fileData.hash) {
+    const existing = fileCollection.findOne({ hash: { $eq: fileData.hash }, ts: { $ne: null } });
+    if (existing) { fileData = { ...fileData, ts: existing.ts }; }
+  }
   const result = fileCollection.insert(fileData);
   return mapId(result);
 }

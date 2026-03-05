@@ -1,3 +1,4 @@
+import fs from 'fs/promises';
 import crypto from 'crypto';
 import Joi from 'joi';
 import axios from 'axios';
@@ -6,6 +7,7 @@ import Scribble from '../state/lastfm.js';
 import * as db from '../db/manager.js';
 import { joiValidate } from '../util/validation.js';
 import { getVPathInfo } from '../util/vpath.js';
+import WebError from '../util/web-error.js';
 
 const Scrobbler = new Scribble();
 
@@ -14,9 +16,15 @@ export function setup(mstream) {
 
   for (const user in config.program.users) {
     if (!Object.hasOwn(config.program.users, user)) { continue; }
-    if (!config.program.users[user]['lastfm-user'] || !config.program.users[user]['lastfm-password']) { continue; }
-    // TODO: Test Auth and alert user if it doesn't work
-    Scrobbler.addUser(config.program.users[user]['lastfm-user'], config.program.users[user]['lastfm-password']);
+    const u = config.program.users[user];
+    if (!u['lastfm-user']) { continue; }
+    if (u['lastfm-session']) {
+      // Preferred: session key from a previous connect — password never stored
+      Scrobbler.addUserWithSession(u['lastfm-user'], u['lastfm-session']);
+    } else if (u['lastfm-password']) {
+      // Legacy: plain-text password in old config — works until user reconnects
+      Scrobbler.addUser(u['lastfm-user'], u['lastfm-password']);
+    }
   }
 
   mstream.post('/api/v1/lastfm/scrobble-by-metadata', (req, res) => {
@@ -28,7 +36,7 @@ export function setup(mstream) {
     joiValidate(schema, req.body);
 
     // TODO: update last-played field in DB
-    if (!req.user['lastfm-user'] || !req.user['lastfm-password']) {
+    if (!req.user['lastfm-user'] || (!req.user['lastfm-session'] && !req.user['lastfm-password'])) {
       return res.json({ scrobble: false });
     }
 
@@ -74,7 +82,7 @@ export function setup(mstream) {
     db.saveUserDB();
     res.json({});
 
-    if (req.user['lastfm-user'] && req.user['lastfm-password']) {
+    if (req.user['lastfm-user'] && (req.user['lastfm-session'] || req.user['lastfm-password'])) {
       // scrobble on last fm
       Scrobbler.Scrobble(
         {
@@ -124,8 +132,90 @@ export function setup(mstream) {
     });
     res.json({});
   });
+
+  // ── Per-user self-service Last.fm endpoints ──────────────────
+
+  mstream.get('/api/v1/lastfm/status', (req, res) => {
+    res.json({ linkedUser: req.user['lastfm-user'] || null });
+  });
+
+  mstream.post('/api/v1/lastfm/connect', async (req, res) => {
+    const schema = Joi.object({
+      lastfmUser:     Joi.string().required(),
+      lastfmPassword: Joi.string().required(),
+    });
+    joiValidate(schema, req.body);
+
+    // Authenticate against Last.fm before saving
+    const token = crypto.createHash('md5').update(
+      req.body.lastfmUser + crypto.createHash('md5').update(req.body.lastfmPassword, 'utf8').digest('hex'),
+      'utf8'
+    ).digest('hex');
+    const apiSig = crypto.createHash('md5').update(
+      `api_key${config.program.lastFM.apiKey}authToken${token}methodauth.getMobileSessionusername${req.body.lastfmUser}${config.program.lastFM.apiSecret}`,
+      'utf8'
+    ).digest('hex');
+    // Call Last.fm — validateStatus:null lets us read error bodies instead of axios throwing
+    let lfmResponse;
+    try {
+      lfmResponse = await axios({
+        method: 'GET',
+        url: `http://ws.audioscrobbler.com/2.0/?method=auth.getMobileSession&username=${encodeURIComponent(req.body.lastfmUser)}&authToken=${token}&api_key=${config.program.lastFM.apiKey}&api_sig=${apiSig}&format=json`,
+        validateStatus: null,
+      });
+    } catch (netErr) {
+      throw new WebError('Could not reach Last.fm: ' + netErr.message, 502);
+    }
+    if (lfmResponse.data?.error) {
+      throw new WebError(`Last.fm error: ${lfmResponse.data.message || 'Authentication failed'} (code ${lfmResponse.data.error})`, 401);
+    }
+    const sessionKey = lfmResponse.data?.session?.key;
+    if (!sessionKey) { throw new WebError('Last.fm returned no session key', 502); }
+
+    // Persist session key only — password is never written to disk
+    const loadConfig = JSON.parse(await fs.readFile(config.configFile, 'utf-8'));
+    if (!loadConfig.users) loadConfig.users = {};
+    if (!loadConfig.users[req.user.username]) loadConfig.users[req.user.username] = {};
+    loadConfig.users[req.user.username]['lastfm-user']    = req.body.lastfmUser;
+    loadConfig.users[req.user.username]['lastfm-session'] = sessionKey;
+    delete loadConfig.users[req.user.username]['lastfm-password'];
+    await fs.writeFile(config.configFile, JSON.stringify(loadConfig, null, 2), 'utf8');
+
+    config.program.users[req.user.username]['lastfm-user']    = req.body.lastfmUser;
+    config.program.users[req.user.username]['lastfm-session'] = sessionKey;
+    delete config.program.users[req.user.username]['lastfm-password'];
+
+    Scrobbler.addUserWithSession(req.body.lastfmUser, sessionKey);
+    res.json({ linkedUser: req.body.lastfmUser });
+  });
+
+  mstream.post('/api/v1/lastfm/disconnect', async (req, res) => {
+    const lfmUser = req.user['lastfm-user'];
+
+    // Remove from config.json
+    const loadConfig = JSON.parse(await fs.readFile(config.configFile, 'utf-8'));
+    if (loadConfig.users?.[req.user.username]) {
+      delete loadConfig.users[req.user.username]['lastfm-user'];
+      delete loadConfig.users[req.user.username]['lastfm-session'];
+      delete loadConfig.users[req.user.username]['lastfm-password'];
+      await fs.writeFile(config.configFile, JSON.stringify(loadConfig, null, 2), 'utf8');
+    }
+    delete config.program.users[req.user.username]['lastfm-user'];
+    delete config.program.users[req.user.username]['lastfm-session'];
+    delete config.program.users[req.user.username]['lastfm-password'];
+
+    // Remove from runtime scrobbler
+    if (lfmUser && Scrobbler.users[lfmUser]) delete Scrobbler.users[lfmUser];
+
+    res.json({});
+  });
 }
 
 export function reset() {
   Scrobbler.reset();
+}
+
+// Allow admin.js to update the runtime API keys without restarting
+export function updateApiKeys(apiKey, apiSecret) {
+  Scrobbler.setKeys(apiKey, apiSecret);
 }

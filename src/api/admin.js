@@ -15,6 +15,7 @@ import { joiValidate } from '../util/validation.js';
 
 import { getTransAlgos, getTransCodecs, getTransBitrates } from '../api/transcode.js';
 import * as scanProgress from '../state/scan-progress.js';
+import * as scrobblerApi from './scrobbler.js';
 
 export function setup(mstream) {
   mstream.all('/api/v1/admin/{*path}', (req, res, next) => {
@@ -292,6 +293,27 @@ export function setup(mstream) {
     joiValidate(schema, req.body);
 
     await admin.setUserLastFM(req.body.username, req.body.lastfmUser, req.body.lastfmPassword);
+    res.json({});
+  });
+
+  // Update global Last.fm API key + shared secret (admin only)
+  mstream.post("/api/v1/admin/lastfm/config", async (req, res) => {
+    const schema = Joi.object({
+      apiKey:    Joi.string().required(),
+      apiSecret: Joi.string().required(),
+    });
+    joiValidate(schema, req.body);
+
+    const loadConfig = await admin.loadFile(config.configFile);
+    if (!loadConfig.lastFM) loadConfig.lastFM = {};
+    loadConfig.lastFM.apiKey    = req.body.apiKey;
+    loadConfig.lastFM.apiSecret = req.body.apiSecret;
+    await admin.saveFile(loadConfig, config.configFile);
+
+    config.program.lastFM.apiKey    = req.body.apiKey;
+    config.program.lastFM.apiSecret = req.body.apiSecret;
+    scrobblerApi.updateApiKeys(req.body.apiKey, req.body.apiSecret);
+
     res.json({});
   });
 

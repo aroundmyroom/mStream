@@ -2162,6 +2162,7 @@ const vm = new Vue({
     'logs-view': logsView,
     'rpn-view': rpnView,
     'lock-view': lockView,
+    'lastfm-view': lastFMView,
   },
   data: {
     currentViewMain: 'folders-view',
@@ -3276,6 +3277,78 @@ const editTranscodeDefaultBitrate = Vue.component('edit-transcode-bitrate-modal'
         });
       }finally {
         this.submitPending = false;
+      }
+    }
+  }
+});
+
+const lastFMView = Vue.component('lastfm-view', {
+  data() {
+    return {
+      apiKey: '',
+      apiSecret: '',
+      pending: false,
+    };
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">Last.fm API Credentials</span>
+              <p style="margin-bottom:16px;color:#aaa;font-size:.92em;">
+                This mStream installation ships with built-in Last.fm credentials.
+                You can optionally override them with your own
+                <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener">API key &amp; shared secret</a>.
+                The secret is stored server-side only and is never sent to clients.
+              </p>
+              <table>
+                <tbody>
+                  <tr>
+                    <td style="width:140px"><b>API Key</b></td>
+                    <td>
+                      <input v-model="apiKey" type="text" placeholder="Enter API key" style="margin:0" />
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><b>Shared Secret</b></td>
+                    <td>
+                      <input v-model="apiSecret" type="password" placeholder="Enter shared secret" style="margin:0" />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-action">
+              <a class="waves-effect waves-light btn" v-on:click="save()" :class="{disabled: pending}">
+                {{ pending ? 'Saving...' : 'Save Credentials' }}
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  methods: {
+    save: async function() {
+      if (!this.apiKey.trim() || !this.apiSecret.trim()) {
+        iziToast.warning({ title: 'Both fields are required', position: 'topCenter', timeout: 3500 });
+        return;
+      }
+      this.pending = true;
+      try {
+        await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/admin/lastfm/config`,
+          data: { apiKey: this.apiKey.trim(), apiSecret: this.apiSecret.trim() }
+        });
+        this.apiKey = '';
+        this.apiSecret = '';
+        iziToast.success({ title: 'Last.fm credentials saved', position: 'topCenter', timeout: 3500 });
+      } catch(err) {
+        iziToast.error({ title: 'Failed to save credentials', position: 'topCenter', timeout: 3500 });
+      } finally {
+        this.pending = false;
       }
     }
   }
