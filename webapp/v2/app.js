@@ -222,11 +222,12 @@ function restoreQueue() {
 let _persistTimer = null;
 
 // ── API ───────────────────────────────────────────────────────
-async function api(method, path, body) {
+async function api(method, path, body, signal) {
   const r = await fetch('/' + path, {
     method,
     headers: { 'Content-Type': 'application/json', 'x-access-token': S.token },
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal,
   });
   if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
   return r.json();
@@ -807,6 +808,38 @@ function renderSongRowsWithPath(songs) {
         ${pathDir ? `<div class="song-path" title="${esc(s.filepath)}">📁 ${esc(pathDir)}</div>` : ''}
       </div>
       <div class="row-stars" data-ci="${i}">${stars}</div>
+      <div class="row-actions">
+        <button class="row-act-btn add-btn" data-ci="${i}" title="Add to queue">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button class="row-act-btn ctx-btn" data-ci="${i}" title="More options">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Lightweight text-only rows for search results — no album-art <img> tags.
+// On slow browsers (CleverTouch) each image triggers a network round-trip +
+// decode + layout reflow; 50 images in one innerHTML write stalls the CPU for
+// 10-30 s and stops music playback. Plain text rows render ~10x faster.
+function renderSearchRows(songs) {
+  return songs.map((s, i) => {
+    const title  = s.title  || s.filepath?.split('/').pop() || 'Unknown';
+    const artist = s.artist || '';
+    const album  = s.album  ? ` · ${s.album}` : '';
+    const pathDir = s.filepath ? s.filepath.split('/').slice(0, -1).join('\\') : '';
+    return `<div class="song-row search-row" data-ci="${i}">
+      <div class="row-num">
+        <span class="num-val">${i + 1}</span>
+        <svg class="row-play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+      </div>
+      <div class="song-info search-row-info">
+        <div class="song-title">${esc(title)}</div>
+        ${artist || album ? `<div class="song-sub">${esc(artist)}${esc(album)}</div>` : ''}
+        ${pathDir ? `<div class="song-path" title="${esc(s.filepath)}">📁 ${esc(pathDir)}</div>` : ''}
+      </div>
       <div class="row-actions">
         <button class="row-act-btn add-btn" data-ci="${i}" title="Add to queue">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -3452,19 +3485,22 @@ function viewSearch() {
   });
 }
 
-// Monotonically-increasing counter. Each call stamps res with the generation
-// it was started with; if a newer call has already written to res by the time
-// an older (slower) response arrives, the stale response is silently discarded.
-// This prevents the classic race where typing "paul van dyk" fires 8 searches
-// and the slowest one ("paul v") resolves last, wiping the correct results.
+// AbortController for in-flight search requests — cancelled at network level
+// the moment a newer search starts, preventing stale responses from consuming
+// CPU on slow devices (CleverTouch) after results are no longer needed.
+let _searchAbort = null;
 let _searchGen = 0;
 async function doSearch(q) {
+  // Cancel any in-flight request immediately at network level
+  if (_searchAbort) { _searchAbort.abort(); }
+  _searchAbort = new AbortController();
+  const { signal } = _searchAbort;
   const res = document.getElementById('search-results');
   if (!res) return;
   const gen = ++_searchGen;
   res.innerHTML = '<div class="loading-state"></div>';
   try {
-    const d = await api('POST', 'api/v1/db/search', { search: q });
+    const d = await api('POST', 'api/v1/db/search', { search: q }, signal);
     // A newer search has already taken over — discard this stale response.
     if (gen !== _searchGen) return;
     let html = '';
@@ -3519,21 +3555,30 @@ async function doSearch(q) {
       const overflowNote = overflow > 0
         ? `<div class="search-overflow-note">Showing 50 of ${allSongs.length} — refine your search to see more</div>`
         : '';
-      html += `<div class="search-section"><h3>Songs (${allSongs.length})</h3><div class="song-list">${renderSongRowsWithPath(displaySongs)}</div>${overflowNote}</div>`;
+      // Text-only rows for search: no album-art <img> tags.
+      // On CleverTouch, each img triggers a network fetch + decode + layout
+      // reflow. 50 images saturates the CPU and stalls music playback.
+      html += `<div class="search-section"><h3>Songs (${allSongs.length})</h3><div class="song-list">${renderSearchRows(displaySongs)}</div>${overflowNote}</div>`;
     }
     if (!html) html = `<div class="empty-state">No results for "${esc(q)}"</div>`;
+
+    // Pause VU/spectrum RAF loop while we do the heavy innerHTML write.
+    // On CleverTouch the 60 fps canvas loop competes with DOM parsing and
+    // causes the 10-30 s freeze. We restart it immediately after.
+    const wasPlaying = !audioEl.paused;
+    if (wasPlaying) VU_NEEDLE.stop();
     res.innerHTML = html;
+    if (wasPlaying) VU_NEEDLE.start();
 
     res.querySelectorAll('.artist-row[data-artist]').forEach(r => r.addEventListener('click', () => viewArtistAlbums(r.dataset.artist, () => viewSearch())));
     res.querySelectorAll('.artist-row[data-album]').forEach(r => r.addEventListener('click', () => viewAlbumSongs(r.dataset.album, null, () => viewSearch())));
     attachSongListEvents(res, displaySongs);
     S.curSongs = displaySongs;
-    // Dismiss keyboard after results arrive so the first touch hits a result,
-    // not the keyboard-dismiss gesture (which felt like "nothing works").
+    // Dismiss keyboard after results arrive so the first touch hits a result.
     const inp = document.getElementById('search-input');
     if (inp) inp.blur();
   } catch(e) {
-    if (gen !== _searchGen) return;
+    if (e.name === 'AbortError' || gen !== _searchGen) return; // cancelled — ignore silently
     res.innerHTML = `<div class="empty-state">Search failed: ${esc(e.message)}</div>`;
     const inp = document.getElementById('search-input');
     if (inp) inp.blur();
