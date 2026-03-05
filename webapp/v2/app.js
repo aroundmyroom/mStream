@@ -42,6 +42,7 @@ const S = {
   gapless:   localStorage.getItem('ms2_gapless_' + (localStorage.getItem('ms2_user') || '')) === '1',
   // Auto-DJ: similar-artists mode
   djSimilar: localStorage.getItem('ms2_dj_similar_' + (localStorage.getItem('ms2_user') || '')) === '1',
+  djArtistHistory: [],  // rolling list of last N distinct artists — used as ignoreArtists cooldown
 };
 
 let audioEl = document.getElementById('audio');
@@ -269,11 +270,13 @@ const Player = {
   setQueue(songs, start) {
     S.queue = [...songs];
     S.djIgnore = [];
+    S.djArtistHistory = [];
     this.playAt(start ?? 0);
   },
   playSingle(song) {
     S.queue = [song];
     S.djIgnore = [];
+    S.djArtistHistory = [];
     this.playAt(0);
   },
   // Add to queue; if nothing is playing yet, start immediately
@@ -454,6 +457,7 @@ async function _djApiCall() {
       ignoreVPaths:  ignoreVPaths.length > 0 ? ignoreVPaths : undefined,
       filepathPrefix: filepathPrefix || undefined,
       artists:       artistFilter,
+      ignoreArtists: S.djArtistHistory.length > 0 ? S.djArtistHistory : undefined,
     });
   }
 
@@ -463,10 +467,21 @@ async function _djApiCall() {
     minRating:    S.djMinRating || undefined,
     ignoreVPaths: ignoreVPaths.length > 0 ? ignoreVPaths : undefined,
     artists:      artistFilter,
+    ignoreArtists: S.djArtistHistory.length > 0 ? S.djArtistHistory : undefined,
   });
 }
 
 // Pre-fetch: silently queue the next DJ song without playing it
+const DJ_ARTIST_COOLDOWN = 8; // minimum songs between the same artist
+function _djPushArtistHistory(artist) {
+  if (!artist) return;
+  // Remove any earlier occurrence of this artist, then push to end
+  const norm = artist.trim().toLowerCase();
+  S.djArtistHistory = S.djArtistHistory.filter(a => a.toLowerCase() !== norm);
+  S.djArtistHistory.push(artist.trim());
+  if (S.djArtistHistory.length > DJ_ARTIST_COOLDOWN) S.djArtistHistory.shift();
+}
+
 async function autoDJPrefetch() {
   if (S._djPrefetching) return;          // already in-flight
   if (S.queue.length > S.idx + 1) return; // already pre-queued
@@ -475,7 +490,9 @@ async function autoDJPrefetch() {
     const d = await _djApiCall();
     S.djIgnore = d.ignoreList;
     localStorage.setItem(_djKey('ignore'), JSON.stringify(S.djIgnore));
-    S.queue.push(norm(d.songs[0]));
+    const song = norm(d.songs[0]);
+    _djPushArtistHistory(song.artist);
+    S.queue.push(song);
     refreshQueueUI();
   } catch(e) { console.error('Auto-DJ prefetch failed:', e); }
   finally { S._djPrefetching = false; }
@@ -488,6 +505,7 @@ async function autoDJFetch() {
     S.djIgnore = d.ignoreList;
     localStorage.setItem(_djKey('ignore'), JSON.stringify(S.djIgnore));
     const song = norm(d.songs[0]);
+    _djPushArtistHistory(song.artist);
     S.queue.push(song);
     Player.playAt(S.queue.length - 1);
     refreshQueueUI();
@@ -3695,6 +3713,7 @@ async function viewAutoDJ() {
       }
       localStorage.setItem(_djKey('vpaths'), JSON.stringify(S.djVpaths));
       S.djIgnore = []; // reset play history when sources change
+      S.djArtistHistory = [];
       localStorage.removeItem(_djKey('ignore'));
     });
   }
