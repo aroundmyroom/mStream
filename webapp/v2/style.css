@@ -36,8 +36,15 @@
 html{height:100%;}
 body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--t1);font-size:14px;line-height:1.5;}
 .hidden{display:none!important;}
-button{background:none;border:none;cursor:pointer;color:inherit;font-family:inherit;font-size:inherit;}
+button{background:none;border:none;cursor:pointer;color:inherit;font-family:inherit;font-size:inherit;touch-action:manipulation;}
 a{color:inherit;text-decoration:none;}
+/* Eliminate 300 ms double-tap-zoom delay on all tappable elements.
+   Browsers only add the synthetic click delay when double-tap-zoom is possible;
+   'manipulation' keeps pan/pinch-zoom but disables double-tap-zoom on the element. */
+button, a, .song-row, .artist-row, .album-card, .album-row,
+.q-item, .fe-dir, .fe-file, .fe-crumb,
+.nav-toggle, .player-left, .player-stars-row,
+.sidebar-item, .playlist-item { touch-action:manipulation; }
 
 /* ── SCROLLBAR ─────────────────────────────────────────────── */
 ::-webkit-scrollbar{width:5px;height:5px;}
@@ -425,6 +432,10 @@ a{color:inherit;text-decoration:none;}
   display:grid;grid-template-columns:36px 48px 1fr auto auto;
   align-items:center;gap:10px;padding:8px 10px;border-radius:var(--r);
   cursor:pointer;transition:background .14s;min-width:0;
+  /* Eliminate the 300 ms tap-delay on touch screens (e.g. CleverShare/CleverTouch).
+     'manipulation' = allow pan/pinch-zoom but not double-tap-zoom, so the browser
+     fires click immediately on touchend instead of waiting to see a second tap. */
+  touch-action:manipulation;
 }
 .song-row:hover{background:var(--hover);}
 .song-row.playing{background:var(--active);}
@@ -445,15 +456,21 @@ a{color:inherit;text-decoration:none;}
 .song-title{font-size:14px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .song-sub{font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
 .song-path{font-size:11px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;font-family:monospace;letter-spacing:-.2px;}
-.row-stars{display:flex;gap:1px;flex-shrink:0;font-size:12px;letter-spacing:-.5px;cursor:pointer;}
+.row-stars{display:flex;gap:1px;flex-shrink:0;font-size:12px;letter-spacing:-.5px;cursor:pointer;touch-action:manipulation;}
 .row-stars .s-on{color:var(--yellow);}
 .row-stars .s-off{color:var(--t4);}
+/* Row action buttons: hidden on mouse, always visible on touch (hover never fires on touch) */
 .row-actions{display:flex;align-items:center;gap:2px;flex-shrink:0;opacity:0;transition:opacity .14s;}
 .song-row:hover .row-actions{opacity:1;}
+@media(hover:none){
+  /* Touch-primary devices — always show action buttons, no hover available */
+  .row-actions{opacity:1;}
+}
 .row-act-btn{
   display:flex;align-items:center;justify-content:center;
   width:28px;height:28px;border-radius:5px;color:var(--t2);
   transition:background .14s,color .14s;
+  touch-action:manipulation;
 }
 .row-act-btn:hover{background:var(--raised);color:var(--t1);}
 
@@ -501,6 +518,7 @@ a{color:inherit;text-decoration:none;}
 .search-input::placeholder{color:var(--t3);}
 .search-section{margin-bottom:24px;}
 .search-section h3{font-size:11px;font-weight:700;letter-spacing:.8px;color:var(--t3);text-transform:uppercase;margin-bottom:10px;}
+.search-overflow-note{font-size:12px;color:var(--t3);text-align:center;padding:10px 0 4px;}
 
 /* ── FILE EXPLORER ─────────────────────────────────────────── */
 .fe-filter-row{display:flex;align-items:center;gap:8px;margin-bottom:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:8px 12px;transition:border-color .18s,box-shadow .18s;}

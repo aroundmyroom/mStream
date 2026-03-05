@@ -3428,11 +3428,14 @@ function viewSearch() {
     </div>
     <div id="search-results"></div>`;
   const input = document.getElementById('search-input');
-  // Restore previous query if returning from a drill-down
+  // Restore previous query if returning from a drill-down (artist → back).
+  // Do NOT auto-focus in this case — keyboard would cover the results and the
+  // first touch to dismiss it would be "eaten", making the screen feel frozen.
   if (S.lastSearch) {
     input.value = S.lastSearch;
     doSearch(S.lastSearch);
   } else {
+    // Fresh search view: open keyboard so the user can start typing immediately.
     input.focus();
   }
   let timer;
@@ -3441,16 +3444,29 @@ function viewSearch() {
     const q = input.value.trim();
     S.lastSearch = q;
     if (!q) { document.getElementById('search-results').innerHTML = ''; return; }
-    timer = setTimeout(() => doSearch(q), 320);
+    // 600 ms debounce — touch keyboards deliver characters slowly; 320 ms fired
+    // a new API call for almost every character typed on CleverTouch.
+    // Also require at least 2 chars so single-letter noise doesn't hit the server.
+    if (q.length < 2) return;
+    timer = setTimeout(() => doSearch(q), 600);
   });
 }
 
+// Monotonically-increasing counter. Each call stamps res with the generation
+// it was started with; if a newer call has already written to res by the time
+// an older (slower) response arrives, the stale response is silently discarded.
+// This prevents the classic race where typing "paul van dyk" fires 8 searches
+// and the slowest one ("paul v") resolves last, wiping the correct results.
+let _searchGen = 0;
 async function doSearch(q) {
   const res = document.getElementById('search-results');
   if (!res) return;
+  const gen = ++_searchGen;
   res.innerHTML = '<div class="loading-state"></div>';
   try {
     const d = await api('POST', 'api/v1/db/search', { search: q });
+    // A newer search has already taken over — discard this stale response.
+    if (gen !== _searchGen) return;
     let html = '';
 
     if (d.artists?.length) {
@@ -3495,17 +3511,33 @@ async function doSearch(q) {
         'album-art': f.album_art_file || null,
       }));
     const allSongs = [...titleSongs, ...fileSongs];
-    if (allSongs.length) {
-      html += `<div class="search-section"><h3>Songs (${allSongs.length})</h3><div class="song-list">${renderSongRowsWithPath(allSongs)}</div></div>`;
+    // Cap at 50 songs — rendering 500+ rows at once causes OOM on CleverTouch.
+    // If there are more, we show a hint to refine the search.
+    const displaySongs = allSongs.slice(0, 50);
+    const overflow = allSongs.length - displaySongs.length;
+    if (displaySongs.length) {
+      const overflowNote = overflow > 0
+        ? `<div class="search-overflow-note">Showing 50 of ${allSongs.length} — refine your search to see more</div>`
+        : '';
+      html += `<div class="search-section"><h3>Songs (${allSongs.length})</h3><div class="song-list">${renderSongRowsWithPath(displaySongs)}</div>${overflowNote}</div>`;
     }
     if (!html) html = `<div class="empty-state">No results for "${esc(q)}"</div>`;
     res.innerHTML = html;
 
     res.querySelectorAll('.artist-row[data-artist]').forEach(r => r.addEventListener('click', () => viewArtistAlbums(r.dataset.artist, () => viewSearch())));
     res.querySelectorAll('.artist-row[data-album]').forEach(r => r.addEventListener('click', () => viewAlbumSongs(r.dataset.album, null, () => viewSearch())));
-    attachSongListEvents(res, allSongs);
-    S.curSongs = allSongs;
-  } catch(e) { res.innerHTML = `<div class="empty-state">Search failed: ${esc(e.message)}</div>`; }
+    attachSongListEvents(res, displaySongs);
+    S.curSongs = displaySongs;
+    // Dismiss keyboard after results arrive so the first touch hits a result,
+    // not the keyboard-dismiss gesture (which felt like "nothing works").
+    const inp = document.getElementById('search-input');
+    if (inp) inp.blur();
+  } catch(e) {
+    if (gen !== _searchGen) return;
+    res.innerHTML = `<div class="empty-state">Search failed: ${esc(e.message)}</div>`;
+    const inp = document.getElementById('search-input');
+    if (inp) inp.blur();
+  }
 }
 
 async function viewRated() {
