@@ -1181,3 +1181,27 @@ A toggle in the Auto-DJ settings panel enables Similar Artists mode.
 - Toggle state is persisted in `localStorage` (`ms2_dj_similar_<user>`).
 
 API: `/api/v1/lastfm/similar-artists`
+
+---
+
+## Seek Bar — DOM Arrow Indicator *(GitHub Copilot, 2026-03-05)*
+
+Replaced the CSS `cursor:` SVG approach (which follows the OS pointer on both axes) with a proper DOM solution:
+
+- `cursor:none` is set on `.player-progress` and `.np-progress` — the real pointer is hidden while over the bar.
+- A `.seek-arrow` `<div>` (CSS border-triangle, white / amber on cue ticks) is appended to the container. Its `bottom` is fixed in CSS and **never touched by JS** — it can only move horizontally.
+- `mousemove` on the container updates only `left` in pixels; vertical position is immovable.
+- Disappears on `mouseleave`. Turns amber when hovering over a cue tick.
+- Applied to both the player-bar row and the Now Playing modal track.
+- No API changes.
+
+---
+
+## Auto-DJ Artist Cooldown — Persisted Across Reloads *(GitHub Copilot, 2026-03-05)*
+
+The 8-song artist-cooldown window (`djArtistHistory`) was in-memory only — a server restart or page reload wiped it, allowing the same artist to repeat immediately.
+
+- `S.djArtistHistory` is now seeded from `localStorage` key `ms2_dj_artist_history_<user>` on page load.
+- Every call to `_djPushArtistHistory()` saves the updated array back to localStorage.
+- `setQueue`, `playSingle`, and vpath source changes clear the key alongside the existing `ignore` cleanup.
+- No server or API changes.

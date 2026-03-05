@@ -820,22 +820,56 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
   display:flex;align-items:center;gap:10px;
   padding:6px 0 4px;
   z-index:1;
+  position:relative;
+  cursor:none;
 }
 .player-progress span{font-size:11px;color:var(--t2);flex-shrink:0;min-width:34px;font-variant-numeric:tabular-nums;}
 .player-progress span:last-child{text-align:right;}
-.prog-track{flex:1;height:5px;border-radius:99px;background:rgba(255,255,255,.08);cursor:pointer;position:relative;transition:height .15s;}
-.prog-track:hover{height:7px;}
+.prog-track{flex:1;height:5px;border-radius:99px;background:rgba(255,255,255,.08);position:relative;}
 /* Gradient fill — purple to accent blue, feels alive across the full width */
 .prog-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--primary) 0%,var(--accent) 100%);pointer-events:none;position:relative;overflow:visible;}
 .prog-thumb{position:absolute;right:-6px;top:50%;width:12px;height:12px;border-radius:50%;background:var(--primary);border:2.5px solid rgba(255,255,255,.85);box-shadow:0 1px 6px rgba(0,0,0,.5);transform:translateY(-50%);transition:width .15s,height .15s,right .15s,box-shadow .15s;pointer-events:none;}
 .prog-track:hover .prog-thumb{width:15px;height:15px;right:-7.5px;box-shadow:0 1px 10px var(--primary-g);}
 :root.light .prog-thumb{border-color:var(--surface);}
+/* Seek time preview bubble — fixed vertical position above the progress row */
+.seek-preview{
+  position:absolute;bottom:20px;
+  transform:translateX(-50%);
+  background:var(--raised);color:var(--t1);
+  font-size:11px;font-variant-numeric:tabular-nums;
+  padding:3px 8px;border-radius:5px;
+  white-space:nowrap;pointer-events:none;
+  border:1px solid var(--border2);
+  box-shadow:0 2px 8px rgba(0,0,0,.45);
+  opacity:0;transition:opacity .08s;z-index:20;
+}
+.seek-preview.sp-show{opacity:1;}
+/* Seek arrow — DOM triangle, replaces the OS cursor; only left changes in JS, bottom is fixed */
+.seek-arrow{
+  position:absolute;
+  bottom:13px;
+  width:0;height:0;
+  border-left:7px solid transparent;
+  border-right:7px solid transparent;
+  border-top:13px solid rgba(255,255,255,.92);
+  filter:drop-shadow(0 1px 3px rgba(0,0,0,.65));
+  transform:translateX(-50%);
+  pointer-events:none;
+  opacity:0;
+  transition:opacity .05s;
+  z-index:25;
+}
+.seek-arrow.sa-show{opacity:1;}
+.seek-arrow.sa-cue{border-top-color:#ffbe1e;}
+:root.light .seek-arrow{border-top-color:rgba(80,40,180,.9);}
+/* Cue ticks restore pointer since cursor:none is on the container */
+.cue-tick{cursor:pointer;}
 .cue-markers{position:absolute;inset:0;pointer-events:none;overflow:visible;z-index:3;}
 /* Each tick: visible colored bar + tooltip. Hit zone wider than visual. */
 .cue-tick{
   position:absolute;top:0;bottom:0;width:12px;
   display:block;transform:translateX(-50%);
-  pointer-events:auto;cursor:pointer;
+  pointer-events:auto;
   background:transparent;
   border:none;padding:0;
 }
@@ -1083,7 +1117,7 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 #np-rate-clear:hover{color:var(--red);}
 .np-rate-row .rate-stars span{color:var(--t4);transition:color .12s;cursor:pointer;}
 .np-rate-row .rate-stars span.lit{color:var(--yellow);}
-.np-progress{display:flex;align-items:center;gap:10px;width:100%;}
+.np-progress{display:flex;align-items:center;gap:10px;width:100%;position:relative;cursor:none;}
 .np-progress span{font-size:12px;color:var(--t2);flex-shrink:0;min-width:36px;}
 .np-progress span:last-child{text-align:right;}
 .np-controls{display:flex;align-items:center;justify-content:center;gap:20px;}
