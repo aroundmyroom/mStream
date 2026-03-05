@@ -50,6 +50,37 @@ let scanTimer    = null;
 let djTimer      = null;
 let scrobbleTimer = null;
 let audioCtx     = null;   // shared Web Audio context (initialised by VIZ.open)
+// Detect Web Audio API + 2D canvas support once at load time.
+// Browsers without these (e.g. CleverShare) will have the VU column hidden.
+const _webAudioSupported = (() => {
+  try {
+    if (!window.AudioContext && !window.webkitAudioContext) return false;
+    const t = document.createElement('canvas');
+    return !!(t.getContext && t.getContext('2d'));
+  } catch (e) { return false; }
+})();
+// Polyfill canvas roundRect — available since Chrome 99 / Firefox 112 but missing on
+// older embedded browsers (e.g. CleverShare). Without this every drawDial/drawKnob/
+// drawPPM call throws a TypeError and canvases stay blank.
+if (typeof CanvasRenderingContext2D !== 'undefined' &&
+    !CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+    r = typeof r === 'number' ? [r,r,r,r] : (Array.isArray(r) ? r : [0,0,0,0]);
+    while (r.length < 4) r = r.concat(r.slice(0, 4 - r.length));
+    const [tl, tr, br, bl] = r;
+    this.moveTo(x + tl, y);
+    this.lineTo(x + w - tr, y);
+    this.arcTo(x + w, y,         x + w, y + tr,     tr);
+    this.lineTo(x + w, y + h - br);
+    this.arcTo(x + w, y + h,     x + w - br, y + h, br);
+    this.lineTo(x + bl, y + h);
+    this.arcTo(x,       y + h,   x, y + h - bl,     bl);
+    this.lineTo(x, y + tl);
+    this.arcTo(x,       y,       x + tl, y,          tl);
+    this.closePath();
+    return this;
+  };
+}
 let _audioGain   = null;   // Web Audio gain node — set once in ensureAudio
 let _pannerNode  = null;   // StereoPannerNode for L/R balance
 let _sleepTimer  = null;   // setInterval handle for sleep countdown
@@ -1766,7 +1797,9 @@ const VU_NEEDLE = (() => {
   // ── Ref-level knob ──────────────────────────────────────────
   function drawKnob(canvas) {
     const dpr = window.devicePixelRatio || 1;
-    const S   = Math.round(canvas.offsetWidth * dpr);
+    // offsetWidth can be 0 on browsers that don't compute layout for visibility:hidden
+    // elements; fall back to the CSS-declared 34 px so the knob always draws.
+    const S   = Math.round((canvas.offsetWidth || 34) * dpr);
     if (S < 4) return;
     if (canvas.width !== S || canvas.height !== S) { canvas.width = S; canvas.height = S; }
     const ctx  = canvas.getContext('2d');
@@ -1955,6 +1988,12 @@ const VU_NEEDLE = (() => {
       _applyMode(audioEl && !audioEl.paused);
     },
     init() {
+      if (!_webAudioSupported) {
+        const row = document.getElementById('vu-spec-row');
+        if (row) row.style.display = 'none';
+        console.warn('[mStream] Web Audio API not supported — VU meters hidden');
+        return;
+      }
       const row = document.getElementById('vu-spec-row');
       if (row) row.addEventListener('click', e => {
         // Toggle on dial, spectrum, PPM canvas (non-slider), or bare row background
@@ -1997,7 +2036,9 @@ const VIZ = (() => {
   let peakR = [], peakVelR = [];  // peak state — right channel
 
   function ensureAudio() {
+    if (!_webAudioSupported) return;
     if (audioCtx) { audioCtx.resume(); return; }
+    try {
     audioCtx    = new (window.AudioContext || window.webkitAudioContext)();
     // Resume immediately — browsers often start in 'suspended' state
     audioCtx.resume().catch(() => {});
@@ -2054,6 +2095,12 @@ const VIZ = (() => {
     _pannerNode.connect(splitter);        // post-pan L+R tap
     splitter.connect(analyserL, 0);       // left  channel (balance-aware)
     splitter.connect(analyserR, 1);       // right channel (balance-aware)
+    } catch (e) {
+      console.warn('[mStream] AudioContext init failed — VU meters hidden:', e);
+      audioCtx = null;
+      const row = document.getElementById('vu-spec-row');
+      if (row) row.style.display = 'none';
+    }
   }
 
   function setPresetLabel() {
