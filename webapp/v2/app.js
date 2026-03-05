@@ -1037,6 +1037,36 @@ const MINI_SPEC = (() => {
   const pkL = Array.from({length: BARS}, () => ({val:0, ts:0, vel:0}));
   const pkR = Array.from({length: BARS}, () => ({val:0, ts:0, vel:0}));
 
+  // Horizontal colour palette: one gradient entry per frequency bin.
+  // Rebuilt only when --primary / --accent change — cost is negligible.
+  let _palKey = '';
+  const _palBot = new Array(BARS).fill('');
+  const _palTop = new Array(BARS).fill('');
+  function _ensurePalette(colPri, colAcc, dark) {
+    const k = colPri + '|' + colAcc + '|' + dark;
+    if (k === _palKey) return;
+    const pc = document.createElement('canvas');
+    pc.width = BARS; pc.height = 1;
+    const px = pc.getContext('2d', { willReadFrequently: true });
+    const pg = px.createLinearGradient(0, 0, BARS, 0);
+    pg.addColorStop(0, colPri);
+    pg.addColorStop(1, colAcc);
+    px.fillStyle = pg; px.fillRect(0, 0, BARS, 1);
+    const d = px.getImageData(0, 0, BARS, 1).data;
+    for (let i = 0; i < BARS; i++) {
+      const r = d[i*4], g = d[i*4+1], b = d[i*4+2];
+      _palBot[i] = `rgba(${r},${g},${b},.92)`;
+      if (dark) {
+        // Dark mode: lighten top 50% toward white — glowing tip effect
+        _palTop[i] = `rgba(${Math.round(r+(255-r)*.5)},${Math.round(g+(255-g)*.5)},${Math.round(b+(255-b)*.5)},.88)`;
+      } else {
+        // Light mode: darken top 40% toward black — stays vivid against light bg
+        _palTop[i] = `rgba(${Math.round(r*.6)},${Math.round(g*.6)},${Math.round(b*.6)},1)`;
+      }
+    }
+    _palKey = k;
+  }
+
   let lastTs = 0;
   let _draining = false;  // true while bars fall to floor after pause/stop
 
@@ -1118,6 +1148,7 @@ const MINI_SPEC = (() => {
     const colPri = cs.getPropertyValue('--primary').trim();
     const colAcc = cs.getPropertyValue('--accent').trim();
     const dark   = !document.documentElement.classList.contains('light');
+    _ensurePalette(colPri, colAcc, dark);
 
     // Subtle floor line anchoring bars (#5)
     ctx.fillStyle = dark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.10)';
@@ -1155,10 +1186,11 @@ const MINI_SPEC = (() => {
         const rMax = Math.min(barW * .4, 2.5 * dpr);
         const r    = barH > rMax * 2 ? rMax : 0;  // only round when bar is tall enough (#4)
 
-        // Bar gradient
+        // Bar gradient — bottom colour varies by frequency position (horizontal),
+        // top colour is a lightened version of the same hue (vertical).
         const grd = ctx.createLinearGradient(0, baseline, 0, baseline - barH);
-        grd.addColorStop(0, colPri);
-        grd.addColorStop(1, colAcc);
+        grd.addColorStop(0, _palBot[bi]);
+        grd.addColorStop(1, _palTop[bi]);
         ctx.fillStyle = grd;
         ctx.beginPath();
         if (r > 0) ctx.roundRect(x, baseline - barH, barW, barH, [r, r, 0, 0]);
@@ -1178,7 +1210,7 @@ const MINI_SPEC = (() => {
           const py      = baseline - ph * baseline * 0.92;
           const tickA    = (Math.min(1, ph * 2) * 0.9).toFixed(2);
           ctx.globalAlpha = parseFloat(tickA);
-          ctx.fillStyle  = colAcc;
+          ctx.fillStyle  = _palTop[bi];
           ctx.fillRect(x, py - 1.5 * dpr, barW, 1.5 * dpr);
           ctx.globalAlpha = 1;
         }
