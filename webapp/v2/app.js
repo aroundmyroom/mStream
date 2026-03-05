@@ -441,6 +441,9 @@ const Player = {
     }
     // sync visualizer song info
     VIZ.songChanged();
+    // Hide seek arrow on both progress bars — crossfade/song-change doesn't
+    // trigger mouseleave so the arrow would stay frozen at the old position.
+    document.dispatchEvent(new CustomEvent('mstream-song-change'));
     // Media Session API (OS lock-screen / notification controls)
     _updateMediaSession(s);
     // Dynamic album-art colour theming
@@ -5922,6 +5925,8 @@ function _reloadFromPosition(attempt) {
   function onLeave() { arrow.classList.remove('sa-show'); bubble.classList.remove('sp-show'); }
   container.addEventListener('mousemove', onMove);
   container.addEventListener('mouseleave', onLeave);
+  // Also hide when the song changes (crossfade doesn't trigger mouseleave)
+  document.addEventListener('mstream-song-change', onLeave);
   container.addEventListener('click', e => {
     if (e.target.closest('.cue-tick')) return;
     const r = track.getBoundingClientRect();
@@ -6044,6 +6049,8 @@ document.getElementById('np-prog-track').addEventListener('click', e => {
   function onLeave() { arrow.classList.remove('sa-show'); bubble.classList.remove('sp-show'); }
   container.addEventListener('mousemove', onMove);
   container.addEventListener('mouseleave', onLeave);
+  // Also hide when the song changes (crossfade doesn't trigger mouseleave)
+  document.addEventListener('mstream-song-change', onLeave);
   container.addEventListener('click', e => {
     if (e.target.closest('.cue-tick')) return;
     const r = track.getBoundingClientRect();
