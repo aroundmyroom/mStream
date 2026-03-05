@@ -246,6 +246,16 @@ a{color:inherit;text-decoration:none;}
 /* Nav items */
 :root.light .nav-item:hover{background:rgba(100,80,200,.09);}
 :root.light .nav-item.active{background:rgba(109,60,230,.13);}
+/* Nav buttons — stronger contrast in light mode */
+:root.light .nav-btn{color:#2e2e50;}
+:root.light .nav-btn:hover{background:rgba(100,80,200,.11);color:#0c0c1a;}
+:root.light .nav-btn.active{background:rgba(109,60,230,.18);color:#4c1fc7;font-weight:600;}
+:root.light .nav-label{color:#4a4a70;}
+:root.light .pl-row-btn{color:#2e2e50;}
+:root.light .pl-row:hover .pl-row-btn{color:#0c0c1a;}
+:root.light .pl-row.active .pl-row-btn{color:#4c1fc7;font-weight:600;}
+:root.light .footer-link,:root.light .footer-action{color:#2e2e50;}
+:root.light .footer-link:hover,:root.light .footer-action:hover{color:#0c0c1a;}
 /* Control buttons */
 :root.light .ctrl-btn:hover{background:rgba(0,0,0,.09);}
 :root.light .ctrl-btn.active{background:rgba(109,60,230,.14);color:var(--primary);}
@@ -678,10 +688,7 @@ a{color:inherit;text-decoration:none;}
   width:100%;height:100%;
   pointer-events:none;
   border-radius:2px;
-  opacity:0.85;
-  transition:opacity .3s;
 }
-.mini-spec:hover{opacity:1;}
 /*
  * VU / spectrum column — col 3, spans all 3 rows.
  * align-self:end + margin-bottom:31px (= half of row-3 height ~62px)
@@ -698,7 +705,6 @@ a{color:inherit;text-decoration:none;}
   margin-bottom:31px;
   width:100%;
 }
-.vu-spec-row:hover .mini-spec{opacity:1;}
 .vu-needle-wrap{
   position:absolute;top:0;left:0;
   display:flex;gap:6px;width:100%;height:100%;align-items:stretch;
