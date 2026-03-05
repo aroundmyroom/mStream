@@ -10,6 +10,7 @@ const __dirname = getDirname(import.meta.url);
 
 const storageJoi = Joi.object({
   albumArtDirectory: Joi.string().default(path.join(__dirname, '../../image-cache')),
+  waveformDirectory: Joi.string().default(path.join(__dirname, '../../waveform-cache')),
   dbDirectory: Joi.string().default(path.join(__dirname, '../../save/db')),
   logsDirectory: Joi.string().default(path.join(__dirname, '../../save/logs')),
   syncConfigDirectory:  Joi.string().default(path.join(__dirname, '../../save/sync')),

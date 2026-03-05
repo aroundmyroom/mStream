@@ -4,6 +4,9 @@ webapp/node_modules/*
 image-cache/*
 !image-cache/README.md
 
+waveform-cache/*
+!waveform-cache/README.md
+
 save/sync/*
 !save/sync/README.md
 
