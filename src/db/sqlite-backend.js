@@ -437,6 +437,13 @@ export function getAllFilesWithMetadata(vpaths, username, opts) {
     params.push(...aIn.params);
   }
 
+  // Exclude recently-heard artists (DJ cooldown window)
+  if (opts.ignoreArtists && Array.isArray(opts.ignoreArtists) && opts.ignoreArtists.length > 0) {
+    const placeholders = opts.ignoreArtists.map(() => '?').join(',');
+    sql += ` AND (f.artist IS NULL OR f.artist NOT IN (${placeholders}))`;
+    params.push(...opts.ignoreArtists);
+  }
+
   const rows = db.prepare(sql).all(...params);
   return rows.map(mapFileRow);
 }

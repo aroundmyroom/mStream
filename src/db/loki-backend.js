@@ -586,7 +586,18 @@ export function getAllFilesWithMetadata(vpaths, username, opts) {
   return fileCollection.chain()
     .eqJoin(userMetadataCollection.chain(), leftFun, rightFunDefault, mapFunDefault)
     .find(orClause)
-    .data();
+    .data()
+    .filter(doc => {
+      if (opts.artists && Array.isArray(opts.artists) && opts.artists.length > 0) {
+        const normed = opts.artists.map(a => a.toLowerCase());
+        if (!doc.artist || !normed.includes(doc.artist.toLowerCase())) return false;
+      }
+      if (opts.ignoreArtists && Array.isArray(opts.ignoreArtists) && opts.ignoreArtists.length > 0) {
+        const normed = opts.ignoreArtists.map(a => a.toLowerCase());
+        if (doc.artist && normed.includes(doc.artist.toLowerCase())) return false;
+      }
+      return true;
+    });
 }
 
 // User Metadata

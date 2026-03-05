@@ -299,10 +299,22 @@ export function setup(mstream) {
       ignoreVPaths: req.body.ignoreVPaths,
       minRating: req.body.minRating,
       filepathPrefix: req.body.filepathPrefix || null,
-      artists: Array.isArray(req.body.artists) ? req.body.artists : undefined
+      artists: Array.isArray(req.body.artists) ? req.body.artists : undefined,
+      ignoreArtists: Array.isArray(req.body.ignoreArtists) ? req.body.ignoreArtists : undefined,
     });
 
-    const count = results.length;
+    // If ignoreArtists eliminated all candidates, retry without it so playback never stalls
+    let finalResults = results;
+    if (results.length === 0 && Array.isArray(req.body.ignoreArtists) && req.body.ignoreArtists.length > 0) {
+      finalResults = db.getAllFilesWithMetadata(req.user.vpaths, req.user.username, {
+        ignoreVPaths: req.body.ignoreVPaths,
+        minRating: req.body.minRating,
+        filepathPrefix: req.body.filepathPrefix || null,
+        artists: Array.isArray(req.body.artists) ? req.body.artists : undefined,
+      });
+    }
+
+    const count = finalResults.length;
     if (count === 0) { throw new WebError('No songs that match criteria', 400); }
     while (ignoreList.length > count * ignorePercentage) {
       ignoreList.shift();
@@ -314,7 +326,7 @@ export function setup(mstream) {
       randomNumber = Math.floor(Math.random() * count);
     }
 
-    const randomSong = results[randomNumber];
+    const randomSong = finalResults[randomNumber];
     returnThis.songs.push(renderMetadataObj(randomSong));
     ignoreList.push(randomNumber);
     returnThis.ignoreList = ignoreList;
