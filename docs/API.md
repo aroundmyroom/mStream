@@ -92,6 +92,8 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 ## Last.fm
 
+[Last.fm integration — scrobbling, connect/disconnect, similar artists, admin key config](API/lastfm.md) *(GitHub Copilot, 2026-03-05)*
+
 [/lastfm/similar-artists](API/lastfm_similar-artists.md) *(GitHub Copilot, 2026-03-04)*
 
 ## JukeBox

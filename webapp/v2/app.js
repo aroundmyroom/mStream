@@ -43,6 +43,8 @@ const S = {
   // Auto-DJ: similar-artists mode
   djSimilar: localStorage.getItem('ms2_dj_similar_' + (localStorage.getItem('ms2_user') || '')) === '1',
   djArtistHistory: JSON.parse(localStorage.getItem('ms2_dj_artist_history_' + (localStorage.getItem('ms2_user') || '')) || 'null') || [],  // rolling list of last N distinct artists — persisted across reloads
+  // Time display mode: false = elapsed|total (default), true = total|countdown
+  timeFlipped: localStorage.getItem('ms2_time_flipped_' + (localStorage.getItem('ms2_user') || '')) === '1',
 };
 
 let audioEl = document.getElementById('audio');
@@ -110,6 +112,25 @@ function fmt(sec) {
   if (!sec || isNaN(sec)) return '0:00';
   const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
   return `${m}:${s.toString().padStart(2,'0')}`;
+}
+// Update both the player-bar and NP-modal time spans to reflect current
+// playback position, honouring the timeFlipped display mode.
+function _renderTimes() {
+  if (!audioEl.duration) return;
+  const cur   = audioEl.currentTime;
+  const total = audioEl.duration;
+  const lText = S.timeFlipped ? fmt(total)                      : fmt(cur);
+  const rText = S.timeFlipped ? fmt(total - cur)               : fmt(total);
+  document.getElementById('time-cur').textContent      = lText;
+  document.getElementById('time-total').textContent    = rText;
+  document.getElementById('np-time-cur').textContent   = lText;
+  document.getElementById('np-time-total').textContent = rText;
+}
+function _toggleTimeFlipped(e) {
+  e.stopPropagation();   // prevent click bubbling to the seek bar container
+  S.timeFlipped = !S.timeFlipped;
+  localStorage.setItem('ms2_time_flipped_' + S.username, S.timeFlipped ? '1' : '');
+  _renderTimes();
 }
 function artUrl(f, size) {
   if (!f) return null;
@@ -360,8 +381,15 @@ const Player = {
     refreshQueueUI();
     // Scrobble after 30 s (logs play count + last-played timestamp)
     clearTimeout(scrobbleTimer);
-    scrobbleTimer = setTimeout(() => {
-      api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath }).catch(() => {});
+    (function(){ const el = document.getElementById('np-scrobble-status'); if (el) { el.textContent = ''; el.className = 'np-scrobble-status'; } })();
+    scrobbleTimer = setTimeout(async () => {
+      const scrobbleEl = document.getElementById('np-scrobble-status');
+      try {
+        await api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath });
+        if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: Scrobbled ✓'; scrobbleEl.className = 'np-scrobble-status np-scrobble-ok'; }
+      } catch (e) {
+        if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: ' + (e?.message || 'scrobble failed'); scrobbleEl.className = 'np-scrobble-status np-scrobble-err'; }
+      }
     }, 30000);
     persistQueue();
   },
@@ -1074,8 +1102,7 @@ function renderNPModal() {
   if (audioEl.duration) {
     const pct = (audioEl.currentTime / audioEl.duration) * 100;
     document.getElementById('np-prog-fill').style.width   = pct + '%';
-    document.getElementById('np-time-cur').textContent    = fmt(audioEl.currentTime);
-    document.getElementById('np-time-total').textContent  = fmt(audioEl.duration);
+    _renderTimes();
   }
   // Full metadata table
   function mv(val) {
@@ -1234,10 +1261,6 @@ const MINI_SPEC = (() => {
     ctx.fillStyle = dark ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.12)';
     ctx.fillRect(0, H - dpr, W, dpr);
 
-    // Centre divider
-    ctx.fillStyle = dark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.08)';
-    ctx.fillRect(hw, 0, cg, H);
-
     // No full-canvas fill — bars breathe via alpha alone, background shows through
     idleRaf = requestAnimationFrame(drawIdle);
   }
@@ -1339,9 +1362,6 @@ const MINI_SPEC = (() => {
 
     // L: treble left → bass at centre
     side(rawL, 0, true, barL, pkL);
-    // centre gap
-    ctx.fillStyle = dark ? 'rgba(255,255,255,.04)' : 'rgba(0,0,0,.08)';
-    ctx.fillRect(hw, 0, cg, H);
     // R: bass at centre → treble right
     side(rawR, hw + cg, false, barR, pkR);
 
@@ -3860,7 +3880,7 @@ async function viewAutoDJ() {
       <div class="autodj-opts">
         <h4>Settings</h4>
         ${S.vpaths.length > 1 ? `
-        <div class="autodj-opt-row">
+        <div class="autodj-opt-row autodj-opt-col">
           <div>
             <div class="autodj-opt-label">Sources</div>
             <div class="autodj-opt-hint">Collections Auto-DJ draws from</div>
@@ -4398,6 +4418,97 @@ function viewPlayHistory() {
 }
 
 // ── PLAYBACK VIEW ─────────────────────────────────────────────
+// ── LAST.FM VIEW ───────────────────────────────────────────
+async function viewLastFM() {
+  setTitle('Last.fm'); setBack(null); setNavActive('lastfm'); S.view = 'lastfm';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+
+  // Fetch current linked account
+  let linkedUser = null;
+  try { const d = await api('GET', 'api/v1/lastfm/status'); linkedUser = d.linkedUser; } catch(_) {}
+
+  setBody(`
+    <div class="playback-panel">
+
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">🎵</div>
+          <div>
+            <div class="playback-section-title">Your Last.fm Account</div>
+            <div class="playback-section-desc">Link your Last.fm profile to scrobble every track you play on this server to your Last.fm history.</div>
+          </div>
+        </div>
+
+        <div id="lfm-connected" class="${linkedUser ? '' : 'hidden'}">
+          <div class="playback-row">
+            <div class="playback-row-label">
+              <div class="playback-row-name">Connected as</div>
+              <div class="playback-row-hint" id="lfm-current-user">${esc(linkedUser || '')}</div>
+            </div>
+            <button class="btn-danger" id="lfm-disconnect-btn">Disconnect</button>
+          </div>
+        </div>
+
+        <div id="lfm-form" class="${linkedUser ? 'hidden' : ''}">
+          <div class="playback-row">
+            <label class="playback-row-label" for="lfm-username">
+              <div class="playback-row-name">Username</div>
+            </label>
+            <input type="text" id="lfm-username" class="settings-input" style="max-width:220px" placeholder="Last.fm username" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore>
+          </div>
+          <div class="playback-row">
+            <label class="playback-row-label" for="lfm-password">
+              <div class="playback-row-name">Password</div>
+            </label>
+            <input type="password" id="lfm-password" class="settings-input" style="max-width:220px" placeholder="Last.fm password" autocomplete="new-password" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore>
+          </div>
+          <div class="playback-row" style="justify-content:flex-end">
+            <button class="btn-primary" id="lfm-connect-btn">Connect</button>
+          </div>
+        </div>
+      </div>
+
+
+    </div>`);
+
+  // Disconnect
+  document.getElementById('lfm-disconnect-btn')?.addEventListener('click', async () => {
+    try {
+      await api('POST', 'api/v1/lastfm/disconnect', {});
+      toast('Last.fm account disconnected');
+      viewLastFM();
+    } catch(e) { toast('Error: ' + e.message); }
+  });
+
+  // Connect
+  document.getElementById('lfm-connect-btn')?.addEventListener('click', async () => {
+    const btn  = document.getElementById('lfm-connect-btn');
+    const user = document.getElementById('lfm-username').value.trim();
+    const pass = document.getElementById('lfm-password').value;
+    if (!user || !pass) { toast('Enter your Last.fm username and password'); return; }
+    btn.disabled = true; btn.textContent = 'Connecting…';
+    try {
+      await api('POST', 'api/v1/lastfm/connect', { lastfmUser: user, lastfmPassword: pass });
+      toast('\u2713 Last.fm connected as ' + user);
+      viewLastFM();
+    } catch(e) {
+      toast('Last.fm: ' + (e.message || 'Authentication failed'));
+      btn.disabled = false; btn.textContent = 'Connect';
+    }
+  });
+
+  // Allow Enter key to submit the connect form
+  ['lfm-username', 'lfm-password'].forEach(id => {
+    document.getElementById(id)?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('lfm-connect-btn')?.click();
+    });
+  });
+
+}
+
+// ── SLEEP TIMER LOGIC ───────────────────────────────
 function viewPlayback() {
   setTitle('Playback'); setBack(null); setNavActive('playback'); S.view = 'playback';
   S.curSongs = [];
@@ -5032,8 +5143,15 @@ function _doXfadeHandoff(nextIdx) {
   refreshQueueUI();
   loadCuePoints(s.filepath);
   clearTimeout(scrobbleTimer);
-  scrobbleTimer = setTimeout(() => {
-    api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath }).catch(() => {});
+  (function(){ const el = document.getElementById('np-scrobble-status'); if (el) { el.textContent = ''; el.className = 'np-scrobble-status'; } })();
+  scrobbleTimer = setTimeout(async () => {
+    const scrobbleEl = document.getElementById('np-scrobble-status');
+    try {
+      await api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath });
+      if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: Scrobbled ✓'; scrobbleEl.className = 'np-scrobble-status np-scrobble-ok'; }
+    } catch (e) {
+      if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: ' + (e?.message || 'scrobble failed'); scrobbleEl.className = 'np-scrobble-status np-scrobble-err'; }
+    }
   }, 30000);
   persistQueue();
 }
@@ -5315,6 +5433,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'shared-links') viewSharedLinks();
     else if (v === 'playback')  viewPlayback();
     else if (v === 'play-history') viewPlayHistory();
+    else if (v === 'lastfm')       viewLastFM();
   });
 });
 
@@ -5794,8 +5913,7 @@ function _onAudioTimeupdateUI() {
   document.getElementById('prog-fill').style.width = pct + '%';
   const _progThumb = document.getElementById('prog-thumb');
   if (_progThumb) _progThumb.style.left = pct + '%';
-  document.getElementById('time-cur').textContent   = fmt(audioEl.currentTime);
-  document.getElementById('time-total').textContent = fmt(audioEl.duration);
+  _renderTimes();
   if (S.autoDJ && S.idx === S.queue.length - 1 &&
       (audioEl.duration - audioEl.currentTime) < Math.max(
         S.djSimilar ? 45 : 25,   // similar-artists = 2 serial API calls; need more runway
@@ -5805,8 +5923,7 @@ function _onAudioTimeupdateUI() {
   }
   if (!document.getElementById('np-modal').classList.contains('hidden')) {
     document.getElementById('np-prog-fill').style.width  = pct + '%';
-    document.getElementById('np-time-cur').textContent   = fmt(audioEl.currentTime);
-    document.getElementById('np-time-total').textContent = fmt(audioEl.duration);
+    _renderTimes();
   }
   if (S.crossfade > 0 && !_xfadeFired) {
     const remaining = audioEl.duration - audioEl.currentTime;
@@ -6082,6 +6199,13 @@ document.getElementById('np-prog-track').addEventListener('click', e => {
     if (audioEl.duration) audioEl.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * audioEl.duration;
   });
 }());
+// Time display toggle — click either time span (player bar or NP modal) to flip
+// between elapsed|total and total|countdown modes.
+document.getElementById('time-cur').addEventListener('click',      _toggleTimeFlipped);
+document.getElementById('time-total').addEventListener('click',    _toggleTimeFlipped);
+document.getElementById('np-time-cur').addEventListener('click',   _toggleTimeFlipped);
+document.getElementById('np-time-total').addEventListener('click', _toggleTimeFlipped);
+
 document.getElementById('np-viz-btn').addEventListener('click', () => { hideNPModal(); VIZ.open(); });
 
 // Visualizer

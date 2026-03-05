@@ -51,7 +51,7 @@ A heavily edited config would look like:
       "salt": "6cm1jPJ1Xl/ocLbaNijpJg==",
       "vpaths": "rock",
       "lastfm-user": "username",
-      "lastfm-password": "password"
+      "lastfm-session": "<session-key-set-via-admin-ui>"
     }
   },
   "transcode": {
@@ -206,31 +206,40 @@ mStream comes with SSL support built in.  Just add your key and cert and the ser
 
 ## LastFM Scrobbling
 
-Each user can have their own lastFM credentials
+Each user can link their own Last.fm account in two ways:
+
+**Recommended — via the GUIv2 interface (Tools → Last.fm)**  
+The user enters their Last.fm username and password once. mStream authenticates against Last.fm, receives a session key, and stores only the session key. The password is never written to disk.
+
+**Config file reference** (managed automatically — do not edit by hand):
 
 ```json
 {
   "folders": {
-    "jake-music": "/media/jake/music",
-    "finn-music": "/media/finn/music",
-    "audiobooks": "/media/books/audio"
+    "jake-music": "/media/jake/music"
   },
   "users": {
     "jake": {
-      "password":"p@ssword",
-      "vpaths": ["jake-music", "audiobooks"],
-      "lastfm-user": "username",
-      "lastfm-password": "password"
-    },
-    "finn": {
-      "password":"p@ssword",
-      "vpaths": ["finn-music", "audiobooks"],
-      "lastfm-user": "username2",
-      "lastfm-password": "password2"
+      "password": "<bcrypt hash>",
+      "salt": "<salt>",
+      "vpaths": ["jake-music"],
+      "lastfm-user":    "jakeslastfm",
+      "lastfm-session": "<session key obtained via connect endpoint>"
     }
   }
 }
 ```
+
+| Field | Description |
+|-------|-------------|
+| `lastfm-user` | The Last.fm username |
+| `lastfm-session` | Session key obtained from Last.fm on connect — replaces password |
+| `lastfm-password` | Legacy field. Stored in old configs before the session-key flow was introduced. Still functional but replaced on next connect. |
+
+**Admin API key override**  
+The server ships with built-in Last.fm API credentials. An admin can override them without restarting via Admin panel → Last.fm, or via `POST /api/v1/admin/lastfm/config`.
+
+See [API/lastfm.md](API/lastfm.md) for the full API reference.
 
 ## Storage
 

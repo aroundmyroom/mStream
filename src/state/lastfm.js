@@ -16,6 +16,14 @@ Scribble.prototype.addUser = function (username, password) {
   }
 }
 
+// Restore a user from a persisted session key — password never stored
+Scribble.prototype.addUserWithSession = function (username, sessionKey) {
+  this.users[username] = {
+    password: null,
+    sessionKey: sessionKey
+  }
+}
+
 Scribble.prototype.reset = function () {
   Object.keys(this.users).forEach(k => delete this.users[k])
 }

@@ -50,8 +50,8 @@ const rpnOptions = Joi.object({
 });
 
 const lastFMOptions = Joi.object({
-  apiKey: Joi.string().default('25627de528b6603d6471cd331ac819e0'),
-  apiSecret: Joi.string().default('a9df934fc504174d4cb68853d9feb143')
+  apiKey: Joi.string().default('33098eb88840fdded379a7e5a7da67dd'),
+  apiSecret: Joi.string().default('ffa27b8912cd04050e1fa14e9ced58a4')
 });
 
 const federationOptions = Joi.object({
@@ -98,6 +98,7 @@ const schema = Joi.object({
       vpaths: Joi.array().items(Joi.string()),
       'lastfm-user': Joi.string().optional(),
       'lastfm-password': Joi.string().optional(),
+      'lastfm-session': Joi.string().optional(),
     })
   ).default({}),
   ssl: Joi.object({
