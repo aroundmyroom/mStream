@@ -88,6 +88,8 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [/db/decades, /db/decade/albums](API/db_decades.md) — decade list + albums by decade *(GitHub Copilot, 2026-03-04)*
 
+[/db/waveform](API/db_waveform.md) — waveform amplitude array for the scrubber *(GitHub Copilot, 2026-03-05)*
+
 ## Last.fm
 
 [/lastfm/similar-artists](API/lastfm_similar-artists.md) *(GitHub Copilot, 2026-03-04)*
