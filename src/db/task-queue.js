@@ -111,33 +111,42 @@ function runScan(scanObj) {
 
 async function runOrphanCleanup() {
   try {
-    const cacheDir = config.program.storage.albumArtDirectory;
-    if (!cacheDir || !fs.existsSync(cacheDir)) return;
+    const artDir      = config.program.storage.albumArtDirectory;
+    const waveformDir = config.program.storage.waveformDirectory;
 
     // Collect all live references from the DB
     const liveArt    = new Set(db.getLiveArtFilenames());   // aaFile values
     const liveHashes = new Set(db.getLiveHashes());         // hash values
 
-    const WAVEFORM_RE   = /^wf-(.+)\.json$/;
     const COMPRESSED_RE = /^z[^-]+-(.+)$/;
 
     let deleted = 0;
-    for (const file of fs.readdirSync(cacheDir)) {
-      if (file === 'README.md') continue;
-      let orphaned = false;
-      const wfMatch = file.match(WAVEFORM_RE);
-      if (wfMatch) {
-        orphaned = !liveHashes.has(wfMatch[1]);
-      } else {
+
+    // --- Album art orphan cleanup ---
+    if (artDir && fs.existsSync(artDir)) {
+      for (const file of fs.readdirSync(artDir)) {
+        if (file === 'README.md') continue;
         const m        = file.match(COMPRESSED_RE);
         const baseName = m ? m[1] : file;
-        orphaned = !liveArt.has(baseName);
-      }
-      if (orphaned) {
-        try { fs.unlinkSync(path.join(cacheDir, file)); deleted++; } catch (_e) { /* skip */ }
+        if (!liveArt.has(baseName)) {
+          try { fs.unlinkSync(path.join(artDir, file)); deleted++; } catch (_e) { /* skip */ }
+        }
       }
     }
-    if (deleted > 0) winston.info(`Post-scan cleanup: removed ${deleted} orphaned file(s) from image-cache`);
+
+    // --- Waveform orphan cleanup ---
+    const WAVEFORM_RE = /^wf-(.+)\.json$/;
+    if (waveformDir && fs.existsSync(waveformDir)) {
+      for (const file of fs.readdirSync(waveformDir)) {
+        const wfMatch = file.match(WAVEFORM_RE);
+        if (!wfMatch) continue;
+        if (!liveHashes.has(wfMatch[1])) {
+          try { fs.unlinkSync(path.join(waveformDir, file)); deleted++; } catch (_e) { /* skip */ }
+        }
+      }
+    }
+
+    if (deleted > 0) winston.info(`Post-scan cleanup: removed ${deleted} orphaned file(s) from cache`);
   } catch (err) {
     winston.warn(`Post-scan orphan cleanup failed: ${err.message}`);
   }

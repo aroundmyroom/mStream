@@ -72,10 +72,10 @@ export function setup(mstream) {
       throw new WebError('File not found', 404);
     }
 
-    // Cache in the album-art directory.
+    // Cache in the dedicated waveform directory.
     // Prefer the DB hash (content-based, shareable across vpaths/duplicates).
     // Fall back to md5(fullPath) only when the file isn't indexed at all.
-    const cacheDir  = config.program.storage.albumArtDirectory;
+    const cacheDir  = config.program.storage.waveformDirectory;
     const cacheHash = fileRow?.hash ?? crypto.createHash('md5').update(pathInfo.fullPath).digest('hex');
     const cacheKey  = `wf-${cacheHash}.json`;
     const cachePath = path.join(cacheDir, cacheKey);

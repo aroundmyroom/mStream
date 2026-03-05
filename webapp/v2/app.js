@@ -561,14 +561,33 @@ async function autoDJPrefetch() {
     localStorage.setItem(_djKey('ignore'), JSON.stringify(S.djIgnore));
     const song = norm(d.songs[0]);
     _djPushArtistHistory(song.artist);
-    S.queue.push(song);
-    refreshQueueUI();
+    // Only push if nothing was added while we were waiting (autoDJFetch race guard)
+    if (S.queue.length <= S.idx + 1) {
+      S.queue.push(song);
+      refreshQueueUI();
+    }
   } catch(e) { console.error('Auto-DJ prefetch failed:', e); }
   finally { S._djPrefetching = false; }
 }
 
-// Full fetch + play: used as fallback when prefetch wasn't ready in time
+// Full fetch + play: fallback when prefetch wasn't ready by the time the song ended.
+// Shares the _djPrefetching flag with autoDJPrefetch — if prefetch is currently
+// in-flight we wait for it instead of firing a second parallel API chain.
 async function autoDJFetch() {
+  // If prefetch is already running, wait up to 12 s for it to finish rather
+  // than launching a duplicate set of API calls at the worst possible moment.
+  if (S._djPrefetching) {
+    let waited = 0;
+    await new Promise(resolve => {
+      const iv = setInterval(() => {
+        waited += 200;
+        if (!S._djPrefetching || waited >= 12000) { clearInterval(iv); resolve(); }
+      }, 200);
+    });
+    // Prefetch succeeded and added the song — just play it
+    if (S.queue.length > S.idx + 1) { Player.playAt(S.idx + 1); return; }
+  }
+  S._djPrefetching = true;
   try {
     const d = await _djApiCall();
     S.djIgnore = d.ignoreList;
@@ -578,7 +597,10 @@ async function autoDJFetch() {
     S.queue.push(song);
     Player.playAt(S.queue.length - 1);
     refreshQueueUI();
-  } catch(e) { console.error('Auto-DJ fetch failed:', e); }
+  } catch(e) {
+    console.error('Auto-DJ fetch failed:', e);
+    toast('Auto-DJ: could not load next song — check connection');
+  } finally { S._djPrefetching = false; }
 }
 
 function setAutoDJ(on, skipAutoStart) {
@@ -5775,7 +5797,10 @@ function _onAudioTimeupdateUI() {
   document.getElementById('time-cur').textContent   = fmt(audioEl.currentTime);
   document.getElementById('time-total').textContent = fmt(audioEl.duration);
   if (S.autoDJ && S.idx === S.queue.length - 1 &&
-      (audioEl.duration - audioEl.currentTime) < Math.max(25, S.crossfade + 15)) {
+      (audioEl.duration - audioEl.currentTime) < Math.max(
+        S.djSimilar ? 45 : 25,   // similar-artists = 2 serial API calls; need more runway
+        S.crossfade + 15
+      )) {
     autoDJPrefetch();
   }
   if (!document.getElementById('np-modal').classList.contains('hidden')) {

@@ -71,7 +71,7 @@ export function setup(mstream) {
     scanProgress.finish(req.body.scanId);
     // Delete server-side waveform cache files for any tracks being pruned
     try {
-      const cacheDir = config.program.storage.albumArtDirectory;
+      const cacheDir = config.program.storage.waveformDirectory;
       const staleHashes = db.getStaleFileHashes(req.body.vpath, req.body.scanId);
       for (const hash of staleHashes) {
         const wfPath = path.join(cacheDir, `wf-${hash}.json`);
