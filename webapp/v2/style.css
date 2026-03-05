@@ -977,6 +977,7 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .modal-box input{width:100%;padding:10px 12px;background:var(--raised);border:1px solid var(--border);border-radius:var(--r);color:var(--t1);font-size:14px;outline:none;transition:border-color .18s;}
 .modal-box input:focus{border-color:var(--primary);}
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+.modal-actions .btn-primary{padding:8px 18px;margin-top:0;display:inline-flex;}
 .btn-ghost{padding:8px 16px;border-radius:var(--r);font-size:13px;font-weight:500;color:var(--t2);background:var(--raised);border:1px solid var(--border);transition:all .15s;cursor:pointer;}
 .btn-ghost:hover{color:var(--t1);background:var(--card);}
 .btn-primary{padding:8px 18px;border-radius:var(--r);font-size:13px;font-weight:600;color:#fff;background:var(--primary);border:none;transition:all .15s;cursor:pointer;}
