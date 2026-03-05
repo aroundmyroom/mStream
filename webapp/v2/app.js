@@ -223,12 +223,15 @@ let _persistTimer = null;
 
 // ── API ───────────────────────────────────────────────────────
 async function api(method, path, body, signal) {
-  const r = await fetch('/' + path, {
+  const opts = {
     method,
     headers: { 'Content-Type': 'application/json', 'x-access-token': S.token },
     body: body !== undefined ? JSON.stringify(body) : undefined,
-    signal,
-  });
+  };
+  // Only add signal when present — older browsers (CleverTouch) may reject
+  // a fetch options object that contains an explicit signal:undefined key.
+  if (signal) opts.signal = signal;
+  const r = await fetch('/' + path, opts);
   if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
   return r.json();
 }
@@ -481,28 +484,56 @@ async function _djApiCall() {
 
   if (allChildSameParent) {
     const parentVpath = meta[selected[0]].parentVpath;
-    // Combine prefixes with OR is not supported cleanly; for a single child
-    // vpath (the common case) just send the one prefix.
     const filepathPrefix = selected.length === 1 ? meta[selected[0]].filepathPrefix : null;
     const ignoreVPaths = S.vpaths.filter(v => v !== parentVpath && !meta[v]?.parentVpath);
-    return api('POST', 'api/v1/db/random-songs', {
-      ignoreList:    S.djIgnore,
-      minRating:     S.djMinRating || undefined,
-      ignoreVPaths:  ignoreVPaths.length > 0 ? ignoreVPaths : undefined,
-      filepathPrefix: filepathPrefix || undefined,
-      artists:       artistFilter,
-      ignoreArtists: S.djArtistHistory.length > 0 ? S.djArtistHistory : undefined,
-    });
+    try {
+      return await api('POST', 'api/v1/db/random-songs', {
+        ignoreList:    S.djIgnore,
+        minRating:     S.djMinRating || undefined,
+        ignoreVPaths:  ignoreVPaths.length > 0 ? ignoreVPaths : undefined,
+        filepathPrefix: filepathPrefix || undefined,
+        artists:       artistFilter,
+        ignoreArtists: S.djArtistHistory.length > 0 ? S.djArtistHistory : undefined,
+      });
+    } catch(e) {
+      // artists filter returned no library matches — fall back to random
+      if (artistFilter && e.status === 400) {
+        console.warn('[AutoDJ] No library songs for similar artists, falling back to random');
+        return api('POST', 'api/v1/db/random-songs', {
+          ignoreList:    S.djIgnore,
+          minRating:     S.djMinRating || undefined,
+          ignoreVPaths:  ignoreVPaths.length > 0 ? ignoreVPaths : undefined,
+          filepathPrefix: filepathPrefix || undefined,
+          ignoreArtists: S.djArtistHistory.length > 0 ? S.djArtistHistory : undefined,
+        });
+      }
+      throw e;
+    }
   }
 
-  const ignoreVPaths = S.vpaths.filter(v => !selected.includes(v));
-  return api('POST', 'api/v1/db/random-songs', {
-    ignoreList:   S.djIgnore,
-    minRating:    S.djMinRating || undefined,
-    ignoreVPaths: ignoreVPaths.length > 0 ? ignoreVPaths : undefined,
-    artists:      artistFilter,
-    ignoreArtists: S.djArtistHistory.length > 0 ? S.djArtistHistory : undefined,
-  });
+  try {
+    return await api('POST', 'api/v1/db/random-songs', {
+      ignoreList:   S.djIgnore,
+      minRating:    S.djMinRating || undefined,
+      ignoreVPaths: S.vpaths.filter(v => !selected.includes(v)).length > 0 ? S.vpaths.filter(v => !selected.includes(v)) : undefined,
+      artists:      artistFilter,
+      ignoreArtists: S.djArtistHistory.length > 0 ? S.djArtistHistory : undefined,
+    });
+  } catch(e) {
+    // artists filter returned no library matches — fall back to random
+    if (artistFilter && e.status === 400) {
+      console.warn('[AutoDJ] No library songs for similar artists, falling back to random');
+      toast('Similar Artists: none found in library, playing random');
+      const ignoreVPaths = S.vpaths.filter(v => !selected.includes(v));
+      return api('POST', 'api/v1/db/random-songs', {
+        ignoreList:   S.djIgnore,
+        minRating:    S.djMinRating || undefined,
+        ignoreVPaths: ignoreVPaths.length > 0 ? ignoreVPaths : undefined,
+        ignoreArtists: S.djArtistHistory.length > 0 ? S.djArtistHistory : undefined,
+      });
+    }
+    throw e;
+  }
 }
 
 // Pre-fetch: silently queue the next DJ song without playing it
