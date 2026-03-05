@@ -33,8 +33,8 @@
   --t1:#0c0c1a; --t2:#42425e; --t3:#7878a0; --t4:#b8b8d0;
   --theme-icon-moon:none; --theme-icon-sun:block;
 }
-html{height:100%;height:-webkit-fill-available;}
-body{height:100%;min-height:-webkit-fill-available;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--t1);font-size:14px;line-height:1.5;}
+html{height:100%;}
+body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--t1);font-size:14px;line-height:1.5;}
 .hidden{display:none!important;}
 button{background:none;border:none;cursor:pointer;color:inherit;font-family:inherit;font-size:inherit;}
 a{color:inherit;text-decoration:none;}
@@ -96,20 +96,23 @@ a{color:inherit;text-decoration:none;}
   grid-template-rows:1fr var(--player);
   grid-template-areas:"side main queue" "side player player";
   height:100vh;
-  height:-webkit-fill-available;
   height:100dvh;
+  max-height:100vh;
+  max-height:100dvh;
+  overflow:hidden; /* prevent content overflow pushing player off screen */
 }
 
 /* ── SIDEBAR ───────────────────────────────────────────────── */
 .sidebar{
   grid-area:side;display:flex;flex-direction:column;
   background:var(--surface);border-right:1px solid var(--border);overflow:hidden;
+  min-height:0; /* allow grid item to shrink so inner flex-scroll gets a constrained height */
 }
 .sidebar-brand{
   display:flex;align-items:center;gap:10px;padding:18px 16px 14px;
   font-weight:700;font-size:15px;letter-spacing:-.2px;flex-shrink:0;
 }
-.sidebar-scroll{flex:1;overflow-y:auto;padding:4px 0 8px;}
+.sidebar-scroll{flex:1 1 0;overflow-y:auto;padding:4px 0 8px;min-height:0;}
 .nav-label{
   padding:14px 16px 5px;font-size:10px;font-weight:700;letter-spacing:.9px;
   color:var(--t2);text-transform:uppercase;flex-shrink:0;
@@ -277,7 +280,7 @@ a{color:inherit;text-decoration:none;}
 :root.light .queue-item.active{background:rgba(109,60,230,.13);}
 
 /* ── CONTENT ───────────────────────────────────────────────── */
-.content{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width:0;}
+.content{grid-area:main;display:flex;flex-direction:column;overflow:hidden;min-width:0;min-height:0;}
 .content-header{
   display:flex;align-items:center;gap:10px;padding:16px 20px 14px;
   border-bottom:1px solid var(--border);
@@ -404,7 +407,7 @@ a{color:inherit;text-decoration:none;}
 .shared-expired-tag{display:inline-block;background:rgba(248,113,113,.15);color:var(--red);font-size:10px;padding:1px 6px;border-radius:99px;margin-left:4px;vertical-align:middle;}
 .btn-primary-sm{background:var(--primary-d);color:var(--primary);border-color:rgba(139,92,246,.3);}
 .btn-primary-sm:hover{background:var(--primary);color:#fff;}
-.content-body{flex:1;overflow-y:auto;padding:16px 20px;}
+.content-body{flex:1 1 0;overflow-y:auto;padding:16px 20px;min-height:0;}
 
 /* ── LOADING / EMPTY ───────────────────────────────────────── */
 .loading-state{display:flex;align-items:center;justify-content:center;height:160px;color:var(--t3);}
@@ -563,6 +566,7 @@ a{color:inherit;text-decoration:none;}
   display:flex;flex-direction:column;
   background:var(--surface);border-left:1px solid var(--border);
   overflow:hidden;
+  min-height:0;
   transition:width .28s cubic-bezier(.4,0,.2,1),border-color .28s;
 }
 .queue-panel.collapsed{width:0;border-left-color:transparent;}
@@ -664,7 +668,7 @@ a{color:inherit;text-decoration:none;}
    * row 2 : auto — progress timeline (cols 1-2 only)
    * row 3 : auto — vol + balance strip (cols 1-2 only)
    */
-  grid-template-columns: minmax(0,1fr) auto min(468px, 38%);
+  grid-template-columns: minmax(0,1fr) auto min(468px, 28%);
   grid-template-rows: 1fr auto auto;
   column-gap:20px; row-gap:0;
   padding:10px 16px 8px 20px;
@@ -1265,6 +1269,14 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
   .vu-spec-row{display:none;}
   .player{grid-template-columns:minmax(0,1fr) auto;}
   .player-progress,.player-right{grid-column:1/-1;}
+}
+/* Large / TV screens — expand sidebar and increase base sizes for comfortable viewing */
+@media(min-width:1600px){
+  :root{--sidebar:260px;}
+  .player-title{font-size:20px;}
+  .player-artist{font-size:16px;}
+  .nav-btn{font-size:14px;padding:9px 12px;}
+  .vu-spec-row{height:130px;}
 }
 @media(max-width:600px){
   .song-row.mp-row{grid-template-columns:36px 48px 1fr auto auto auto;}
