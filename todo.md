@@ -4,20 +4,7 @@
 
 ## NOW — In Progress / Remaining
 
-### Upload Feature (server: `noUpload: false`)
 
-The upload endpoint (`POST /api/v1/file-explorer/upload`) is fully functional on the server.
-In the classic GUI it works via drag-and-drop only, while inside the File Explorer view.
-The v2 GUI has no upload support at all yet.
-
-- [ ] Check server config on login/session — fetch `noUpload` status from `/api/v1/admin/about` or similar and store in app state
-- [ ] Add an **Upload** button to the File Explorer / Library browser in v2, visible only when `noUpload === false`
-- [ ] Implement drag-and-drop onto the file list area as an alternative to the button
-- [ ] Show a progress bar during upload (reuse the Dropzone or fetch-based approach)
-- [ ] Show success/error toast when upload completes
-- [ ] Refresh the file list after a successful upload so the new files appear immediately
-- [ ] Hide/disable the upload UI entirely when `noUpload === true` (respect admin setting)
-- [ ] Ensure the upload target directory is the currently browsed vpath directory (pass as `data-location` header, URI-encoded)
 
 ### Admin Area — GUIv2
 
@@ -43,6 +30,14 @@ It needs to be redesigned/integrated into the GUIv2 look and feel.
 ---
 
 ## DONE — Completed features
+
+### Upload in GUIv2 ✅
+- [x] `S.canUpload` set from `noUpload` flag in the `/api/v1/ping` response on login
+- [x] **Upload** button in File Explorer toolbar — visible only when `S.canUpload === true` and not at the root `/`
+- [x] Modal with drag-and-drop zone + browse-files button; files validated against `supportedAudioFiles` before queuing
+- [x] Per-file XHR progress bars; status icons (`✓` / `✗` / `…`) per file
+- [x] Auto-closes modal on completion; calls `viewFiles()` to refresh the file list immediately
+- [x] Success and error toasts with file count; `toastError()` for rejected file types
 
 ### Gapless Playback ✅
 

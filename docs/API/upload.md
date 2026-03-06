@@ -2,6 +2,9 @@
 ----
   This endpoint can be used to upload files.
 
+> **GUIv2 client**: the File Explorer view shows an **Upload** button whenever the server is configured with `noUpload: false`. Clicking it opens a modal with a drag-and-drop zone, a browse button, per-file progress bars, and automatic directory refresh on completion. Files are pre-validated against the `supportedAudioFiles` list from `/api/v1/ping` before any network request is made.
+
+
 * **URL**
 
   `/api/v1/file-explorer/upload`
