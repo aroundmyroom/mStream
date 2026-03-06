@@ -1,8 +1,11 @@
 'use strict';
 // ── STATE ─────────────────────────────────────────────────────
+// Read once at startup — avoids 14 repeated localStorage.getItem calls inside
+// the object literal (each call is a synchronous hash-map lookup + string copy).
+const _u = localStorage.getItem('ms2_user') || '';
 const S = {
   token:    localStorage.getItem('ms2_token') || '',
-  username: localStorage.getItem('ms2_user')  || '',
+  username: _u,
   isAdmin:  false,
   vpaths:   [],
   queue:    [],
@@ -11,8 +14,8 @@ const S = {
   repeat:   'off',   // 'off' | 'one' | 'all'
   autoDJ:   false,
   djIgnore: [],
-  djMinRating: parseInt(localStorage.getItem('ms2_dj_min_rating_' + (localStorage.getItem('ms2_user') || '')) || '0', 10),
-  djVpaths: JSON.parse(localStorage.getItem('ms2_dj_vpaths_' + (localStorage.getItem('ms2_user') || '')) || 'null') || [],
+  djMinRating: parseInt(localStorage.getItem('ms2_dj_min_rating_' + _u) || '0', 10),
+  djVpaths: JSON.parse(localStorage.getItem('ms2_dj_vpaths_' + _u) || 'null') || [],
   _djPrefetching: false, // true while prefetch request is in-flight
   vpathMeta: {},     // keyed by vpath: { type, parentVpath, filepathPrefix }
   playlists:[],
@@ -26,26 +29,26 @@ const S = {
   supportedAudioFiles: {},  // populated from ping
   // Transcode
   transInfo:    null,  // { serverEnabled, defaultCodec, defaultBitrate, defaultAlgorithm }
-  transEnabled: !!localStorage.getItem('ms2_trans_'         + (localStorage.getItem('ms2_user') || '')),
-  transCodec:   localStorage.getItem('ms2_trans_codec_'    + (localStorage.getItem('ms2_user') || '')) || '',
-  transBitrate: localStorage.getItem('ms2_trans_bitrate_'  + (localStorage.getItem('ms2_user') || '')) || '',
-  transAlgo:    localStorage.getItem('ms2_trans_algo_'     + (localStorage.getItem('ms2_user') || '')) || '',
+  transEnabled: !!localStorage.getItem('ms2_trans_'          + _u),
+  transCodec:   localStorage.getItem('ms2_trans_codec_'     + _u) || '',
+  transBitrate: localStorage.getItem('ms2_trans_bitrate_'   + _u) || '',
+  transAlgo:    localStorage.getItem('ms2_trans_algo_'      + _u) || '',
   // Jukebox
   jukeWs:   null,
   jukeCode: null,
   // Playback
-  crossfade: parseInt(localStorage.getItem('ms2_crossfade_' + (localStorage.getItem('ms2_user') || '')) || '0'),
+  crossfade: parseInt(localStorage.getItem('ms2_crossfade_' + _u) || '0'),
   sleepMins: 0,        // 0 = off; remaining minutes when active
   sleepEndsAt: 0,      // Date.now() ms timestamp when sleep fires
   // Playback quality
-  rgEnabled: localStorage.getItem('ms2_rg_'      + (localStorage.getItem('ms2_user') || '')) === '1',
-  gapless:   localStorage.getItem('ms2_gapless_' + (localStorage.getItem('ms2_user') || '')) === '1',
-  dynColor:  localStorage.getItem('ms2_dyn_color_' + (localStorage.getItem('ms2_user') || '')) !== '0',  // default ON; stored as '0' when disabled
+  rgEnabled: localStorage.getItem('ms2_rg_'       + _u) === '1',
+  gapless:   localStorage.getItem('ms2_gapless_'  + _u) === '1',
+  dynColor:  localStorage.getItem('ms2_dyn_color_' + _u) !== '0',  // default ON; stored as '0' when disabled
   // Auto-DJ: similar-artists mode
-  djSimilar: localStorage.getItem('ms2_dj_similar_' + (localStorage.getItem('ms2_user') || '')) === '1',
-  djArtistHistory: JSON.parse(localStorage.getItem('ms2_dj_artist_history_' + (localStorage.getItem('ms2_user') || '')) || 'null') || [],  // rolling list of last N distinct artists — persisted across reloads
+  djSimilar: localStorage.getItem('ms2_dj_similar_' + _u) === '1',
+  djArtistHistory: JSON.parse(localStorage.getItem('ms2_dj_artist_history_' + _u) || 'null') || [],  // rolling list of last N distinct artists
   // Time display mode: false = elapsed|total (default), true = total|countdown
-  timeFlipped: localStorage.getItem('ms2_time_flipped_' + (localStorage.getItem('ms2_user') || '')) === '1',
+  timeFlipped: localStorage.getItem('ms2_time_flipped_' + _u) === '1',
 };
 
 let audioEl = document.getElementById('audio');
@@ -243,6 +246,16 @@ function restoreQueue() {
 }
 // Throttled save of currentTime every 5 s while audio is playing
 let _persistTimer = null;
+// Navigation AbortController — cancelled every time the user switches view so
+// a slow in-flight response from a previous page can never overwrite current content.
+let _navAbort = null;
+function _navCancel() {
+  // Older browsers (CleverTouch) may not have AbortController — guard silently.
+  if (typeof AbortController === 'undefined') return undefined;
+  _navAbort?.abort();
+  _navAbort = new AbortController();
+  return _navAbort.signal;
+}
 
 // ── API ───────────────────────────────────────────────────────
 async function api(method, path, body, signal) {
@@ -581,6 +594,20 @@ function _djPushArtistHistory(artist) {
   localStorage.setItem(_djKey('artist_history'), JSON.stringify(S.djArtistHistory));
 }
 
+// Rolling queue cap — prune tracks that are already behind the cursor so the
+// queue never grows without bound. Keeps 10 tracks of history behind the cursor.
+// Critical on slow hardware (CleverTouch, single-CPU) where a large queue makes
+// persistQueue() / JSON.stringify stutter during playback.
+const DJ_QUEUE_CAP = 500;
+function _pruneQueue() {
+  if (S.queue.length < DJ_QUEUE_CAP || S.idx < 15) return;
+  const prune = Math.min(S.idx - 10, S.queue.length - DJ_QUEUE_CAP + 1);
+  if (prune > 0) {
+    S.queue.splice(0, prune);
+    S.idx = Math.max(0, S.idx - prune);
+  }
+}
+
 async function autoDJPrefetch() {
   if (S._djPrefetching) return;          // already in-flight
   if (S.queue.length > S.idx + 1) return; // already pre-queued
@@ -593,6 +620,7 @@ async function autoDJPrefetch() {
     _djPushArtistHistory(song.artist);
     // Only push if nothing was added while we were waiting (autoDJFetch race guard)
     if (S.queue.length <= S.idx + 1) {
+      _pruneQueue();
       S.queue.push(song);
       refreshQueueUI();
     }
@@ -624,6 +652,7 @@ async function autoDJFetch() {
     localStorage.setItem(_djKey('ignore'), JSON.stringify(S.djIgnore));
     const song = norm(d.songs[0]);
     _djPushArtistHistory(song.artist);
+    _pruneQueue();
     S.queue.push(song);
     Player.playAt(S.queue.length - 1);
     refreshQueueUI();
@@ -2152,11 +2181,12 @@ const VIZ = (() => {
     try {
     audioCtx    = new (window.AudioContext || window.webkitAudioContext)();
     // Resume immediately — browsers often start in 'suspended' state
-    audioCtx.resume().catch(() => {});
+    audioCtx.resume().catch(e => console.warn('AudioContext resume failed:', e));
     // Auto-resume if the browser suspends the context (energy-saving policy)
     // — without this a suspended context causes ~0.5 s silence mid-song.
     audioCtx.addEventListener('statechange', () => {
-      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+      if (audioCtx && audioCtx.state === 'suspended')
+        audioCtx.resume().catch(e => console.warn('AudioContext statechange resume failed:', e));
     });
     // Main analyser for butterchurn
     analyserNode = audioCtx.createAnalyser();
@@ -3129,18 +3159,20 @@ async function viewSharedLinks() {
 
 async function viewRecent() {
   setTitle('Recently Added'); setBack(null); setNavActive('recent'); S.view = 'recent';
+  const sig = _navCancel();
   setBody('<div class="loading-state"></div>');
   try {
-    const d = await api('POST', 'api/v1/db/recent/added', { limit: 200 });
+    const d = await api('POST', 'api/v1/db/recent/added', { limit: 200 }, sig);
     showSongs(d.map(norm));
-  } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
+  } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
 async function viewArtists() {
   setTitle('Artists'); setBack(null); setNavActive('artists'); S.view = 'artists';
+  const sig = _navCancel();
   setBody('<div class="loading-state"></div>');
   try {
-    const d = await api('POST', 'api/v1/db/artists', {});
+    const d = await api('POST', 'api/v1/db/artists', {}, sig);
     const rawArtists = d.artists || [];
     if (!rawArtists.length) { setBody('<div class="empty-state">No artists found</div>'); return; }
     S.curSongs = [];
@@ -3257,7 +3289,7 @@ async function viewArtists() {
       const g = groups[parseInt(row.dataset.gi)];
       if (g) row.addEventListener('click', () => viewArtistAlbums(g.display, g.variants));
     });
-  } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
+  } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
 async function viewArtistAlbums(displayName, variantsOrBackFn, backFn) {
@@ -3272,11 +3304,12 @@ async function viewArtistAlbums(displayName, variantsOrBackFn, backFn) {
     back = variantsOrBackFn;
   }
   setTitle(displayName); setBack(back || (() => viewArtists()));
+  const sig = _navCancel();
   setBody('<div class="loading-state"></div>');
   try {
     // Parallel fetch for all name variants, then merge albums client-side
     const results = await Promise.all(
-      variants.map(a => api('POST', 'api/v1/db/artists-albums', { artist: a }))
+      variants.map(a => api('POST', 'api/v1/db/artists-albums', { artist: a }, sig))
     );
     const seen = new Set();
     const albums = [];
@@ -3290,7 +3323,7 @@ async function viewArtistAlbums(displayName, variantsOrBackFn, backFn) {
       }
     }
     renderAlbumGrid(albums, displayName, variants);
-  } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
+  } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
 async function viewAllAlbums() {
@@ -3518,13 +3551,14 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
 async function viewAlbumSongs(albumName, artist, backFn) {
   setTitle(albumName || 'Singles');
   setBack(backFn || null);
+  const sig = _navCancel();
   setBody('<div class="loading-state"></div>');
   try {
     const body = { album: albumName };
     if (artist) body.artist = artist;
-    const d = await api('POST', 'api/v1/db/album-songs', body);
+    const d = await api('POST', 'api/v1/db/album-songs', body, sig);
     showSongs(d.map(norm));
-  } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
+  } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
 function viewSearch() {
@@ -3698,11 +3732,12 @@ async function viewFiles(dir, addToStack) {
   setNavActive('files'); S.view = 'files';
   if (addToStack && S.feDir !== dir) S.feDirStack.push(S.feDir);
   S.feDir = dir || '';
+  const sig = _navCancel();
   setBody('<div class="loading-state"></div>');
   try {
-    const d = await api('POST', 'api/v1/file-explorer', { directory: S.feDir, sort: true, pullMetadata: true });
+    const d = await api('POST', 'api/v1/file-explorer', { directory: S.feDir, sort: true, pullMetadata: true }, sig);
     renderFileExplorer(d);
-  } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
+  } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
 function renderFileExplorer(d) {
@@ -5228,34 +5263,49 @@ function _startCrossfade(nextIdx) {
   VIZ.initAudio();               // ensure audioCtx + _audioGain exist
   const xEl  = _getOrCreateXfadeEl();
   _connectXfadeToAudio();         // wire xfadeEl into the Web Audio graph
-  // For crossfade, _nextElGain must be 1 so xEl.volume ramp controls output.
-  // (Gapless keeps _nextElGain at 0 and uses setValueAtTime scheduling.)
-  if (_nextElGain) { _nextElGain.gain.cancelScheduledValues(0); _nextElGain.gain.value = 1; }
   const next = S.queue[nextIdx];
   if (!next) { _xfadeFired = false; return; }
-  xEl.src    = mediaUrl(next.filepath);
-  xEl.volume = 0;
+  xEl.src = mediaUrl(next.filepath);
   xEl.play().catch(() => {});
 
   // Kick off the visual dissolve in parallel with the audio ramp
   _startArtXfade(nextIdx, xf * 1000);
 
-  let step = 0;
   clearInterval(_xfadeGainIv);
-  _xfadeGainIv = setInterval(() => {
-    step++;
-    const pct      = Math.min(step / steps, 1);
-    // Equal-power (constant-power) crossfade — sin²+cos²=1 keeps perceived
-    // loudness constant throughout the fade instead of dipping/swelling.
-    audioEl.volume = Math.max(0, _xfadeStartVol * Math.cos(pct * Math.PI / 2));
-    xEl.volume     = Math.min(_xfadeStartVol, _xfadeStartVol * Math.sin(pct * Math.PI / 2));
-    if (step >= steps) {
-      clearInterval(_xfadeGainIv);
-      _xfadeGainIv = null;
-      // Ramp done — audioEl has at most a few ms left.
-      // The 'ended' event will call _doXfadeHandoff to complete the transition.
+  _xfadeGainIv = null;
+
+  if (audioCtx && _curElGain && _nextElGain) {
+    // ── Web Audio path: hardware-scheduled equal-power gain curves ───────────
+    // Both elements play at full user volume; gain nodes handle the blend.
+    // setValueCurveAtTime is sample-accurate — no audible stepping.
+    xEl.volume = _xfadeStartVol;
+    const N = 256; // curve resolution — 256 points is more than sufficient
+    const curCurve = new Float32Array(N);
+    const nxtCurve = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const t = i / (N - 1);
+      curCurve[i] = Math.cos(t * Math.PI / 2); // 1 → 0  (outgoing)
+      nxtCurve[i] = Math.sin(t * Math.PI / 2); // 0 → 1  (incoming)
     }
-  }, stepMs);
+    _curElGain.gain.cancelScheduledValues(audioCtx.currentTime);
+    _nextElGain.gain.cancelScheduledValues(audioCtx.currentTime);
+    _curElGain.gain.setValueAtTime(1, audioCtx.currentTime);
+    _nextElGain.gain.setValueAtTime(0, audioCtx.currentTime);
+    _curElGain.gain.setValueCurveAtTime(curCurve, audioCtx.currentTime, xf);
+    _nextElGain.gain.setValueCurveAtTime(nxtCurve, audioCtx.currentTime, xf);
+    // No interval needed — AudioContext handles everything on the audio thread.
+  } else {
+    // ── Fallback: setInterval ramp (no Web Audio, e.g. CleverTouch) ──────────
+    xEl.volume = 0;
+    let step = 0;
+    _xfadeGainIv = setInterval(() => {
+      step++;
+      const pct = Math.min(step / steps, 1);
+      audioEl.volume = Math.max(0, _xfadeStartVol * Math.cos(pct * Math.PI / 2));
+      xEl.volume     = Math.min(_xfadeStartVol, _xfadeStartVol * Math.sin(pct * Math.PI / 2));
+      if (step >= steps) { clearInterval(_xfadeGainIv); _xfadeGainIv = null; }
+    }, stepMs);
+  }
 }
 
 // Called exclusively from the 'ended' handler when _xfadeFired is true.
