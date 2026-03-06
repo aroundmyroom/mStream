@@ -40,6 +40,7 @@ const S = {
   // Playback quality
   rgEnabled: localStorage.getItem('ms2_rg_'      + (localStorage.getItem('ms2_user') || '')) === '1',
   gapless:   localStorage.getItem('ms2_gapless_' + (localStorage.getItem('ms2_user') || '')) === '1',
+  dynColor:  localStorage.getItem('ms2_dyn_color_' + (localStorage.getItem('ms2_user') || '')) !== '0',  // default ON; stored as '0' when disabled
   // Auto-DJ: similar-artists mode
   djSimilar: localStorage.getItem('ms2_dj_similar_' + (localStorage.getItem('ms2_user') || '')) === '1',
   djArtistHistory: JSON.parse(localStorage.getItem('ms2_dj_artist_history_' + (localStorage.getItem('ms2_user') || '')) || 'null') || [],  // rolling list of last N distinct artists — persisted across reloads
@@ -95,6 +96,7 @@ let _xfadeWired  = false;  // true once _xfadeEl is connected to Web Audio
 let _curElGain   = null;   // per-element GainNode for audioEl  — for scheduled swap
 let _nextElGain  = null;   // per-element GainNode for _xfadeEl — for scheduled swap
 let _gaplessTimer= null;   // setTimeout handle: starts xEl 80ms before end
+let _msPosThrottle = 0;    // timestamp of last setPositionState call — throttled to 1 Hz
 let _rgGainNode  = null;   // ReplayGain gain node — inserted before _audioGain
 let _waveformData = null;  // decoded waveform array [0..255] for current track
 let _waveformFp  = null;   // filepath matching _waveformData (avoids double-fetch)
@@ -4437,7 +4439,7 @@ async function viewLastFM() {
           <div class="playback-section-icon">🎵</div>
           <div>
             <div class="playback-section-title">Your Last.fm Account</div>
-            <div class="playback-section-desc">Link your Last.fm profile to scrobble every track you play on this server to your Last.fm history.</div>
+            <div class="playback-section-desc">Link your Last.fm profile to scrobble every track you play on this server to your Last.fm history. Your password is never stored — it is used once to obtain a session key from Last.fm, and only that key is saved.</div>
           </div>
         </div>
 
@@ -4510,7 +4512,7 @@ async function viewLastFM() {
 
 // ── SLEEP TIMER LOGIC ───────────────────────────────
 function viewPlayback() {
-  setTitle('Playback'); setBack(null); setNavActive('playback'); S.view = 'playback';
+  setTitle('Playback Settings'); setBack(null); setNavActive('playback'); S.view = 'playback';
   S.curSongs = [];
   document.getElementById('play-all-btn').onclick = null;
   document.getElementById('add-all-btn').onclick  = null;
@@ -4611,7 +4613,28 @@ function viewPlayback() {
         </div>
       </div>
 
-    </div>`);
+      <!-- ── DYNAMIC COLOURS ── -->
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">🎨</div>
+          <div>
+            <div class="playback-section-title">Dynamic Colours</div>
+            <div class="playback-section-desc">Tints the interface with the dominant colour sampled from the current album art.</div>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Dynamic Colours</div>
+            <div class="playback-row-hint">Stored in this browser's local storage — setting is per-browser for now</div>
+          </div>
+          <label class="toggle-sw">
+            <input type="checkbox" id="dyn-color-enable" ${S.dynColor ? 'checked' : ''}>
+            <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
+          </label>
+        </div>
+      </div>
+
+    </div>`)
 
   // Crossfade slider
   const xfSlider = document.getElementById('xf-slider');
@@ -4647,6 +4670,20 @@ function viewPlayback() {
     S.gapless = e.target.checked;
     S.gapless ? localStorage.setItem(_uKey('gapless'), '1') : localStorage.removeItem(_uKey('gapless'));
     toast(S.gapless ? 'Gapless playback: On' : 'Gapless playback: Off');
+  });
+
+  // Dynamic colours toggle
+  document.getElementById('dyn-color-enable').addEventListener('change', e => {
+    S.dynColor = e.target.checked;
+    // Store '0' when OFF (default is ON — key absent means enabled)
+    S.dynColor ? localStorage.removeItem(_uKey('dyn_color')) : localStorage.setItem(_uKey('dyn_color'), '0');
+    if (S.dynColor) {
+      _lastThemeUrl = null;  // force re-sample
+      _applyAlbumArtTheme(S.queue[S.idx] ? artUrl(S.queue[S.idx]['album-art'], 'l') : null);
+    } else {
+      _resetAlbumArtTheme();
+    }
+    toast(S.dynColor ? 'Dynamic colours: On' : 'Dynamic colours: Off');
   });
 }
 
@@ -4899,6 +4936,7 @@ function _resetAlbumArtTheme() {
 }
 
 function _applyAlbumArtTheme(url) {
+  if (!S.dynColor) { _resetAlbumArtTheme(); _lastThemeUrl = null; return; }
   if (!url) { _resetAlbumArtTheme(); _lastThemeUrl = null; return; }
   if (url === _lastThemeUrl) return;
   _lastThemeUrl = url;
@@ -5810,8 +5848,8 @@ function _syncQueueLabel() {
 }
 
 // ── AUDIO EVENT HANDLERS (named so they can be moved to a swapped element) ──
-function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); _startWaveformRaf(); document.body.classList.add('audio-playing'); }
-function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  _stopWaveformRaf(); document.body.classList.remove('audio-playing'); }
+function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); _startWaveformRaf(); document.body.classList.add('audio-playing'); if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'playing'; } catch(_e) {} }
+function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  _stopWaveformRaf(); document.body.classList.remove('audio-playing'); if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'paused'; } catch(_e) {} }
 function _onAudioEnded() {
   if (S.sleepMins === -1) {
     S.sleepMins = 0;
@@ -5908,6 +5946,14 @@ function _onAudioTimeupdatePersist() {
 }
 function _onAudioTimeupdateUI() {
   if (!audioEl.duration) return;
+  // Media Session position state — throttled to 1 Hz
+  if ('mediaSession' in navigator) {
+    const _tNow = Date.now();
+    if (_tNow - _msPosThrottle >= 1000) {
+      _msPosThrottle = _tNow;
+      try { navigator.mediaSession.setPositionState({ duration: audioEl.duration, playbackRate: audioEl.playbackRate, position: audioEl.currentTime }); } catch(_e) {}
+    }
+  }
   if (_cuePoints.length && !_cueMarkersRendered) renderCueMarkers();
   const pct = (audioEl.currentTime / audioEl.duration) * 100;
   document.getElementById('prog-fill').style.width = pct + '%';
