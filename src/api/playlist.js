@@ -41,8 +41,12 @@ export function setup(mstream) {
         // parentVpath: the vpath that physically covers this folder's files in the DB
         // filepathPrefix: the relative path prefix to filter by inside the parent vpath
         parentVpath: parentVpath || null,
+        // Normalize child root with a trailing slash before slicing so the
+        // prefix always ends with '/' (e.g. "Disco/" not "Disco").
+        // Without the slash, SQLite LIKE 'Disco%' would incorrectly match
+        // sibling folders like "Disco Mix Club Series/".
         filepathPrefix: parentVpath
-          ? allFolders[p].root.slice(allFolders[parentVpath].root.replace(/\/?$/, '/').length)
+          ? allFolders[p].root.replace(/\/?$/, '/').slice(allFolders[parentVpath].root.replace(/\/?$/, '/').length)
           : null
       };
     });
