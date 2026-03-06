@@ -6279,6 +6279,12 @@ document.getElementById('volume').addEventListener('input', e => {
 function _setVolPct(val) {
   const el = document.getElementById('vol-pct');
   if (el) el.textContent = Math.round(val) + '%';
+  // Drive the filled-track gradient and thumb glow via CSS custom properties
+  const slider = document.getElementById('volume');
+  if (slider) {
+    slider.style.setProperty('--vol-pct',  val + '%');
+    slider.style.setProperty('--vol-glow', Math.round(val * 0.18) + 'px');
+  }
 }
 
 // ── Balance slider ───────────────────────────────────────────
@@ -6752,11 +6758,56 @@ window.EGG = (() => {
 // Keyboard shortcuts
 document.addEventListener('keydown', e => {
   if (['INPUT','TEXTAREA'].includes(e.target.tagName)) return;
-  if (e.code === 'Escape')     { hideNPModal(); hideCtxMenu(); VIZ.close(); }
-  if (e.code === 'Space')       { e.preventDefault(); Player.toggle(); }
-  if (e.code === 'ArrowRight')  { e.preventDefault(); Player.next(); }
-  if (e.code === 'ArrowLeft')   { e.preventDefault(); Player.prev(); }
-  if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey) { S.shuffle = !S.shuffle; document.getElementById('shuffle-btn').classList.toggle('active', S.shuffle); toast(S.shuffle ? 'Shuffle: On' : 'Shuffle: Off'); }
+  if (e.target.isContentEditable) return;
+
+  switch (e.code) {
+    case 'Escape':
+      hideNPModal(); hideCtxMenu(); VIZ.close();
+      break;
+    case 'Space':
+      e.preventDefault(); Player.toggle();
+      break;
+    // ← → seek ±5s  (Shift+← → skip track)
+    case 'ArrowRight':
+      e.preventDefault();
+      if (e.shiftKey) { Player.next(); }
+      else if (audioEl.duration) { audioEl.currentTime = Math.min(audioEl.duration, audioEl.currentTime + 5); }
+      break;
+    case 'ArrowLeft':
+      e.preventDefault();
+      if (e.shiftKey) { Player.prev(); }
+      else if (audioEl.duration) { audioEl.currentTime = Math.max(0, audioEl.currentTime - 5); }
+      break;
+    // ↑ ↓ volume ±5%
+    case 'ArrowUp': {
+      e.preventDefault();
+      const vUp = Math.min(100, Math.round(audioEl.volume * 100) + 5);
+      audioEl.volume = vUp / 100;
+      const slUp = document.getElementById('volume');
+      if (slUp) slUp.value = vUp;
+      _setVolPct(vUp);
+      break;
+    }
+    case 'ArrowDown': {
+      e.preventDefault();
+      const vDn = Math.max(0, Math.round(audioEl.volume * 100) - 5);
+      audioEl.volume = vDn / 100;
+      const slDn = document.getElementById('volume');
+      if (slDn) slDn.value = vDn;
+      _setVolPct(vDn);
+      break;
+    }
+    case 'KeyM':
+      document.getElementById('mute-btn')?.click();
+      break;
+    case 'KeyS':
+      if (!e.ctrlKey && !e.metaKey) {
+        S.shuffle = !S.shuffle;
+        document.getElementById('shuffle-btn').classList.toggle('active', S.shuffle);
+        toast(S.shuffle ? 'Shuffle: On' : 'Shuffle: Off');
+      }
+      break;
+  }
 });
 
 // ── SIDEBAR COLLAPSE ─────────────────────────────────────────
