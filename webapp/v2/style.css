@@ -125,7 +125,7 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .brand-name{font-size:15px;}
 .brand-m{font-weight:300;color:var(--t2);}
 .brand-stream{font-weight:700;color:var(--t1);letter-spacing:-.2px;}
-.brand-velvet{font-size:9px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--primary);opacity:.8;}
+.brand-velvet{font-size:9px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--primary);opacity:.8;align-self:flex-end;}
 .sidebar-scroll{flex:1 1 0;overflow-y:auto;padding:4px 0 8px;min-height:0;}
 .nav-label{
   padding:14px 16px 5px;font-size:10px;font-weight:700;letter-spacing:.9px;
@@ -773,7 +773,7 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .vu-cn-velvet{
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
   font-size:9px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;
-  color:var(--primary);opacity:.85;
+  color:var(--primary);opacity:.85;align-self:flex-end;
 }
 /* Flowing gradient on both name elements while audio is playing */
 body.audio-playing .vu-cn-main,
