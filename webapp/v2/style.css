@@ -277,7 +277,6 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 :root.light .ctrl-btn:hover{background:rgba(0,0,0,.09);}
 :root.light .ctrl-btn.active{background:rgba(109,60,230,.14);color:var(--primary);}
 /* Sliders — more visible track */
-:root.light .vol-slider{background:rgba(0,0,0,.20);}
 :root.light .bal-slider{background:rgba(0,0,0,.20);}
 /* pright buttons */
 :root.light .pright-btn:hover{background:rgba(0,0,0,.09);}
@@ -761,13 +760,24 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
   border-radius:50%;display:block;
 }
 .vu-center-name{
-  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-  font-size:8px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
-  color:var(--t2);white-space:nowrap;
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+  line-height:1;white-space:nowrap;
   transition:color .4s;
 }
-/* Flowing primary→accent gradient while audio is playing */
-body.audio-playing .vu-center-name{
+.vu-cn-main{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  font-size:11px;font-weight:300;letter-spacing:.5px;
+  color:var(--t2);
+}
+.vu-cn-main strong{font-weight:700;color:var(--t1);}
+.vu-cn-velvet{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  font-size:9px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--primary);opacity:.85;
+}
+/* Flowing gradient on both name elements while audio is playing */
+body.audio-playing .vu-cn-main,
+body.audio-playing .vu-cn-main strong{
   background:linear-gradient(90deg,var(--primary),var(--accent),var(--primary));
   background-size:200% auto;
   -webkit-background-clip:text;
@@ -775,6 +785,15 @@ body.audio-playing .vu-center-name{
   -webkit-text-fill-color:transparent;
   color:transparent;
   animation:vu-name-flow 3s linear infinite;
+}
+body.audio-playing .vu-cn-velvet{
+  background:linear-gradient(90deg,var(--accent),var(--primary),var(--accent));
+  background-size:200% auto;
+  -webkit-background-clip:text;
+  background-clip:text;
+  -webkit-text-fill-color:transparent;
+  color:transparent;
+  animation:vu-name-flow 3s linear infinite reverse;
 }
 @keyframes vu-name-flow{
   0%  {background-position:0% center;}
@@ -978,8 +997,41 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .mute-btn{display:flex;align-items:center;justify-content:center;flex-shrink:0;opacity:.55;transition:opacity .15s,color .15s;color:var(--t1);}
 .mute-btn:hover{opacity:1;}
 .mute-btn.muted{opacity:1;color:var(--red);}
-.vol-slider{flex:1;height:4px;cursor:pointer;accent-color:var(--primary);-webkit-appearance:none;appearance:none;background:var(--border2);border-radius:99px;outline:none;}
-.vol-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--primary);cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.4);}
+.vol-slider{
+  flex:1;height:4px;cursor:pointer;
+  -webkit-appearance:none;appearance:none;
+  background:linear-gradient(to right,
+    var(--primary) 0%,
+    var(--primary) var(--vol-pct, 80%),
+    var(--border2)  var(--vol-pct, 80%),
+    var(--border2)  100%);
+  border-radius:99px;outline:none;
+}
+.vol-slider::-webkit-slider-thumb{
+  -webkit-appearance:none;
+  width:14px;height:14px;border-radius:50%;
+  background:var(--primary);cursor:pointer;
+  box-shadow:
+    0 0 var(--vol-glow, 5px) calc(var(--vol-glow, 5px) * .55) var(--primary-g),
+    0 1px 4px rgba(0,0,0,.4);
+  transition:box-shadow .12s;
+}
+.vol-slider::-moz-range-track{
+  height:4px;border-radius:99px;
+  background:linear-gradient(to right,
+    var(--primary) 0%,
+    var(--primary) var(--vol-pct, 80%),
+    var(--border2)  var(--vol-pct, 80%),
+    var(--border2)  100%);
+}
+.vol-slider::-moz-range-thumb{
+  width:14px;height:14px;border-radius:50%;border:none;
+  background:var(--primary);cursor:pointer;
+  box-shadow:
+    0 0 var(--vol-glow, 5px) calc(var(--vol-glow, 5px) * .55) var(--primary-g),
+    0 1px 4px rgba(0,0,0,.4);
+  transition:box-shadow .12s;
+}
 .vol-pct{font-size:11px;color:var(--t2);min-width:34px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums;margin-left:4px;}
 
 /* ── MODALS ────────────────────────────────────────────────── */
