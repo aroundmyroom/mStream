@@ -30,12 +30,22 @@
 <div id="login-screen">
   <div class="login-card">
     <div class="login-brand">
-      <svg width="44" height="44" viewBox="72 33 76 89">
-        <polygon fill="#6684B2" points="75,118.5 75,35.5 96,48.5 96,118.5"/>
-        <polygon fill="#26477B" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/>
-        <polygon fill="#6684B2" points="124,118.5 124,48.5 145,35.5 145,118.5"/>
+      <svg width="48" height="48" viewBox="72 33 76 89">
+        <defs>
+          <linearGradient id="lg-vg-o" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#c4b5fd"/>
+            <stop offset="100%" stop-color="#6d28d9" stop-opacity=".85"/>
+          </linearGradient>
+          <linearGradient id="lg-vg-i" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#4c1d95"/>
+            <stop offset="100%" stop-color="#a78bfa"/>
+          </linearGradient>
+        </defs>
+        <polygon fill="url(#lg-vg-o)" points="75,118.5 75,35.5 96,48.5 96,118.5"/>
+        <polygon fill="url(#lg-vg-i)" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/>
+        <polygon fill="url(#lg-vg-o)" points="124,118.5 124,48.5 145,35.5 145,118.5"/>
       </svg>
-      <h1>mStream</h1>
+      <h1><span class="brand-m">m</span><span class="brand-stream">Stream</span> <span class="login-velvet-tag">Velvet</span></h1>
       <p>Your personal music server</p>
     </div>
     <form id="login-form">
@@ -274,12 +284,25 @@
   <!-- SIDEBAR -->
   <aside class="sidebar">
     <div class="sidebar-brand">
-      <svg width="26" height="26" viewBox="72 33 76 89">
-        <polygon fill="#6684B2" points="75,118.5 75,35.5 96,48.5 96,118.5"/>
-        <polygon fill="#26477B" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/>
-        <polygon fill="#6684B2" points="124,118.5 124,48.5 145,35.5 145,118.5"/>
+      <svg width="30" height="30" viewBox="72 33 76 89">
+        <defs>
+          <linearGradient id="sb-vg-o" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#c4b5fd"/>
+            <stop offset="100%" stop-color="#6d28d9" stop-opacity=".85"/>
+          </linearGradient>
+          <linearGradient id="sb-vg-i" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#4c1d95"/>
+            <stop offset="100%" stop-color="#a78bfa"/>
+          </linearGradient>
+        </defs>
+        <polygon fill="url(#sb-vg-o)" points="75,118.5 75,35.5 96,48.5 96,118.5"/>
+        <polygon fill="url(#sb-vg-i)" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/>
+        <polygon fill="url(#sb-vg-o)" points="124,118.5 124,48.5 145,35.5 145,118.5"/>
       </svg>
-      <span>mStream</span>
+      <div class="brand-text">
+        <div class="brand-name"><span class="brand-m">m</span><span class="brand-stream">Stream</span></div>
+        <div class="brand-velvet">Velvet</div>
+      </div>
     </div>
 
     <div class="sidebar-scroll">
@@ -603,9 +626,19 @@
         <canvas id="vu-dial-L" class="vu-dial"></canvas>
         <div class="vu-center-logo">
           <svg width="22" height="22" viewBox="72 33 76 89" style="pointer-events:none">
-            <polygon fill="#6684B2" points="75,118.5 75,35.5 96,48.5 96,118.5"/>
-            <polygon fill="#26477B" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/>
-            <polygon fill="#6684B2" points="124,118.5 124,48.5 145,35.5 145,118.5"/>
+            <defs>
+              <linearGradient id="vu-vg-o" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#c4b5fd"/>
+                <stop offset="100%" stop-color="#6d28d9" stop-opacity=".85"/>
+              </linearGradient>
+              <linearGradient id="vu-vg-i" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#4c1d95"/>
+                <stop offset="100%" stop-color="#a78bfa"/>
+              </linearGradient>
+            </defs>
+            <polygon fill="url(#vu-vg-o)" points="75,118.5 75,35.5 96,48.5 96,118.5"/>
+            <polygon fill="url(#vu-vg-i)" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/>
+            <polygon fill="url(#vu-vg-o)" points="124,118.5 124,48.5 145,35.5 145,118.5"/>
           </svg>
           <canvas id="vu-ref-knob" class="vu-ref-knob" title="Drag up/down · peak ref: -13 dBFS"></canvas>
           <span class="vu-center-name" style="pointer-events:none">mStream</span>
