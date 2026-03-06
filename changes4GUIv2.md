@@ -253,7 +253,7 @@ explicit confirmation dialog, and show a toast on success.  Ratings are
 | **Search** | Live search across songs, artists, albums |
 | **Artists** | A-Z artist list with avatar initials; click → albums of that artist |
 | **Albums** | Responsive card grid; click → song list for that album |
-| **File Explorer** | Directory tree with breadcrumb, inline filter, folder and file rows |
+| **File Explorer** | Directory tree with breadcrumb, inline filter, folder and file rows; Upload button when server permits |
 | **Playlists** | Load from sidebar; full song-row list with play-all / add-all |
 | **Auto-DJ** | Config panel (vpath filter, min rating, start/stop) |
 | **Jukebox** | Room code + QR + WebSocket status |
@@ -408,6 +408,22 @@ After editing nginx.conf, reload without downtime:
 ```bash
 sudo nginx -t && sudo nginx -s reload
 ```
+
+---
+
+## Upload — GUIv2 Client
+
+Full upload support added to the v2 GUI — previously only the legacy alpha UI had upload capability.
+
+- **Upload button** in the File Explorer toolbar: appears only when the server has `noUpload: false` (stored as `S.canUpload`) and the user is browsed into a real directory (not the root `/`).
+- **Modal** (`#upload-modal`) with:
+  - Drag-and-drop zone — drop files directly onto it.
+  - Browse button — opens the OS file picker; `accept` attribute is set dynamically from the server's `supportedAudioFiles` whitelist so the OS filters to audio only by default.
+  - Per-file rows showing filename, size, a remove button (pre-upload) or status icon (`✓` / `✗` / `…`).
+  - Per-file XHR progress bars updated via `xhr.upload.onprogress`.
+- Files are validated against `S.supportedAudioFiles` before being queued; invalid types are rejected immediately with a `toastError()` — no network request is made.
+- On completion the modal auto-closes and `viewFiles(dir)` is called to refresh the directory listing immediately.
+- The upload target directory is the currently browsed path, sent as the `data-location` header (URI-encoded) on each XHR request.
 
 ---
 
