@@ -5078,6 +5078,142 @@ function _connectXfadeToAudio() {
   } catch(e) { /* already connected or no audioCtx */ }
 }
 
+// ── VISUAL CROSSFADE (album art + track info) ────────────────
+// Fades the incoming track's art and text in sync with the audio xfade so
+// there is no hard visual switch — the album art crossfades like a dissolve
+// and the title/artist text fades out then back in with the new values.
+
+function _startArtXfade(nextIdx, durationMs) {
+  const s = S.queue[nextIdx];
+  if (!s) return;
+  const dur = (durationMs / 1000).toFixed(2) + 's';
+
+  // Helper: same double-rAF trick that makes the art overlay work perfectly.
+  // 1) snapshot old content into an absolute overlay → fade it OUT (1 → 0)
+  // 2) write new content into real elements at opacity:0 → fade them IN (0 → 1)
+  // Both start at the exact same moment, same duration — a true dissolve.
+  function _dissolveText(containerSel, ids, newValues) {
+    const container = document.querySelector(containerSel);
+    if (!container) return;
+
+    // Remove any leftover overlay from a previous (interrupted) xfade
+    container.querySelectorAll('.xf-text-out').forEach(e => e.remove());
+
+    // Build outgoing overlay from current element content
+    const outEl = document.createElement('div');
+    outEl.className = 'xf-text-out';
+    outEl.style.transition = `opacity ${dur} ease-in-out`;
+    ids.forEach(id => {
+      const real = document.getElementById(id);
+      if (!real) return;
+      const clone = real.cloneNode(true);
+      clone.removeAttribute('id');
+      outEl.appendChild(clone);
+    });
+    container.appendChild(outEl);
+
+    // Write new values into real elements immediately, hold at opacity:0
+    ids.forEach((id, i) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const nv = newValues[i];
+      if (nv !== null) {
+        el.textContent = nv.text;
+        el.classList.toggle('hidden', !!nv.hidden);
+      }
+      el.style.transition = 'none';
+      el.style.opacity = '0';
+    });
+
+    // Double-rAF: frame 1 lets the browser commit opacity:0 on real elements
+    // and record the overlay's transition; frame 2 triggers both animations.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      outEl.style.opacity = '0';
+      ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.transition = `opacity ${dur} ease-in-out`;
+        el.style.opacity = '1';
+      });
+      // Remove overlay after transition completes
+      setTimeout(() => outEl.remove(), durationMs + 150);
+    }));
+  }
+
+  // ── Player-bar album art overlay (unchanged — already perfect) ─────────────
+  const artEl = document.getElementById('player-art');
+  if (artEl) {
+    artEl.querySelectorAll('.xf-art').forEach(e => e.remove());
+    const u = artUrl(s['album-art'], 'l');
+    const ov = document.createElement('div');
+    ov.className = 'xf-art';
+    ov.style.transition = `opacity ${dur} ease-in-out`;
+    ov.innerHTML = u ? `<img src="${u}" alt="">` : noArtHtml();
+    artEl.appendChild(ov);
+    requestAnimationFrame(() => requestAnimationFrame(() => { ov.style.opacity = '1'; }));
+  }
+
+  // ── Player-bar text dissolve ───────────────────────────────────────────────
+  const albumYear = [s.album, s.year].filter(Boolean).join(' · ');
+  _dissolveText('.player-info',
+    ['player-title', 'player-artist', 'player-album'],
+    [
+      { text: s.title  || s.filepath?.split('/').pop() || '—', hidden: false },
+      { text: s.artist || '',                                   hidden: false },
+      { text: albumYear,                                        hidden: !albumYear },
+    ]
+  );
+
+  // ── NP modal (if open) ────────────────────────────────────────────────────
+  if (!document.getElementById('np-modal').classList.contains('hidden')) {
+    const npArtEl = document.getElementById('np-art');
+    if (npArtEl) {
+      npArtEl.querySelectorAll('.xf-art').forEach(e => e.remove());
+      const u = artUrl(s['album-art'], 'l');
+      const ov = document.createElement('div');
+      ov.className = 'xf-art';
+      ov.style.transition = `opacity ${dur} ease-in-out`;
+      ov.innerHTML = u ? `<img src="${u}" alt="">` : noArtHtml();
+      npArtEl.appendChild(ov);
+      requestAnimationFrame(() => requestAnimationFrame(() => { ov.style.opacity = '1'; }));
+    }
+    const npSub = [s.album, s.year].filter(Boolean).join(' · ');
+    _dissolveText('.np-info',
+      ['np-title', 'np-artist', 'np-album'],
+      [
+        { text: s.title  || s.filepath?.split('/').pop() || '—', hidden: false },
+        { text: s.artist || '',                                   hidden: false },
+        { text: npSub,                                            hidden: !npSub },
+      ]
+    );
+  }
+}
+
+function _cancelArtXfade() {
+  document.querySelectorAll('.xf-art, .xf-text-out').forEach(e => e.remove());
+  ['player-title','player-artist','player-album','np-title','np-artist','np-album'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.transition = '';
+    el.style.opacity = '';
+  });
+}
+
+function _finishArtXfade() {
+  // Art overlays: removed when updateBar() replaces #player-art innerHTML.
+  // Text overlays (.xf-text-out): still fading out on their own — leave them,
+  //   the setTimeout inside _dissolveText will remove them when done.
+  // Real text elements: already show new content and are fading in (opacity
+  //   transitioning 0→1). updateBar() will re-write the same text (no change).
+  // Just schedule a cleanup so no inline opacity lingers after the animation.
+  setTimeout(() => {
+    ['player-title','player-artist','player-album','np-title','np-artist','np-album'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.style.transition = ''; el.style.opacity = ''; }
+    });
+  }, (S.crossfade * 1000) + 300);
+}
+
 function _startCrossfade(nextIdx) {
   if (_xfadeFired) return;
   _xfadeFired    = true;
@@ -5100,6 +5236,9 @@ function _startCrossfade(nextIdx) {
   xEl.src    = mediaUrl(next.filepath);
   xEl.volume = 0;
   xEl.play().catch(() => {});
+
+  // Kick off the visual dissolve in parallel with the audio ramp
+  _startArtXfade(nextIdx, xf * 1000);
 
   let step = 0;
   clearInterval(_xfadeGainIv);
@@ -5127,7 +5266,7 @@ function _doXfadeHandoff(nextIdx) {
   clearInterval(_xfadeGainIv);
   _xfadeGainIv = null;
 
-  const vol     = _xfadeStartVol > 0 ? _xfadeStartVol : 0.8;
+  const vol     = _xfadeStartVol;   // preserve whatever volume was set — including 0
   const newEl   = _xfadeEl;
   const oldEl   = audioEl;
 
@@ -5177,6 +5316,7 @@ function _doXfadeHandoff(nextIdx) {
 
   // Update UI / persistence (mirrors Player.playAt without touching audio)
   Player.updateBar();
+  _finishArtXfade();
   highlightRow();
   refreshQueueUI();
   loadCuePoints(s.filepath);
@@ -5195,6 +5335,7 @@ function _doXfadeHandoff(nextIdx) {
 }
 
 function _resetXfade() {
+  _cancelArtXfade();   // restore visuals if xfade is cancelled mid-dissolve
   const wasActive = _xfadeFired;
   const savedVol  = _xfadeStartVol;
   _xfadeFired    = false;

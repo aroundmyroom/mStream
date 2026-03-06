@@ -785,13 +785,18 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .player-left{grid-column:1;grid-row:1;display:flex;align-items:center;gap:14px;min-width:0;cursor:pointer;z-index:1;align-self:center;}
 .player-left:hover .player-thumb{box-shadow:0 0 0 2px var(--primary);transition:box-shadow .18s;}
 /* album art thumb — floating depth */
-.player-thumb{width:88px;height:88px;flex-shrink:0;border-radius:var(--r);overflow:hidden;background:var(--raised);
+.player-thumb{position:relative;width:88px;height:88px;flex-shrink:0;border-radius:var(--r);overflow:hidden;background:var(--raised);
   display:flex;align-items:center;justify-content:center;
   box-shadow:0 8px 24px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.32), 0 0 0 1px rgba(255,255,255,.07);
   transition:box-shadow .18s;
 }
 .player-thumb img{width:100%;height:100%;object-fit:cover;}
-.player-info{min-width:0;flex:1;overflow:hidden;}
+/* incoming-track art overlay used during audio crossfade */
+.xf-art{position:absolute;inset:0;opacity:0;z-index:2;pointer-events:none;border-radius:inherit;overflow:hidden;display:flex;align-items:center;justify-content:center;}
+.xf-art img{width:100%;height:100%;object-fit:cover;display:block;}
+/* outgoing text clone overlay — sits on top of incoming text while it fades out */
+.xf-text-out{position:absolute;top:0;left:0;right:0;pointer-events:none;z-index:2;background:transparent;}
+.player-info{position:relative;min-width:0;flex:1;overflow:hidden;}
 .player-title{font-size:18px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .player-artist{font-size:15px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .player-album{font-size:13px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
@@ -1136,7 +1141,7 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
   padding:42px 32px 28px;overflow-y:auto;max-height:94vh;
   scrollbar-width:thin;
 }
-.np-info{width:100%;}
+.np-info{position:relative;width:100%;}
 .np-title{
   font-size:24px;font-weight:800;line-height:1.25;letter-spacing:-.5px;
   color:var(--t1);margin-bottom:8px;
