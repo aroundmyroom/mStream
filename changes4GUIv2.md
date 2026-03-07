@@ -1221,3 +1221,57 @@ The 8-song artist-cooldown window (`djArtistHistory`) was in-memory only — a s
 - Every call to `_djPushArtistHistory()` saves the updated array back to localStorage.
 - `setQueue`, `playSingle`, and vpath source changes clear the key alongside the existing `ignore` cleanup.
 - No server or API changes.
+
+---
+
+## Player Bar — UI Polish & Controls Redesign *(GitHub Copilot, 2026-03-07)*
+
+A comprehensive pass over the player bar controls, info strip, icons, and interactive feedback.
+
+### Transport Controls
+- Wrapped shuffle / prev / play / next / repeat in `div.ctrl-transport` with `margin-right: 20px` to shift the transport group left of the utility buttons.
+- **Sharp straight icons** — `stroke-linecap="square"` + `stroke-linejoin="miter"` applied to shuffle and repeat SVGs; `rx` removed from prev/next bar rects; repeat path arcs replaced with straight `L`-corner paths so corners are truly 90°.
+- **Repeat-One** — `_svgRepeatAll` / `_svgRepeatOne` JS constants; `_syncRepeatIcon()` swaps the icon and renders a large `1` inside the SVG for repeat-one mode.
+- Shuffle / repeat dot indicator (4 px circle below button) shows active state.
+
+### Transport Feedback — Info Strip instead of Toasts
+- Shuffle on/off, Repeat (Off / All / One Song), and all Sleep timer states now show in `_showInfoStrip()` (centered, no badge) instead of `toast()`.
+- `_showInfoStrip` gains a 4th `center` param; `.dj-strip-center` CSS modifier hides the badge and centres content at 13 px.
+- Text format: `Shuffle: On`, `Repeat: One Song`, `💤 Sleep timer set · 5 min`, etc.
+- When Shuffle is toggled while Auto-DJ is active, strip shows: *Shuffle: On — but inactive, Auto-DJ is on*.
+
+### Auto-DJ Status in Queue Label
+- `_syncQueueLabel()` now shows `· AUTO-DJ` (accent colour) inline when Auto-DJ is on, and `· AUTO-DJ: SIMILAR SONGS` when Similar is also on.
+- Label updates immediately when Auto-DJ or Similar Songs is toggled.
+
+### DJ Badge → Headphones Icon Button
+- Removed animated `dj-light` text pill with gradient sweep.
+- Replaced with a `ctrl-btn ctrl-sm` headphones SVG icon (same size and style as EQ / visualizer).
+- **Active** (DJ on): `var(--primary)` colour + 4 px dot indicator below.
+- **Inactive** (DJ off): muted `var(--t3)` colour — always visible, never hidden.
+
+### Utility Icons Alignment
+- `ctrl-sm` buttons (Auto-DJ, EQ, Visualizer, Queue) bumped to **40 × 40 px**, SVGs to **22 × 22 px** — identical to shuffle and repeat.
+
+### Queue Icon
+- Replaced generic bulleted-list icon with a **play-queue icon**: filled play triangle (current track indicator) + 3 horizontal lines.
+- Queue count badge: 9 px bold, `box-shadow: 0 0 0 2px var(--bg)` halo for readability against any background.
+- **Auto-contrast badge text** — `_updateBadgeFg()` computes relative luminance of `--primary` (supports hex, rgb, and hsl formats) and sets `--badge-fg` to `#111` or `#fff` accordingly. Called from `applyTheme()` and from the album-art colour extractor so it updates on every primary colour change.
+
+### Volume Slider Glow
+- Removed persistent brightness-proportional glow (`--vol-glow` CSS var + JS calculation).
+- Replaced with hover/active-only ring: `box-shadow: 0 0 0 3px rgba(139,92,246,.18)` on hover, 5 px on active.
+
+### Velvet Name Alignment
+- `align-self: flex-end` on `.brand-velvet` (sidebar) and `.vu-cn-velvet` (VU meter) — right-aligns the VELVET label under mStream.
+
+### Custom Tooltips
+- Replaced browser-native `title="…"` white tooltips with a custom `#tip-box` system.
+- All `title` attributes are converted to `data-tip` at runtime; a `MutationObserver` handles dynamically added elements.
+- Styled with `var(--raised)` background, themed border, `var(--t1)` text, 6 px radius, drop shadow — consistent across dark and light themes.
+- Tooltip auto-dismisses after **5 seconds** if the mouse stays on the element; hides on `mouseout` and `mousedown`.
+- `#tip-box` is declared before `app.js` in the HTML to prevent null-reference on load.
+
+### DJ Similar Strip — Left Accent Border
+- Removed flashing gradient badge entirely (`display:none`).
+- Added `border-left: 3px solid var(--primary)` to the strip as a static active indicator.
