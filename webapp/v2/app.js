@@ -187,6 +187,44 @@ function toastError(msg, ms = 4000) {
   _toastT = setTimeout(() => { el.classList.add('hidden'); el.classList.remove('toast-error'); }, ms);
 }
 
+let _similarStripT = null;
+let _djSimilarFor = '';      // artist we searched Last.fm for
+let _djSimilarArtists = [];  // artists Last.fm returned
+
+function _showInfoStrip(badge, contentHtml, ms = 30000) {
+  const strip = document.getElementById('dj-similar-strip');
+  if (!strip) return;
+  document.getElementById('dj-strip-badge').textContent = badge;
+  document.getElementById('dj-strip-content').innerHTML = contentHtml;
+  clearTimeout(_similarStripT);
+  strip.classList.remove('dj-strip-out');
+  strip.classList.add('dj-strip-in');
+  if (ms > 0) _similarStripT = setTimeout(() => _dismissInfoStrip(), ms);
+}
+function _dismissInfoStrip() {
+  const strip = document.getElementById('dj-similar-strip');
+  if (!strip) return;
+  clearTimeout(_similarStripT);
+  strip.classList.remove('dj-strip-in');
+  strip.classList.add('dj-strip-out');
+}
+function _showDJStrip(song) {
+  if (!_djSimilarFor || !_djSimilarArtists.length) return;
+  // Exclude the queued artist itself from the pills (it's already shown)
+  const pills = _djSimilarArtists
+    .filter(a => a.toLowerCase() !== (song.artist || '').toLowerCase())
+    .slice(0, 5)
+    .map(a => `<span class="dj-strip-pill">${esc(a)}</span>`).join('');
+  const title = esc(song.title || song.filepath?.split('/').pop() || '');
+  const html =
+    `<span class="dj-strip-label">Similar to <strong>${esc(_djSimilarFor)}</strong></span>` +
+    `<span class="dj-strip-sep">—</span>` +
+    `<span class="dj-strip-queued">${esc(song.artist || '?')}</span>` +
+    (title ? `<span class="dj-strip-sep">·</span><span class="dj-strip-title">${title}</span>` : '') +
+    (pills ? `<span class="dj-strip-sep">·</span><span class="dj-strip-pills">${pills}</span>` : '');
+  _showInfoStrip('DJ', html, 30000); // stays until crossfade dismisses it
+}
+
 // ── QUEUE PERSISTENCE ───────────────────────────────────────
 function _queueKey() { return `ms2_queue_${S.username}`; }
 function _djKey(k)    { return `ms2_dj_${k}_${S.username || ''}`; }
@@ -218,7 +256,9 @@ function restoreQueue() {
   S.idx   = (typeof data.idx === 'number' && data.idx >= 0 && data.idx < data.queue.length)
             ? data.idx : 0;
   refreshQueueUI();
-  toast(`Queue restored (${S.queue.length} song${S.queue.length !== 1 ? 's' : ''})`, 2500);
+  _showInfoStrip('✓',
+    `<span class="dj-strip-label">Queue restored</span><span class="dj-strip-sep">·</span><span class="dj-strip-queued">${S.queue.length}</span><span class="dj-strip-title">&nbsp;song${S.queue.length !== 1 ? 's' : ''}</span>`,
+    5000);
 
   // Set up audio element — failures here must NOT break queue display
   try {
@@ -516,15 +556,18 @@ async function _djApiCall() {
       const d = await api('GET', `api/v1/lastfm/similar-artists?artist=${encodeURIComponent(currentArtist)}`);
       if (d.artists && d.artists.length > 0) {
         artistFilter = d.artists;
+        _djSimilarFor = currentArtist;
+        _djSimilarArtists = artistFilter;
         console.log(`[AutoDJ] Last.fm similar to "${currentArtist}":`, artistFilter);
-        toast(`Similar to ${currentArtist}: ${artistFilter.slice(0, 3).join(', ')}${artistFilter.length > 3 ? ` +${artistFilter.length - 3} more` : ''}`);
       } else {
         console.warn(`[AutoDJ] Last.fm returned no similar artists for "${currentArtist}" — playing random`);
-        toast(`Similar Artists: no results for ${currentArtist}, playing random`);
+        _djSimilarFor = currentArtist;
+        _djSimilarArtists = [];
       }
     } catch (_e) {
       console.error(`[AutoDJ] Last.fm call failed for "${currentArtist}":`, _e);
-      toast(`Similar Artists: Last.fm error, playing random`);
+      _djSimilarFor = currentArtist;
+      _djSimilarArtists = [];
     }
   }
 
@@ -569,7 +612,7 @@ async function _djApiCall() {
     // artists filter returned no library matches — fall back to random
     if (artistFilter && e.status === 400) {
       console.warn('[AutoDJ] No library songs for similar artists, falling back to random');
-      toast('Similar Artists: none found in library, playing random');
+      _djSimilarArtists = [];  // prevent _showDJStrip from showing "similar to" for a random fallback
       const ignoreVPaths = S.vpaths.filter(v => !selected.includes(v));
       return api('POST', 'api/v1/db/random-songs', {
         ignoreList:   S.djIgnore,
@@ -622,6 +665,7 @@ async function autoDJPrefetch() {
     if (S.queue.length <= S.idx + 1) {
       _pruneQueue();
       S.queue.push(song);
+      _showDJStrip(song);
       refreshQueueUI();
     }
   } catch(e) { console.error('Auto-DJ prefetch failed:', e); }
@@ -654,6 +698,7 @@ async function autoDJFetch() {
     _djPushArtistHistory(song.artist);
     _pruneQueue();
     S.queue.push(song);
+    _showDJStrip(song);
     Player.playAt(S.queue.length - 1);
     refreshQueueUI();
   } catch(e) {
@@ -5252,6 +5297,7 @@ function _finishArtXfade() {
 function _startCrossfade(nextIdx) {
   if (_xfadeFired) return;
   _xfadeFired    = true;
+  _dismissInfoStrip();          // clear DJ strip before crossfade visuals take over
   _xfadeNextIdx  = nextIdx;
   _xfadeStartVol = audioEl.volume;
   _syncQueueLabel();
@@ -6033,7 +6079,7 @@ function _syncQueueLabel() {
     text = 'Paused';
   } else {
     icon = '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>';
-    text = 'Now Playing';
+    text = S.autoDJ && S.djSimilar ? 'Now Playing <span class="ql-similar-badge">∿ similar</span>' : 'Now Playing';
   }
   label.innerHTML = icon + ' ' + text;
 }
