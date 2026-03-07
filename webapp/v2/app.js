@@ -191,11 +191,12 @@ let _similarStripT = null;
 let _djSimilarFor = '';      // artist we searched Last.fm for
 let _djSimilarArtists = [];  // artists Last.fm returned
 
-function _showInfoStrip(badge, contentHtml, ms = 30000) {
+function _showInfoStrip(badge, contentHtml, ms = 30000, center = false) {
   const strip = document.getElementById('dj-similar-strip');
   if (!strip) return;
   document.getElementById('dj-strip-badge').textContent = badge;
   document.getElementById('dj-strip-content').innerHTML = contentHtml;
+  strip.classList.toggle('dj-strip-center', !!center);
   clearTimeout(_similarStripT);
   strip.classList.remove('dj-strip-out');
   strip.classList.add('dj-strip-in');
@@ -216,12 +217,13 @@ function _showDJStrip(song) {
     .slice(0, 5)
     .map(a => `<span class="dj-strip-pill">${esc(a)}</span>`).join('');
   const title = esc(song.title || song.filepath?.split('/').pop() || '');
+  const played = title ? `${esc(song.artist || '?')} · ${title}` : esc(song.artist || '?');
   const html =
     `<span class="dj-strip-label">Similar to <strong>${esc(_djSimilarFor)}</strong></span>` +
     `<span class="dj-strip-sep">—</span>` +
-    `<span class="dj-strip-queued">${esc(song.artist || '?')}</span>` +
-    (title ? `<span class="dj-strip-sep">·</span><span class="dj-strip-title">${title}</span>` : '') +
-    (pills ? `<span class="dj-strip-sep">·</span><span class="dj-strip-pills">${pills}</span>` : '');
+    `<span class="dj-strip-label">We will play:</span>` +
+    `<span class="dj-strip-queued">${played}</span>` +
+    (pills ? `<span class="dj-strip-sep">—</span><span class="dj-strip-label">Other choices were:</span><span class="dj-strip-sep">&nbsp;</span><span class="dj-strip-pills">${pills}</span>` : '');
   _showInfoStrip('DJ', html, 30000); // stays until crossfade dismisses it
 }
 
@@ -710,7 +712,8 @@ async function autoDJFetch() {
 function setAutoDJ(on, skipAutoStart) {
   S.autoDJ = on;
   localStorage.setItem(_uKey('autodj'), on ? '1' : '');
-  document.getElementById('dj-light').classList.toggle('hidden', !on);
+  document.getElementById('dj-light').classList.toggle('dj-inactive', !on);
+  _syncQueueLabel();
   // update autodj page if visible
   const btn = document.querySelector('.autodj-toggle');
   if (btn) { btn.classList.toggle('on', on); btn.textContent = on ? '⏹ Stop Auto-DJ' : '▶ Start Auto-DJ'; }
@@ -4008,6 +4011,7 @@ async function viewAutoDJ() {
     S.djSimilar
       ? localStorage.setItem(_uKey('dj_similar'), '1')
       : localStorage.removeItem(_uKey('dj_similar'));
+    _syncQueueLabel();
     toast(S.djSimilar ? 'Similar Artists: On' : 'Similar Artists: Off');
   });
 
@@ -4783,7 +4787,7 @@ function setSleepTimer(mins) {
     S.sleepMins = -1;
     S.sleepEndsAt = -1;
     localStorage.setItem(_uKey('sleep_ends'), '-1');
-    toast('Sleep: will stop after this song');
+    _showInfoStrip('', '<span class="dj-strip-label">💤 Sleep — will stop after this song</span>', 5000, true);
     _updateSleepLight();
     return;
   }
@@ -4791,7 +4795,7 @@ function setSleepTimer(mins) {
   S.sleepMins = mins;
   S.sleepEndsAt = Date.now() + mins * 60000;
   localStorage.setItem(_uKey('sleep_ends'), String(S.sleepEndsAt));
-  toast(`Sleep timer set · ${mins} min`);
+  _showInfoStrip('', `<span class="dj-strip-label">💤 Sleep timer set · <strong>${mins} min</strong></span>`, 5000, true);
   _updateSleepLight();
 
   _sleepTimer = setInterval(() => {
@@ -4842,7 +4846,7 @@ function _sleepFadeOut() {
       clearInterval(iv);
       audioEl.pause();
       audioEl.volume = startVol; // restore volume for next play
-      toast('Sleep timer — playback stopped');
+      _showInfoStrip('', '<span class="dj-strip-label">💤 Sleep — playback stopped</span>', 6000, true);
       S.sleepMins = 0;
       _updateSleepLight();
     }
@@ -5051,6 +5055,7 @@ function _applyAlbumArtTheme(url) {
       const accent  = `hsl(${aHDeg},${Math.round(s * 100)}%,${Math.round(aL * 100)}%)`;
       document.documentElement.style.setProperty('--primary', primary);
       document.documentElement.style.setProperty('--accent',  accent);
+      _updateBadgeFg();
     } catch(_e) {}
   };
   img.onerror = () => { _resetAlbumArtTheme(); };
@@ -5726,21 +5731,34 @@ document.getElementById('next-btn').addEventListener('click', () => Player.next(
 document.getElementById('prev-btn').addEventListener('click', () => Player.prev());
 
 // Shuffle
+function _shuffleStripHtml() {
+  if (S.shuffle && S.autoDJ)
+    return '<span class="dj-strip-label">Shuffle: <strong>On</strong> — but inactive, Auto-DJ is on</span>';
+  return `<span class="dj-strip-label">Shuffle: <strong>${S.shuffle ? 'On' : 'Off'}</strong></span>`;
+}
 document.getElementById('shuffle-btn').addEventListener('click', () => {
   S.shuffle = !S.shuffle;
   document.getElementById('shuffle-btn').classList.toggle('active', S.shuffle);
-  toast(S.shuffle ? 'Shuffle: On' : 'Shuffle: Off');
+  _showInfoStrip('', _shuffleStripHtml(), 3000, true);
 });
 
 // Repeat
+const _svgRepeatAll = `<svg id="repeat-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><polyline points="17,1 21,5 17,9"/><path d="M3 11V5H21"/><polyline points="7,23 3,19 7,15"/><path d="M21 13v6H3"/></svg>`;
+const _svgRepeatOne = `<svg id="repeat-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" stroke-linejoin="miter"><polyline points="17,1 21,5 17,9"/><path d="M3 11V5H21"/><polyline points="7,23 3,19 7,15"/><path d="M21 13v6H3"/><text x="12" y="14.5" text-anchor="middle" dominant-baseline="middle" font-size="10" font-weight="700" stroke="none" fill="currentColor" font-family="system-ui,sans-serif">1</text></svg>`;
+function _syncRepeatIcon() {
+  const btn = document.getElementById('repeat-btn');
+  if (!btn) return;
+  btn.innerHTML = S.repeat === 'one' ? _svgRepeatOne : _svgRepeatAll;
+  btn.classList.toggle('active', S.repeat !== 'off');
+  btn.title = S.repeat === 'one' ? 'Repeat: One' : S.repeat === 'all' ? 'Repeat: All' : 'Repeat: Off';
+}
+
 document.getElementById('repeat-btn').addEventListener('click', () => {
   const modes = ['off', 'all', 'one'];
   S.repeat = modes[(modes.indexOf(S.repeat) + 1) % modes.length];
-  const btn = document.getElementById('repeat-btn');
-  btn.classList.toggle('active', S.repeat !== 'off');
-  btn.title = S.repeat === 'one' ? 'Repeat: One' : S.repeat === 'all' ? 'Repeat: All' : 'Repeat: Off';
-  // show "1" on button for repeat-one
-  toast(S.repeat === 'one' ? 'Repeat: One song' : S.repeat === 'all' ? 'Repeat: All' : 'Repeat: Off');
+  _syncRepeatIcon();
+  localStorage.setItem(_uKey('repeat'), S.repeat);
+  _showInfoStrip('', `<span class="dj-strip-label">Repeat: <strong>${S.repeat === 'one' ? 'One Song' : S.repeat === 'all' ? 'All' : 'Off'}</strong></span>`, 3000, true);
 });
 
 // Queue toggle (player bar button)
@@ -6079,9 +6097,14 @@ function _syncQueueLabel() {
     text = 'Paused';
   } else {
     icon = '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>';
-    text = S.autoDJ && S.djSimilar ? 'Now Playing <span class="ql-similar-badge">∿ similar</span>' : 'Now Playing';
+    text = 'Now Playing';
   }
-  label.innerHTML = icon + ' ' + text;
+  const djSub = S.autoDJ
+    ? (S.djSimilar
+      ? ' <span class="ql-sub-label">· Auto-DJ: Similar Songs</span>'
+      : ' <span class="ql-sub-label">· Auto-DJ</span>')
+    : '';
+  label.innerHTML = icon + ' ' + text + djSub;
 }
 
 // ── AUDIO EVENT HANDLERS (named so they can be moved to a swapped element) ──
@@ -6092,7 +6115,7 @@ function _onAudioEnded() {
     S.sleepMins = 0;
     S.sleepEndsAt = 0;
     _updateSleepLight();
-    toast('Sleep timer \u2014 playback stopped');
+    _showInfoStrip('', '<span class="dj-strip-label">💤 Sleep — playback stopped</span>', 6000, true);
     return;
   }
   // Crossfade: _xfadeEl is already playing through Web Audio.
@@ -6379,7 +6402,6 @@ function _setVolPct(val) {
   const slider = document.getElementById('volume');
   if (slider) {
     slider.style.setProperty('--vol-pct',  val + '%');
-    slider.style.setProperty('--vol-glow', Math.round(val * 0.18) + 'px');
   }
 }
 
@@ -6605,6 +6627,27 @@ function applyTheme(light, persist = true) {
   if (track) track.classList.toggle('lit', light);
   if (label) label.textContent = light ? 'Light Mode' : 'Blue';
   if (persist) localStorage.setItem(_uKey('theme'), light ? 'light' : 'dark');
+  requestAnimationFrame(() => requestAnimationFrame(_updateBadgeFg));
+}
+function _updateBadgeFg() {
+  const val = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim();
+  let r, g, b;
+  const hex = val.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  const rgb = val.match(/rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/);
+  const hsl = val.match(/hsla?\(\s*([\d.]+),\s*([\d.]+)%,\s*([\d.]+)%/);
+  if (hex) { r = parseInt(hex[1],16); g = parseInt(hex[2],16); b = parseInt(hex[3],16); }
+  else if (rgb) { r = +rgb[1]; g = +rgb[2]; b = +rgb[3]; }
+  else if (hsl) {
+    const h = +hsl[1]/360, s = +hsl[2]/100, l = +hsl[3]/100;
+    const q = l < 0.5 ? l*(1+s) : l+s-l*s, p = 2*l-q;
+    const hue2rgb = (p,q,t) => { if(t<0)t+=1;if(t>1)t-=1;if(t<1/6)return p+(q-p)*6*t;if(t<1/2)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p; };
+    r = Math.round(hue2rgb(p,q,h+1/3)*255); g = Math.round(hue2rgb(p,q,h)*255); b = Math.round(hue2rgb(p,q,h-1/3)*255);
+  }
+  if (r !== undefined) {
+    const lin = c => { c/=255; return c<=0.04045?c/12.92:Math.pow((c+0.055)/1.055,2.4); };
+    const L = 0.2126*lin(r)+0.7152*lin(g)+0.0722*lin(b);
+    document.documentElement.style.setProperty('--badge-fg', L > 0.35 ? '#111' : '#fff');
+  }
 }
 
 // Follow OS colour scheme when the user hasn't stored an explicit preference
@@ -6900,7 +6943,7 @@ document.addEventListener('keydown', e => {
       if (!e.ctrlKey && !e.metaKey) {
         S.shuffle = !S.shuffle;
         document.getElementById('shuffle-btn').classList.toggle('active', S.shuffle);
-        toast(S.shuffle ? 'Shuffle: On' : 'Shuffle: Off');
+        _showInfoStrip('', _shuffleStripHtml(), 3000, true);
       }
       break;
   }
@@ -6954,4 +6997,56 @@ try {
 
   const ok = await checkSession();
   ok ? showApp() : showLogin();
+})();
+
+/* ── CUSTOM TOOLTIP ─────────────────────────────────────────── */
+(function() {
+  const tip = document.getElementById('tip-box');
+  if (!tip) return;
+  let hideT = null;
+  let autoT = null;
+
+  function convertTitles(root) {
+    const els = root ? [root, ...root.querySelectorAll('[title]')] : document.querySelectorAll('[title]');
+    els.forEach(el => {
+      if (el.hasAttribute && el.hasAttribute('title')) {
+        el.setAttribute('data-tip', el.getAttribute('title'));
+        el.removeAttribute('title');
+      }
+    });
+  }
+  convertTitles();
+  new MutationObserver(muts => {
+    muts.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) convertTitles(n); }));
+  }).observe(document.body, { childList: true, subtree: true });
+
+  document.addEventListener('mouseover', e => {
+    const el = e.target.closest('[data-tip]');
+    if (!el) return;
+    clearTimeout(hideT);
+    tip.textContent = el.getAttribute('data-tip');
+    const r = el.getBoundingClientRect();
+    // Measure after setting text
+    const tw = tip.offsetWidth;
+    const th = tip.offsetHeight;
+    let x = r.left + r.width / 2 - tw / 2;
+    let y = r.top - th - 8;
+    if (x < 6) x = 6;
+    if (x + tw > window.innerWidth - 6) x = window.innerWidth - tw - 6;
+    if (y < 6) y = r.bottom + 8;
+    tip.style.left = x + 'px';
+    tip.style.top  = y + 'px';
+    tip.classList.add('tip-show');
+    clearTimeout(autoT);
+    autoT = setTimeout(() => tip.classList.remove('tip-show'), 5000);
+  });
+
+  document.addEventListener('mouseout', e => {
+    const el = e.target.closest('[data-tip]');
+    if (!el) return;
+    clearTimeout(autoT);
+    hideT = setTimeout(() => tip.classList.remove('tip-show'), 80);
+  });
+
+  document.addEventListener('mousedown', () => { clearTimeout(autoT); tip.classList.remove('tip-show'); });
 })();
