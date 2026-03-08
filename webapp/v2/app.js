@@ -1256,6 +1256,9 @@ function showNPModal() {
 function hideNPModal() {
   document.getElementById('np-modal').classList.add('hidden');
   document.getElementById('np-left')?.classList.remove('np-left--picking');
+  // Force the Discogs section to re-render its initial button state on next open
+  const _dsEl = document.getElementById('np-discogs-section');
+  if (_dsEl) _dsEl.dataset.songFp = '';
 }
 
 // ── DISCOGS ART IN NP MODAL ───────────────────────────────
@@ -1271,6 +1274,9 @@ async function _npDiscogsSearch(song) {
     if (song.title)  params.set('title',  song.title);
     if (song.album)  params.set('album',  song.album);
     if (song.year)   params.set('year',   String(song.year));
+    // Always send filepath so the server can extract artist/title from the
+    // directory name when tags are absent (e.g. untagged WAV files)
+    if (song.filepath) params.set('filepath', song.filepath);
     // No metadata at all — fall back to the bare filename so the server's
     // filename parser (CamelCase / dash splitter) can extract artist + title
     if (!song.artist && !song.title && !song.album && song.filepath) {
