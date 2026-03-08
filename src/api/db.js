@@ -321,14 +321,42 @@ export function setup(mstream) {
     }
 
     const returnThis = { songs: [], ignoreList: [] };
-    let randomNumber = Math.floor(Math.random() * count);
-    while (ignoreList.indexOf(randomNumber) > -1) {
-      randomNumber = Math.floor(Math.random() * count);
+
+    // ── Two-stage artist-fair selection (similar-artists mode) ────────────────
+    // When an artist filter is active, pick a random *artist* first (equal weight
+    // per artist, not per song), then a random song from that artist.
+    // This prevents artists with large catalogues from dominating the queue.
+    if (Array.isArray(req.body.artists) && req.body.artists.length > 0) {
+      // Collect available (non-ignored) indices
+      const available = [];
+      for (let i = 0; i < count; i++) {
+        if (ignoreList.indexOf(i) === -1) available.push(i);
+      }
+      // If everything is ignored, reset and pick freely
+      const pickFrom = available.length > 0 ? available : Array.from({ length: count }, (_, i) => i);
+      // Group by artist
+      const byArtist = new Map();
+      for (const idx of pickFrom) {
+        const a = (finalResults[idx].artist || '').trim().toLowerCase();
+        if (!byArtist.has(a)) byArtist.set(a, []);
+        byArtist.get(a).push(idx);
+      }
+      const artistKeys = [...byArtist.keys()];
+      const chosenArtist = artistKeys[Math.floor(Math.random() * artistKeys.length)];
+      const artistIndices = byArtist.get(chosenArtist);
+      const pickedIdx = artistIndices[Math.floor(Math.random() * artistIndices.length)];
+      returnThis.songs.push(renderMetadataObj(finalResults[pickedIdx]));
+      ignoreList.push(pickedIdx);
+    } else {
+      // ── Standard single-stage random selection ────────────────────────────
+      let randomNumber = Math.floor(Math.random() * count);
+      while (ignoreList.indexOf(randomNumber) > -1) {
+        randomNumber = Math.floor(Math.random() * count);
+      }
+      returnThis.songs.push(renderMetadataObj(finalResults[randomNumber]));
+      ignoreList.push(randomNumber);
     }
 
-    const randomSong = finalResults[randomNumber];
-    returnThis.songs.push(renderMetadataObj(randomSong));
-    ignoreList.push(randomNumber);
     returnThis.ignoreList = ignoreList;
 
     res.json(returnThis);

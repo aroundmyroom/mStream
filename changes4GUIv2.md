@@ -1330,3 +1330,74 @@ Previously, the Fix Art picker would show for all file formats but the embed end
 - Previously only checked Discogs (admin-only).
 - Now also checks Last.fm status for all users and shows/hides `lastfm-nav-btn` accordingly.
 - The admin-only Discogs block remains guarded by `if (S.isAdmin)` as before.
+
+---
+
+## [Feature] Visualizer — Art-Pulse VU Mode *(GitHub Copilot, 2026-03-08)*
+
+**Files:** `webapp/v2/app.js`, `src/server.js`
+
+A new visualizer mode added alongside the existing spectrum analyser: **Art-Pulse** — a two-sided VU bar display that reveals the album art through the bars.
+
+### How it works
+- A hidden `<canvas>` overlays the album art in the player bar left panel.
+- 80 bars per side (L and R channels) are drawn using the same log-bin geometry and decay constants as the spectrum analyser (`logBin`, `GAP`, `relDecay = 0.30`, `barW`).
+- **L channel**: treble far-left → bass at centre (mirrored).
+- **R channel**: bass at centre → treble far-right.
+- Each bar is a vertical "window" into the underlying album art — the image is cover-cropped to the canvas and each bar column is clipped, so the art is revealed proportionally to each frequency band's energy.
+- **Peak-hold ticks** with gravity-accelerated fall (`HOLD_MS = 1200`, `GRAVITY = 0.7`) match the PPM meter feel.
+- Canvas is hidden (`visibility: hidden; pointer-events: none`) when silent or when no album art is loaded.
+
+### Album-art route hardened
+- `GET /api/v1/db/album-art` no longer returns HTTP 404 when the physical file is missing from disk (e.g. cleared cache, partial Discogs download, manual deletion).
+- Instead it serves a small inline SVG placeholder, preventing broken-image flashes in the player bar and Now Playing modal.
+
+---
+
+## [Fix] Discogs Modal — Album Art Drifts Down on Repeated Open/Close *(GitHub Copilot, 2026-03-08)*
+
+**File:** `webapp/v2/app.js` — `hideNPModal()`
+
+**Problem:** Opening the Discogs picker scrolls the `#np-left` panel (it becomes `overflow-y: auto` via `.np-left--picking`). Closing the modal removed the class but left `scrollTop` at a non-zero value. On the next open the `justify-content: center` layout rendered with the residual scroll offset, pushing the album art down. Repeated open/close cycles compounded the offset.
+
+**Fix:** `hideNPModal()` now resets `np-left.scrollTop = 0` after removing `np-left--picking`.
+
+---
+
+## [Fix] Auto-DJ Similar Artists — Dominant-Artist Bias Eliminated *(GitHub Copilot, 2026-03-08)*
+
+**Files:** `src/api/db.js`, `webapp/v2/app.js`
+
+**Problem:** The random-songs endpoint selected a track from a flat list of all songs matching the 20 similar artists. An artist with 50 tracks had 10× the probability of being picked over an artist with 5 tracks, so 2–3 large-catalogue artists dominated every session.
+
+**Fix — two-stage artist-fair selection (`src/api/db.js`):**
+When `artists` filter is active (similar-artists mode), the endpoint now:
+1. Collects all non-ignored candidate song indices.
+2. Groups them by artist.
+3. Picks one artist at random — **equal weight per artist**, regardless of catalogue size.
+4. Picks one random song from that artist.
+Standard (non-similar) mode is unchanged: single-stage flat random as before.
+
+**Fix — increased artist cooldown (`webapp/v2/app.js`):**
+`DJ_ARTIST_COOLDOWN` raised from `8` → `15`. Once an artist plays they go into a 15-song exclusion window, giving all other similar artists much more breathing room before any artist can repeat.
+
+---
+
+## [Change] Auto-DJ Strip — Show Up to 10 "Other Choices" Pills *(GitHub Copilot, 2026-03-08)*
+
+**File:** `webapp/v2/app.js` — `_showDJStrip()`
+
+The DJ info strip previously showed at most 5 artist pills under "Other choices were:". Raised to **10** to take better advantage of wider screens and the full 20-artist Last.fm result set.
+
+---
+
+## [Fix] Scanner — Preserve Discogs Art on File Rescan *(GitHub Copilot, 2026-03-08)*
+
+**Files:** `src/api/scanner.js`, `src/db/scanner.mjs`
+
+**Problem:** When a file's modification time changed (tags edited, re-encoded, etc.) the scanner deleted the old DB record and re-inserted it. For WAV/AIFF files — which cannot embed cover art — the new record had `aaFile = null`. The post-scan orphan cleanup then found the Discogs-assigned image no longer referenced in the DB and deleted it from `image-cache/`.
+
+**Fix:**
+- `GET /api/v1/scanner/get-file` (`src/api/scanner.js`): when removing a stale record, the old `aaFile` is now returned to the scanner child process as `_preserveAaFile`.
+- `src/db/scanner.mjs`: after re-parsing a modified file, if the new parse yields no `aaFile` (normal for WAV/AIFF) but `_preserveAaFile` was supplied, the preserved value is written back into the insert payload before `insertEntries()` is called.
+- Result: the DB record always carries the user's Discogs art reference → `runOrphanCleanup` sees it as live → the image file on disk is untouched.

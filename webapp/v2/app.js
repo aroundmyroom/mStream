@@ -218,7 +218,7 @@ function _showDJStrip(song) {
   // Exclude the queued artist itself from the pills (it's already shown)
   const pills = _djSimilarArtists
     .filter(a => a.toLowerCase() !== (song.artist || '').toLowerCase())
-    .slice(0, 5)
+    .slice(0, 10)
     .map(a => `<span class="dj-strip-pill">${esc(a)}</span>`).join('');
   const title = esc(song.title || song.filepath?.split('/').pop() || '');
   const played = title ? `${esc(song.artist || '?')} · ${title}` : esc(song.artist || '?');
@@ -639,7 +639,7 @@ async function _djApiCall() {
 }
 
 // Pre-fetch: silently queue the next DJ song without playing it
-const DJ_ARTIST_COOLDOWN = 8; // minimum songs between the same artist
+const DJ_ARTIST_COOLDOWN = 15; // minimum songs between the same artist
 function _djPushArtistHistory(artist) {
   if (!artist) return;
   // Remove any earlier occurrence of this artist, then push to end
@@ -1254,7 +1254,11 @@ function showNPModal() {
 }
 function hideNPModal() {
   document.getElementById('np-modal').classList.add('hidden');
-  document.getElementById('np-left')?.classList.remove('np-left--picking');
+  const _npLeft = document.getElementById('np-left');
+  if (_npLeft) {
+    _npLeft.classList.remove('np-left--picking');
+    _npLeft.scrollTop = 0;
+  }
   // Force the Discogs section to re-render its initial button state on next open
   const _dsEl = document.getElementById('np-discogs-section');
   if (_dsEl) _dsEl.dataset.songFp = '';
