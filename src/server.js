@@ -18,6 +18,7 @@ import * as adminApi from './api/admin.js';
 import * as remoteApi from './api/remote.js';
 import * as sharedApi from './api/shared.js';
 import * as scrobblerApi from './api/scrobbler.js';
+import * as discogsApi from './api/discogs.js';
 import * as waveformApi from './api/waveform.js';
 import * as config from './state/config.js';
 import * as logger from './logger.js';
@@ -204,6 +205,7 @@ export async function serveIt(configFile) {
   fileExplorerApi.setup(mstream);
   transcode.setup(mstream);
   scrobblerApi.setup(mstream);
+  discogsApi.setup(mstream);
   waveformApi.setup(mstream);
   remoteApi.setupAfterAuth(mstream, server);
   sharedApi.setupAfterSecurity(mstream);

@@ -1275,3 +1275,58 @@ A comprehensive pass over the player bar controls, info strip, icons, and intera
 ### DJ Similar Strip — Left Accent Border
 - Removed flashing gradient badge entirely (`display:none`).
 - Added `border-left: 3px solid var(--primary)` to the strip as a static active indicator.
+
+---
+
+## [Feature] Discogs — WAV/AIFF Cache-Only Art + Inline Info Note *(GitHub Copilot, 2026-03-08)*
+
+**Files:** `webapp/v2/app.js`
+
+Previously, the Fix Art picker would show for all file formats but the embed endpoint returned a 422 for WAV/AIFF/W64 files. Now the client detects the format and handles it gracefully:
+
+- When the current song is a **WAV, AIFF, or W64** file the search button still appears, but below it a 2-line inline note is shown:
+  > *WAV files can't store embedded art — art will be saved to the database only.*  
+  > *It is lost on a DB reset or album-art cache delete.*
+- When the current song is an **embeddable format** (mp3, flac, ogg, m4a…) the button appears alone as before.
+- The extension is re-checked at click time: the embed status message shows `⏳ Saving art to database…` for WAV and `⏳ Embedding cover art…` for all other formats.
+- After success, `refreshQueueUI()` is called alongside `renderNPModal()` and `Player.updateBar()` so the **queue panel** immediately shows the new art (this was previously missing).
+
+---
+
+## [Feature] Discogs — Allow Art Update flag (`S.discogsAllowUpdate`) *(GitHub Copilot, 2026-03-08)*
+
+**Files:** `webapp/v2/app.js`
+
+- New `S.discogsAllowUpdate: false` state field.
+- Fetched from `GET /api/v1/admin/discogs/config` on login, `checkSession()`, and `visibilitychange` — alongside the existing `discogsEnabled` fetch.
+- `renderNPModal()` now shows the Discogs cover-art section only when:
+  ```
+  S.isAdmin && S.discogsEnabled && (!song['album-art'] || S.discogsAllowUpdate)
+  ```
+  — when **Allow Art Update** is off, the Fix Art picker is hidden for songs that already have album art.
+
+---
+
+## [Feature] Last.fm — Server-Side Enable/Disable, Nav Button Gating *(GitHub Copilot, 2026-03-08)*
+
+**Files:** `webapp/v2/app.js`, `webapp/v2/index.html`
+
+### Nav button
+- `<button data-view="lastfm">` now has `id="lastfm-nav-btn"` and the `hidden` CSS class (matches the Discogs nav button pattern).
+- `showApp()` calls `document.getElementById('lastfm-nav-btn').classList.remove('hidden')` when `S.lastfmEnabled` is true.
+- The button is shown for **all users** (not admin-only) since scrobbling is a user-facing feature.
+
+### `S.lastfmEnabled` state
+- New `S.lastfmEnabled: false` state field.
+- Set by fetching `GET /api/v1/lastfm/status` (a public endpoint, already authenticated) and reading `response.serverEnabled`.
+  - This is called after both login flow and `checkSession()` — outside the admin-only block so it works for regular users.
+  - Also re-checked in the `visibilitychange` handler so disabling Last.fm in the admin panel is reflected without a hard reload.
+
+### Scrobble gating
+- Both scrobble timer blocks (in `playAt()` and the standalone playback handler) are now wrapped in `if (S.lastfmEnabled) { … }`.
+- When disabled: `clearTimeout(scrobbleTimer)` still runs (cancels any in-flight timer) and the scrobble status string is cleared, but no new timer is started.
+
+### `visibilitychange` handler
+- Previously only checked Discogs (admin-only).
+- Now also checks Last.fm status for all users and shows/hides `lastfm-nav-btn` accordingly.
+- The admin-only Discogs block remains guarded by `if (S.isAdmin)` as before.

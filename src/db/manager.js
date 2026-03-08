@@ -52,6 +52,7 @@ export function getStats() { return backend.getStats(); }
 
 // Metadata Queries
 export function updateFileArt(filepath, vpath, aaFile, scanId) { return backend.updateFileArt(filepath, vpath, aaFile, scanId); }
+export function countArtUsage(aaFile) { return backend.countArtUsage(aaFile); }
 export function updateFileCue(filepath, vpath, cuepoints) { return backend.updateFileCue(filepath, vpath, cuepoints); }
 export function getFileWithMetadata(filepath, vpath, username) { return backend.getFileWithMetadata(filepath, vpath, username); }
 export function getArtists(vpaths, ignoreVPaths) { return backend.getArtists(vpaths, ignoreVPaths); }

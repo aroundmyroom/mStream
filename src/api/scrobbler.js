@@ -136,7 +136,10 @@ export function setup(mstream) {
   // ── Per-user self-service Last.fm endpoints ──────────────────
 
   mstream.get('/api/v1/lastfm/status', (req, res) => {
-    res.json({ linkedUser: req.user['lastfm-user'] || null });
+    res.json({
+      serverEnabled: config.program.lastFM?.enabled !== false,
+      linkedUser: req.user['lastfm-user'] || null,
+    });
   });
 
   mstream.post('/api/v1/lastfm/connect', async (req, res) => {

@@ -297,19 +297,31 @@ export function setup(mstream) {
   });
 
   // Update global Last.fm API key + shared secret (admin only)
+  mstream.get("/api/v1/admin/lastfm/config", (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    res.json({
+      enabled:   config.program.lastFM?.enabled   !== false,
+      apiKey:    config.program.lastFM?.apiKey    || '',
+      apiSecret: config.program.lastFM?.apiSecret || '',
+    });
+  });
+
   mstream.post("/api/v1/admin/lastfm/config", async (req, res) => {
     const schema = Joi.object({
-      apiKey:    Joi.string().required(),
-      apiSecret: Joi.string().required(),
+      enabled:   Joi.boolean().required(),
+      apiKey:    Joi.string().allow('').required(),
+      apiSecret: Joi.string().allow('').required(),
     });
     joiValidate(schema, req.body);
 
     const loadConfig = await admin.loadFile(config.configFile);
     if (!loadConfig.lastFM) loadConfig.lastFM = {};
+    loadConfig.lastFM.enabled   = req.body.enabled;
     loadConfig.lastFM.apiKey    = req.body.apiKey;
     loadConfig.lastFM.apiSecret = req.body.apiSecret;
     await admin.saveFile(loadConfig, config.configFile);
 
+    config.program.lastFM.enabled   = req.body.enabled;
     config.program.lastFM.apiKey    = req.body.apiKey;
     config.program.lastFM.apiSecret = req.body.apiSecret;
     scrobblerApi.updateApiKeys(req.body.apiKey, req.body.apiSecret);
@@ -535,6 +547,47 @@ export function setup(mstream) {
     joiValidate(schema, req.body);
 
     await admin.setSSL(path.resolve(req.body.cert), path.resolve(req.body.key));
+    res.json({});
+  });
+
+  // ── Discogs config ───────────────────────────────────────────
+  mstream.get("/api/v1/admin/discogs/config", (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    res.json({
+      enabled:        config.program.discogs?.enabled        || false,
+      allowArtUpdate: config.program.discogs?.allowArtUpdate || false,
+      apiKey:         config.program.discogs?.apiKey         || '',
+      apiSecret:      config.program.discogs?.apiSecret      || '',
+      userAgentTag:   config.program.discogs?.userAgentTag   || '',
+    });
+  });
+
+  mstream.post("/api/v1/admin/discogs/config", async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const schema = Joi.object({
+      enabled:        Joi.boolean().required(),
+      allowArtUpdate: Joi.boolean().required(),
+      apiKey:         Joi.string().allow('').required(),
+      apiSecret:      Joi.string().allow('').required(),
+      userAgentTag:   Joi.string().allow('').pattern(/^[a-zA-Z0-9]{0,4}$/).required(),
+    });
+    joiValidate(schema, req.body);
+
+    const loadConfig = await admin.loadFile(config.configFile);
+    if (!loadConfig.discogs) loadConfig.discogs = {};
+    loadConfig.discogs.enabled        = req.body.enabled;
+    loadConfig.discogs.allowArtUpdate = req.body.allowArtUpdate;
+    loadConfig.discogs.apiKey         = req.body.apiKey;
+    loadConfig.discogs.apiSecret      = req.body.apiSecret;
+    loadConfig.discogs.userAgentTag   = req.body.userAgentTag;
+    await admin.saveFile(loadConfig, config.configFile);
+
+    config.program.discogs.enabled        = req.body.enabled;
+    config.program.discogs.allowArtUpdate = req.body.allowArtUpdate;
+    config.program.discogs.apiKey         = req.body.apiKey;
+    config.program.discogs.apiSecret      = req.body.apiSecret;
+    config.program.discogs.userAgentTag   = req.body.userAgentTag;
+
     res.json({});
   });
 }
