@@ -20,8 +20,11 @@ export function setup(mstream) {
     }
     // if the file was edited, remove it from the DB
     else if (req.body.modTime !== dbFileInfo.modified) {
+      // Preserve any Discogs-assigned art (cache-only, e.g. WAV) so a rescan
+      // of the modified file doesn't orphan art the user manually picked.
+      const preserveAaFile = dbFileInfo.aaFile || null;
       db.removeFileByPath(req.body.filepath, req.body.vpath);
-      return res.json({});
+      return res.json({ _stale: true, _preserveAaFile: preserveAaFile });
     }
     // update scan ID now so the record survives finish-scan pruning
     db.updateFileScanId(dbFileInfo, req.body.scanId);

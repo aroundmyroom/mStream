@@ -182,9 +182,15 @@ async function recursiveScan(dir) {
           }
         });
 
-        if (Object.entries(dbFileInfo.data).length === 0) {
-          // New file — full parse + insert (cuepoints extracted inside parseMyFile)
+        if (Object.entries(dbFileInfo.data).length === 0 || dbFileInfo.data._stale) {
+          // New or modified file — full parse + insert (cuepoints extracted inside parseMyFile)
           const songInfo = await parseMyFile(filepath, stat.mtime.getTime());
+          // Preserve Discogs-assigned art (DB cache only, e.g. WAV files) when the
+          // re-parsed file carries no embedded art — prevents orphan cleanup from
+          // deleting art the user manually picked via the Discogs picker.
+          if (!songInfo.aaFile && dbFileInfo.data._preserveAaFile) {
+            songInfo.aaFile = dbFileInfo.data._preserveAaFile;
+          }
           await insertEntries(songInfo);
         } else {
           // File already in DB — run targeted updates for anything still missing
