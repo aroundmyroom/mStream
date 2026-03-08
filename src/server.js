@@ -216,12 +216,25 @@ export async function serveIt(configFile) {
   mstream.get('/api/', (req, res) => res.json({ "server": packageJson.version, "apiVersions": ["1"] }));
 
   // album art folder
-  mstream.get('/album-art/:file', (req, res) => {
-    if (!req.params.file) {
-      throw new WebError('Missing Error', 404);
-    }
+  // Rule: NEVER return 404. If the file is in the DB but missing from disk
+  // (cache cleared, partial scan, manual deletion) serve a neutral SVG placeholder
+  // so the browser shows something consistent instead of a broken-image icon.
+  const ALBUM_ART_FALLBACK_SVG = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">' +
+    '<rect width="1" height="1" fill="#1e1e2e"/>' +
+    '<circle cx=".5" cy=".5" r=".28" fill="none" stroke="#45475a" stroke-width=".06"/>' +
+    '<circle cx=".5" cy=".5" r=".08" fill="#45475a"/>' +
+    '</svg>'
+  );
+  function sendArtFallback(res) {
+    res.set('Content-Type', 'image/svg+xml');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.end(ALBUM_ART_FALLBACK_SVG);
+  }
 
-    // ideally we should be checking this filename against a DB entry
+  mstream.get('/album-art/:file', (req, res) => {
+    if (!req.params.file) { return sendArtFallback(res); }
+
     const filename = sanitizeFilename(req.params.file);
 
     const compressedFilePath = path.join(config.program.storage.albumArtDirectory, `z${req.query.compress}-${filename}`);
@@ -229,7 +242,11 @@ export async function serveIt(configFile) {
       return res.sendFile(compressedFilePath);
     }
 
-    res.sendFile(path.join(config.program.storage.albumArtDirectory, filename));
+    const fullPath = path.join(config.program.storage.albumArtDirectory, filename);
+    if (!fs.existsSync(fullPath)) { return sendArtFallback(res); }
+    res.sendFile(fullPath, err => {
+      if (err && !res.headersSent) sendArtFallback(res);
+    });
   });
 
   // TODO: determine if user has access to the exact file

@@ -808,6 +808,10 @@ body.audio-playing .vu-cn-velvet{
   white-space:nowrap;opacity:0.88;
 }
 body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
+/* Art-pulse mode: album art fills the VU row and pulses with audio level */
+.vu-art-wrap{position:absolute;inset:0;overflow:hidden;}
+.vu-art-wrap canvas{display:block;width:100%;height:100%;visibility:hidden;pointer-events:none;}
+#vu-art-wrap.hidden{display:block!important;visibility:hidden!important;pointer-events:none!important;}
 /* player-left: col 1, row 1 */
 .player-left{grid-column:1;grid-row:1;display:flex;align-items:center;gap:14px;min-width:0;cursor:pointer;z-index:1;align-self:center;}
 .player-left:hover .player-thumb{box-shadow:0 0 0 2px var(--primary);transition:box-shadow .18s;}
