@@ -523,6 +523,7 @@ const Player = {
     thumb.innerHTML = u
       ? `<img src="${u}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`
       : noArtHtml();
+    VU_NEEDLE.setArt(u || '');
     // update player stars
     const starsEl = document.getElementById('player-stars');
     if (s.rating) {
@@ -1595,6 +1596,153 @@ const VU_NEEDLE = (() => {
   const PPM_HOLD_MS  = 2000;    // peak hold duration
   const PPM_FADE_MS  = 2000;    // peak fade after hold
   let ppmBrightness  = parseFloat(localStorage.getItem(_uKey('ppm_bright')) || '0.38');
+
+  // Art-pulse — dedicated fast-attack / medium-release level (dBFS, used for drain threshold only)
+  let artLvlL = -30, artLvlR = -30;
+  const TAU_ART_ATK = 0.010;
+  const TAU_ART_REL = 0.300;
+
+  // Art bar state: per-frequency ballistic levels (same count as MINI_SPEC)
+  let _artImg      = null;
+  const _ART_NBARS = 80;
+  const _ART_TAU   = 0.30;  // same release tau as MINI_SPEC
+  let _artBarsL    = new Float32Array(_ART_NBARS);
+  let _artBarsR    = new Float32Array(_ART_NBARS);
+  const _ART_HOLD_MS = 1200;   // peak tick hold time before falling (same as MINI_SPEC)
+  const _ART_GRAVITY = 0.7;    // peak fall acceleration (same as MINI_SPEC)
+  let _artPkL      = Array.from({length: _ART_NBARS}, () => ({val:0, ts:0, vel:0}));
+  let _artPkR      = Array.from({length: _ART_NBARS}, () => ({val:0, ts:0, vel:0}));
+
+  function _buildArtCols() {
+    _artBarsL.fill(0); _artBarsR.fill(0);
+    _artPkL.forEach(p => { p.val=0; p.ts=0; p.vel=0; });
+    _artPkR.forEach(p => { p.val=0; p.ts=0; p.vel=0; });
+  }
+
+  function _drawArt(dt, draining) {
+    const canvas = document.getElementById('vu-art-canvas');
+    if (!canvas) return;
+    const now = performance.now();
+
+    // Fetch FFT data — silence when draining
+    const rawL = new Uint8Array(analyserL ? analyserL.frequencyBinCount : 128);
+    const rawR = new Uint8Array(analyserR ? analyserR.frequencyBinCount : 128);
+    if (!draining && analyserL && analyserR) {
+      analyserL.getByteFrequencyData(rawL);
+      analyserR.getByteFrequencyData(rawR);
+    }
+
+    // Log-frequency bin mapping — identical to MINI_SPEC
+    const sampleRate = audioCtx ? audioCtx.sampleRate : 44100;
+    function logBin(i, binCount) {
+      const freq = Math.pow(2, Math.log2(40) + (Math.log2(20000) - Math.log2(40)) * i / _ART_NBARS);
+      return Math.min(Math.floor(freq / (sampleRate / 2) * binCount), binCount - 1);
+    }
+    const relDecay = Math.exp(-dt / _ART_TAU);
+    let anyActive = false;
+
+    for (let i = 0; i < _ART_NBARS; i++) {
+      // L side: reversed — bar 0 = treble (far left), bar NBARS-1 = bass (centre)
+      const biL  = _ART_NBARS - 1 - i;
+      const vL   = Math.pow(rawL[logBin(biL, rawL.length)] / 255, 0.82);
+      _artBarsL[i] = vL > _artBarsL[i] ? vL : _artBarsL[i] * relDecay + vL * (1 - relDecay);
+      if (_artBarsL[i] < 0.001) _artBarsL[i] = 0; else anyActive = true;
+
+      // R side: normal — bar 0 = bass (centre), bar NBARS-1 = treble (far right)
+      const vR   = Math.pow(rawR[logBin(i, rawR.length)] / 255, 0.82);
+      _artBarsR[i] = vR > _artBarsR[i] ? vR : _artBarsR[i] * relDecay + vR * (1 - relDecay);
+      if (_artBarsR[i] < 0.001) _artBarsR[i] = 0; else anyActive = true;
+
+      // Peak hold — L (gravity-accelerated fall, same as MINI_SPEC)
+      if (vL >= _artPkL[i].val) { _artPkL[i].val = vL; _artPkL[i].ts = now; _artPkL[i].vel = 0; }
+      else if (now - _artPkL[i].ts > _ART_HOLD_MS) {
+        _artPkL[i].vel += _ART_GRAVITY * dt;
+        _artPkL[i].val  = Math.max(0, _artPkL[i].val - _artPkL[i].vel * dt);
+      }
+      if (_artPkL[i].val > 0.005) anyActive = true;
+
+      // Peak hold — R
+      if (vR >= _artPkR[i].val) { _artPkR[i].val = vR; _artPkR[i].ts = now; _artPkR[i].vel = 0; }
+      else if (now - _artPkR[i].ts > _ART_HOLD_MS) {
+        _artPkR[i].vel += _ART_GRAVITY * dt;
+        _artPkR[i].val  = Math.max(0, _artPkR[i].val - _artPkR[i].vel * dt);
+      }
+      if (_artPkR[i].val > 0.005) anyActive = true;
+    }
+
+    // Hide canvas when fully silent — player background shows through cleanly
+    if (!_artImg || !_artImg.complete || !_artImg.naturalWidth) {
+      canvas.style.visibility = 'hidden'; canvas.style.pointerEvents = 'none'; return;
+    }
+    if (!anyActive) {
+      canvas.style.visibility = 'hidden'; canvas.style.pointerEvents = 'none';
+      const dpr2 = window.devicePixelRatio || 1;
+      canvas.getContext('2d').clearRect(0, 0, Math.round(canvas.offsetWidth*dpr2), Math.round(canvas.offsetHeight*dpr2));
+      return;
+    }
+    canvas.style.visibility = 'visible'; canvas.style.pointerEvents = 'auto';
+
+    const W = canvas.offsetWidth, H = canvas.offsetHeight;
+    if (W < 4 || H < 4) return;
+    const dpr = window.devicePixelRatio || 1;
+    const CW  = Math.round(W * dpr), CH = Math.round(H * dpr);
+    if (canvas.width !== CW || canvas.height !== CH) { canvas.width = CW; canvas.height = CH; }
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, CW, CH);
+
+    // Two-sided geometry — identical to MINI_SPEC
+    const GAP  = 1.5 * dpr;
+    const cg   = 2 * dpr;
+    const hw   = (CW - cg) / 2;
+    const barW = (hw - GAP * (_ART_NBARS - 1)) / _ART_NBARS;
+
+    // Cover-crop source image to full canvas aspect ratio
+    const iw = _artImg.naturalWidth, ih = _artImg.naturalHeight;
+    const srcAspect = iw / ih, dstAspect = CW / CH;
+    let sx, sy, srcW, srcH;
+    if (srcAspect > dstAspect) {
+      srcH = ih; srcW = Math.round(ih * dstAspect);
+      sx = Math.round((iw - srcW) / 2); sy = 0;
+    } else {
+      srcW = iw; srcH = Math.round(iw / dstAspect);
+      sx = 0; sy = Math.round((ih - srcH) / 2);
+    }
+
+    // Draw one side — image column position is proportional to destX across full canvas
+    function drawSide(bars, pks, startX) {
+      for (let i = 0; i < _ART_NBARS; i++) {
+        const destX  = Math.round(startX + i * (barW + GAP));
+        const destW  = Math.max(1, Math.round(barW));
+        // Map screen position → source image column
+        const srcX   = sx + Math.round(srcW * (startX + i * (barW + GAP)) / CW);
+        const srcCW  = Math.max(1, Math.round(srcW * barW / CW));
+
+        const bv = bars[i];
+        if (bv >= 0.001) {
+          const barH = Math.max(1, bv * CH * 0.92);
+          const destY = CH - Math.round(barH);
+          const srcY  = sy + Math.round(srcH * (1 - bv * 0.92));
+          const srcCH = Math.max(1, srcH - Math.round(srcH * (1 - bv * 0.92)));
+          ctx.drawImage(_artImg, srcX, srcY, srcCW, srcCH, destX, destY, destW, Math.round(barH));
+        }
+
+        // Peak tick — bright white line that falls with gravity (same feel as MINI_SPEC)
+        const ph = pks[i].val;
+        if (ph > 0.015) {
+          const tickH = Math.max(1, Math.round(1.5 * dpr));
+          const py    = Math.round(CH - ph * CH * 0.92) - tickH;
+          ctx.globalAlpha = Math.min(0.92, ph * 1.8);
+          ctx.fillStyle   = '#ffffff';
+          ctx.fillRect(destX, py, destW, tickH);
+          ctx.globalAlpha = 1;
+        }
+      }
+    }
+
+    drawSide(_artBarsL, _artPkL, 0);           // L: treble left → bass centre
+    drawSide(_artBarsR, _artPkR, hw + cg);     // R: bass centre → treble right
+  }
+
   let _bsAlpha       = 0;          // brightness-slider overlay opacity (0 = hidden)
   let _bsFadeTimer   = null;       // timeout id for auto-hide
   let _bsRaf         = null;       // rAF for smooth fade animation
@@ -2068,6 +2216,10 @@ const VU_NEEDLE = (() => {
       const cP = document.getElementById('vu-ppm');
       if (cP) drawPPM(cP, -40, -40, -40, -40, 0, 0);
     }
+    if (_mode === 'art') {
+      _buildArtCols();
+      _drawArt(0.016, true);
+    }
   }
 
   // ── Ref-level knob ──────────────────────────────────────────
@@ -2215,8 +2367,22 @@ const VU_NEEDLE = (() => {
       const cP = document.getElementById('vu-ppm');
       if (cP) drawPPM(cP, ppmL, ppmR, ppmPkL, ppmPkR, ppmLampI(ppmPkTsL), ppmLampI(ppmPkTsR));
     }
+    // Art-pulse ballistics (always computed so mode switch is instant)
+    {
+      const rawArtL = (_vuDraining || !analyserL) ? -Infinity : peakToDBFS(analyserL);
+      const rawArtR = (_vuDraining || !analyserR) ? -Infinity : peakToDBFS(analyserR);
+      const tgtAL   = isFinite(rawArtL) ? Math.max(-30, rawArtL) : -30;
+      const tgtAR   = isFinite(rawArtR) ? Math.max(-30, rawArtR) : -30;
+      const aAtk    = 1 - Math.exp(-dt / TAU_ART_ATK);
+      const aRel    = 1 - Math.exp(-dt / TAU_ART_REL);
+      artLvlL = tgtAL > artLvlL ? artLvlL + aAtk * (tgtAL - artLvlL) : artLvlL + aRel * (tgtAL - artLvlL);
+      artLvlR = tgtAR > artLvlR ? artLvlR + aAtk * (tgtAR - artLvlR) : artLvlR + aRel * (tgtAR - artLvlR);
+    }
+    if (_mode === 'art') _drawArt(dt, _vuDraining);
     // Once drained to near-minimum, switch to static idle frame
-    const _drainThresh = _mode === 'ppm' ? Math.max(ppmL, ppmR) > -39 : Math.max(vuL, vuR) > -24.5;
+    const _drainThresh = _mode === 'ppm'  ? Math.max(ppmL,    ppmR)    > -39   :
+                         _mode === 'art'  ? (_artBarsL.some(f => f > 0.005) || _artBarsR.some(f => f > 0.005) || _artPkL.some(p => p.val > 0.01) || _artPkR.some(p => p.val > 0.01)) :
+                                            Math.max(vuL,     vuR)     > -24.5;
     if (_vuDraining && _drainThresh) { rafId = requestAnimationFrame(drawFrame); return; }
     if (_vuDraining) {
       rafId = null;
@@ -2225,6 +2391,9 @@ const VU_NEEDLE = (() => {
       ppmL = -40; ppmR = -40;
       ppmPkL = -40; ppmPkR = -40;
       ppmPkTsL = null; ppmPkTsR = null;
+      artLvlL = -30; artLvlR = -30;
+      _buildArtCols();
+      _drawArt(0.016, true);
       _drawIdle();
       return;
     }
@@ -2242,12 +2411,25 @@ const VU_NEEDLE = (() => {
   }
   function _applyMode(startIfPlaying) {
     _vuDraining = false;
+    // Clear art canvas immediately when leaving art mode
+    if (_mode !== 'art') {
+      _buildArtCols();
+      const ac = document.getElementById('vu-art-canvas');
+      if (ac) {
+        const dpr = window.devicePixelRatio || 1;
+        ac.getContext('2d').clearRect(0, 0, Math.round(ac.offsetWidth*dpr), Math.round(ac.offsetHeight*dpr));
+        ac.style.visibility = 'hidden';
+        ac.style.pointerEvents = 'none';
+      }
+    }
     const wrap = document.getElementById('vu-needle-wrap');
     const spec = document.getElementById('mini-spec');
     const ppmW = document.getElementById('vu-ppm-wrap');
+    const artW = document.getElementById('vu-art-wrap');
     if (wrap) wrap.classList.toggle('hidden', _mode !== 'needle');
     if (spec) spec.classList.toggle('hidden', _mode !== 'spec');
     if (ppmW) ppmW.classList.toggle('hidden', _mode !== 'ppm');
+    if (artW) artW.classList.toggle('hidden', _mode !== 'art');
     document.body.classList.toggle('vu-needle-mode', _mode === 'needle');
     if (_mode === 'spec') { _stop(); if (startIfPlaying) MINI_SPEC.start(); }
     else                  { MINI_SPEC.stop(); if (startIfPlaying) _start(); else _drawIdle(); }
@@ -2256,10 +2438,17 @@ const VU_NEEDLE = (() => {
 
   return {
     get mode() { return _mode; },
+    setArt(url) {
+      if (!url) { _artImg = null; _buildArtCols(); _drawArt(0.016, true); return; }
+      const img = new Image();
+      img.onload  = () => { _artImg = img; _buildArtCols(); };
+      img.onerror = () => { _artImg = null; };
+      img.src = url;
+    },
     start()  { if (_mode === 'spec') MINI_SPEC.start(); else _start(); },
     stop()   { if (_mode === 'spec') MINI_SPEC.stop();  else _stop();  },
     toggle() {
-      const MODES = ['spec', 'needle', 'ppm'];
+      const MODES = ['spec', 'needle', 'ppm', 'art'];
       _mode = MODES[(MODES.indexOf(_mode) + 1) % MODES.length];
       _applyMode(audioEl && !audioEl.paused);
     },
@@ -2275,7 +2464,8 @@ const VU_NEEDLE = (() => {
         // Toggle on dial, spectrum, PPM canvas (non-slider), or bare row background
         const id = e.target && e.target.id;
         if (id === 'vu-dial-L' || id === 'vu-dial-R' || id === 'mini-spec' ||
-            id === 'vu-ppm'    || id === 'vu-ppm-wrap' || e.target === row) this.toggle();
+            id === 'vu-ppm'    || id === 'vu-ppm-wrap' ||
+            id === 'vu-art-wrap' || id === 'vu-art-canvas' || e.target === row) this.toggle();
       });
       // Block clicks on center logo area from bubbling to the row toggle
       const center = document.querySelector('.vu-center-logo');
@@ -2284,11 +2474,13 @@ const VU_NEEDLE = (() => {
       const wrap = document.getElementById('vu-needle-wrap');
       const spec = document.getElementById('mini-spec');
       const ppmW = document.getElementById('vu-ppm-wrap');
+      const artW = document.getElementById('vu-art-wrap');
       if (wrap) wrap.classList.toggle('hidden', _mode !== 'needle');
       if (spec) spec.classList.toggle('hidden', _mode !== 'spec');
       if (ppmW) ppmW.classList.toggle('hidden', _mode !== 'ppm');
+      if (artW) artW.classList.toggle('hidden', _mode !== 'art');
       document.body.classList.toggle('vu-needle-mode', _mode === 'needle');
-      if (_mode === 'needle' || _mode === 'ppm') _drawIdle();
+      if (_mode === 'needle' || _mode === 'ppm' || _mode === 'art') _drawIdle();
       else MINI_SPEC.stop();  // idle breathing on page load in spec mode
       initKnob();
       initPPMBrightness();
