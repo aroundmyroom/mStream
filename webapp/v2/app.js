@@ -677,9 +677,9 @@ async function autoDJPrefetch() {
     if (S.queue.length <= S.idx + 1) {
       _pruneQueue();
       S.queue.push(song);
+      refreshQueueUI();      // update queue panel FIRST so it's visible before strip appears
       _showDJStrip(song);
       _fetchDiscogsArt(song);
-      refreshQueueUI();
     }
   } catch(e) { console.error('Auto-DJ prefetch failed:', e); }
   finally { S._djPrefetching = false; }
@@ -711,10 +711,10 @@ async function autoDJFetch() {
     _djPushArtistHistory(song.artist);
     _pruneQueue();
     S.queue.push(song);
+    refreshQueueUI();      // update queue panel FIRST so it's visible before strip appears
     _showDJStrip(song);
     _fetchDiscogsArt(song);
     Player.playAt(S.queue.length - 1);
-    refreshQueueUI();
   } catch(e) {
     console.error('Auto-DJ fetch failed:', e);
     toast('Auto-DJ: could not load next song — check connection');
