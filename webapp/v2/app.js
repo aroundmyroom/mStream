@@ -679,7 +679,6 @@ async function autoDJPrefetch() {
       S.queue.push(song);
       refreshQueueUI();      // update queue panel FIRST so it's visible before strip appears
       _showDJStrip(song);
-      _fetchDiscogsArt(song);
     }
   } catch(e) { console.error('Auto-DJ prefetch failed:', e); }
   finally { S._djPrefetching = false; }
@@ -713,7 +712,6 @@ async function autoDJFetch() {
     S.queue.push(song);
     refreshQueueUI();      // update queue panel FIRST so it's visible before strip appears
     _showDJStrip(song);
-    _fetchDiscogsArt(song);
     Player.playAt(S.queue.length - 1);
   } catch(e) {
     console.error('Auto-DJ fetch failed:', e);
