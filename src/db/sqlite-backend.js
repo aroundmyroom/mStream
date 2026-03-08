@@ -108,6 +108,10 @@ export function updateFileArt(filepath, vpath, aaFile, scanId) {
   db.prepare('UPDATE files SET aaFile = ?, sID = ? WHERE filepath = ? AND vpath = ?').run(aaFile, scanId, filepath, vpath);
 }
 
+export function countArtUsage(aaFile) {
+  return db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE aaFile = ?').get(aaFile).cnt;
+}
+
 export function updateFileCue(filepath, vpath, cuepoints) {
   // cuepoints is either a JSON string or '[]' (sentinel = checked, no cue)
   db.prepare('UPDATE files SET cuepoints = ? WHERE filepath = ? AND vpath = ?').run(cuepoints, filepath, vpath);

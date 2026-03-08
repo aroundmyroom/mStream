@@ -50,8 +50,17 @@ const rpnOptions = Joi.object({
 });
 
 const lastFMOptions = Joi.object({
-  apiKey: Joi.string().default('33098eb88840fdded379a7e5a7da67dd'),
+  enabled:   Joi.boolean().default(true),
+  apiKey:    Joi.string().default('33098eb88840fdded379a7e5a7da67dd'),
   apiSecret: Joi.string().default('ffa27b8912cd04050e1fa14e9ced58a4')
+});
+
+const discogsOptions = Joi.object({
+  enabled:        Joi.boolean().default(false),
+  allowArtUpdate: Joi.boolean().default(false),
+  apiKey:         Joi.string().allow('').default(''),
+  apiSecret:      Joi.string().allow('').default(''),
+  userAgentTag:   Joi.string().allow('').pattern(/^[a-zA-Z0-9]{0,4}$/).default(''),
 });
 
 const federationOptions = Joi.object({
@@ -71,6 +80,7 @@ const schema = Joi.object({
     "opus": true, "m3u": false
   }),
   lastFM: lastFMOptions.default(lastFMOptions.validate({}).value),
+  discogs: discogsOptions.default(discogsOptions.validate({}).value),
   scanOptions: scanOptions.default(scanOptions.validate({}).value),
   noUpload: Joi.boolean().default(false),
   writeLogs: Joi.boolean().default(false),

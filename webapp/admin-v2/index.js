@@ -2447,6 +2447,7 @@ const lockView = Vue.component('lock-view', {
 const lastFMView = Vue.component('lastfm-view', {
   data() {
     return {
+      enabled: true,
       apiKey: '',
       apiSecret: '',
       pending: false,
@@ -2458,53 +2459,165 @@ const lastFMView = Vue.component('lastfm-view', {
         <div class="col s12">
           <div class="card">
             <div class="card-content">
-              <span class="card-title">Last.fm API Credentials</span>
-              <p style="margin-bottom:1rem;">
-                This mStream installation ships with built-in Last.fm credentials.
-                You can optionally override them with your own
-                <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener">API key &amp; shared secret</a>.
-                The shared secret is stored server-side only and is never sent to clients.
+              <span class="card-title">Last.fm</span>
+              <p style="margin-bottom:0.5rem;">
+                When enabled, users can link their Last.fm account to scrobble every track they play.
+                mStream ships with built-in API credentials — you can optionally override them with
+                <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener">your own key &amp; shared secret</a>.
               </p>
+              <p style="margin-bottom:1rem;font-size:0.85rem;color:#999;">The shared secret is stored server-side only and is never sent to clients.</p>
               <table>
                 <tbody>
                   <tr>
-                    <td style="width:140px"><b>API Key</b></td>
-                    <td><input v-model="apiKey" type="text" placeholder="Enter new API key" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore spellcheck="false" style="margin:0" /></td>
+                    <td style="width:140px"><b>Enable</b></td>
+                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> Enable Last.fm scrobbling for users</td>
+                  </tr>
+                  <tr>
+                    <td><b>API Key</b></td>
+                    <td><input v-model="apiKey" type="text" placeholder="Leave blank to use built-in key" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore spellcheck="false" style="margin:0" /></td>
                   </tr>
                   <tr>
                     <td><b>Shared Secret</b></td>
-                    <td><input v-model="apiSecret" type="password" placeholder="Enter new shared secret" autocomplete="new-password" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore style="margin:0" /></td>
+                    <td><input v-model="apiSecret" type="password" placeholder="Leave blank to use built-in secret" autocomplete="new-password" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore style="margin:0" /></td>
                   </tr>
                 </tbody>
               </table>
             </div>
             <div class="card-action">
               <button class="btn" v-on:click="save()" :disabled="pending">
-                {{ pending ? 'Saving...' : 'Save Credentials' }}
+                {{ pending ? 'Saving...' : 'Save' }}
               </button>
             </div>
           </div>
         </div>
       </div>
     </div>`,
+  async mounted() {
+    try {
+      const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/lastfm/config` });
+      this.enabled   = res.data.enabled !== false;
+      this.apiKey    = res.data.apiKey    || '';
+      this.apiSecret = res.data.apiSecret || '';
+    } catch(e) { /* ignore */ }
+  },
   methods: {
     save: async function() {
-      if (!this.apiKey.trim() || !this.apiSecret.trim()) {
-        iziToast.warning({ title: 'Both fields are required', position: 'topCenter', timeout: 3500 });
-        return;
-      }
       this.pending = true;
       try {
         await API.axios({
           method: 'POST',
           url: `${API.url()}/api/v1/admin/lastfm/config`,
-          data: { apiKey: this.apiKey.trim(), apiSecret: this.apiSecret.trim() }
+          data: { enabled: this.enabled, apiKey: this.apiKey.trim(), apiSecret: this.apiSecret.trim() }
         });
-        this.apiKey = '';
-        this.apiSecret = '';
-        iziToast.success({ title: 'Last.fm credentials saved', position: 'topCenter', timeout: 3000 });
+        iziToast.success({ title: 'Last.fm settings saved', position: 'topCenter', timeout: 3000 });
       } catch(err) {
-        iziToast.error({ title: 'Failed to save credentials', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: 'Failed to save Last.fm settings', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.pending = false;
+      }
+    }
+  }
+});
+
+const discogsView = Vue.component('discogs-view', {
+  data() {
+    return {
+      enabled: false,
+      allowArtUpdate: false,
+      apiKey: '',
+      apiSecret: '',
+      userAgentTag: '',
+      pending: false,
+    };
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">Discogs Cover Art</span>
+              <p style="margin-bottom:0.5rem;">
+                When a song is missing album art &#8212; or has art that looks wrong &#8212; the Now Playing modal
+                shows a <b>"Fix Art"</b> button. Clicking it searches the
+                <a href="https://www.discogs.com/developers/" target="_blank" rel="noopener">Discogs API</a>
+                and presents up to <b>3 front-cover proposals</b> to choose from.
+                Selecting one permanently embeds the image into the audio file (mp3, flac, ogg, m4a&hellip;),
+                so every client sees the correct art from that point on.
+                This picker is only visible to admins.
+              </p>
+              <p style="margin-bottom:0.5rem;">
+                <b>API key &amp; secret are optional.</b>
+                Without them, Discogs allows <b>25 unauthenticated requests per minute</b> — enough for casual use.
+                With your own key + secret (free, register at <a href="https://www.discogs.com/settings/developers" target="_blank" rel="noopener">discogs.com/settings/developers</a>)
+                the limit rises to <b>60 requests per minute</b>.
+                Each cover art search uses up to ~10 requests, so you may hit the unauthenticated limit quickly if you search often.
+              </p>
+              <p style="margin-bottom:1rem; font-size:0.85rem; color:#999;">
+                The key and secret are stored server-side only and are never exposed to non-admin users.
+              </p>
+              <table>
+                <tbody>
+                  <tr>
+                    <td style="width:160px"><b>Enable</b></td>
+                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> Enable Discogs cover art</td>
+                  </tr>
+                  <tr>
+                    <td><b>Allow Art Update</b></td>
+                    <td>
+                      <input type="checkbox" v-model="allowArtUpdate" style="margin:0;width:auto;height:auto;" /> Allow replacing existing album art
+                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">When enabled, the Fix Art button also appears on songs that <i>already have</i> album art, letting you update it. The old art is removed from the cache and database once no other song references it.</div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><b>API Key</b></td>
+                    <td><input v-model="apiKey" type="text" placeholder="Consumer Key" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore spellcheck="false" style="margin:0" /></td>
+                  </tr>
+                  <tr>
+                    <td><b>API Secret</b></td>
+                    <td><input v-model="apiSecret" type="password" placeholder="Consumer Secret" autocomplete="new-password" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore style="margin:0" /></td>
+                  </tr>
+                  <tr>
+                    <td><b>Instance Tag</b></td>
+                    <td>
+                      <input v-model="userAgentTag" type="text" maxlength="4" placeholder="e.g. amr" autocomplete="off" spellcheck="false" style="margin:0;width:80px;text-transform:lowercase" />
+                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">Optional. Up to 4 letters/digits. Your tag is appended to the User-Agent sent to Discogs: <code>mStreamVelvet/dev/{{ userAgentTag || 'tag' }} +…</code></div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-action">
+              <button class="btn" v-on:click="save()" :disabled="pending">
+                {{ pending ? 'Saving...' : 'Save' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  async mounted() {
+    try {
+      const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/discogs/config` });
+      this.enabled        = !!res.data.enabled;
+      this.allowArtUpdate = !!res.data.allowArtUpdate;
+      this.apiKey         = res.data.apiKey       || '';
+      this.apiSecret      = res.data.apiSecret    || '';
+      this.userAgentTag   = res.data.userAgentTag || '';
+    } catch(e) { /* ignore */ }
+  },
+  methods: {
+    save: async function() {
+      this.pending = true;
+      try {
+        await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/admin/discogs/config`,
+          data: { enabled: this.enabled, allowArtUpdate: this.allowArtUpdate, apiKey: this.apiKey.trim(), apiSecret: this.apiSecret.trim(), userAgentTag: this.userAgentTag.trim().slice(0,4).replace(/[^a-zA-Z0-9]/g,'') }
+        });
+        iziToast.success({ title: 'Discogs settings saved', position: 'topCenter', timeout: 3000 });
+      } catch(err) {
+        iziToast.error({ title: 'Failed to save Discogs settings', position: 'topCenter', timeout: 3000 });
       } finally {
         this.pending = false;
       }
@@ -2527,6 +2640,7 @@ const vm = new Vue({
     'lock-view': lockView,
     'scan-errors-view': scanErrorsView,
     'lastfm-view': lastFMView,
+    'discogs-view': discogsView,
   },
   data: {
     currentViewMain: 'folders-view',

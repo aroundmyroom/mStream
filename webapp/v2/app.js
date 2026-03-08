@@ -7,6 +7,9 @@ const S = {
   token:    localStorage.getItem('ms2_token') || '',
   username: _u,
   isAdmin:  false,
+  discogsEnabled: false,
+  discogsAllowUpdate: false,
+  lastfmEnabled: false,
   vpaths:   [],
   queue:    [],
   idx:      -1,
@@ -210,6 +213,7 @@ function _dismissInfoStrip() {
   strip.classList.add('dj-strip-out');
 }
 function _showDJStrip(song) {
+  if (!S.autoDJ) return;
   if (!_djSimilarFor || !_djSimilarArtists.length) return;
   // Exclude the queued artist itself from the pills (it's already shown)
   const pills = _djSimilarArtists
@@ -310,7 +314,11 @@ async function api(method, path, body, signal) {
   // a fetch options object that contains an explicit signal:undefined key.
   if (signal) opts.signal = signal;
   const r = await fetch('/' + path, opts);
-  if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
+  if (!r.ok) {
+    let msg = 'HTTP ' + r.status;
+    try { const j = await r.json(); if (j?.error) msg = j.error; } catch (_) {}
+    const e = new Error(msg); e.status = r.status; throw e;
+  }
   return r.json();
 }
 
@@ -439,15 +447,17 @@ const Player = {
     // Scrobble after 30 s (logs play count + last-played timestamp)
     clearTimeout(scrobbleTimer);
     (function(){ const el = document.getElementById('np-scrobble-status'); if (el) { el.textContent = ''; el.className = 'np-scrobble-status'; } })();
-    scrobbleTimer = setTimeout(async () => {
-      const scrobbleEl = document.getElementById('np-scrobble-status');
-      try {
-        await api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath });
-        if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: Scrobbled ✓'; scrobbleEl.className = 'np-scrobble-status np-scrobble-ok'; }
-      } catch (e) {
-        if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: ' + (e?.message || 'scrobble failed'); scrobbleEl.className = 'np-scrobble-status np-scrobble-err'; }
-      }
-    }, 30000);
+    if (S.lastfmEnabled) {
+      scrobbleTimer = setTimeout(async () => {
+        const scrobbleEl = document.getElementById('np-scrobble-status');
+        try {
+          await api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath });
+          if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: Scrobbled ✓'; scrobbleEl.className = 'np-scrobble-status np-scrobble-ok'; }
+        } catch (e) {
+          if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: ' + (e?.message || 'scrobble failed'); scrobbleEl.className = 'np-scrobble-status np-scrobble-err'; }
+        }
+      }, 30000);
+    }
     persistQueue();
   },
   toggle() {
@@ -668,6 +678,7 @@ async function autoDJPrefetch() {
       _pruneQueue();
       S.queue.push(song);
       _showDJStrip(song);
+      _fetchDiscogsArt(song);
       refreshQueueUI();
     }
   } catch(e) { console.error('Auto-DJ prefetch failed:', e); }
@@ -701,6 +712,7 @@ async function autoDJFetch() {
     _pruneQueue();
     S.queue.push(song);
     _showDJStrip(song);
+    _fetchDiscogsArt(song);
     Player.playAt(S.queue.length - 1);
     refreshQueueUI();
   } catch(e) {
@@ -1216,6 +1228,25 @@ function renderNPModal() {
     fpEl.innerHTML = '';
     fpEl.classList.add('hidden');
   }
+  // Discogs cover-art section (admin only)
+  const _dsEl = document.getElementById('np-discogs-section');
+  if (_dsEl) {
+    if (S.isAdmin && S.discogsEnabled && (!s['album-art'] || S.discogsAllowUpdate)) {
+      _dsEl.classList.remove('hidden');
+      // Reset if the song changed — don't keep stale search results
+      if (_dsEl.dataset.songFp !== (s.filepath || '')) {
+        _dsEl.dataset.songFp = s.filepath || '';
+        const _ext = (s.filepath || '').split('.').pop().toLowerCase();
+        const _wavLike = ['wav','aiff','aif','w64'].includes(_ext);
+        const _btn = `<button class="np-discogs-btn" id="np-discogs-search-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search Album Art on Discogs</button>`;
+        _dsEl.innerHTML = _wavLike
+          ? _btn + `<span class="np-discogs-note" style="margin-top:5px;display:block">WAV files can\'t store embedded art — art will be saved to the database only.<br>It is lost on a DB reset or album-art cache delete.</span>`
+          : _btn;
+      }
+    } else {
+      _dsEl.classList.add('hidden');
+    }
+  }
 }
 function showNPModal() {
   if (!S.queue[S.idx]) return;
@@ -1224,7 +1255,60 @@ function showNPModal() {
 }
 function hideNPModal() {
   document.getElementById('np-modal').classList.add('hidden');
+  document.getElementById('np-left')?.classList.remove('np-left--picking');
 }
+
+// ── DISCOGS ART IN NP MODAL ───────────────────────────────
+async function _npDiscogsSearch(song) {
+  const dsEl  = document.getElementById('np-discogs-section');
+  const npLeft = document.getElementById('np-left');
+  if (!dsEl || !song) return;
+  dsEl.innerHTML = `<span class="np-discogs-status">Searching Discogs…</span>`;
+  npLeft?.classList.add('np-left--picking');
+  try {
+    const params = new URLSearchParams();
+    if (song.artist) params.set('artist', song.artist);
+    if (song.title)  params.set('title',  song.title);
+    if (song.album)  params.set('album',  song.album);
+    if (song.year)   params.set('year',   String(song.year));
+    // No metadata at all — fall back to the bare filename so the server's
+    // filename parser (CamelCase / dash splitter) can extract artist + title
+    if (!song.artist && !song.title && !song.album && song.filepath) {
+      const bare = song.filepath.split('/').pop() || '';
+      if (bare) params.set('title', bare);
+    }
+    const d = await api('GET', `api/v1/discogs/coverart?${params}`);
+    if (!d.choices || !d.choices.length) {
+      dsEl.innerHTML =
+        `<span class="np-discogs-status">No results found</span>` +
+        `<button class="np-discogs-btn" id="np-discogs-search-btn" style="margin-top:8px">Try again</button>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
+      return;
+    }
+    const thumbsHtml = d.choices.map(c =>
+      `<img class="np-discogs-thumb"
+        src="${c.thumbB64}" alt=""
+        title="${esc(c.releaseTitle)}${c.year ? ' (' + esc(c.year) + ')' : ''}"
+        data-release-id="${c.releaseId}"
+        data-filepath="${esc(song.filepath || '')}">`
+    ).join('');
+    dsEl.innerHTML =
+      `<div class="np-discogs-pick-header">` +
+        `<span class="np-discogs-pick-title">Pick a cover</span>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn">← Cancel</button>` +
+      `</div>` +
+      `<div class="np-discogs-choices">${thumbsHtml}</div>` +
+      `<span class="np-discogs-note">via Discogs</span>`;
+    dsEl.dataset.songFp = song.filepath || '';
+  } catch(e) {
+    const msg = e?.status === 404
+      ? 'Discogs not enabled — configure in admin'
+      : esc(e?.message || 'Search failed');
+    dsEl.innerHTML =
+      `<span class="np-discogs-status">${msg}</span>` +
+      `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
+  }
+} 
 
 // ── EQUALIZER CONFIG ──────────────────────────────────────────
 const EQ_BANDS = [
@@ -4594,6 +4678,85 @@ async function viewLastFM() {
 
 }
 
+// ── DISCOGS ADMIN SETTINGS ───────────────────────────────────
+async function viewDiscogs() {
+  setTitle('Discogs'); setBack(null); setNavActive('discogs'); S.view = 'discogs';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+
+  let cfg = { enabled: false, apiKey: '', apiSecret: '' };
+  try { cfg = await api('GET', 'api/v1/admin/discogs/config'); } catch (_) {}
+
+  setBody(`
+    <div class="playback-panel">
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+          </div>
+          <div>
+            <div class="playback-section-title">Discogs Album Art</div>
+            <div class="playback-section-desc">When enabled, the Now Playing modal shows a <b>Fix Art</b> button for songs with missing or broken album art. It searches Discogs and offers up to <b>3 front-cover proposals</b> — picking one embeds the image permanently into the audio file (mp3, flac, ogg, m4a&hellip;). Only visible to admins. Enter your own key+secret from <strong>discogs.com/settings/developers</strong>, or leave blank to use the built-in keys.</div>
+          </div>
+        </div>
+
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Enable Album Art Import</div>
+            <div class="playback-row-hint">Show Discogs cover choices in the Auto-DJ strip</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="discogs-enabled" ${cfg.enabled ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="playback-row">
+          <label class="playback-row-label" for="discogs-key">
+            <div class="playback-row-name">API Key</div>
+            <div class="playback-row-hint">Consumer Key from Discogs developer settings</div>
+          </label>
+          <input type="text" id="discogs-key" class="settings-input" style="max-width:280px"
+            placeholder="Consumer Key (optional)" autocomplete="off"
+            data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore
+            value="${esc(cfg.apiKey || '')}">
+        </div>
+
+        <div class="playback-row">
+          <label class="playback-row-label" for="discogs-secret">
+            <div class="playback-row-name">API Secret</div>
+            <div class="playback-row-hint">Consumer Secret from Discogs developer settings</div>
+          </label>
+          <input type="password" id="discogs-secret" class="settings-input" style="max-width:280px"
+            placeholder="Consumer Secret (optional)" autocomplete="new-password"
+            data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore
+            value="${esc(cfg.apiSecret || '')}">
+        </div>
+
+        <div class="playback-row" style="justify-content:flex-end">
+          <button class="btn-primary" id="discogs-save-btn">Save</button>
+        </div>
+      </div>
+    </div>`);
+
+  document.getElementById('discogs-save-btn').addEventListener('click', async () => {
+    const btn       = document.getElementById('discogs-save-btn');
+    const enabled   = document.getElementById('discogs-enabled').checked;
+    const apiKey    = document.getElementById('discogs-key').value.trim();
+    const apiSecret = document.getElementById('discogs-secret').value.trim();
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      await api('POST', 'api/v1/admin/discogs/config', { enabled, apiKey, apiSecret });
+      toast('\u2713 Discogs settings saved');
+      viewDiscogs();
+    } catch (e) {
+      toast('Error: ' + e.message);
+      btn.disabled = false; btn.textContent = 'Save';
+    }
+  });
+}
+
 // ── SLEEP TIMER LOGIC ───────────────────────────────
 function viewPlayback() {
   setTitle('Playback Settings'); setBack(null); setNavActive('playback'); S.view = 'playback';
@@ -5423,15 +5586,17 @@ function _doXfadeHandoff(nextIdx) {
   loadCuePoints(s.filepath);
   clearTimeout(scrobbleTimer);
   (function(){ const el = document.getElementById('np-scrobble-status'); if (el) { el.textContent = ''; el.className = 'np-scrobble-status'; } })();
-  scrobbleTimer = setTimeout(async () => {
-    const scrobbleEl = document.getElementById('np-scrobble-status');
-    try {
-      await api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath });
-      if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: Scrobbled ✓'; scrobbleEl.className = 'np-scrobble-status np-scrobble-ok'; }
-    } catch (e) {
-      if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: ' + (e?.message || 'scrobble failed'); scrobbleEl.className = 'np-scrobble-status np-scrobble-err'; }
-    }
-  }, 30000);
+  if (S.lastfmEnabled) {
+    scrobbleTimer = setTimeout(async () => {
+      const scrobbleEl = document.getElementById('np-scrobble-status');
+      try {
+        await api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath });
+        if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: Scrobbled ✓'; scrobbleEl.className = 'np-scrobble-status np-scrobble-ok'; }
+      } catch (e) {
+        if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: ' + (e?.message || 'scrobble failed'); scrobbleEl.className = 'np-scrobble-status np-scrobble-err'; }
+      }
+    }, 30000);
+  }
   persistQueue();
 }
 
@@ -5533,7 +5698,9 @@ async function tryLogin(username, password) {
   try {
     await api('GET', 'api/v1/admin/directories');
     S.isAdmin = true;
-  } catch(_) { S.isAdmin = false; }
+    try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; }
+  } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; }
+  try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
 }
 
 async function checkSession() {
@@ -5555,7 +5722,9 @@ async function checkSession() {
       try {
         await api('GET', 'api/v1/admin/directories');
         S.isAdmin = true;
-      } catch(_) { S.isAdmin = false; }
+        try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; }
+      } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; }
+      try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
       return true;
     } catch(e) {
       if (e.status === 401) { S.token = ''; localStorage.removeItem('ms2_token'); }
@@ -5615,10 +5784,12 @@ function showApp() {
   if (S.isAdmin) {
     document.getElementById('scan-btn').classList.remove('hidden');
     document.getElementById('admin-panel-btn').classList.remove('hidden');
+    if (S.discogsEnabled) document.getElementById('discogs-nav-btn').classList.remove('hidden');
     if (localStorage.getItem('ms2_show_classic') === '1') {
       document.getElementById('classic-admin-btn').classList.remove('hidden');
     }
   }
+  if (S.lastfmEnabled) document.getElementById('lastfm-nav-btn').classList.remove('hidden');
   if (localStorage.getItem('ms2_show_classic') === '1') {
     document.getElementById('classic-player-btn').classList.remove('hidden');
   }
@@ -5641,6 +5812,41 @@ function showApp() {
   else if (_savedSleepEnds > Date.now()) { setSleepTimer(Math.ceil((_savedSleepEnds - Date.now()) / 60000)); }
   pollScan();
   VU_NEEDLE.init();
+
+  // Re-check feature flags when returning to this tab (e.g. after changing
+  // settings in the admin panel which opens in a separate tab).
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible') return;
+    // Admin-only flags (Discogs)
+    if (S.isAdmin) {
+      try {
+        const dc = await api('GET', 'api/v1/admin/discogs/config');
+        const wasDiscogsEnabled = S.discogsEnabled;
+        S.discogsEnabled    = dc?.enabled === true;
+        S.discogsAllowUpdate = dc?.allowArtUpdate === true;
+        const discogsBtn = document.getElementById('discogs-nav-btn');
+        if (discogsBtn) {
+          if (S.discogsEnabled) discogsBtn.classList.remove('hidden');
+          else discogsBtn.classList.add('hidden');
+        }
+        if (wasDiscogsEnabled && !S.discogsEnabled) {
+          document.getElementById('np-left')?.classList.remove('np-left--picking');
+          const dsEl = document.getElementById('np-discogs-section');
+          if (dsEl) { dsEl.classList.add('hidden'); dsEl.dataset.songFp = ''; }
+        }
+      } catch (_) {}
+    }
+    // All-user flag: Last.fm server enabled/disabled
+    try {
+      const ls = await api('GET', 'api/v1/lastfm/status');
+      S.lastfmEnabled = ls?.serverEnabled !== false;
+      const lastfmBtn = document.getElementById('lastfm-nav-btn');
+      if (lastfmBtn) {
+        if (S.lastfmEnabled) lastfmBtn.classList.remove('hidden');
+        else lastfmBtn.classList.add('hidden');
+      }
+    } catch (_) {}
+  });
   // Fetch ping to get transcode server info + vpath metadata
   api('GET', 'api/v1/ping').then(d => {
     if (d.transcode) {
@@ -5714,6 +5920,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'playback')  viewPlayback();
     else if (v === 'play-history') viewPlayHistory();
     else if (v === 'lastfm')       viewLastFM();
+    else if (v === 'discogs')      viewDiscogs();
   });
 });
 
@@ -6465,6 +6672,58 @@ document.getElementById('np-open-btn').addEventListener('click', e => {
 document.getElementById('np-close-btn').addEventListener('click', hideNPModal);
 document.getElementById('np-modal').addEventListener('click', e => {
   if (!e.target.closest('#np-box')) hideNPModal();
+});
+// Discogs art picker inside the NP modal left panel
+document.getElementById('np-left').addEventListener('click', async e => {
+  e.stopPropagation(); // prevent bubbling to np-modal overlay close handler
+  // Cancel / back button
+  if (e.target.closest('#np-discogs-back-btn')) {
+    document.getElementById('np-left')?.classList.remove('np-left--picking');
+    const dsElBack = document.getElementById('np-discogs-section');
+    if (dsElBack) dsElBack.dataset.songFp = '';
+    renderNPModal();
+    return;
+  }
+  // Click on missing-art placeholder — auto-open search
+  if (e.target.closest('#np-art') && !S.queue[S.idx]?.['album-art']) {
+    _npDiscogsSearch(S.queue[S.idx]);
+    return;
+  }
+  // Search button
+  if (e.target.closest('#np-discogs-search-btn')) {
+    _npDiscogsSearch(S.queue[S.idx]);
+    return;
+  }
+  // Click a thumbnail to embed
+  const thumb = e.target.closest('.np-discogs-thumb');
+  if (!thumb) return;
+  const releaseId = Number(thumb.dataset.releaseId);
+  const filepath  = thumb.dataset.filepath;
+  if (!filepath || !releaseId) return;
+  thumb.classList.add('selected');
+  const dsEl = document.getElementById('np-discogs-section');
+  const _cacheOnly = ['wav','aiff','aif','w64'].includes((filepath || '').split('.').pop().toLowerCase());
+  if (dsEl) dsEl.innerHTML = `<span class="np-discogs-status">${_cacheOnly ? '⏳ Saving art to database…' : '⏳ Embedding cover art…'}</span>`;  try {
+    const result = await api('POST', 'api/v1/discogs/embed', { filepath, releaseId });
+    if (result?.aaFile) {
+      S.queue.forEach(q => { if (q.filepath === filepath) q['album-art'] = result.aaFile; });
+    }
+    document.getElementById('np-left')?.classList.remove('np-left--picking');
+    // Force renderNPModal to reset the discogs section by clearing the cached fp
+    const dsEl2 = document.getElementById('np-discogs-section');
+    if (dsEl2) dsEl2.dataset.songFp = '';
+    // Re-render modal (shows new art + resets discogs section)
+    renderNPModal();
+    // Refresh player bar thumbnail + queue panel
+    if (S.queue[S.idx]?.filepath === filepath) Player.updateBar();
+    refreshQueueUI();
+  } catch(err) {
+    if (dsEl) dsEl.innerHTML =
+      `<span class="np-discogs-status">Embed failed: ${esc(err?.message || 'error')}</span>` +
+      `<button class="np-discogs-btn" id="np-discogs-search-btn" style="margin-top:6px">Try again</button>` +
+      `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:4px">← Back</button>`;
+    thumb.classList.remove('selected');
+  }
 });
 document.getElementById('np-play-btn').addEventListener('click', () => Player.toggle());
 document.getElementById('np-prev-btn').addEventListener('click', () => Player.prev());

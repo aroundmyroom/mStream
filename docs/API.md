@@ -96,6 +96,10 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [/lastfm/similar-artists](API/lastfm_similar-artists.md) *(GitHub Copilot, 2026-03-04)*
 
+## Discogs
+
+[Discogs cover art — search, embed, admin config](API/discogs.md) *(GitHub Copilot, 2026-03-07)*
+
 ## JukeBox
 
 [/jukebox/push-to-client](API/jukebox_push-to-client.md)

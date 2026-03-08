@@ -17,13 +17,16 @@ Authentication uses the Last.fm **Mobile Session** flow — your password is sen
 
 ---
 
-## Admin — API key management
+## Admin — enable/disable & API key management
 
-By default mStream ships with a built-in Last.fm API key and shared secret.  
-Admins can override these with their own credentials in the **Last.fm** section of the Admin panel (Admin → Last.fm).
+Admins can enable or disable Last.fm scrobbling entirely from the **Last.fm** section of the Admin panel (Admin → Last.fm). When disabled:
+- The Last.fm nav button is hidden in the player sidebar for all users.
+- Scrobble timers never fire — no calls to Last.fm are made.
+
+Admins can also override the built-in API key and shared secret with their own credentials.
 
 - The shared secret is stored server-side only and is **never** sent to browser clients.
-- Changing the API key takes effect immediately without restarting the server.
+- All changes take effect immediately without restarting the server.
 
 To get your own credentials: <https://www.last.fm/api/account/create>
 
@@ -37,13 +40,14 @@ All endpoints require a valid user token (`x-access-token` header or `token` que
 
 ### GET `/api/v1/lastfm/status`
 
-Returns the Last.fm username currently linked to the authenticated mStream user.
+Returns whether Last.fm is enabled server-side and the Last.fm username currently linked to the authenticated mStream user.
 
 **Response**
 ```json
-{ "linkedUser": "aroundmyroom" }
+{ "serverEnabled": true, "linkedUser": "yourusername" }
 ```
-Returns `null` for `linkedUser` when no account is linked.
+Returns `null` for `linkedUser` when no account is linked.  
+`serverEnabled` is `false` when the admin has disabled Last.fm — the player uses this to hide the nav button and suppress scrobbling for all users.
 
 ---
 
@@ -55,14 +59,14 @@ The password is used once to obtain a session key and is never stored.
 **Request body**
 ```json
 {
-  "lastfmUser":     "aroundmyroom",
+  "lastfmUser":     "yourusername",
   "lastfmPassword": "your-lastfm-password"
 }
 ```
 
 **Response** (success)
 ```json
-{ "linkedUser": "aroundmyroom" }
+{ "linkedUser": "yourusername" }
 ```
 
 **Errors**
@@ -129,14 +133,31 @@ Returns similar artists from Last.fm for the given artist name.
 
 ---
 
+### GET `/api/v1/admin/lastfm/config`  *(admin only)*
+
+Returns the current Last.fm server configuration.
+
+**Response**
+```json
+{
+  "enabled":   true,
+  "apiKey":    "33098eb88840fdded379a7e5a7da67dd",
+  "apiSecret": ""
+}
+```
+`apiSecret` is always returned as an empty string to avoid leaking it to the browser; it is write-only from the admin panel.
+
+---
+
 ### POST `/api/v1/admin/lastfm/config`  *(admin only)*
 
-Updates the global Last.fm API key and shared secret.  
+Updates the global Last.fm enabled flag, API key, and shared secret.  
 Takes effect immediately — no server restart required.
 
 **Request body**
 ```json
 {
+  "enabled":   true,
   "apiKey":    "your-lastfm-api-key",
   "apiSecret": "your-lastfm-shared-secret"
 }
@@ -156,7 +177,7 @@ After a user connects, their `save/conf/default.json` will contain:
     "password": "<bcrypt hash>",
     "salt": "<salt>",
     "vpaths": ["Music"],
-    "lastfm-user":    "aroundmyroom",
+    "lastfm-user":    "yourusername",
     "lastfm-session": "<session key from Last.fm>"
   }
 }

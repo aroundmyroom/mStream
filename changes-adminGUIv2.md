@@ -659,3 +659,69 @@ The `/remote/:code` page was using Materialize CSS and Vue 2, resulting in a whi
 - webapp/admin-v2/index.css: same bg/surface/raised/card, plus --t4 #2a2a3e→#2a3a5e, --border #2a2a3e→#2a3a5e, --border2 #3a3a52→#3a4e72
 - webapp/shared/index.html: already inherits from v2/style.css (updated previously) ✓
 - webapp/remote/index.html: already the navy palette (the source) ✓
+
+---
+
+## [Feature] Last.fm — Enable/Disable Toggle in Admin Panel *(GitHub Copilot, 2026-03-08)*
+
+**Files:** `webapp/admin-v2/index.js`, `src/api/admin.js`, `src/api/scrobbler.js`, `src/state/config.js`
+
+### What was added
+The Last.fm admin panel card (`lastFMView` Vue component) previously had no enable/disable toggle and no way to load the current settings — it was a write-only form for API credentials only.
+
+### Changes
+
+**`src/state/config.js`**
+- Added `enabled: Joi.boolean().default(true)` to `lastFMOptions` Joi schema.
+  Defaults to `true` so existing installations keep scrobbling working after the upgrade.
+
+**`src/api/admin.js`**
+- Added `GET /api/v1/admin/lastfm/config` — returns `{ enabled, apiKey, apiSecret }`.
+- Updated `POST /api/v1/admin/lastfm/config` — now accepts and persists `enabled` alongside `apiKey`/`apiSecret`.
+
+**`src/api/scrobbler.js`**
+- `GET /api/v1/lastfm/status` now returns `{ serverEnabled, linkedUser }` where `serverEnabled` reflects the admin toggle. The player reads this on load and after tab refocus to gate scrobbling and hide/show the nav button.
+
+**`webapp/admin-v2/index.js`** — `lastFMView` rewrite:
+- Added `enabled: true` to component data.
+- Added `mounted()` lifecycle hook — calls `GET /api/v1/admin/lastfm/config` and populates all three fields.
+- Added **Enable** checkbox row in the table (above API Key).
+- Updated `save()` to send `{ enabled, apiKey, apiSecret }` — removed the "both fields required" guard since credentials are optional (built-in keys ship with the app).
+- Save confirmation toast changed from "Last.fm credentials saved" to "Last.fm settings saved".
+
+---
+
+## [Feature] Discogs — Allow Art Update Toggle + Description Rewrite *(GitHub Copilot, 2026-03-08)*
+
+**Files:** `webapp/admin-v2/index.js`, `src/api/admin.js`, `src/api/discogs.js`, `src/state/config.js`, `src/db/sqlite-backend.js`, `src/db/manager.js`
+
+### New setting: Allow Art Update
+
+When enabled, the Fix Art picker in the Now Playing modal is also shown for songs that **already have** album art. This lets admins search Discogs and replace existing art.
+
+**`src/state/config.js`**
+- Added `allowArtUpdate: Joi.boolean().default(false)` to `discogsOptions`.
+
+**`src/api/admin.js`**
+- `GET /api/v1/admin/discogs/config` now returns `allowArtUpdate`.
+- `POST /api/v1/admin/discogs/config` Joi schema accepts `allowArtUpdate: Joi.boolean().required()`; persisted to config file and live runtime.
+
+**`src/db/sqlite-backend.js` + `src/db/manager.js`**
+- New exported function `countArtUsage(aaFile)` — counts how many DB rows still reference a given art filename, used to decide whether to delete the old art file.
+
+**`src/api/discogs.js`** — embed endpoint:
+- Before overwriting the DB record, reads the song's current `aaFile` from the database.
+- After saving the new art and updating the DB, checks `countArtUsage(oldAaFile)`. If the count is `0` (no other song still uses it), all three variants are deleted from `image-cache/`:
+  - `{hash}.jpg` (full res)
+  - `zl-{hash}.jpg` (256 px, large)
+  - `zs-{hash}.jpg` (92 px, small)
+
+**`webapp/admin-v2/index.js`** — `discogsView`:
+- Added `allowArtUpdate: false` to component data.
+- `mounted()` now populates `this.allowArtUpdate` from the GET response.
+- New **Allow Art Update** table row with checkbox and description text:
+  > *When enabled, the Fix Art button also appears on songs that already have album art, letting you update it. The old art is removed from the cache and database once no other song references it.*
+- `save()` includes `allowArtUpdate` in the POST body.
+
+### Card description text rewrite
+The Discogs card description was updated throughout to clearly explain the 3-proposal picker and its purpose (fixing missing or broken art) rather than vaguely mentioning "album cover art embedding".
