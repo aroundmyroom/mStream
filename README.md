@@ -1,9 +1,16 @@
-# AroundMyroom-mStream V2
+# AroundMyroom-mStream V2 — mStream Velvet
 
 > **This is a heavily modified fork of [mStream](https://github.com/IrosTheBeggar/mStream) by [aroundmyroom](https://github.com/aroundmyroom).**
 >
-> **Be noticed that all changes are 100% AI generated changes made by Claude Sonnet 4.6 enterily. So be careful when running my REPO !**
+> **Fork base:** mStream **5.14.3**, branch **`sqlite`**
+> **This fork:** version **5.15.0-velvet** (and onwards with the `-velvet` suffix)
 >
+> The API info endpoint (`GET /api/`) reflects the fork version:
+> ```json
+> { "server": "5.15.0-velvet", "apiVersions": ["1"] }
+> ```
+>
+> **Be noticed that all changes are 100% AI generated changes made by Claude Sonnet 4.6 entirely. So be careful when running my REPO !**
 >
 > The `GUIv2` branch contains all changes. The original `master` branch is preserved for reference.
 > See [changes4GUIv2.md](changes4GUIv2.md) for a full changelog of everything that was added or changed.
