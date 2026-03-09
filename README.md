@@ -3,11 +3,11 @@
 > **This is a heavily modified fork of [mStream](https://github.com/IrosTheBeggar/mStream) by [aroundmyroom](https://github.com/aroundmyroom).**
 >
 > **Fork base:** mStream **5.14.3**, branch **`sqlite`**
-> **This fork:** version **5.15.0-velvet** (and onwards with the `-velvet` suffix)
+> **This fork:** version **5.15.1-velvet** (and onwards with the `-velvet` suffix)
 >
 > The API info endpoint (`GET /api/`) reflects the fork version:
 > ```json
-> { "server": "5.15.0-velvet", "apiVersions": ["1"] }
+> { "server": "5.15.1-velvet", "apiVersions": ["1"] }
 > ```
 >
 > **Be noticed that all changes are 100% AI generated changes made by Claude Sonnet 4.6 entirely. So be careful when running my REPO !**
