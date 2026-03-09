@@ -103,3 +103,6 @@ export function getScanErrors() { return backend.getScanErrors(); }
 export function clearScanErrors() { return backend.clearScanErrors(); }
 export function pruneScanErrors(retentionHours) { return backend.pruneScanErrors(retentionHours); }
 export function getScanErrorCount() { return backend.getScanErrorCount(); }
+export function markScanErrorFixed(guid) { return backend.markScanErrorFixed(guid); }
+export function markFileArtChecked(filepath, vpath) { return backend.markFileArtChecked(filepath, vpath); }
+export function markFileCueChecked(filepath, vpath) { return backend.markFileCueChecked(filepath, vpath); }

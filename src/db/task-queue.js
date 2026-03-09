@@ -156,7 +156,7 @@ export function scanVPath(vPath) {
   addScanTask(vPath);
 }
 
-export { scanAll };
+export { scanAll, isChildOf };
 
 export function isScanning() {
   return runningTasks.size > 0 ? true : false;

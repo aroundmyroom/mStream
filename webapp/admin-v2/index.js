@@ -157,12 +157,15 @@ const ADMINDATA = (() => {
         method: 'GET',
         url: `${API.url()}/api/v1/federation/stats`
       });
-  
-      module.federationEnabled.val = true;
 
-      Object.keys(res.data).forEach(key=>{
-        module.federationParams[key] = res.data[key];
-      });
+      if (res.data.enabled === false) {
+        module.federationEnabled.val = false;
+      } else {
+        module.federationEnabled.val = true;
+        Object.keys(res.data).forEach(key=>{
+          module.federationParams[key] = res.data[key];
+        });
+      }
     }catch (err) {}
 
     module.federationParamsUpdated.ts = Date.now();
@@ -257,6 +260,7 @@ const scanErrorsView = Vue.component('scan-errors-view', {
       typeFilter:      null,
       retentionHours:  ADMINDATA.dbParams.scanErrorRetentionHours || 48,
       savingRetention: false,
+      fixing:          {},   // guid → true while fix API call is in-flight
     };
   },
   computed: {
@@ -271,6 +275,9 @@ const scanErrorsView = Vue.component('scan-errors-view', {
     },
     allTypes() {
       return [...new Set(this.errors.map(e => e.error_type))];
+    },
+    unfixedCount() {
+      return this.errors.filter(e => !e.fixed_at).length;
     }
   },
   mounted() { this.load(); },
@@ -387,6 +394,34 @@ const scanErrorsView = Vue.component('scan-errors-view', {
       navigator.clipboard.writeText(fp).then(() => {
         iziToast.info({ title: 'Path copied to clipboard', position: 'topCenter', timeout: 1500 });
       }).catch(() => {});
+    },
+    async fixError(err) {
+      if (err.fixed_at || this.fixing[err.guid]) return;
+      Vue.set(this.fixing, err.guid, true);
+      try {
+        const r = await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/db/scan-errors/fix`, data: { guid: err.guid } });
+        const idx = this.errors.findIndex(e => e.guid === err.guid);
+        if (idx >= 0) {
+          this.errors[idx].fixed_at  = Math.floor(Date.now() / 1000);
+          this.errors[idx]._fixAction = r.data.action;
+        }
+        const badge = document.getElementById('scan-errors-badge');
+        if (badge) {
+          const cnt = this.unfixedCount;
+          badge.textContent = cnt > 99 ? '99+' : cnt;
+          badge.style.display = cnt === 0 ? 'none' : 'inline-flex';
+        }
+        const labels = { art_fixed: 'Embedded image stripped from file', cue_dismissed: 'Cue error dismissed', dismissed: 'Dismissed' };
+        iziToast.success({ title: 'Fixed', message: labels[r.data.action] || 'Done', position: 'topCenter', timeout: 2500 });
+        if (r.data.note) iziToast.warning({ title: 'Note', message: r.data.note, position: 'topCenter', timeout: 5000 });
+      } catch (e) {
+        iziToast.error({ title: 'Fix failed', message: e?.response?.data?.error || 'Unknown error', position: 'topCenter', timeout: 3000 });
+      } finally {
+        Vue.delete(this.fixing, err.guid);
+      }
+    },
+    fixActionLabel(action) {
+      return { art_fixed: 'Embedded image stripped', cue_dismissed: 'Cue error dismissed', dismissed: 'Dismissed' }[action] || 'Fixed';
     }
   },
   template: `
@@ -518,7 +553,7 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                     <!-- Main row -->
                     <div
                       class="se-row"
-                      :class="{expanded: expandedRow === err.guid}"
+                      :class="{expanded: expandedRow === err.guid, 'se-row--fixed': err.fixed_at}"
                       @click="toggleRow(err.guid)"
                     >
                       <!-- Type badge -->
@@ -529,6 +564,7 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                           <span v-html="typeIcon(err.error_type)"></span>
                           {{typeLabel(err.error_type)}}
                         </span>
+                        <span class="se-fixed-badge" v-if="err.fixed_at">&#x2713; Fixed</span>
                       </div>
 
                       <!-- File path -->
@@ -609,6 +645,26 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                             </span>
                           </div>
                         </div>
+
+                        <!-- ── Fix action row ── -->
+                        <div class="se-detail-fix-row" v-if="err.fixed_at">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--se-green,#4caf50)" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                          <span class="se-fix-done-txt">
+                            Fixed {{relTime(err.fixed_at)}} — auto-removed from log after 48 h
+                            <span v-if="err._fixAction" style="opacity:.65;margin-left:.35rem">({{fixActionLabel(err._fixAction)}})</span>
+                          </span>
+                        </div>
+                        <div class="se-detail-fix-row" v-else>
+                          <button class="se-fix-btn" @click.stop="fixError(err)" :disabled="fixing[err.guid]">
+                            <svg v-if="!fixing[err.guid]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                            <svg v-else class="se-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                            {{fixing[err.guid] ? 'Fixing\u2026' : 'Fix this error'}}
+                          </button>
+                          <span class="se-fix-hint" v-if="err.error_type === 'art'">Marks file as &ldquo;art checked&rdquo; so the scanner stops retrying</span>
+                          <span class="se-fix-hint" v-else-if="err.error_type === 'cue'">Marks file as &ldquo;cue checked&rdquo; so the scanner stops retrying</span>
+                          <span class="se-fix-hint" v-else>Dismisses this error &mdash; auto-expires in 48 h</span>
+                        </div>
+
                       </div>
                     </div>
 
