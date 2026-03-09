@@ -65,6 +65,8 @@ export function init(dbDirectory) {
   `);
   // Migration: add cuepoints column for databases created before this feature
   try { db.exec('ALTER TABLE files ADD COLUMN cuepoints TEXT'); } catch (_e) {}
+  // Migration: add fixed_at column for scan-error auto-fix feature
+  try { db.exec('ALTER TABLE scan_errors ADD COLUMN fixed_at INTEGER'); } catch (_e) {}
 }
 
 export function close() {
@@ -647,7 +649,8 @@ export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stac
   const now = Math.floor(Date.now() / 1000);
   const existing = db.prepare('SELECT count FROM scan_errors WHERE guid = ?').get(guid);
   if (existing) {
-    db.prepare('UPDATE scan_errors SET last_seen = ?, count = count + 1 WHERE guid = ?').run(now, guid);
+    // Re-occurrence resets fixed_at so a re-broken file becomes unfixed again
+    db.prepare('UPDATE scan_errors SET last_seen = ?, count = count + 1, fixed_at = NULL WHERE guid = ?').run(now, guid);
   } else {
     db.prepare(
       'INSERT INTO scan_errors (guid, filepath, vpath, error_type, error_msg, stack, first_seen, last_seen, count) VALUES (?,?,?,?,?,?,?,?,1)'
@@ -656,19 +659,41 @@ export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stac
 }
 
 export function getScanErrors() {
-  return db.prepare('SELECT * FROM scan_errors ORDER BY last_seen DESC').all();
+  return db.prepare('SELECT * FROM scan_errors ORDER BY fixed_at DESC NULLS LAST, last_seen DESC').all();
 }
 
 export function clearScanErrors() {
   db.prepare('DELETE FROM scan_errors').run();
 }
 
-/** Remove entries whose last_seen is older than retentionHours. */
+/** Remove entries whose last_seen is older than retentionHours, plus fixed entries older than 48 h. */
 export function pruneScanErrors(retentionHours) {
-  const cutoff = Math.floor(Date.now() / 1000) - retentionHours * 3600;
+  const cutoff      = Math.floor(Date.now() / 1000) - retentionHours * 3600;
+  const fixedCutoff = Math.floor(Date.now() / 1000) - 48 * 3600;
   db.prepare('DELETE FROM scan_errors WHERE last_seen < ?').run(cutoff);
+  db.prepare('DELETE FROM scan_errors WHERE fixed_at IS NOT NULL AND fixed_at < ?').run(fixedCutoff);
 }
 
+/** Mark a single error as fixed. */
+export function markScanErrorFixed(guid) {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare('UPDATE scan_errors SET fixed_at = ? WHERE guid = ?').run(now, guid);
+}
+
+/**
+ * Mark a file's album-art lookup as "checked, none found" by setting aaFile = ''
+ * (empty string). The scanner treats null as "never tried" and '' as "tried, nothing".
+ */
+export function markFileArtChecked(filepath, vpath) {
+  db.prepare("UPDATE files SET aaFile = '' WHERE (aaFile IS NULL OR aaFile = '') AND filepath = ? AND vpath = ?").run(filepath, vpath);
+}
+
+/** Mark a file's cue-sheet check as done-with-nothing by setting cuepoints = '[]'. */
+export function markFileCueChecked(filepath, vpath) {
+  db.prepare("UPDATE files SET cuepoints = '[]' WHERE (cuepoints IS NULL) AND filepath = ? AND vpath = ?").run(filepath, vpath);
+}
+
+/** Count only unfixed errors (used for the sidebar badge). */
 export function getScanErrorCount() {
-  return db.prepare('SELECT COUNT(*) AS cnt FROM scan_errors').get().cnt;
+  return db.prepare('SELECT COUNT(*) AS cnt FROM scan_errors WHERE fixed_at IS NULL').get().cnt;
 }

@@ -30,8 +30,8 @@ export function setup(mstream) {
     db.updateFileScanId(dbFileInfo, req.body.scanId);
 
     const flags = {};
-    // signal art-only update if aaFile is missing
-    if (!dbFileInfo.aaFile) { flags._needsArt = true; }
+    // signal art-only update if aaFile is missing (null = never attempted; '' = checked, none found)
+    if (dbFileInfo.aaFile === null || dbFileInfo.aaFile === undefined) { flags._needsArt = true; }
     // signal cue-only update if cuepoints has never been checked (NULL)
     if (dbFileInfo.cuepoints === null || dbFileInfo.cuepoints === undefined) { flags._needsCue = true; }
 

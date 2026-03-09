@@ -736,6 +736,7 @@ export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stac
   if (existing) {
     existing.last_seen = now;
     existing.count = (existing.count || 1) + 1;
+    existing.fixed_at = null; // re-occurrence resets fix state
     scanErrorCollection.update(existing);
   } else {
     scanErrorCollection.insert({
@@ -745,7 +746,8 @@ export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stac
       stack: stack || '',
       first_seen: now,
       last_seen: now,
-      count: 1
+      count: 1,
+      fixed_at: null
     });
   }
 }
@@ -756,9 +758,14 @@ export function getScanErrors() {
     .map(r => ({
       guid: r.guid, filepath: r.filepath, vpath: r.vpath,
       error_type: r.error_type, error_msg: r.error_msg, stack: r.stack,
-      first_seen: r.first_seen, last_seen: r.last_seen, count: r.count
+      first_seen: r.first_seen, last_seen: r.last_seen, count: r.count,
+      fixed_at: r.fixed_at || null
     }))
-    .sort((a, b) => b.last_seen - a.last_seen);
+    .sort((a, b) => {
+      // fixed items last, then newest first
+      if ((a.fixed_at === null) !== (b.fixed_at === null)) return a.fixed_at === null ? -1 : 1;
+      return b.last_seen - a.last_seen;
+    });
 }
 
 export function clearScanErrors() {
@@ -766,10 +773,28 @@ export function clearScanErrors() {
 }
 
 export function pruneScanErrors(retentionHours) {
-  const cutoff = Math.floor(Date.now() / 1000) - retentionHours * 3600;
+  const cutoff      = Math.floor(Date.now() / 1000) - retentionHours * 3600;
+  const fixedCutoff = Math.floor(Date.now() / 1000) - 48 * 3600;
   scanErrorCollection.findAndRemove({ last_seen: { '$lt': cutoff } });
+  scanErrorCollection.findAndRemove({ fixed_at: { '$ne': null, '$lt': fixedCutoff } });
+}
+
+export function markScanErrorFixed(guid) {
+  const now = Math.floor(Date.now() / 1000);
+  const row = scanErrorCollection.findOne({ guid: { '$eq': guid } });
+  if (row) { row.fixed_at = now; scanErrorCollection.update(row); }
+}
+
+export function markFileArtChecked(filepath, vpath) {
+  const row = fileCollection.findOne({ filepath: { '$eq': filepath }, vpath: { '$eq': vpath } });
+  if (row && !row.aaFile) { row.aaFile = ''; fileCollection.update(row); }
+}
+
+export function markFileCueChecked(filepath, vpath) {
+  const row = fileCollection.findOne({ filepath: { '$eq': filepath }, vpath: { '$eq': vpath } });
+  if (row && row.cuepoints === null || row?.cuepoints === undefined) { row.cuepoints = '[]'; fileCollection.update(row); }
 }
 
 export function getScanErrorCount() {
-  return scanErrorCollection.count();
+  return scanErrorCollection.count({ fixed_at: { '$eq': null } });
 }

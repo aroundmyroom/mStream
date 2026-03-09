@@ -1,5 +1,6 @@
 import path from 'path';
 import child from 'child_process';
+import fs from 'fs';
 import os from 'os';
 import Joi from 'joi';
 import winston from 'winston';
@@ -188,7 +189,15 @@ export function setup(mstream) {
     res.json({});
 
     try {
-      dbQueue.scanVPath(input.value.vpath);
+      // Only scan this vpath if it is NOT a child of another configured vpath.
+      // Child folders (e.g. /media/music/Disco inside /media/music) are already
+      // covered by their parent vpath scan — scanning them separately creates duplicates.
+      const isChild = Object.keys(config.program.folders).some(
+        other => other !== input.value.vpath && dbQueue.isChildOf(other, input.value.vpath)
+      );
+      if (!isChild) {
+        dbQueue.scanVPath(input.value.vpath);
+      }
     }catch (err) {
       winston.error('/api/v1/admin/directory failed to add ', { stack: err });
     }
@@ -251,6 +260,56 @@ export function setup(mstream) {
 
   mstream.get('/api/v1/admin/db/scan-errors/count', (req, res) => {
     res.json({ count: db.getScanErrorCount() });
+  });
+
+  // ── Auto-fix a single scan error ─────────────────────────────────────────
+  // For art errors: strips embedded images from the file using ffmpeg so that
+  // music-metadata can parse the file cleanly on the next scan.
+  // Returns an error if the file cannot be found or if ffmpeg fails — no
+  // silent DB suppression fallback.
+  mstream.post('/api/v1/admin/db/scan-errors/fix', async (req, res) => {
+    try {
+      const schema = Joi.object({ guid: Joi.string().required() });
+      joiValidate(schema, req.body);
+      const { guid } = req.body;
+
+      const errors = db.getScanErrors();
+      const err = errors.find(e => e.guid === guid);
+      if (!err) return res.status(404).json({ error: 'Error not found' });
+
+      if (err.error_type === 'art') {
+        // Reconstruct the absolute path: filepath stored in DB is relative to
+        // the vpath root directory (see scanner.mjs reportError)
+        const vpathFolder = config.program.folders[err.vpath];
+        if (!vpathFolder) return res.status(400).json({ error: `Unknown vpath: ${err.vpath}` });
+        const absPath = path.join(vpathFolder.root, err.filepath);
+
+        if (!fs.existsSync(absPath)) {
+          return res.status(400).json({ error: `File not found on disk: ${absPath}` });
+        }
+
+        const result = await stripEmbeddedImages(absPath);
+        if (!result.ok) {
+          return res.status(500).json({ error: result.reason });
+        }
+
+        db.markScanErrorFixed(guid);
+        return res.json({ ok: true, action: 'art_fixed' });
+
+      } else if (err.error_type === 'cue') {
+        // Cue data comes from text sidecar files or text tags—nothing to strip
+        // from the audio binary. Just mark fixed so the error clears.
+        db.markScanErrorFixed(guid);
+        return res.json({ ok: true, action: 'cue_dismissed' });
+
+      } else {
+        // parse / insert / other — no file action possible
+        db.markScanErrorFixed(guid);
+        return res.json({ ok: true, action: 'dismissed' });
+      }
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   mstream.post('/api/v1/admin/db/params/scan-error-retention', async (req, res) => {
@@ -590,4 +649,61 @@ export function setup(mstream) {
 
     res.json({});
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// stripEmbeddedImages(absFilepath)
+// Uses the bundled ffmpeg binary to copy the audio stream and all text metadata
+// while discarding every video/image stream (embedded cover art, PICTURE blocks
+// etc.).  This resolves UnexpectedFileContentError and InvalidCharacterError
+// raised by music-metadata when it tries to parse those malformed image tags.
+// The file is rewritten in-place via a temp file so the original is never
+// truncated before the new file is confirmed complete.
+// Caller must verify the file exists before calling this function.
+// ─────────────────────────────────────────────────────────────────────────────
+async function stripEmbeddedImages(absFilepath) {
+  const ffmpegDir = config.program.transcode?.ffmpegDirectory;
+  const binExt    = process.platform === 'win32' ? '.exe' : '';
+  const ffmpegBin = ffmpegDir ? path.join(ffmpegDir, `ffmpeg${binExt}`) : null;
+
+  if (!ffmpegBin || !fs.existsSync(ffmpegBin)) {
+    return { ok: false, reason: 'ffmpeg binary not found' };
+  }
+
+  const dir  = path.dirname(absFilepath);
+  const base = path.basename(absFilepath, path.extname(absFilepath));
+  const ext  = path.extname(absFilepath);
+  const tmp  = path.join(dir, `.__mstream_fix_${base}${ext}`);
+
+  // For WAV files: suppress ID3 tag output — the malformed id3 chunk in the
+  // RIFF container (which caused UnexpectedFileContentError) must not be
+  // re-written by ffmpeg into the output file.
+  const isWav = ext.toLowerCase() === '.wav';
+
+  try {
+    await new Promise((resolve, reject) => {
+      // -map 0:a        : keep only audio streams — drops all image/video streams
+      // -c:a copy       : stream-copy (no re-encode, lossless)
+      // -map_metadata 0 : preserve all text tags (title, artist, album, etc.)
+      // -write_id3v2 0  : (WAV only) do NOT write an ID3v2 block into the output
+      const args = ['-y', '-i', absFilepath, '-map', '0:a', '-c:a', 'copy', '-map_metadata', '0'];
+      if (isWav) args.push('-write_id3v2', '0');
+      args.push(tmp);
+
+      const proc = child.spawn(ffmpegBin, args);
+      let stderr = '';
+      proc.stderr.on('data', d => { stderr += d.toString(); });
+      proc.on('close', code => {
+        if (code === 0) return resolve();
+        reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-400)}`));
+      });
+      proc.on('error', reject);
+    });
+
+    fs.renameSync(tmp, absFilepath);
+    return { ok: true };
+  } catch (e) {
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_) {}
+    return { ok: false, reason: e.message };
+  }
 }

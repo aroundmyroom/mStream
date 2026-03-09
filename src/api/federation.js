@@ -8,6 +8,20 @@ import * as config from '../state/config.js';
 import { joiValidate } from '../util/validation.js';
 
 export function setup(mstream) {
+  // Stats endpoint is registered BEFORE the enabled-check middleware so the
+  // admin UI can always call it without getting a 4xx red console error.
+  // Returns { enabled: false } when federation is off instead of 405.
+  mstream.get('/api/v1/federation/stats', (req, res) => {
+    if (config.program.federation.enabled === false) {
+      return res.json({ enabled: false });
+    }
+    res.json({
+      enabled: true,
+      deviceId: sync.getId(),
+      uiAddress: sync.getUiAddress()
+    });
+  });
+
   mstream.all('/api/v1/federation/{*path}', (req, res, next) => {
     if (config.program.federation.enabled === false) { return res.status(405).json({ error: 'Admin API Disabled' }); }
     if (config.program.lockAdmin === true) { return res.status(405).json({ error: 'Admin API Disabled' }); }
@@ -65,13 +79,6 @@ export function setup(mstream) {
     }
 
     res.json({ token: jwt.sign(tokenData, config.program.secret, {}) });
-  });
-
-  mstream.get('/api/v1/federation/stats', (req, res) => {
-    res.json({
-      deviceId: sync.getId(),
-      uiAddress: sync.getUiAddress()
-    });
   });
 
   const apiProxy = httpProxy.createProxyServer();

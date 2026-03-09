@@ -196,66 +196,72 @@ async function recursiveScan(dir) {
           // File already in DB — run targeted updates for anything still missing
 
           if (dbFileInfo.data._needsArt) {
-            // File exists but has no art — run art detection only, don't touch ts.
-            // We need to re-parse metadata to catch embedded art (e.g. WAV ID3 tags),
-            // then fall back to directory images if nothing is embedded.
-            let songInfo;
+            // Entire art block is wrapped so a failure here never skips _needsCue below.
             try {
-              songInfo = (await parseFile(filepath, { skipCovers: false })).common;
-            } catch (_e) {
-              await reportError(filepath, 'art', `Failed to parse file for embedded art: ${_e.message}`, _e.stack);
-              songInfo = {};
-            }
-            songInfo.filePath = path.relative(loadJson.directory, filepath);
-            await getAlbumArt(songInfo);
-            if (songInfo.aaFile) {
-              await ax({
-                method: 'POST',
-                url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-art`,
-                headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
-                responseType: 'json',
-                data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, aaFile: songInfo.aaFile, scanId: loadJson.scanId }
-              });
+              let songInfo;
+              try {
+                songInfo = (await parseFile(filepath, { skipCovers: false })).common;
+              } catch (_e) {
+                await reportError(filepath, 'art', `Failed to parse file for embedded art: ${_e.message}`, _e.stack);
+                songInfo = {};
+              }
+              songInfo.filePath = path.relative(loadJson.directory, filepath);
+              await getAlbumArt(songInfo);
+              if (songInfo.aaFile) {
+                await ax({
+                  method: 'POST',
+                  url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-art`,
+                  headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+                  responseType: 'json',
+                  data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, aaFile: songInfo.aaFile, scanId: loadJson.scanId }
+                });
+              }
+            } catch (_artErr) {
+              await reportError(filepath, 'art', `Art update failed: ${_artErr.message}`, _artErr.stack);
             }
           }
 
           if (dbFileInfo.data._needsCue) {
-            // cuepoints IS NULL — first time we check this file for an embedded cue sheet.
-            // Always writes back ('[]' sentinel or actual JSON) so this file is skipped next scan.
-            let cuepoints = '[]';
+            // Entire cue block is wrapped independently so a failure doesn't leave cuepoints = NULL forever.
             try {
-              const parsed = await parseFile(filepath, { skipCovers: true });
-              const cue = parsed.common?.cuesheet;
-              const sampleRate = parsed.format?.sampleRate || null;
-              if (cue && Array.isArray(cue.tracks) && cue.tracks.length && sampleRate) {
-                const pts = [];
-                for (const t of cue.tracks) {
-                  if (t.number === 170) continue;
-                  const idx1 = Array.isArray(t.indexes) && t.indexes.find(i => i.number === 1);
-                  if (!idx1) continue;
-                  pts.push({ no: t.number, title: t.title || null, t: Math.round((idx1.offset / sampleRate) * 100) / 100 });
-                }
-                if (pts.length > 1) cuepoints = JSON.stringify(pts);
-              }
-            } catch (_e) {
-              await reportError(filepath, 'cue', `Embedded cue sheet parse failed: ${_e.message}`, _e.stack);
-            }
-            // Fallback: sidecar .cue file alongside the audio file
-            if (cuepoints === '[]') {
+              let cuepoints = '[]';
               try {
-                const sidecar = parseSidecarCue(filepath);
-                if (sidecar) cuepoints = JSON.stringify(sidecar);
+                const parsed = await parseFile(filepath, { skipCovers: true });
+                const cue = parsed.common?.cuesheet;
+                const sampleRate = parsed.format?.sampleRate || null;
+                if (cue && Array.isArray(cue.tracks) && cue.tracks.length && sampleRate) {
+                  const pts = [];
+                  for (const t of cue.tracks) {
+                    if (t.number === 170) continue;
+                    const idx1 = Array.isArray(t.indexes) && t.indexes.find(i => i.number === 1);
+                    if (!idx1) continue;
+                    pts.push({ no: t.number, title: t.title || null, t: Math.round((idx1.offset / sampleRate) * 100) / 100 });
+                  }
+                  if (pts.length > 1) cuepoints = JSON.stringify(pts);
+                }
               } catch (_e) {
-                await reportError(filepath, 'cue', `Sidecar .cue file parse failed: ${_e.message}`, _e.stack);
+                await reportError(filepath, 'cue', `Embedded cue sheet parse failed: ${_e.message}`, _e.stack);
               }
+              // Fallback: sidecar .cue file alongside the audio file
+              if (cuepoints === '[]') {
+                try {
+                  const sidecar = parseSidecarCue(filepath);
+                  if (sidecar) cuepoints = JSON.stringify(sidecar);
+                } catch (_e) {
+                  await reportError(filepath, 'cue', `Sidecar .cue file parse failed: ${_e.message}`, _e.stack);
+                }
+              }
+              // Always write back — even '[]' sentinel clears the NULL so this file is never re-checked
+              await ax({
+                method: 'POST',
+                url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-cue`,
+                headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+                responseType: 'json',
+                data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, cuepoints }
+              });
+            } catch (_cueErr) {
+              await reportError(filepath, 'cue', `Cue update failed: ${_cueErr.message}`, _cueErr.stack);
             }
-            await ax({
-              method: 'POST',
-              url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-cue`,
-              headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
-              responseType: 'json',
-              data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, cuepoints }
-            });
           }
         }
       } catch (err) {

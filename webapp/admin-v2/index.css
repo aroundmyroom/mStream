@@ -562,7 +562,50 @@ tr:hover td { background: var(--raised); }
 }
 .se-table-footer a { cursor: pointer; }
 
-/* ── Empty state ── */
+/* ── Fix button & fixed-state styles ── */
+:root { --se-green: #4caf50; }
+
+.se-row--fixed { opacity: .6; }
+.se-row--fixed:hover { opacity: .85; }
+
+.se-fixed-badge {
+  display: inline-flex; align-items: center;
+  margin-left: .45rem; padding: .15rem .45rem;
+  font-size: .68rem; font-weight: 700; letter-spacing: .04em;
+  color: var(--se-green); background: rgba(76,175,80,.12);
+  border: 1px solid rgba(76,175,80,.35); border-radius: 999px;
+  vertical-align: middle; white-space: nowrap;
+}
+
+.se-detail-fix-row {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .55rem;
+  padding: .6rem .9rem; margin-top: .25rem;
+  background: var(--surface); border-radius: 7px;
+  border: 1px solid var(--border);
+}
+
+.se-fix-btn {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .35rem .8rem; font-size: .8rem; font-weight: 600;
+  color: #fff; background: var(--se-green);
+  border: none; border-radius: 6px; cursor: pointer;
+  transition: opacity .15s;
+}
+.se-fix-btn:hover:not(:disabled) { opacity: .85; }
+.se-fix-btn:disabled { opacity: .5; cursor: wait; }
+
+.se-fix-hint {
+  font-size: .78rem; color: var(--t2); line-height: 1.4;
+}
+
+.se-fix-done-txt {
+  font-size: .82rem; color: var(--se-green); display: flex; align-items: center; gap: .35rem;
+}
+
+@keyframes se-spin { to { transform: rotate(360deg); } }
+.se-spin { animation: se-spin .8s linear infinite; transform-origin: center; }
+
+
 .se-empty-state {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 4rem 2rem; text-align: center;
