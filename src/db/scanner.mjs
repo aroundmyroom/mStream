@@ -60,6 +60,7 @@ async function insertEntries(song) {
     "modified": song.modified,
     "hash": song.hash,
     "aaFile": song.aaFile ? song.aaFile : null,
+    "art_source": song._artSource || null,
     "vpath": loadJson.vpath,
     "ts": Math.floor(Date.now() / 1000),
     "sID": loadJson.scanId,
@@ -190,6 +191,7 @@ async function recursiveScan(dir) {
           // deleting art the user manually picked via the Discogs picker.
           if (!songInfo.aaFile && dbFileInfo.data._preserveAaFile) {
             songInfo.aaFile = dbFileInfo.data._preserveAaFile;
+            songInfo._artSource = dbFileInfo.data._preserveArtSource || null;
           }
           await insertEntries(songInfo);
         } else {
@@ -213,7 +215,7 @@ async function recursiveScan(dir) {
                   url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-art`,
                   headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
                   responseType: 'json',
-                  data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, aaFile: songInfo.aaFile, scanId: loadJson.scanId }
+                  data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, aaFile: songInfo.aaFile, scanId: loadJson.scanId, artSource: songInfo._artSource || null }
                 });
               }
             } catch (_artErr) {
@@ -411,6 +413,7 @@ async function getAlbumArt(songInfo) {
     // Generate unique name based off hash of album art and metadata
     const picHashString = crypto.createHash('md5').update(songInfo.picture[0].data).digest('hex');
     songInfo.aaFile = picHashString + '.' + mime.extension(songInfo.picture[0].format);
+    songInfo._artSource = 'embedded';
     // Check image-cache folder for filename and save if doesn't exist
     if (!fs.existsSync(path.join(loadJson.albumArtDirectory, songInfo.aaFile))) {
       // Save file sync
@@ -419,6 +422,7 @@ async function getAlbumArt(songInfo) {
     }
   } else {
     originalFileBuffer = await checkDirectoryForAlbumArt(songInfo);
+    if (songInfo.aaFile) { songInfo._artSource = 'directory'; }
   }
 
   if (originalFileBuffer) {

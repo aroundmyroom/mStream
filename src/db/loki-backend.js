@@ -126,11 +126,12 @@ export function updateFileScanId(file, scanId) {
   }
 }
 
-export function updateFileArt(filepath, vpath, aaFile, scanId) {
+export function updateFileArt(filepath, vpath, aaFile, scanId, artSource = null) {
   const dbFile = fileCollection.findOne({ '$and': [{ 'filepath': { '$eq': filepath } }, { 'vpath': { '$eq': vpath } }] });
   if (dbFile) {
     dbFile.aaFile = aaFile;
     dbFile.sID = scanId;
+    dbFile.art_source = artSource;
     fileCollection.update(dbFile);
   }
 }
