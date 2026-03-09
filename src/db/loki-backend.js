@@ -136,12 +136,23 @@ export function updateFileArt(filepath, vpath, aaFile, scanId, artSource = null)
   }
 }
 
+export function countArtUsage(aaFile) {
+  return fileCollection.count({ 'aaFile': { '$eq': aaFile } });
+}
+
 export function updateFileCue(filepath, vpath, cuepoints) {
   const dbFile = fileCollection.findOne({ '$and': [{ 'filepath': { '$eq': filepath } }, { 'vpath': { '$eq': vpath } }] });
   if (dbFile) {
     dbFile.cuepoints = cuepoints;
     fileCollection.update(dbFile);
   }
+}
+
+export function updateFileTags(filepath, vpath, tags) {
+  const dbFile = fileCollection.findOne({ '$and': [{ 'filepath': { '$eq': filepath } }, { 'vpath': { '$eq': vpath } }] });
+  if (!dbFile) return;
+  Object.assign(dbFile, tags);
+  fileCollection.update(dbFile);
 }
 
 export function insertFile(fileData) {

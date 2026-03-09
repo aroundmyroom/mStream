@@ -121,6 +121,20 @@ export function updateFileCue(filepath, vpath, cuepoints) {
   db.prepare('UPDATE files SET cuepoints = ? WHERE filepath = ? AND vpath = ?').run(cuepoints, filepath, vpath);
 }
 
+export function updateFileTags(filepath, vpath, tags) {
+  const fields = [], values = [];
+  if ('title'  in tags) { fields.push('title = ?');  values.push(tags.title  ?? null); }
+  if ('artist' in tags) { fields.push('artist = ?'); values.push(tags.artist ?? null); }
+  if ('album'  in tags) { fields.push('album = ?');  values.push(tags.album  ?? null); }
+  if ('year'   in tags) { fields.push('year = ?');   values.push(tags.year   ?? null); }
+  if ('genre'  in tags) { fields.push('genre = ?');  values.push(tags.genre  ?? null); }
+  if ('track'  in tags) { fields.push('track = ?');  values.push(tags.track  ?? null); }
+  if ('disk'   in tags) { fields.push('disk = ?');   values.push(tags.disk   ?? null); }
+  if (!fields.length) return;
+  values.push(filepath, vpath);
+  db.prepare(`UPDATE files SET ${fields.join(', ')} WHERE filepath = ? AND vpath = ?`).run(...values);
+}
+
 export function insertFile(fileData) {
   // If this hash already exists under a different vpath, inherit that ts so the
   // file doesn't appear as "newly added" just because a new vpath was created.

@@ -62,7 +62,7 @@ async function insertEntries(song) {
     "aaFile": song.aaFile ? song.aaFile : null,
     "art_source": song._artSource || null,
     "vpath": loadJson.vpath,
-    "ts": Math.floor(Date.now() / 1000),
+    "ts": song._preserveTs || Math.floor(Date.now() / 1000),
     "sID": loadJson.scanId,
     "replaygainTrackDb": song.replaygain_track_gain ? song.replaygain_track_gain.dB : null,
     "genre": song.genre ? String(song.genre) : null,
@@ -192,6 +192,11 @@ async function recursiveScan(dir) {
           if (!songInfo.aaFile && dbFileInfo.data._preserveAaFile) {
             songInfo.aaFile = dbFileInfo.data._preserveAaFile;
             songInfo._artSource = dbFileInfo.data._preserveArtSource || null;
+          }
+          // Preserve original insertion timestamp so editing tags/art doesn't
+          // re-flood "Recently Added" (file hash changes after rewrite → ts = now without this).
+          if (dbFileInfo.data._preserveTs) {
+            songInfo._preserveTs = dbFileInfo.data._preserveTs;
           }
           await insertEntries(songInfo);
         } else {
@@ -412,7 +417,11 @@ async function getAlbumArt(songInfo) {
   if (songInfo.picture && songInfo.picture[0]) {
     // Generate unique name based off hash of album art and metadata
     const picHashString = crypto.createHash('md5').update(songInfo.picture[0].data).digest('hex');
-    songInfo.aaFile = picHashString + '.' + mime.extension(songInfo.picture[0].format);
+    // mime-types returns 'jpeg' for image/jpeg — normalise to 'jpg' so filenames
+    // are consistent with what the Discogs embed endpoint writes (.jpg hardcoded).
+    const _rawExt = mime.extension(songInfo.picture[0].format);
+    const _normExt = (_rawExt === 'jpeg') ? 'jpg' : (_rawExt || 'jpg');
+    songInfo.aaFile = picHashString + '.' + _normExt;
     songInfo._artSource = 'embedded';
     // Check image-cache folder for filename and save if doesn't exist
     if (!fs.existsSync(path.join(loadJson.albumArtDirectory, songInfo.aaFile))) {

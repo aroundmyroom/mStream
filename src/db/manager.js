@@ -51,9 +51,10 @@ export function countFilesByVpath(vpath) { return backend.countFilesByVpath(vpat
 export function getStats() { return backend.getStats(); }
 
 // Metadata Queries
-export function updateFileArt(filepath, vpath, aaFile, scanId) { return backend.updateFileArt(filepath, vpath, aaFile, scanId); }
+export function updateFileArt(filepath, vpath, aaFile, scanId, artSource) { return backend.updateFileArt(filepath, vpath, aaFile, scanId, artSource); }
 export function countArtUsage(aaFile) { return backend.countArtUsage(aaFile); }
 export function updateFileCue(filepath, vpath, cuepoints) { return backend.updateFileCue(filepath, vpath, cuepoints); }
+export function updateFileTags(filepath, vpath, tags) { return backend.updateFileTags(filepath, vpath, tags); }
 export function getFileWithMetadata(filepath, vpath, username) { return backend.getFileWithMetadata(filepath, vpath, username); }
 export function getArtists(vpaths, ignoreVPaths) { return backend.getArtists(vpaths, ignoreVPaths); }
 export function getArtistAlbums(artist, vpaths, ignoreVPaths) { return backend.getArtistAlbums(artist, vpaths, ignoreVPaths); }

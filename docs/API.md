@@ -100,6 +100,10 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [Discogs cover art — search, embed, admin config](API/discogs.md) *(GitHub Copilot, 2026-03-07)*
 
+## Admin — ID3 Tag Editing
+
+[ID3 tag write — enable setting, write tags to file](API/admin_id3-tags.md) *(GitHub Copilot, 2026-03-09)*
+
 ## JukeBox
 
 [/jukebox/push-to-client](API/jukebox_push-to-client.md)

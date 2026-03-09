@@ -1,3 +1,4 @@
+import { promisify } from 'util';
 import path from 'path';
 import child from 'child_process';
 import fs from 'fs';
@@ -13,6 +14,7 @@ import * as imageCompress from '../db/image-compress-manager.js';
 import * as transcode from './transcode.js';
 import * as db from '../db/manager.js';
 import { joiValidate } from '../util/validation.js';
+import { getVPathInfo } from '../util/vpath.js';
 
 import { getTransAlgos, getTransCodecs, getTransBitrates } from '../api/transcode.js';
 import * as scanProgress from '../state/scan-progress.js';
@@ -160,6 +162,13 @@ export function setup(mstream) {
     res.json({});
   });
 
+  mstream.post("/api/v1/admin/db/params/allow-id3edit", async (req, res) => {
+    const schema = Joi.object({ allowId3Edit: Joi.boolean().required() });
+    joiValidate(schema, req.body);
+    await admin.editAllowId3Edit(req.body.allowId3Edit);
+    res.json({});
+  });
+
   mstream.get("/api/v1/admin/users", (req, res) => {
     // Scrub passwords and salts before sending to frontend
     const memClone = JSON.parse(JSON.stringify(config.program.users));
@@ -237,6 +246,11 @@ export function setup(mstream) {
 
   mstream.post("/api/v1/admin/db/scan/all", (req, res) => {
     dbQueue.scanAll();
+    res.json({});
+  });
+
+  mstream.post("/api/v1/admin/db/scan/stop", (req, res) => {
+    dbQueue.stopScanning();
     res.json({});
   });
 
@@ -615,6 +629,7 @@ export function setup(mstream) {
     res.json({
       enabled:        config.program.discogs?.enabled        || false,
       allowArtUpdate: config.program.discogs?.allowArtUpdate || false,
+      allowId3Edit:   config.program.scanOptions?.allowId3Edit || false,
       apiKey:         config.program.discogs?.apiKey         || '',
       apiSecret:      config.program.discogs?.apiSecret      || '',
       userAgentTag:   config.program.discogs?.userAgentTag   || '',
@@ -648,6 +663,124 @@ export function setup(mstream) {
     config.program.discogs.userAgentTag   = req.body.userAgentTag;
 
     res.json({});
+  });
+
+  // ── ID3 tag write ────────────────────────────────────────────
+  const execFileAsync = promisify(child.execFile);
+  mstream.post('/api/v1/admin/tags/write', async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    if (!config.program.scanOptions?.allowId3Edit) return res.status(403).json({ error: 'ID3 editing not enabled in admin settings' });
+
+    const schema = Joi.object({
+      filepath: Joi.string().required(),
+      title:    Joi.string().allow('').optional(),
+      artist:   Joi.string().allow('').optional(),
+      album:    Joi.string().allow('').optional(),
+      year:     Joi.alternatives().try(Joi.string().allow(''), Joi.number()).optional(),
+      genre:    Joi.string().allow('').optional(),
+      track:    Joi.alternatives().try(Joi.string().allow(''), Joi.number()).optional(),
+      disk:     Joi.alternatives().try(Joi.string().allow(''), Joi.number()).optional(),
+    });
+    joiValidate(schema, req.body);
+
+    let pathInfo;
+    try { pathInfo = getVPathInfo(req.body.filepath, req.user); } catch (e) { return res.status(400).json({ error: e.message }); }
+    const absPath = pathInfo.fullPath;
+    if (!fs.existsSync(absPath)) return res.status(404).json({ error: 'File not found' });
+
+    const ext       = path.extname(absPath).toLowerCase();
+    const ffmpegDir = config.program.transcode?.ffmpegDirectory;
+    const ffmpegBin = ffmpegDir ? path.join(ffmpegDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg') : 'ffmpeg';
+    // Write to same directory so fs.renameSync is atomic (avoids cross-device EXDEV errors).
+    const tmpOut    = path.join(path.dirname(absPath), `.mstream-tags-tmp-${Date.now()}${ext}`);
+
+    const metaArgs = [];
+    // ffmpeg uses 'date' for year and 'disc' for disk number
+    if (req.body.title  !== undefined) metaArgs.push('-metadata', `title=${req.body.title}`);
+    if (req.body.artist !== undefined) metaArgs.push('-metadata', `artist=${req.body.artist}`);
+    if (req.body.album  !== undefined) metaArgs.push('-metadata', `album=${req.body.album}`);
+    if (req.body.year   !== undefined) metaArgs.push('-metadata', `date=${req.body.year}`);
+    if (req.body.genre  !== undefined) metaArgs.push('-metadata', `genre=${req.body.genre}`);
+    if (req.body.track  !== undefined) metaArgs.push('-metadata', `track=${req.body.track}`);
+    if (req.body.disk   !== undefined) metaArgs.push('-metadata', `disc=${req.body.disk}`);
+
+    // Temp path for extracted art (OS temp dir — never visible in music dirs)
+    const tmpArt = path.join(os.tmpdir(), `.mstream-art-${Date.now()}.jpg`);
+    // Second temp output used only when re-embedding art after tag write
+    const tmpOut2 = path.join(path.dirname(absPath), `.mstream-tags-art-${Date.now()}${ext}`);
+
+    try {
+      // ── Step 1: extract any embedded picture stream ──────────────────────
+      // We never stream-copy the picture stream directly because ffmpeg sets
+      // avg_frame_rate=0/0 on the copy, which makes Chrome's demuxer emit
+      // "PTS is not defined" and refuse to play the file.  Instead we extract
+      // the raw image, write tags audio-only, then re-embed it fresh so ffmpeg
+      // generates correct disposition and timing metadata.
+      let hasArt = false;
+      try {
+        await execFileAsync(ffmpegBin, [
+          '-y', '-i', absPath,
+          '-map', '0:v:0', '-frames:v', '1', '-f', 'image2', tmpArt,
+        ]);
+        hasArt = fs.existsSync(tmpArt) && fs.statSync(tmpArt).size > 100;
+      } catch (_) { /* no picture stream — that's fine */ }
+
+      // ── Step 2: write tags, audio stream only ─────────────────────────────
+      await execFileAsync(ffmpegBin, [
+        '-y', '-fflags', '+genpts', '-i', absPath,
+        '-map', '0:a', '-map_metadata', '0', '-codec', 'copy',
+        ...metaArgs,
+        tmpOut,
+      ]);
+
+      if (hasArt) {
+        // ── Step 3: re-embed the extracted art ─────────────────────────────
+        // Use '-c:v mjpeg' (re-encode) not '-c:v copy'. Stream-copying a JPEG
+        // produces an mjpeg stream with avg_frame_rate=0/0 and no PTS, which
+        // causes Chrome to emit "PTS is not defined" and refuse to play.
+        try {
+          await execFileAsync(ffmpegBin, [
+            '-y',
+            '-i', tmpOut, '-i', tmpArt,
+            '-map', '0:a', '-map', '1:v',
+            '-c:a', 'copy',
+            '-c:v', 'mjpeg',
+            '-disposition:v:0', 'attached_pic',
+            '-metadata:s:v', 'title=Cover (Front)',
+            '-metadata:s:v', 'comment=Cover (Front)',
+            tmpOut2,
+          ]);
+          fs.renameSync(tmpOut2, absPath);
+          try { fs.unlinkSync(tmpOut); } catch (_) {}
+        } catch (_) {
+          // Re-embed failed (e.g. corrupt art) — still commit the tag changes
+          try { fs.unlinkSync(tmpOut2); } catch (_) {}
+          fs.renameSync(tmpOut, absPath);
+        }
+        try { fs.unlinkSync(tmpArt); } catch (_) {}
+      } else {
+        // No art — single atomic rename
+        fs.renameSync(tmpOut, absPath);
+      }
+
+      // ── Step 4: update DB ─────────────────────────────────────────────────
+      const tags = {};
+      if (req.body.title  !== undefined) tags.title  = req.body.title  || null;
+      if (req.body.artist !== undefined) tags.artist = req.body.artist || null;
+      if (req.body.album  !== undefined) tags.album  = req.body.album  || null;
+      if (req.body.year   !== undefined) tags.year   = req.body.year   ? Number(req.body.year)  || null : null;
+      if (req.body.genre  !== undefined) tags.genre  = req.body.genre  || null;
+      if (req.body.track  !== undefined) tags.track  = req.body.track  ? Number(req.body.track) || null : null;
+      if (req.body.disk   !== undefined) tags.disk   = req.body.disk   ? Number(req.body.disk)  || null : null;
+      db.updateFileTags(pathInfo.relativePath, pathInfo.vpath, tags);
+
+      res.json({ ok: true });
+    } catch (e) {
+      try { fs.unlinkSync(tmpOut);  } catch (_) {}
+      try { fs.unlinkSync(tmpOut2); } catch (_) {}
+      try { fs.unlinkSync(tmpArt);  } catch (_) {}
+      res.status(500).json({ error: e.message });
+    }
   });
 }
 
