@@ -2,8 +2,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import crypto from 'crypto';
 import fs from 'fs';
-import path from 'path';
 import os from 'os';
+import path from 'path';
 import axios from 'axios';
 import Joi from 'joi';
 import * as config from '../state/config.js';
@@ -34,7 +34,14 @@ async function fetchImageBuf(url) {
     headers:      discogsHeaders(),
     responseType: 'arraybuffer',
   });
-  return Buffer.from(resp.data);
+  const buf = Buffer.from(resp.data);
+  // Validate JPEG magic bytes (FF D8 FF) — a redirect or error page would
+  // produce an HTML/text body that embeds as a corrupt JPEG and causes
+  // Chrome's demuxer to emit "PTS is not defined" during playback.
+  if (buf.length < 3 || buf[0] !== 0xFF || buf[1] !== 0xD8 || buf[2] !== 0xFF) {
+    throw new Error(`Discogs returned non-JPEG data (${buf.length} bytes, starts: ${buf.slice(0,4).toString('hex')})`);
+  }
+  return buf;
 }
 
 /**
@@ -382,6 +389,15 @@ export function setup(mstream) {
     const extLower = path.extname(absPath).toLowerCase();
     const cacheOnly = ['.wav', '.aiff', '.aif', '.w64'].includes(extLower);
 
+    // Declare temp paths before try so the catch block can clean them up.
+    // tmpCover goes to the OS temp dir so it never appears as a visible file in
+    // the user's NFS music directory during download.
+    // tmpOut must be in the same directory as absPath so fs.renameSync is a
+    // single-syscall atomic replace (same filesystem, avoids EXDEV errors).
+    const _ts      = Date.now();
+    const tmpCover = path.join(os.tmpdir(), `.mstream-cover-${_ts}.jpg`);
+    const tmpOut   = path.join(path.dirname(absPath), `.mstream-out-${_ts}${extLower}`);
+
     try {
       // Fetch full-res primary image from Discogs
       const release = await discogsGet(`https://api.discogs.com/releases/${req.body.releaseId}`);
@@ -390,35 +406,39 @@ export function setup(mstream) {
       if (!img?.uri) return res.status(404).json({ error: 'No cover image for this release' });
 
       const imgBuf   = await fetchImageBuf(img.uri);
-      const ext      = extLower;
-      const tmpDir   = os.tmpdir();
-      const ts       = Date.now();
-      const tmpCover = path.join(tmpDir, `mstream-cover-${ts}.jpg`);
-      const tmpOut   = path.join(tmpDir, `mstream-out-${ts}${ext}`);
-
+      // Write temp files in the same directory as the audio file so renameSync
+      // is atomic (same filesystem — avoids cross-device EXDEV errors).
       fs.writeFileSync(tmpCover, imgBuf);
 
       if (!cacheOnly) {
         // ffmpeg: embed cover art — works for mp3, flac, ogg, m4a, opus
-        const ffmpegBin = path.join(
-          config.program.transcode.ffmpegDirectory,
-          process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'
-        );
+        const ffmpegDir = config.program.transcode?.ffmpegDirectory;
+        const ffmpegBin = ffmpegDir
+          ? path.join(ffmpegDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')
+          : 'ffmpeg';
+        // Always map only the audio from the source ('-map 0:a') so any
+        // pre-existing embedded-art stream is dropped and replaced cleanly.
+        // CRITICAL: use '-c:v mjpeg' (re-encode through ffmpeg's JPEG encoder)
+        // instead of '-c:v copy'. Stream-copying a raw JPEG produces an mjpeg
+        // stream with avg_frame_rate=0/0 and no PTS, which makes Chrome's
+        // demuxer emit "PTS is not defined" and refuse to play the file.
+        // Re-encoding through mjpeg costs ~50ms but gives the stream proper
+        // timing metadata that every browser/decoder expects.
         await execFileAsync(ffmpegBin, [
           '-y',
           '-i', absPath,
           '-i', tmpCover,
-          '-map', '0', '-map', '1',
-          '-c', 'copy',
+          '-map', '0:a', '-map', '1:v',
+          '-c:a', 'copy',
+          '-c:v', 'mjpeg',
           '-disposition:v:0', 'attached_pic',
           '-metadata:s:v', 'title=Cover (Front)',
           '-metadata:s:v', 'comment=Cover (Front)',
           tmpOut,
         ]);
 
-        // Replace the original file (copy+delete handles cross-device moves)
-        fs.copyFileSync(tmpOut, absPath);
-        try { fs.unlinkSync(tmpOut); } catch (_) {}
+        // Atomic replace — single syscall, file is never in a mid-written state
+        fs.renameSync(tmpOut, absPath);
       }
 
       try { fs.unlinkSync(tmpCover); } catch (_) {}
@@ -467,6 +487,9 @@ export function setup(mstream) {
 
       res.json({ ok: true, aaFile, cacheOnly });
     } catch (e) {
+      // Clean up any leftover temp files in the music directory
+      try { fs.unlinkSync(tmpCover); } catch (_) {}
+      try { fs.unlinkSync(tmpOut);   } catch (_) {}
       console.error('[discogs/embed] ERROR:', e);
       res.status(500).json({ error: e.message });
     }

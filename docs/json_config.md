@@ -28,7 +28,8 @@ A heavily edited config would look like:
     "scanInterval": 1.5,
     "pause": 50,
     "saveInterval": 500,
-    "bootScanDelay": 15
+    "bootScanDelay": 15,
+    "allowId3Edit": false
   },
   "storage": {
     "albumArtDirectory": "/media/album-art",
@@ -174,6 +175,7 @@ Sets the secret key used for the login system.  If this is not set, mStream will
 * `scanInterval`: The interval which controls how often file system will be scanned for changes (in hours). Set to 0 if you want to disable scanning
 * `saveInterval`: interval which to refresh the DB on scan.  Defaults to 250.  Can be set to a higher number for large collections to avoid hogging the CPU thread
 * `pause` (in milliseconds): During the scan, there is an optional pause that is aded between file parsing.   This can prevent mStream from hogging system resources during the initial scan
+* `allowId3Edit`: (boolean) when `true`, admin users see a **✏ Edit Tags** button in the Now Playing modal that lets them rewrite ID3/Vorbis/MP4 tags directly on disk using ffmpeg. See [API/admin_id3-tags.md](API/admin_id3-tags.md). Managed via Admin panel → Database → "Allow ID3 Tag Editing" or via `POST /api/v1/admin/db/params/allow-id3edit`. *(GitHub Copilot, 2026-03-09)*
 
 ```json
 {
@@ -182,7 +184,8 @@ Sets the secret key used for the login system.  If this is not set, mStream will
     "scanInterval": 1.5,
     "pause": 50,
     "saveInterval": 500,
-    "bootScanDelay": 15
+    "bootScanDelay": 15,
+    "allowId3Edit": false
   }
 }
 ```

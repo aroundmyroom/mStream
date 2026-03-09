@@ -193,6 +193,16 @@ export function runAfterBoot() {
   }, config.program.scanOptions.bootScanDelay * 1000);
 }
 
+export function stopScanning() {
+  for (const task of runningTasks) {
+    task.kill();
+  }
+  runningTasks.clear();
+  vpathLimiter.clear();
+  taskQueue.length = 0;
+  currentScanDirs.clear();
+}
+
 export function reset() {
   for (const task of runningTasks) {
     task.kill();

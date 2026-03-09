@@ -263,11 +263,20 @@ export async function serveIt(configFile) {
 
   // error handling
   mstream.use((error, req, res, _next) => {
-    const status = error instanceof WebError ? error.status : 500;
+    // Honour .status from any HTTP-aware error (e.g. send module's
+    // RangeNotSatisfiableError has status=416). Fall back to 500 only when
+    // there is no explicit status.
+    const status = (error.status && Number.isInteger(error.status))
+      ? error.status
+      : 500;
 
     if (status === 401 || status === 403) {
       // Auth failures are normal operational noise – log at warn, not error
       winston.warn(`Auth failure on route ${req.originalUrl} [${status}]`);
+    } else if (status === 416) {
+      // Range Not Satisfiable — happens when the client cached a byte-offset
+      // from before a file was rewritten. Not a server bug; log at debug level.
+      winston.debug(`Range not satisfiable on ${req.originalUrl} [416] — client will retry from 0`);
     } else {
       winston.error(`Server error on route ${req.originalUrl}: ${error.message}`, { stack: error });
     }
@@ -279,6 +288,12 @@ export async function serveIt(configFile) {
 
     if (error instanceof WebError) {
       return res.status(error.status).json({ error: error.message });
+    }
+
+    // For errors that carry their own HTTP status (send, multer, etc.) return
+    // that status so the browser can handle it correctly.
+    if (status !== 500) {
+      return res.status(status).end();
     }
 
     res.status(500).json({ error: 'Server Error' });

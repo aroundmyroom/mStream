@@ -317,6 +317,15 @@ export async function editCompressImages(val) {
   config.program.scanOptions.compressImage = val;
 }
 
+export async function editAllowId3Edit(val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
+  loadConfig.scanOptions.allowId3Edit = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.scanOptions.allowId3Edit = val;
+}
+
 export async function editScanErrorRetention(hours) {
   const loadConfig = await loadFile(config.configFile);
   if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }

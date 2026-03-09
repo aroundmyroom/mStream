@@ -1374,6 +1374,12 @@ const dbView = Vue.component('db-view', {
                         [<a v-on:click="openModal('edit-db-engine-modal')">edit</a>]
                       </td>
                     </tr>
+                    <tr>
+                      <td><b>Allow ID3 Tag Editing:</b> {{dbParams.allowId3Edit || false}}</td>
+                      <td>
+                        [<a v-on:click="toggleAllowId3Edit()">edit</a>]
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -1386,6 +1392,7 @@ const dbView = Vue.component('db-view', {
               <div class="card-content">
                 <span class="card-title">Scan Queue & Stats</span>
                 <a v-on:click="scanDB" class="btn">Start A Scan</a>
+                <a v-if="scanProgress.length > 0" v-on:click="stopScan" class="btn red" style="margin-left:.5rem">Stop Scanning</a>
                 <a v-on:click="pullStats" class="btn">Pull Stats</a>
                 <div v-if="scanProgress.length > 0" class="sp-container">
                   <div v-for="sp in scanProgress" :key="sp.scanId" class="sp-card">
@@ -1452,7 +1459,7 @@ const dbView = Vue.component('db-view', {
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num" style="color:var(--accent)">{{(dbStats.artFromDiscogs||0).toLocaleString()}}</div>
-                      <div class="sc-label">Art via Discogs</div>
+                      <div class="sc-label">Art Picked by User (Discogs)</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num" style="color:var(--accent)">{{(dbStats.withReplaygain||0).toLocaleString()}}</div>
@@ -1699,6 +1706,15 @@ const dbView = Vue.component('db-view', {
         });
       }
     },
+    stopScan: async function() {
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/db/scan/stop` });
+        iziToast.success({ title: 'Scan Stopped', position: 'topCenter', timeout: 3500 });
+        this.scanProgress = [];
+      } catch (err) {
+        iziToast.error({ title: 'Failed to Stop Scan', position: 'topCenter', timeout: 3500 });
+      }
+    },
     recompressImages: function() {
             adminConfirm(`<b>Compress All Images?</b>`, 'This process will run in the background', 'Start', async () => {
         try {
@@ -1753,6 +1769,27 @@ const dbView = Vue.component('db-view', {
                       });
                     });
       });
+    },
+    toggleAllowId3Edit: function() {
+            adminConfirm(
+        `<b>${this.dbParams.allowId3Edit ? 'Disable' : 'Enable'} ID3 Tag Editing?</b>`,
+        this.dbParams.allowId3Edit
+          ? 'Admins will no longer be able to edit ID3 tags in the Now Playing modal.'
+          : 'Allows admins to edit ID3 tags (title, artist, album, year, genre…) in the Now Playing modal. Tags are written directly to the file via ffmpeg.',
+        this.dbParams.allowId3Edit ? 'Disable' : 'Enable',
+        () => {
+          API.axios({
+                        method: 'POST',
+                        url: `${API.url()}/api/v1/admin/db/params/allow-id3edit`,
+                        data: { allowId3Edit: !this.dbParams.allowId3Edit }
+                      }).then(() => {
+                        Vue.set(ADMINDATA.dbParams, 'allowId3Edit', !this.dbParams.allowId3Edit);
+                        iziToast.success({ title: 'Updated Successfully', position: 'topCenter', timeout: 3500 });
+                      }).catch(() => {
+                        iziToast.error({ title: 'Failed', position: 'topCenter', timeout: 3500 });
+                      });
+        }
+      );
     },
     toggleSkipImg: function() {
             adminConfirm(`<b>${this.dbParams.skipImg === true ? 'Disable' : 'Enable'} Image Skip?</b>`, '', `${this.dbParams.skipImg === true ? 'Disable' : 'Enable'}`, () => {
@@ -1925,11 +1962,10 @@ const infoView = Vue.component('info-view', {
         <div class="col s12">
           <div class="card">
             <div class="card-content">
-              <h4 style="margin:0 0 .25rem;font-size:1.3rem;font-weight:700;color:var(--t1);">mStream <span style="color:var(--primary);">v{{version.val}}</span></h4>
+              <h4 style="margin:0 0 .25rem;font-size:1.3rem;font-weight:700;color:var(--t1);"><span style="font-weight:300;color:var(--t2);">m</span><span style="font-weight:700;color:var(--t1);">Stream</span> <span style="font-size:10px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--primary);opacity:.85;vertical-align:middle;position:relative;top:-1px;">Velvet</span> <span style="color:var(--primary);font-size:1rem;">v{{version.val}}</span> <span style="color:var(--t2);font-size:.8rem;font-weight:400;">— a fork of mStream</span></h4>
               <p style="margin:0 0 1.25rem;color:var(--t2);">Developed by <a href="mailto:paul@mstream.io" style="color:var(--accent);">Paul Sori</a></p>
               <div style="background:var(--raised);border:1px solid var(--border);border-radius:8px;padding:.85rem 1.1rem;margin-bottom:1.25rem;">
-                <div style="font-size:.82rem;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:.4rem;">Admin GUI v2</div>
-                <div style="color:var(--t1);font-size:.95rem;">Custom admin interface built for mStream — dark / light mode, GUIv2 design language.</div>
+                <div style="color:var(--t2);font-size:.85rem;">The entire application — player, admin panel, scanner, API and more — expanded by <strong style="color:var(--t1);">AroundMyRoom</strong> (Dennis Slagers) with Claude Sonnet and serious prompting.</div>
               </div>
               <div style="display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;margin-bottom:1.25rem;">
                 <iframe src="https://github.com/sponsors/IrosTheBeggar/button" title="Donate" height="35" width="116" style="border:0;border-radius:6px;"></iframe>

@@ -26,6 +26,7 @@ save/*.json
 
 .DS_Store
 .vscode/*
+.github/copilot-instructions.md
 
 *.log
 *.db

@@ -27,11 +27,14 @@ Returns the current Discogs configuration.
 {
   "enabled": true,
   "allowArtUpdate": false,
+  "allowId3Edit": false,
   "apiKey": "your_key",
   "apiSecret": "your_secret",
   "userAgentTag": "amr"
 }
 ```
+
+`allowId3Edit` — whether the admin has enabled ID3 tag editing (see [admin_id3-tags.md](admin_id3-tags.md)). The player reads this field on login, session restore, and page visibility change to decide whether to show the **✏ Edit Tags** button in the Now Playing modal.
 
 ---
 

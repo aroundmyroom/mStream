@@ -9,6 +9,7 @@ const S = {
   isAdmin:  false,
   discogsEnabled: false,
   discogsAllowUpdate: false,
+  allowId3Edit:   false,
   lastfmEnabled: false,
   vpaths:   [],
   queue:    [],
@@ -524,13 +525,11 @@ const Player = {
       ? `<img src="${u}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`
       : noArtHtml();
     VU_NEEDLE.setArt(u || '');
-    // update player stars
+    // update player stars — always show 5 stars; yellow = rated, dim = unrated
     const starsEl = document.getElementById('player-stars');
-    if (s.rating) {
-      starsEl.innerHTML = starsHtml(s.rating, 'ps');
-      starsEl.dataset.fp = s.filepath;
-      starsEl.dataset.rating = s.rating || 0;
-    } else { starsEl.innerHTML = ''; }
+    starsEl.innerHTML = starsHtml(s.rating || 0, 'ps');
+    starsEl.dataset.fp = s.filepath;
+    starsEl.dataset.rating = s.rating || 0;
     // sync NP modal if open
     if (!document.getElementById('np-modal').classList.contains('hidden')) {
       renderNPModal();
@@ -544,6 +543,8 @@ const Player = {
     _updateMediaSession(s);
     // Dynamic album-art colour theming
     _applyAlbumArtTheme(artUrl(s['album-art'], 'l'));
+    // Tab favicon + title
+    _TabFav.setSong(s, !audioEl.paused);
   },
 };
 
@@ -576,11 +577,13 @@ async function _djApiCall() {
         console.warn(`[AutoDJ] Last.fm returned no similar artists for "${currentArtist}" — playing random`);
         _djSimilarFor = currentArtist;
         _djSimilarArtists = [];
+        _showInfoStrip('AutoDJ', `Last.fm has no similar artists for <strong>${esc(currentArtist)}</strong> — playing random`, 8000);
       }
     } catch (_e) {
       console.error(`[AutoDJ] Last.fm call failed for "${currentArtist}":`, _e);
       _djSimilarFor = currentArtist;
       _djSimilarArtists = [];
+      _showInfoStrip('AutoDJ', `Last.fm lookup failed for <strong>${esc(currentArtist)}</strong> — playing random`, 8000);
     }
   }
 
@@ -601,6 +604,7 @@ async function _djApiCall() {
       // artists filter returned no library matches — fall back to random
       if (artistFilter && e.status === 400) {
         console.warn('[AutoDJ] No library songs for similar artists, falling back to random');
+        _showInfoStrip('AutoDJ', `No songs found in your library for Last.fm&apos;s suggestions — playing random`, 8000);
         return api('POST', 'api/v1/db/random-songs', {
           ignoreList:    S.djIgnore,
           minRating:     S.djMinRating || undefined,
@@ -626,6 +630,7 @@ async function _djApiCall() {
     if (artistFilter && e.status === 400) {
       console.warn('[AutoDJ] No library songs for similar artists, falling back to random');
       _djSimilarArtists = [];  // prevent _showDJStrip from showing "similar to" for a random fallback
+      _showInfoStrip('AutoDJ', `No songs found in your library for Last.fm&apos;s suggestions — playing random`, 8000);
       const ignoreVPaths = S.vpaths.filter(v => !selected.includes(v));
       return api('POST', 'api/v1/db/random-songs', {
         ignoreList:   S.djIgnore,
@@ -1246,6 +1251,13 @@ function renderNPModal() {
       _dsEl.classList.add('hidden');
     }
   }
+  // ID3 tag edit button (admin only, when allowId3Edit is enabled)
+  const _id3El = document.getElementById('np-id3-section');
+  if (_id3El) {
+    _id3El.innerHTML = (S.isAdmin && S.allowId3Edit && s)
+      ? `<button class="np-id3-edit-btn" id="np-id3-edit-btn">&#9998; Edit Tags</button>`
+      : '';
+  }
 }
 function showNPModal() {
   if (!S.queue[S.idx]) return;
@@ -1318,6 +1330,93 @@ async function _npDiscogsSearch(song) {
       `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
   }
 } 
+
+// ── ID3 TAG EDITING IN NP MODAL ───────────────────────────────
+function _npId3Edit(song) {
+  const id3El = document.getElementById('np-id3-section');
+  if (!id3El || !song) return;
+  const v = x => esc(String(x ?? ''));
+  id3El.innerHTML = `<div class="np-id3-form">
+    <div class="np-id3-row"><label class="np-id3-lbl">Title</label><input class="np-id3-inp" id="id3-title" value="${v(song.title)}"></div>
+    <div class="np-id3-row"><label class="np-id3-lbl">Artist</label><input class="np-id3-inp" id="id3-artist" value="${v(song.artist)}"></div>
+    <div class="np-id3-row"><label class="np-id3-lbl">Album</label><input class="np-id3-inp" id="id3-album" value="${v(song.album)}"></div>
+    <div class="np-id3-row"><label class="np-id3-lbl">Year</label><input class="np-id3-inp" id="id3-year" value="${v(song.year)}"></div>
+    <div class="np-id3-row"><label class="np-id3-lbl">Genre</label><input class="np-id3-inp" id="id3-genre" value="${v(song.genre)}"></div>
+    <div class="np-id3-row"><label class="np-id3-lbl">Track</label><input class="np-id3-inp" id="id3-track" value="${v(song.track)}"></div>
+    <div class="np-id3-row"><label class="np-id3-lbl">Disc</label><input class="np-id3-inp" id="id3-disk" value="${v(song.disk)}"></div>
+    <div class="np-id3-btns">
+      <button class="np-discogs-btn" id="np-id3-apply-btn">Apply</button>
+      <button class="np-discogs-cancel" id="np-id3-cancel-btn">Cancel</button>
+    </div>
+    <span id="np-id3-status" class="np-discogs-status" style="display:none"></span>
+  </div>`;
+}
+
+async function _npId3ApplyTags(song) {
+  const statusEl = document.getElementById('np-id3-status');
+  const applyBtn = document.getElementById('np-id3-apply-btn');
+  if (statusEl) { statusEl.textContent = 'Saving\u2026'; statusEl.style.display = ''; }
+  if (applyBtn) applyBtn.disabled = true;
+  // Snapshot playback state BEFORE the API call so we can reload seamlessly.
+  // Pause immediately — the tag write takes 2-4 seconds (3 ffmpeg passes:
+  // extract art, write tags, re-embed art).  If the browser keeps streaming
+  // it hits a mid-write 500, which triggers the error-recovery loop and the
+  // browser plays from position 0 before the write finishes.
+  const _isCurrentSong = S.queue[S.idx]?.filepath === song.filepath;
+  const _wasPlaying    = _isCurrentSong && !audioEl.paused;
+  const _resumeAt      = _isCurrentSong ? audioEl.currentTime : 0;
+  if (_isCurrentSong && _wasPlaying) audioEl.pause();
+  const data = {
+    filepath: song.filepath,
+    title:  document.getElementById('id3-title')?.value  ?? '',
+    artist: document.getElementById('id3-artist')?.value ?? '',
+    album:  document.getElementById('id3-album')?.value  ?? '',
+    year:   document.getElementById('id3-year')?.value   ?? '',
+    genre:  document.getElementById('id3-genre')?.value  ?? '',
+    track:  document.getElementById('id3-track')?.value  ?? '',
+    disk:   document.getElementById('id3-disk')?.value   ?? '',
+  };
+  try {
+    await api('POST', 'api/v1/admin/tags/write', data);
+    // Update queue items so the UI reflects new tags immediately.
+    // Always assign all fields — including empty strings — so that clearing
+    // a tag (e.g. removing the genre) is reflected instantly without a rescan.
+    S.queue.forEach(q => {
+      if (q.filepath !== song.filepath) return;
+      if (data.title  !== undefined) q.title  = data.title  || null;
+      if (data.artist !== undefined) q.artist = data.artist || null;
+      if (data.album  !== undefined) q.album  = data.album  || null;
+      if (data.year   !== undefined) q.year   = data.year   ? Number(data.year)  || null : null;
+      if (data.genre  !== undefined) q.genre  = data.genre  || null;
+      if (data.track  !== undefined) q.track  = data.track  ? Number(data.track) || null : null;
+      if (data.disk   !== undefined) q.disk   = data.disk   ? Number(data.disk)  || null : null;
+    });
+    renderNPModal();
+    refreshQueueUI();
+    if (typeof Player !== 'undefined') Player.updateBar?.();
+    // Reload the audio element so the browser re-fetches the newly written file.
+    // Always play from position 0 — the file was atomically rewritten and byte
+    // offsets shift, so seeking to the old currentTime triggers a range request
+    // that may land mid-frame in the new file, causing PTS/demuxer errors.
+    if (_isCurrentSong) {
+      clearTimeout(_netRecoveryTimer);
+      toast('Tags saved — restarting from the beginning');
+      audioEl.addEventListener('loadedmetadata', () => {
+        if (_wasPlaying) audioEl.play().catch(() => {});
+      }, { once: true });
+      // Re-assign src with a cache-buster so Chrome discards its stale internal
+      // byte-range state. Merely calling load() is not enough — Chrome reuses
+      // the last Range offset and gets a 416 on the rewritten (differently-sized) file.
+      audioEl.src = mediaUrl(song.filepath) + '&_t=' + Date.now();
+      audioEl.load();
+    }
+  } catch(e) {
+    // Resume playback as-is — the file wasn't changed
+    if (_isCurrentSong && _wasPlaying) audioEl.play().catch(() => {});
+    if (statusEl) { statusEl.textContent = 'Error: ' + esc(e?.message || 'failed'); statusEl.style.display = ''; }
+    if (applyBtn) applyBtn.disabled = false;
+  }
+}
 
 // ── EQUALIZER CONFIG ──────────────────────────────────────────
 const EQ_BANDS = [
@@ -5898,8 +5997,8 @@ async function tryLogin(username, password) {
   try {
     await api('GET', 'api/v1/admin/directories');
     S.isAdmin = true;
-    try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; }
-  } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; }
+    try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
+  } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
   try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
 }
 
@@ -5922,8 +6021,8 @@ async function checkSession() {
       try {
         await api('GET', 'api/v1/admin/directories');
         S.isAdmin = true;
-        try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; }
-      } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; }
+        try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
+      } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
       try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
       return true;
     } catch(e) {
@@ -6024,6 +6123,7 @@ function showApp() {
         const wasDiscogsEnabled = S.discogsEnabled;
         S.discogsEnabled    = dc?.enabled === true;
         S.discogsAllowUpdate = dc?.allowArtUpdate === true;
+        S.allowId3Edit = dc?.allowId3Edit === true;
         const discogsBtn = document.getElementById('discogs-nav-btn');
         if (discogsBtn) {
           if (S.discogsEnabled) discogsBtn.classList.remove('hidden');
@@ -6514,9 +6614,77 @@ function _syncQueueLabel() {
   label.innerHTML = icon + ' ' + text + djSub;
 }
 
+// ── Tab favicon + dynamic title ──────────────────────────────────────────────
+// Playing  → album art drawn to canvas once (no loop)
+// Paused / idle → Velvet logo SVG (dark bg + purple m)
+const _TabFav = (() => {
+  let _icos = null, _song = null, _playing = false, _lastArtSrc = '';
+  const _origHrefs = new Map();
+
+  // Velvet idle/paused logo: dark rounded square + bold "m" in primary purple
+  const _SVG_VELVET = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="72 33 76 89"><defs><linearGradient id="tfv-o" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c4b5fd"/><stop offset="100%" stop-color="#6d28d9" stop-opacity=".85"/></linearGradient><linearGradient id="tfv-i" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#4c1d95"/><stop offset="100%" stop-color="#a78bfa"/></linearGradient></defs><polygon fill="url(#tfv-o)" points="75,118.5 75,35.5 96,48.5 96,118.5"/><polygon fill="url(#tfv-i)" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/><polygon fill="url(#tfv-o)" points="124,118.5 124,48.5 145,35.5 145,118.5"/></svg>`;
+
+  function _svgHref(svg) { return 'data:image/svg+xml,' + encodeURIComponent(svg); }
+  const _VELVET_HREF = _svgHref(_SVG_VELVET);
+
+  function _init() {
+    if (_icos) return;
+    _icos = Array.from(document.querySelectorAll('link[rel*="icon"]'))
+                 .filter(el => !el.rel.includes('apple'));
+    _icos.forEach(el => _origHrefs.set(el, el.href));
+  }
+
+  function _setAll(href) { _icos.forEach(el => { el.href = href; }); }
+
+  function _title() {
+    if (!_song) { document.title = 'mStream Velvet'; return; }
+    const a = _song.artist || '', t = _song.title || (_song.filepath || '').split('/').pop() || '';
+    const mark = _playing ? '\u25B6' : '\u23F8';
+    document.title = (a && t) ? `${mark} ${a} \u2014 ${t}` : `${mark} ${t || 'mStream Velvet'}`;
+  }
+
+  function _drawArt(src) {
+    if (!src) { _setAll(_VELVET_HREF); return; }
+    if (src === _lastArtSrc) return; // same art, already set
+    _lastArtSrc = src;
+    const cvs = document.createElement('canvas');
+    cvs.width = cvs.height = 32;
+    const ctx = cvs.getContext('2d');
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      ctx.save();
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(0, 0, 32, 32, 4); else ctx.rect(0, 0, 32, 32);
+      ctx.clip();
+      ctx.drawImage(img, 0, 0, 32, 32);
+      ctx.restore();
+      _setAll(cvs.toDataURL('image/png'));
+    };
+    img.onerror = () => { _setAll(_VELVET_HREF); };
+    img.src = src;
+  }
+
+  return {
+    setSong(song, playing) {
+      _init(); _song = song;
+      if (playing !== undefined) _playing = playing;
+      _title();
+      if (_playing && song) _drawArt(artUrl(song['album-art'], 's'));
+      else _setAll(_VELVET_HREF);
+    },
+    play() {
+      _init(); _playing = true; _title();
+      if (_song) _drawArt(artUrl(_song['album-art'], 's'));
+    },
+    pause() { _init(); _playing = false; _lastArtSrc = ''; _title(); _setAll(_VELVET_HREF); },
+    reset() { _init(); _song = null; _playing = false; _lastArtSrc = ''; document.title = 'mStream Velvet'; _setAll(_VELVET_HREF); },
+  };
+})();
+
 // ── AUDIO EVENT HANDLERS (named so they can be moved to a swapped element) ──
-function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); _startWaveformRaf(); document.body.classList.add('audio-playing'); if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'playing'; } catch(_e) {} }
-function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  _stopWaveformRaf(); document.body.classList.remove('audio-playing'); if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'paused'; } catch(_e) {} }
+function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); _startWaveformRaf(); document.body.classList.add('audio-playing'); _TabFav.play();  if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'playing'; } catch(_e) {} }
+function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  _stopWaveformRaf(); document.body.classList.remove('audio-playing'); _TabFav.pause(); if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'paused';  } catch(_e) {} }
 function _onAudioEnded() {
   if (S.sleepMins === -1) {
     S.sleepMins = 0;
@@ -6534,23 +6702,37 @@ function _onAudioEnded() {
   _stopWaveformRaf();
   Player.next();
 }
+// Tracks how many reload attempts have been made for a given src URL so we
+// know when to give up and skip rather than loop forever.
+const _mediaParseRetries = new Map();
+
 function _onAudioError() {
   const err = audioEl.error;
   if (!err || !audioEl.src) return;
   console.warn(`Audio error code ${err.code}: ${err.message || '(no message)'}`);
 
-  // Code 2 = MEDIA_ERR_NETWORK — connection dropped mid-stream; try to reload.
+  // Code 2 = MEDIA_ERR_NETWORK — connection dropped mid-stream; reload.
   if (err.code === MediaError.MEDIA_ERR_NETWORK) {
-    if (!S.autoDJ) return; // only auto-recover for Auto-DJ streams
     _reloadFromPosition(0);
     return;
   }
 
   // Code 3 = MEDIA_ERR_DECODE, Code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED
   // — the file exists but the browser can't parse it (corrupt, unsupported
-  //   codec, bad PTS timestamps, etc.).
+  //   codec, bad PTS timestamps, ERR_CONTENT_LENGTH_MISMATCH, etc.).
+  // Retry once: a reload often clears transient PTS / demuxer failures.
   if (err.code === MediaError.MEDIA_ERR_DECODE ||
       err.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+    const src = audioEl.src;
+    const attempts = _mediaParseRetries.get(src) || 0;
+    if (attempts < 1) {
+      _mediaParseRetries.set(src, attempts + 1);
+      console.warn(`Audio parse error — reload attempt ${attempts + 1}/1 for: ${src}`);
+      _reloadFromPosition(0);
+      return;
+    }
+    // Already retried — give up and skip.
+    _mediaParseRetries.delete(src);
     const song = S.queue[S.idx];
     const name = song ? (song.title || song.filepath.split('/').pop()) : 'Unknown';
     toast(`⚠ Skipping unplayable file: ${name}`);
@@ -6559,16 +6741,28 @@ function _onAudioError() {
   }
 }
 function _onAudioStalled() {
-  if (!S.autoDJ) return;
   clearTimeout(_netRecoveryTimer);
   _netRecoveryTimer = setTimeout(() => {
     if (audioEl.readyState < 3) {
-      console.warn(`Auto-DJ: stream stalled (readyState=${audioEl.readyState}) — recovering`);
+      console.warn(`Stream stalled (readyState=${audioEl.readyState}) — recovering`);
       _reloadFromPosition(0);
     }
   }, 5000);
 }
-function _onAudioPlaying()  { clearTimeout(_netRecoveryTimer); }
+function _onAudioPlaying()  {
+  clearTimeout(_netRecoveryTimer);
+  // Only reset the parse-retry counter once we've played enough to know the
+  // file is genuinely working. Playing briefly from position 0 while the
+  // recovery logic seeks to the resume position would otherwise clear the
+  // counter and turn a 1-retry limit into an infinite loop.
+  const src = audioEl.src;
+  const _clearRetryTimer = setTimeout(() => {
+    if (audioEl.src === src && !audioEl.paused) _mediaParseRetries.delete(src);
+  }, 3000);
+  audioEl.addEventListener('pause',  () => clearTimeout(_clearRetryTimer), { once: true });
+  audioEl.addEventListener('ended',  () => clearTimeout(_clearRetryTimer), { once: true });
+  audioEl.addEventListener('error',  () => clearTimeout(_clearRetryTimer), { once: true });
+}
 function _onAudioCanPlay() { clearTimeout(_netRecoveryTimer); }
 
 // ── CUE SHEET MARKERS ────────────────────────────────────────
@@ -6723,10 +6917,21 @@ let _netRecoveryTimer = null;
 
 function _reloadFromPosition(attempt) {
   attempt = attempt || 0;
-  if (attempt > 5) { console.error('Auto-DJ: gave up after 5 recovery attempts'); return; }
-  const resumeAt = audioEl.currentTime;
+  if (attempt > 5) {
+    console.error('Recovery: gave up after 5 recovery attempts — skipping track');
+    const song = S.queue[S.idx];
+    const name = song ? (song.title || song.filepath.split('/').pop()) : 'Unknown';
+    toast(`⚠ Skipping unreachable file: ${name}`);
+    Player.next();
+    return;
+  }
+  // On the very first attempt try to resume from the current position.
+  // If that fails (e.g. 416 Range Not Satisfiable after a file rewrite where
+  // the new file is smaller), fall back to the start immediately.
+  // Starting from 0 is always safe and preferred over an infinite 416 loop.
+  const resumeAt = attempt < 1 ? audioEl.currentTime : 0;
   const delay = Math.min(1000 * Math.pow(2, attempt), 30000);
-  console.warn(`Auto-DJ: recovery attempt ${attempt + 1}/5 — resume from ${Math.round(resumeAt)}s in ${delay}ms`);
+  console.warn(`Recovery attempt ${attempt + 1}/5 — resume from ${Math.round(resumeAt)}s in ${delay}ms`);
   clearTimeout(_netRecoveryTimer);
   _netRecoveryTimer = setTimeout(() => {
     audioEl.load(); // re-issues the HTTP GET through the proxy
@@ -6739,7 +6944,7 @@ function _reloadFromPosition(attempt) {
     // If loadedmetadata never fires (proxy keeps resetting), retry
     const retryTimer = setTimeout(() => {
       audioEl.removeEventListener('loadedmetadata', onMeta);
-      if (S.autoDJ && audioEl.paused) _reloadFromPosition(attempt + 1);
+      _reloadFromPosition(attempt + 1);
     }, 12000);
     // Clean up retry timer once we're actually playing
     audioEl.addEventListener('playing', () => clearTimeout(retryTimer), { once: true });
@@ -6901,28 +7106,79 @@ document.getElementById('np-left').addEventListener('click', async e => {
   const filepath  = thumb.dataset.filepath;
   if (!filepath || !releaseId) return;
   thumb.classList.add('selected');
-  const dsEl = document.getElementById('np-discogs-section');
+  const dsEl    = document.getElementById('np-discogs-section');
+  const npLeft  = document.getElementById('np-left');
   const _cacheOnly = ['wav','aiff','aif','w64'].includes((filepath || '').split('.').pop().toLowerCase());
-  if (dsEl) dsEl.innerHTML = `<span class="np-discogs-status">${_cacheOnly ? '⏳ Saving art to database…' : '⏳ Embedding cover art…'}</span>`;  try {
+  const _label  = _cacheOnly ? 'Saving art to database…' : 'Embedding cover art…';
+
+  // Snapshot playback state and pause BEFORE the API call.
+  // ffmpeg atomically replaces the file on disk; the browser must not be
+  // streaming it at that moment or it will get a mid-stream disconnect.
+  const _isCurrentSong = S.queue[S.idx]?.filepath === filepath;
+  const _wasPlaying    = _isCurrentSong && !audioEl.paused;
+  const _resumeAt      = _isCurrentSong ? audioEl.currentTime : 0;
+  if (_isCurrentSong && _wasPlaying) audioEl.pause();
+
+  // Show a full-panel spinner and block further interaction
+  if (dsEl) dsEl.innerHTML =
+    `<div class="np-embed-spinner"></div>` +
+    `<span class="np-embed-label">${_label}</span>`;
+  npLeft?.classList.add('np-left--embedding');
+  try {
     const result = await api('POST', 'api/v1/discogs/embed', { filepath, releaseId });
     if (result?.aaFile) {
       S.queue.forEach(q => { if (q.filepath === filepath) q['album-art'] = result.aaFile; });
     }
-    document.getElementById('np-left')?.classList.remove('np-left--picking');
+    npLeft?.classList.remove('np-left--embedding');
+    npLeft?.classList.remove('np-left--picking');
     // Force renderNPModal to reset the discogs section by clearing the cached fp
-    const dsEl2 = document.getElementById('np-discogs-section');
-    if (dsEl2) dsEl2.dataset.songFp = '';
+    if (dsEl) dsEl.dataset.songFp = '';
     // Re-render modal (shows new art + resets discogs section)
     renderNPModal();
     // Refresh player bar thumbnail + queue panel
     if (S.queue[S.idx]?.filepath === filepath) Player.updateBar();
     refreshQueueUI();
+    // Reload the audio element so the browser re-fetches the new file instead
+    // of continuing to decode the old stream. Reset currentTime first to clear
+    // Always reload from position 0 — the file was atomically rewritten and
+    // byte offsets shift, so seeking to the old currentTime triggers a range
+    // request that may land mid-frame in the new file → PTS/demuxer errors.
+    if (_isCurrentSong) {
+      clearTimeout(_netRecoveryTimer); // prevent stall-recovery from interfering
+      toast('Album art saved — restarting from the beginning');
+      audioEl.addEventListener('loadedmetadata', () => {
+        if (_wasPlaying) audioEl.play().catch(() => {});
+      }, { once: true });
+      // Re-assign src with a cache-buster so Chrome discards its stale internal
+      // byte-range state. Merely calling load() is not enough — Chrome reuses
+      // the last Range offset and gets a 416 on the rewritten (differently-sized) file.
+      audioEl.src = mediaUrl(filepath) + '&_t=' + Date.now();
+      audioEl.load();
+    }
   } catch(err) {
+    npLeft?.classList.remove('np-left--embedding');
+    // Resume playback if we paused it — the file wasn't changed
+    if (_isCurrentSong && _wasPlaying) audioEl.play().catch(() => {});
     if (dsEl) dsEl.innerHTML =
-      `<span class="np-discogs-status">Embed failed: ${esc(err?.message || 'error')}</span>` +
+      `<span class="np-discogs-status" style="color:rgba(255,100,100,.8)">Embed failed: ${esc(err?.message || 'error')}</span>` +
       `<button class="np-discogs-btn" id="np-discogs-search-btn" style="margin-top:6px">Try again</button>` +
       `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:4px">← Back</button>`;
     thumb.classList.remove('selected');
+  }
+});
+// ID3 tag edit buttons inside the NP modal right panel
+document.getElementById('np-right').addEventListener('click', async e => {
+  e.stopPropagation(); // prevent bubbling to np-modal overlay close handler
+  if (e.target.closest('#np-id3-edit-btn')) {
+    _npId3Edit(S.queue[S.idx]);
+    return;
+  }
+  if (e.target.closest('#np-id3-cancel-btn')) {
+    renderNPModal();
+    return;
+  }
+  if (e.target.closest('#np-id3-apply-btn')) {
+    await _npId3ApplyTags(S.queue[S.idx]);
   }
 });
 document.getElementById('np-play-btn').addEventListener('click', () => Player.toggle());
@@ -7019,6 +7275,8 @@ document.getElementById('np-rate-stars').querySelectorAll('span').forEach((star,
     if (!s) return;
     const val = parseInt(star.dataset.v);
     s.rating = val;
+    // Update .lit immediately — don't wait for updateBar→renderNPModal chain
+    document.querySelectorAll('#np-rate-stars span').forEach((s2, j) => s2.classList.toggle('lit', j <= i));
     const ci = S.curSongs.findIndex(cs => cs.filepath === s.filepath);
     if (ci >= 0) {
       S.curSongs[ci].rating = val;

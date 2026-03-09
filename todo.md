@@ -136,6 +136,8 @@ Currently all user preferences (ReplayGain, Gapless, Dynamic Colours, crossfade,
 - [ ] On login: fetch settings from server and hydrate `S` state + `localStorage` as a local cache
 - [ ] On change: write to `localStorage` immediately (fast), debounce a PUT to the server (sync in background)
 - [ ] Covers: `rg`, `gapless`, `dyn_color`, `crossfade`, `shuffle`, `repeat`, `vol`, `balance`, `djSimilar`, `trans_*`, `smart_pl_filter`, and future settings
+- [ ] **Playlist resume / position sync**: also persist the active queue (ordered list of filepaths) + current index + seek position in `user_settings` — on login, restore queue and seek to saved position. This solves the iOS/Android "restarts from first song" problem: the app reads the server state on launch, and `localStorage` acts as a fast local cache between sessions. Cross-device resume becomes possible for free once the server is the source of truth.
+  - **Storage pattern**: write to `localStorage` immediately on every change (zero latency, works offline); debounce a PUT to server DB every ~10–15 sec and on pause/close. On login/launch: fetch from server and hydrate `localStorage`. If server unreachable: fall back to `localStorage`. Same debounce pattern applies to all other user settings above.
 
 ---
 

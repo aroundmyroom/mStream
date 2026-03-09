@@ -6,6 +6,43 @@
 
 ---
 
+## v5.15.2-velvet — 2026-03-09
+
+### ID3 Tag Editing (new feature)
+- **Admin toggle** — new "Allow tag editing" switch in admin UI (`webapp/admin-v2/`) persists in config; both `POST /api/v1/admin/tags/write` and the NP modal edit UI respect it
+- **Backend** (`src/api/admin.js`) — `POST /api/v1/admin/tags/write` writes title/artist/album/year/genre/track/disk via 3-step ffmpeg pipeline: (1) extract existing art, (2) write tags audio-only, (3) re-embed art using `-c:v mjpeg` to produce a valid PTS stream
+- **NP modal edit UI** — pencil button in the Now Playing modal opens an inline form; saving updates the file, the in-memory queue, and the player bar immediately without a rescan
+- **DB** — `db.updateFileTags()` added to sqlite-backend and loki-backend; queue cache updated in-place so UI reflects new tags instantly
+
+### Discogs Art Embed Fixes
+- **PTS fix** — embed command changed from `-c copy` to `-c:a copy -c:v mjpeg`; stream-copying a JPEG into FLAC/OGG produces `avg_frame_rate=0/0` with no PTS → Chrome's demuxer throws `DEMUXER_ERROR_COULD_NOT_PARSE: PTS is not defined`; re-encoding through ffmpeg's MJPEG codec generates correct timing metadata
+- **Art deduplication** — `-map 0:a -map 1:v` instead of `-map 0 -map 1` so any pre-existing embedded art stream is dropped before the new one is added (prevents double art streams)
+- **tmpCover to `/tmp/`** — Discogs temp cover file now written to `os.tmpdir()` instead of the music directory, so it never appears as a stray file in NFS/SMB shares
+- **JPEG validation** — `fetchImageBuf` checks for `FF D8 FF` magic bytes before accepting a download
+
+### Audio Resilience & Playback Fixes
+- **Cache-busting after file rewrite** — after any tag save or art embed, `audioEl.src` is reassigned with `&_t=<timestamp>` cache-buster before `load()`; merely calling `load()` was insufficient — Chrome reused its stale internal byte-range offset and received a 416 on the rewritten (differently-sized) file
+- **Restart from 0 after rewrite** — playback always restarts from position 0 after a file is rewritten; seeking to the pre-rewrite currentTime triggered range requests that could land mid-frame in the new file causing PTS errors
+- **Toast notification** — user sees "Tags saved — restarting from the beginning" / "Album art saved — restarting from the beginning" when the current song is rewritten
+- **`_reloadFromPosition` improvement** — attempt 0 tries to resume from currentTime; attempt 1+ immediately falls back to position 0 (breaks 416 loop from resized files)
+- **Skip after 5 retries** — `_reloadFromPosition` calls `Player.next()` + shows toast after 5 failed recovery attempts instead of looping forever
+
+### Server Error Handler Fix (`src/server.js`)
+- `RangeNotSatisfiableError` (status 416) from the `send` module was being converted to 500 because the global error handler only checked for `WebError` instances; now any error with an integer `.status` property has that status honoured — 416 is logged at debug level, not error, to avoid alarming log noise
+
+### DB / Scanner Fixes
+- **`countArtUsage`** added to `loki-backend.js` (was missing, only existed in sqlite-backend)
+- **`updateFileArt` artSource passthrough** — `manager.js` now passes the 5th `artSource` argument through correctly (was silently dropped)
+- **Scanner** — `.jpeg` extension normalised to `.jpg` for art files; `_preserveTs` timestamp preservation fixed; `refreshQueueUI()` call added after scan completes
+
+### Rating Stars Fixes
+- **Player bar stars always visible** — stars were hidden when a song had no rating; now always show 5 stars (dim when unrated, yellow when rated)
+- **Star CSS class mismatch** — `starsHtml()` generates `.s-on`/`.s-off` but player bar CSS targeted `.ps-on`/`.ps-off` (never existed); fixed to `.s-on`/`.s-off` so yellow ratings render correctly
+- **NP modal stars interactive** — clicking stars in the Now Playing modal now immediately updates `.lit` state without waiting for the `updateBar→renderNPModal` chain
+- **NP modal unlit stars visible** — unlit stars changed from near-black `var(--t4)` to `rgba(255,255,255,.08)` with hover brightening so they are visible but don't compete with yellow rated stars
+
+---
+
 ## Design System
 
 - **Complete dark-mode rewrite** — deep navy/purple palette with CSS custom

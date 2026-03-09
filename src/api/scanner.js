@@ -25,7 +25,7 @@ export function setup(mstream) {
       const preserveAaFile = dbFileInfo.aaFile || null;
       const preserveArtSource = dbFileInfo.art_source || null;
       db.removeFileByPath(req.body.filepath, req.body.vpath);
-      return res.json({ _stale: true, _preserveAaFile: preserveAaFile, _preserveArtSource: preserveArtSource });
+      return res.json({ _stale: true, _preserveAaFile: preserveAaFile, _preserveArtSource: preserveArtSource, _preserveTs: dbFileInfo.ts || null });
     }
     // update scan ID now so the record survives finish-scan pruning
     db.updateFileScanId(dbFileInfo, req.body.scanId);
