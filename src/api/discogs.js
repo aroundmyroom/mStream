@@ -451,7 +451,7 @@ export function setup(mstream) {
       } catch (_) { /* compression optional */ }
 
       // Update the DB record so grid/list views also show it after reload
-      try { dbManager.updateFileArt(pathInfo.relativePath, pathInfo.vpath, aaFile, null); } catch (_) {}
+      try { dbManager.updateFileArt(pathInfo.relativePath, pathInfo.vpath, aaFile, null, 'discogs'); } catch (_) {}
 
       // ── Remove old art from cache/disk if it's now orphaned ──────────────
       if (oldAaFile && oldAaFile !== aaFile) {

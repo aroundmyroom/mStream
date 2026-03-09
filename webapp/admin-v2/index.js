@@ -1443,6 +1443,18 @@ const dbView = Vue.component('db-view', {
                       <div class="sc-label">No Cover Art</div>
                     </div>
                     <div class="stat-chip">
+                      <div class="sc-num">{{(dbStats.artEmbedded||0).toLocaleString()}}</div>
+                      <div class="sc-label">Art Embedded in File</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num">{{(dbStats.artFromDirectory||0).toLocaleString()}}</div>
+                      <div class="sc-label">Art from Folder Image</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num" style="color:var(--accent)">{{(dbStats.artFromDiscogs||0).toLocaleString()}}</div>
+                      <div class="sc-label">Art via Discogs</div>
+                    </div>
+                    <div class="stat-chip">
                       <div class="sc-num" style="color:var(--accent)">{{(dbStats.withReplaygain||0).toLocaleString()}}</div>
                       <div class="sc-label">ReplayGain Tagged</div>
                     </div>

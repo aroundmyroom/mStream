@@ -67,6 +67,8 @@ export function init(dbDirectory) {
   try { db.exec('ALTER TABLE files ADD COLUMN cuepoints TEXT'); } catch (_e) {}
   // Migration: add fixed_at column for scan-error auto-fix feature
   try { db.exec('ALTER TABLE scan_errors ADD COLUMN fixed_at INTEGER'); } catch (_e) {}
+  // Migration: add art_source column to track art provenance (embedded / directory / discogs)
+  try { db.exec('ALTER TABLE files ADD COLUMN art_source TEXT'); } catch (_e) {}
 }
 
 export function close() {
@@ -106,8 +108,8 @@ export function updateFileScanId(file, scanId) {
   db.prepare('UPDATE files SET sID = ? WHERE filepath = ? AND vpath = ?').run(scanId, file.filepath, file.vpath);
 }
 
-export function updateFileArt(filepath, vpath, aaFile, scanId) {
-  db.prepare('UPDATE files SET aaFile = ?, sID = ? WHERE filepath = ? AND vpath = ?').run(aaFile, scanId, filepath, vpath);
+export function updateFileArt(filepath, vpath, aaFile, scanId, artSource = null) {
+  db.prepare('UPDATE files SET aaFile = ?, sID = ?, art_source = ? WHERE filepath = ? AND vpath = ?').run(aaFile, scanId, artSource, filepath, vpath);
 }
 
 export function countArtUsage(aaFile) {
@@ -127,13 +129,14 @@ export function insertFile(fileData) {
     const existing = db.prepare('SELECT ts FROM files WHERE hash = ? AND ts IS NOT NULL LIMIT 1').get(fileData.hash);
     if (existing) { ts = existing.ts; }
   }
-  const stmt = db.prepare(`INSERT INTO files (title, artist, year, album, filepath, format, track, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const stmt = db.prepare(`INSERT INTO files (title, artist, year, album, filepath, format, track, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const result = stmt.run(
     fileData.title ?? null, fileData.artist ?? null, fileData.year ?? null, fileData.album ?? null,
     fileData.filepath, fileData.format ?? null, fileData.track ?? null, fileData.disk ?? null,
     fileData.modified ?? null, fileData.hash ?? null, fileData.aaFile ?? null, fileData.vpath,
-    ts, fileData.sID ?? null, fileData.replaygainTrackDb ?? null, fileData.genre ?? null, fileData.cuepoints ?? null
+    ts, fileData.sID ?? null, fileData.replaygainTrackDb ?? null, fileData.genre ?? null, fileData.cuepoints ?? null,
+    fileData.art_source ?? null
   );
   return { ...fileData, id: Number(result.lastInsertRowid) };
 }
@@ -177,6 +180,9 @@ export function getStats() {
   const totalAlbums     = db.prepare("SELECT COUNT(DISTINCT album) AS cnt FROM files WHERE album IS NOT NULL AND album != ''").get().cnt;
   const totalGenres     = db.prepare("SELECT COUNT(DISTINCT genre) AS cnt FROM files WHERE genre IS NOT NULL AND genre != ''").get().cnt;
   const withArt         = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE aaFile IS NOT NULL AND aaFile != ''").get().cnt;
+  const artFromDiscogs  = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE art_source = 'discogs'").get().cnt;
+  const artEmbedded     = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE art_source = 'embedded'").get().cnt;
+  const artFromDirectory= db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE art_source = 'directory'").get().cnt;
   const withReplaygain  = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE replaygainTrackDb IS NOT NULL').get().cnt;
   const withCue         = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE cuepoints IS NOT NULL AND cuepoints != '[]'").get().cnt;
   const cueUnchecked    = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE cuepoints IS NULL').get().cnt;
@@ -214,6 +220,9 @@ export function getStats() {
     totalGenres,
     withArt,
     withoutArt: totalFiles - withArt,
+    artFromDiscogs,
+    artEmbedded,
+    artFromDirectory,
     withReplaygain,
     withCue,
     cueUnchecked,

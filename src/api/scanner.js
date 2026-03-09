@@ -23,8 +23,9 @@ export function setup(mstream) {
       // Preserve any Discogs-assigned art (cache-only, e.g. WAV) so a rescan
       // of the modified file doesn't orphan art the user manually picked.
       const preserveAaFile = dbFileInfo.aaFile || null;
+      const preserveArtSource = dbFileInfo.art_source || null;
       db.removeFileByPath(req.body.filepath, req.body.vpath);
-      return res.json({ _stale: true, _preserveAaFile: preserveAaFile });
+      return res.json({ _stale: true, _preserveAaFile: preserveAaFile, _preserveArtSource: preserveArtSource });
     }
     // update scan ID now so the record survives finish-scan pruning
     db.updateFileScanId(dbFileInfo, req.body.scanId);
@@ -43,7 +44,7 @@ export function setup(mstream) {
   });
 
   mstream.post('/api/v1/scanner/update-art', (req, res) => {
-    db.updateFileArt(req.body.filepath, req.body.vpath, req.body.aaFile, req.body.scanId);
+    db.updateFileArt(req.body.filepath, req.body.vpath, req.body.aaFile, req.body.scanId, req.body.artSource || null);
     res.json({});
   });
 
