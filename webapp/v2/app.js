@@ -1,4 +1,6 @@
 'use strict';
+// Feature detection — Web Animations API required for the dice throw
+const _webAnimSupported = typeof Element.prototype.animate === 'function';
 // ── STATE ─────────────────────────────────────────────────────
 // Read once at startup — avoids 14 repeated localStorage.getItem calls inside
 // the object literal (each call is a synchronous hash-map lookup + string copy).
@@ -50,6 +52,7 @@ const S = {
   dynColor:  localStorage.getItem('ms2_dyn_color_' + _u) !== '0',  // default ON; stored as '0' when disabled
   // Auto-DJ: similar-artists mode
   djSimilar: localStorage.getItem('ms2_dj_similar_' + _u) === '1',
+  djDice:    localStorage.getItem('ms2_dj_dice_'    + _u) === '1',  // default OFF
   djArtistHistory: JSON.parse(localStorage.getItem('ms2_dj_artist_history_' + _u) || 'null') || [],  // rolling list of last N distinct artists
   // Time display mode: false = elapsed|total (default), true = total|countdown
   timeFlipped: localStorage.getItem('ms2_time_flipped_' + _u) === '1',
@@ -572,18 +575,18 @@ async function _djApiCall() {
         artistFilter = d.artists;
         _djSimilarFor = currentArtist;
         _djSimilarArtists = artistFilter;
-        console.log(`[AutoDJ] Last.fm similar to "${currentArtist}":`, artistFilter);
+        console.log(`[Auto-DJ] Last.fm similar to "${currentArtist}":`, artistFilter);
       } else {
-        console.warn(`[AutoDJ] Last.fm returned no similar artists for "${currentArtist}" — playing random`);
+        console.warn(`[Auto-DJ] Last.fm returned no similar artists for "${currentArtist}" — playing random`);
         _djSimilarFor = currentArtist;
         _djSimilarArtists = [];
-        _showInfoStrip('AutoDJ', `Last.fm has no similar artists for <strong>${esc(currentArtist)}</strong> — playing random`, 8000);
+        _showInfoStrip('Auto-DJ', `Last.fm has no similar artists for <strong>${esc(currentArtist)}</strong> — playing random`, 8000);
       }
     } catch (_e) {
-      console.error(`[AutoDJ] Last.fm call failed for "${currentArtist}":`, _e);
+      console.error(`[Auto-DJ] Last.fm call failed for "${currentArtist}":`, _e);
       _djSimilarFor = currentArtist;
       _djSimilarArtists = [];
-      _showInfoStrip('AutoDJ', `Last.fm lookup failed for <strong>${esc(currentArtist)}</strong> — playing random`, 8000);
+      _showInfoStrip('Auto-DJ', `Last.fm lookup failed for <strong>${esc(currentArtist)}</strong> — playing random`, 8000);
     }
   }
 
@@ -603,8 +606,8 @@ async function _djApiCall() {
     } catch(e) {
       // artists filter returned no library matches — fall back to random
       if (artistFilter && e.status === 400) {
-        console.warn('[AutoDJ] No library songs for similar artists, falling back to random');
-        _showInfoStrip('AutoDJ', `No songs found in your library for Last.fm&apos;s suggestions — playing random`, 8000);
+        console.warn('[Auto-DJ] No library songs for similar artists, falling back to random');
+        _showInfoStrip('Auto-DJ', `No songs found in your library for Last.fm&apos;s suggestions — playing random`, 8000);
         return api('POST', 'api/v1/db/random-songs', {
           ignoreList:    S.djIgnore,
           minRating:     S.djMinRating || undefined,
@@ -628,9 +631,9 @@ async function _djApiCall() {
   } catch(e) {
     // artists filter returned no library matches — fall back to random
     if (artistFilter && e.status === 400) {
-      console.warn('[AutoDJ] No library songs for similar artists, falling back to random');
+      console.warn('[Auto-DJ] No library songs for similar artists, falling back to random');
       _djSimilarArtists = [];  // prevent _showDJStrip from showing "similar to" for a random fallback
-      _showInfoStrip('AutoDJ', `No songs found in your library for Last.fm&apos;s suggestions — playing random`, 8000);
+      _showInfoStrip('Auto-DJ', `No songs found in your library for Last.fm&apos;s suggestions — playing random`, 8000);
       const ignoreVPaths = S.vpaths.filter(v => !selected.includes(v));
       return api('POST', 'api/v1/db/random-songs', {
         ignoreList:   S.djIgnore,
@@ -4381,6 +4384,17 @@ async function viewAutoDJ() {
             <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
           </label>
         </div>
+${_webAnimSupported ? `
+        <div class="autodj-opt-row">
+          <div>
+            <div class="autodj-opt-label">Dice Roll on Crossfade</div>
+            <div class="autodj-opt-hint">Throw a tumbling die each time Auto-DJ crossfades to a new track</div>
+          </div>
+          <label class="toggle-sw">
+            <input type="checkbox" id="dj-dice-toggle" ${S.djDice ? 'checked' : ''}>
+            <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
+          </label>
+        </div>` : ''}
       </div>
     </div>`;
 
@@ -4397,6 +4411,15 @@ async function viewAutoDJ() {
     _syncQueueLabel();
     toast(S.djSimilar ? 'Similar Artists: On' : 'Similar Artists: Off');
   });
+  if (_webAnimSupported) {
+    document.getElementById('dj-dice-toggle').addEventListener('change', e => {
+      S.djDice = e.target.checked;
+      S.djDice
+        ? localStorage.setItem(_uKey('dj_dice'), '1')
+        : localStorage.removeItem(_uKey('dj_dice'));
+      toast(S.djDice ? 'Dice Roll: On' : 'Dice Roll: Off');
+    });
+  }
 
   const pillsEl = document.getElementById('dj-vpaths');
   if (pillsEl) {
@@ -5479,6 +5502,7 @@ function _rgbToHsl(r, g, b) {
 function _resetAlbumArtTheme() {
   document.documentElement.style.removeProperty('--primary');
   document.documentElement.style.removeProperty('--accent');
+  document.documentElement.style.removeProperty('--primary-fg');
 }
 
 function _applyAlbumArtTheme(url) {
@@ -5515,8 +5539,16 @@ function _applyAlbumArtTheme(url) {
       const aL    = Math.min(Math.max(l + (l < 0.55 ? 0.10 : -0.06), 0.42), 0.72);
       const primary = `hsl(${hDeg},${Math.round(s * 100)}%,${Math.round(l * 100)}%)`;
       const accent  = `hsl(${aHDeg},${Math.round(s * 100)}%,${Math.round(aL * 100)}%)`;
+      // --primary-fg: same hue/sat but lightness forced to be readable as text
+      // on the card background. Dark mode card is ~#1a1a26 → need L≥0.65.
+      // Light mode card is ~#dcdcec → need L≤0.40.
+      const isLight = document.documentElement.classList.contains('light');
+      const fgL   = isLight ? Math.min(l, 0.40) : Math.max(l, 0.65);
+      const fgS   = Math.min(Math.max(s, 0.55), 0.95);
+      const primaryFg = `hsl(${hDeg},${Math.round(fgS * 100)}%,${Math.round(fgL * 100)}%)`;
       document.documentElement.style.setProperty('--primary', primary);
       document.documentElement.style.setProperty('--accent',  accent);
+      document.documentElement.style.setProperty('--primary-fg', primaryFg);
       _updateBadgeFg();
     } catch(_e) {}
   };
@@ -5672,19 +5704,19 @@ function _startArtXfade(nextIdx, durationMs) {
       el.style.opacity = '0';
     });
 
-    // Double-rAF: frame 1 lets the browser commit opacity:0 on real elements
-    // and record the overlay's transition; frame 2 triggers both animations.
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      outEl.style.opacity = '0';
-      ids.forEach(id => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        el.style.transition = `opacity ${dur} ease-in-out`;
-        el.style.opacity = '1';
-      });
-      // Remove overlay after transition completes
-      setTimeout(() => outEl.remove(), durationMs + 150);
-    }));
+    // Force a synchronous reflow to commit opacity:0 before starting the
+    // transitions. This works even when the tab is in the background —
+    // unlike requestAnimationFrame which freezes completely when hidden.
+    void container.offsetHeight;
+    outEl.style.opacity = '0';
+    ids.forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.style.transition = `opacity ${dur} ease-in-out`;
+      el.style.opacity = '1';
+    });
+    // Remove overlay after transition completes
+    setTimeout(() => outEl.remove(), durationMs + 150);
   }
 
   // ── Player-bar album art overlay (unchanged — already perfect) ─────────────
@@ -5697,7 +5729,8 @@ function _startArtXfade(nextIdx, durationMs) {
     ov.style.transition = `opacity ${dur} ease-in-out`;
     ov.innerHTML = u ? `<img src="${u}" alt="">` : noArtHtml();
     artEl.appendChild(ov);
-    requestAnimationFrame(() => requestAnimationFrame(() => { ov.style.opacity = '1'; }));
+    void ov.offsetHeight; // force reflow — works in background tabs
+    ov.style.opacity = '1';
   }
 
   // ── Player-bar text dissolve ───────────────────────────────────────────────
@@ -5722,7 +5755,8 @@ function _startArtXfade(nextIdx, durationMs) {
       ov.style.transition = `opacity ${dur} ease-in-out`;
       ov.innerHTML = u ? `<img src="${u}" alt="">` : noArtHtml();
       npArtEl.appendChild(ov);
-      requestAnimationFrame(() => requestAnimationFrame(() => { ov.style.opacity = '1'; }));
+      void ov.offsetHeight; // force reflow — works in background tabs
+      ov.style.opacity = '1';
     }
     const npSub = [s.album, s.year].filter(Boolean).join(' · ');
     _dissolveText('.np-info',
@@ -5761,9 +5795,116 @@ function _finishArtXfade() {
   }, (S.crossfade * 1000) + 300);
 }
 
+// ── Auto-DJ dice throw ──────────────────────────────────────────────────────
+// Throws a tumbling 3D die for the entire crossfade duration.
+function _throwDjDice(xfSec) {
+  if (!S.autoDJ || !S.djDice || !_webAnimSupported) return;
+  const wrap = document.getElementById('dj-dice');
+  if (!wrap) return;
+  const cube = wrap.querySelector('.dj-dice-cube');
+  if (!cube) return;
+
+  // Cancel any in-flight animation
+  try { if (wrap._djw) wrap._djw.cancel(); } catch(_){}
+  try { if (cube._djc) cube._djc.cancel(); } catch(_){}
+  (wrap._djTimers || []).forEach(t => clearTimeout(t));
+  wrap._djTimers = [];
+
+  // Total time = full crossfade, clamped 3-20 s
+  const totalMs = Math.max(3000, Math.min((xfSec || S.crossfade) * 1000, 20000));
+
+  // Random rotations — multiples of 90° so it lands on a face
+  // Use many turns (8–14) so the initial spin looks forcefully thrown
+  const signX = Math.random() > .5 ? 1 : -1;
+  const signY = Math.random() > .5 ? 1 : -1;
+  const rx = signX * (8 + Math.ceil(Math.random() * 6)) * 90;
+  const ry = signY * (8 + Math.ceil(Math.random() * 6)) * 90;
+
+  // Land 60–88 % of viewport width to the left
+  const throwFrac = 0.60 + Math.random() * 0.28;
+  const arcX = -Math.floor(window.innerWidth * throwFrac);
+  // High arc
+  const arcY = -(250 + Math.floor(Math.random() * 200));
+
+  // ─ Phase timing ───────────
+  const flightMs = Math.floor(totalMs * 0.48);   // 48 % flying
+  const b1Ms    = Math.floor(totalMs * 0.16);    // bounce 1 (big)
+  const b2Ms    = Math.floor(totalMs * 0.11);    // bounce 2 (medium)
+  const b3Ms    = Math.floor(totalMs * 0.07);    // bounce 3 (small)
+  const restMs  = totalMs - flightMs - b1Ms - b2Ms - b3Ms; // rest + fade
+
+  const tx = `${arcX}px`;
+
+  // ─ Flight arc ────────────────
+  wrap._djw = wrap.animate([
+    { opacity: 0, transform: `translate(0px,30px) scale(.18)` },
+    { opacity: 1, transform: `translate(${arcX * .28}px,${arcY}px) scale(1.30)`,        offset: .30 },
+    { opacity: 1, transform: `translate(${arcX * .66}px,${arcY * .25}px) scale(1.12)`,  offset: .70 },
+    { opacity: 1, transform: `translate(${tx},0px) scale(1.0)` },
+  ], { duration: flightMs, easing: 'ease-in-out', fill: 'forwards' });
+
+  // Cube spin during flight — frontloaded: most rotation in first 20% of flight,
+  // then decelerates like a real thrown object losing angular momentum.
+  cube._djc = cube.animate([
+    { transform: `rotateX(0deg) rotateY(0deg)` },
+    { transform: `rotateX(${rx * .72}deg) rotateY(${ry * .72}deg)`, offset: .18 },
+    { transform: `rotateX(${rx * .91}deg) rotateY(${ry * .91}deg)`, offset: .42 },
+    { transform: `rotateX(${rx * .97}deg) rotateY(${ry * .97}deg)`, offset: .70 },
+    { transform: `rotateX(${rx}deg)       rotateY(${ry}deg)` },
+  ], { duration: flightMs, easing: 'linear', fill: 'forwards' });
+
+  // ─ Bounce 1 – large ──────────
+  wrap._djTimers.push(setTimeout(() => {
+    wrap.animate([
+      { transform: `translate(${tx},0px) scale(1.0)` },
+      { transform: `translate(${tx},-52px) scale(1.10)` },
+      { transform: `translate(${tx},0px) scale(0.95)` },
+    ], { duration: b1Ms, easing: 'cubic-bezier(.33,0,.66,1)', fill: 'forwards' });
+    cube.animate([
+      { transform: `rotateX(${rx}deg) rotateY(${ry}deg)` },
+      { transform: `rotateX(${rx + signX*55}deg) rotateY(${ry + signY*65}deg)` },
+    ], { duration: b1Ms, easing: 'ease-out', fill: 'forwards' });
+  }, flightMs));
+
+  // ─ Bounce 2 – medium ────────
+  wrap._djTimers.push(setTimeout(() => {
+    wrap.animate([
+      { transform: `translate(${tx},0px) scale(0.95)` },
+      { transform: `translate(${tx},-24px) scale(1.05)` },
+      { transform: `translate(${tx},0px) scale(0.97)` },
+    ], { duration: b2Ms, easing: 'cubic-bezier(.33,0,.66,1)', fill: 'forwards' });
+    cube.animate([
+      { transform: `rotateX(${rx + signX*55}deg) rotateY(${ry + signY*65}deg)` },
+      { transform: `rotateX(${rx + signX*80}deg) rotateY(${ry + signY*90}deg)` },
+    ], { duration: b2Ms, easing: 'ease-out', fill: 'forwards' });
+  }, flightMs + b1Ms));
+
+  // ─ Bounce 3 – small ─────────
+  wrap._djTimers.push(setTimeout(() => {
+    wrap.animate([
+      { transform: `translate(${tx},0px) scale(0.97)` },
+      { transform: `translate(${tx},-9px) scale(1.02)` },
+      { transform: `translate(${tx},0px) scale(0.98)` },
+    ], { duration: b3Ms, easing: 'cubic-bezier(.33,0,.66,1)', fill: 'forwards' });
+  }, flightMs + b1Ms + b2Ms));
+
+  // ─ Rest then fade out at end of crossfade ──────
+  wrap._djTimers.push(setTimeout(() => {
+    const fadeMs = Math.max(500, restMs);
+    const out = wrap.animate([
+      { opacity: 1, transform: `translate(${tx},0px) scale(0.98)` },
+      { opacity: 0, transform: `translate(${tx},-18px) scale(.55)` },
+    ], { duration: fadeMs, delay: Math.max(0, restMs - fadeMs), easing: 'ease-in', fill: 'forwards' });
+    out.onfinish = () => {
+      try { wrap._djw.cancel(); cube._djc.cancel(); } catch(_){}
+    };
+  }, flightMs + b1Ms + b2Ms + b3Ms));
+}
+
 function _startCrossfade(nextIdx) {
   if (_xfadeFired) return;
   _xfadeFired    = true;
+  _throwDjDice(S.crossfade);    // toss the die for the full crossfade duration
   _dismissInfoStrip();          // clear DJ strip before crossfade visuals take over
   _xfadeNextIdx  = nextIdx;
   _xfadeStartVol = audioEl.volume;
@@ -7402,6 +7543,20 @@ window.EGG = (() => {
   let peaks     = new Float32Array(BARS * 2);
   let peakTimer = new Int32Array(BARS * 2);
 
+  // Cached per-show values — avoids DOM/layout queries inside the hot draw() loop
+  let _eggCanvas  = null;
+  let _eggColLeft = 236, _eggColRight = 0;
+  let _rawL = null, _rawR = null;  // reused typed arrays — no GC per frame
+
+  function _cacheLayout() {
+    _eggCanvas = document.getElementById('egg-canvas');
+    const sideEl  = document.querySelector('.sidebar');
+    const queueEl = document.getElementById('queue-panel');
+    _eggColLeft  = sideEl  ? sideEl.getBoundingClientRect().right : 236;
+    const qRect  = queueEl ? queueEl.getBoundingClientRect() : null;
+    _eggColRight = (qRect && qRect.width > 20) ? qRect.left : window.innerWidth;
+  }
+
   function barBin(i, totalBins) {
     const minF = 40, maxF = 18000, nyq = 22050;
     const freq = minF * Math.pow(maxF / minF, i / (BARS - 1));
@@ -7464,20 +7619,17 @@ window.EGG = (() => {
     if (!active) return;
     raf = requestAnimationFrame(draw);
 
-    const cv = document.getElementById('egg-canvas');
+    const cv = _eggCanvas;
     if (!cv) return;
-    if (cv.width !== window.innerWidth) cv.width = window.innerWidth;
+    if (cv.width !== window.innerWidth) { cv.width = window.innerWidth; _cacheLayout(); }
     const W  = cv.width;
     const cx = cv.getContext('2d');
     cx.clearRect(0, 0, W, H);
 
-    // Content column bounds
-    const sideEl    = document.querySelector('.sidebar');
-    const queueEl   = document.getElementById('queue-panel');
-    const colLeft   = sideEl  ? sideEl.getBoundingClientRect().right  : 236;
-    const queueRect = queueEl ? queueEl.getBoundingClientRect()        : null;
-    const colRight  = (queueRect && queueRect.width > 20) ? queueRect.left : W;
-    const colW      = colRight - colLeft;
+    // Cached column bounds — recalculated on show() and resize, not every frame
+    const colLeft  = _eggColLeft;
+    const colRight = _eggColRight > 0 ? _eggColRight : W;
+    const colW     = colRight - colLeft;
     if (colW < 20) return;
 
     cx.save();
@@ -7485,12 +7637,12 @@ window.EGG = (() => {
     cx.rect(colLeft, 0, colW, H);
     cx.clip();
 
-    // FFT data — separate L and R
+    // FFT data — reuse pre-allocated typed arrays to avoid GC pressure
     const fftSize = analyserL ? analyserL.frequencyBinCount : 1024;
-    const rawL    = new Uint8Array(fftSize);
-    const rawR    = new Uint8Array(fftSize);
-    if (analyserL) analyserL.getByteFrequencyData(rawL);
-    if (analyserR) analyserR.getByteFrequencyData(rawR);
+    if (!_rawL || _rawL.length !== fftSize) { _rawL = new Uint8Array(fftSize); _rawR = new Uint8Array(fftSize); }
+    if (analyserL) analyserL.getByteFrequencyData(_rawL);
+    if (analyserR) analyserR.getByteFrequencyData(_rawR);
+    const rawL = _rawL, rawR = _rawR;
 
     const SEG_H    = 2;
     const SEG_GAP  = 1;
@@ -7542,18 +7694,29 @@ window.EGG = (() => {
                        : 5;
 
           // Check whether this segment's pixel lands inside a letter stroke
+          // shadowBlur is intentionally NOT set per-segment — it is extremely
+          // expensive on every fillRect call and causes the browser to stall.
+          // Glow is applied once per bar (below) on the topmost segment only.
           if (mask && sampleMask(mask, mW, mH, xMid, maskEdge, segMid)) {
             // ── Letter segment: cyan #00F5FF — max contrast on green/yellow/red ──
-            cx.shadowColor = 'rgba(0,245,255,0.90)';
-            cx.shadowBlur  = 8;
+            cx.shadowBlur  = 0;
             cx.fillStyle   = `rgba(0,245,255,${0.80 + t * 0.20})`;
           } else {
             // ── Normal segment: green → yellow → red hue ──
-            cx.shadowColor = `hsla(${glowHue},90%,65%,0.45)`;
-            cx.shadowBlur  = 3 + amp * 7;
+            cx.shadowBlur  = 0;
             cx.fillStyle   = `hsla(${segHue},95%,${52 + t * 12}%,${0.65 + t * 0.35})`;
           }
           cx.fillRect(Math.round(x), segTop, barW, SEG_H);
+        }
+
+        // Glow on topmost active segment (once per bar, not per segment)
+        if (segs >= 1) {
+          const topSegTop = H - segs * SEG_STEP + SEG_GAP;
+          cx.shadowColor = `hsla(${glowHue},90%,65%,0.55)`;
+          cx.shadowBlur  = 4 + amp * 6;
+          cx.fillStyle   = `hsla(${glowHue},95%,${52 + topT * 12}%,0.9)`;
+          cx.fillRect(Math.round(x), topSegTop, barW, SEG_H);
+          cx.shadowBlur  = 0;
         }
 
         // Peak hold segment
@@ -7571,9 +7734,9 @@ window.EGG = (() => {
 
     const rStart = colLeft + halfW + CG;
     // L: treble outer-left → bass at centre  | mStream mask
-    drawChannel(rawL, 0,    colLeft, true,  rMask,    rMaskW,    rMaskH,    colLeft);
+    drawChannel(_rawL, 0,    colLeft, true,  rMask,    rMaskW,    rMaskH,    colLeft);
     // R: bass at centre → treble outer-right | AroundMyRoom mask (left-aligned)
-    drawChannel(rawR, BARS, rStart,  false, textMask, textMaskW, textMaskH, rStart);
+    drawChannel(_rawR, BARS, rStart,  false, textMask, textMaskW, textMaskH, rStart);
 
     cx.shadowBlur = 0;
     cx.restore();
@@ -7582,7 +7745,9 @@ window.EGG = (() => {
   function show() {
     smoothed.fill(0); peaks.fill(0); peakTimer.fill(0);
     textMaskW = 0; rMaskW = 0;  // force mask rebuild with fresh column dimensions
-    const cv = document.getElementById('egg-canvas');
+    _cacheLayout();  // snapshot sidebar/queue bounds once — not on every frame
+    const cv = _eggCanvas;
+    if (!cv) return;
     cv.style.transition = '';
     cv.style.opacity    = '1';
     cv.style.display    = 'block';
@@ -7596,8 +7761,7 @@ window.EGG = (() => {
   function hide() {
     active = false;
     cancelAnimationFrame(raf);
-    const cv = document.getElementById('egg-canvas');
-    if (cv) cv.style.display = 'none';
+    if (_eggCanvas) _eggCanvas.style.display = 'none';
   }
 
   const _epx = document.getElementById('egg-pixel');

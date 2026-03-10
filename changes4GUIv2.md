@@ -6,6 +6,42 @@
 
 ---
 
+## v5.15.3-velvet — 2026-03-10
+
+### Auto-DJ: Dice Roll Crossfade Animation (new feature)
+- New optional **Dice Roll on Crossfade** toggle in the Auto-DJ settings view (visible only when Web Animations API is supported)
+- On each crossfade a 3D cube animates from the player bar corner across the screen with a physics arc, three decreasing bounces, then fades out — total duration matches the crossfade length
+- `S.djDice` persisted via `localStorage` key `ms2_dj_dice_<user>`; default OFF
+- `_throwDjDice(xfSec)` handles animation via the Web Animations API — cancels any in-flight animation before starting a new one; all timers stored on the wrapper element to prevent leaks
+- CSS: `#dj-dice`, `.dj-dice-cube`, `.dj-dice-face` variants with `perspective`/`transform-style:preserve-3d` 3D rendering; 6 face classes (f/b/r/l/t/d)
+- `_webAnimSupported` feature-detect constant added; dice toggle and HTML only rendered when `true`
+
+### Discogs: Compilation Album Detection
+- `isCompilationAlbum(album)` — new function that returns `true` when the album tag matches known compilation patterns: `top 40`, `chart hit`, `greatest hits`, `va`, `various`, `best of`, `hits`, `collection`, `mixtape`, etc.
+- When a compilation album is detected **and** artist + title are both known, all ID3 album-based Discogs searches are demoted from phase `'A'` to phase `'C'` (`albumPhase` variable) — so artist/song results (phase B) always rank above generic compilation covers
+- Filepath folder fallback now also triggers when the existing album tag is itself a compilation, allowing the folder path to supply a more specific release name
+- Fixes: files tagged with generic compilation names (e.g. `Complete Top 40 Van 1982`) were returning only compilation cover art instead of single/album art for the actual artist
+
+### Auto-DJ: Similar Artists Fallback Improvement (`src/api/db.js`)
+- `POST /api/v1/db/random-songs`: added a second fallback stage — when the `artists` filter (similar-artists mode) returns zero library matches, the server now retries with the `artists` filter removed but `ignoreArtists` still applied, before finally dropping `ignoreArtists` as a last resort
+- Previously only the `ignoreArtists` exhaustion was handled; a library with no tracks from any Last.fm-suggested artist would return an empty result instead of gracefully falling back to random playback
+
+### Art Crossfade: Background Tab Fix
+- `_startArtXfade` card fade and player-bar/NP overlay transitions replaced `requestAnimationFrame(()=>requestAnimationFrame(...))` with a synchronous `void container.offsetHeight` reflow trigger
+- `rAF` freezes entirely when the tab is in the background (page visibility hidden), causing crossfade art transitions to never complete when music plays while the tab is backgrounded; `offsetHeight` forces the reflow immediately regardless of visibility state
+
+### Album Art Theme: `--primary-fg` Tracking
+- `_applyAlbumArtTheme` now computes and sets `--primary-fg` alongside `--primary` and `--accent`: same hue/saturation as `--primary` but lightness clamped for readability as text (`L ≥ 0.65` in dark mode, `L ≤ 0.40` in light mode)
+- `_resetAlbumArtTheme` now also removes `--primary-fg` when reverting to defaults, preventing stale values from the previous track bleeding through
+
+### Remote UI: Velvet Gradient Logo
+- `webapp/remote/index.html` topbar logo updated from flat blue polygons to the Velvet dual-gradient mark (outer: `#c4b5fd` → `#6d28d9`; inner: `#4c1d95` → `#a78bfa`) matching the main player and admin panel
+
+### Similar Artists Strip: Pill Color Fix
+- `.dj-strip-pill` border color reverted from `var(--primary-fg)` to `var(--t1)` / `var(--border2)` — the pill text was inheriting the dynamic album-art accent color and turning yellow/orange; pills now always render in neutral text color regardless of active theme
+
+---
+
 ## v5.15.2-velvet — 2026-03-09
 
 ### ID3 Tag Editing (new feature)
