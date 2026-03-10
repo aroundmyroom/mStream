@@ -5,6 +5,14 @@ The classic admin at `webapp/admin/` is untouched throughout.
 
 ---
 
+## 2026-03-10
+
+### Velvet Gradient Logo
+- `webapp/admin-v2/index.html`: favicon inline SVG updated to the Velvet dual-gradient mark; sidebar brand SVG polygons replaced with the same gradient definitions (`#c4b5fd` → `#6d28d9` outer, `#4c1d95` → `#a78bfa` inner) — matches the main GUIv2 player and remote control tab
+- `webapp/admin-v2/index.js` About view: legacy flat mStream wordmark SVG replaced with the Velvet gradient icon + `mStream Velvet / Admin Panel` text header using the same CSS variable typography (`--t1`, `--t2`, `--primary`) as the rest of the GUIv2 UI; gradient IDs namespaced (`aa-vg-o`, `aa-vg-i`) to avoid SVG `<defs>` ID collisions
+
+---
+
 ## [Initial] Created `webapp/admin-v2/` — Separate GUIv2 Admin
 
 **Problem:** The old admin panel (`webapp/admin/`) uses Materialize CSS, green buttons, floating labels, and a completely different visual language from the GUIv2 player. Attempts to restyle it in-place broke the classic admin.

@@ -303,14 +303,24 @@ export function setup(mstream) {
       ignoreArtists: Array.isArray(req.body.ignoreArtists) ? req.body.ignoreArtists : undefined,
     });
 
-    // If ignoreArtists eliminated all candidates, retry without it so playback never stalls
+    // If the similar-artists filter returned nothing in the library, retry
+    // without it — no 400, no client-side fallback dance, playback never stalls.
     let finalResults = results;
-    if (results.length === 0 && Array.isArray(req.body.ignoreArtists) && req.body.ignoreArtists.length > 0) {
+    if (results.length === 0 && Array.isArray(req.body.artists) && req.body.artists.length > 0) {
       finalResults = db.getAllFilesWithMetadata(req.user.vpaths, req.user.username, {
         ignoreVPaths: req.body.ignoreVPaths,
         minRating: req.body.minRating,
         filepathPrefix: req.body.filepathPrefix || null,
-        artists: Array.isArray(req.body.artists) ? req.body.artists : undefined,
+        ignoreArtists: Array.isArray(req.body.ignoreArtists) ? req.body.ignoreArtists : undefined,
+      });
+    }
+
+    // If ignoreArtists eliminated all candidates, retry without it so playback never stalls
+    if (finalResults.length === 0 && Array.isArray(req.body.ignoreArtists) && req.body.ignoreArtists.length > 0) {
+      finalResults = db.getAllFilesWithMetadata(req.user.vpaths, req.user.username, {
+        ignoreVPaths: req.body.ignoreVPaths,
+        minRating: req.body.minRating,
+        filepathPrefix: req.body.filepathPrefix || null,
       });
     }
 

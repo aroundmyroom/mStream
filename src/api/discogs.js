@@ -104,6 +104,17 @@ function parseFilename(raw) {
 }
 
 /**
+ * Returns true when the album string looks like a generic compilation /
+ * various-artists release where the album title is NOT specific to one artist
+ * (e.g. "Complete Top 40 Van 1982", "Greatest Hits of the 80s", …).
+ * In that case it makes no sense to search Discogs by album name first.
+ */
+function isCompilationAlbum(album) {
+  if (!album) return false;
+  return /\b(top\s*\d+|chart\s*hit|nr\.?\s*\d|number\s*\d|\bva\b|various|compilation|collection|greatest\s*hit|best\s*of|\bgold\b|\bhits\b|all\s*star|one\s*hit|radio\s*hit|nostalg|evergre|classic\s*hit|essential|playlist|mixtape)/i.test(album);
+}
+
+/**
  * Score how well the Discogs result artist (extracted from "Artist - Title"
  * format) matches the requested artist. Returns 0 (no match) → 1 (exact).
  * Handles Discogs split-artist titles like "Artist A / Artist B - Release".
@@ -145,15 +156,20 @@ export function setup(mstream) {
     // e.g. filepath = "12-inches/.../Van McCoy - The Hustle (12 Inch Classics On CD) - SP5-1306/01 The Hustle.wav"
     //      dirName  = "Van McCoy - The Hustle (12 Inch Classics On CD) - SP5-1306"
     //      → artist = "Van McCoy",  album = "The Hustle"
+    // NOTE: we only fill album from the folder when the existing album tag is
+    // absent or itself looks like a compilation — we must NOT overwrite a real
+    // album tag with a folder that also happens to be a compilation name.
     const rawFilepath = String(req.query.filepath || '').trim();
-    if (rawFilepath && (!artist || !album)) {
+    const albumTagIsCompilation = isCompilationAlbum(album);
+    if (rawFilepath && (!artist || !album || albumTagIsCompilation)) {
       const segments  = rawFilepath.replace(/\\/g, '/').split('/').filter(Boolean);
       // Walk parent dirs from innermost outward; skip vpath root (first segment)
       for (let i = segments.length - 2; i >= 1; i--) {
         const parsed = parseFilename(segments[i]);
         if (!parsed) continue;
         if (!artist && parsed.artist) artist = parsed.artist;
-        if (!album  && parsed.title) {
+        // Only fill album from folder when we don't already have a real (non-compilation) album tag
+        if ((!album || albumTagIsCompilation) && parsed.title) {
           let t = stripDiscSuffix(parsed.title);
           // Strip trailing catalog-number suffix: " - SP5-1306", "- 12CL-001" etc.
           // Pattern: " - " followed by 1-6 letters then digits/dashes (no spaces)
@@ -165,6 +181,12 @@ export function setup(mstream) {
     }
 
     if (!artist && !title && !album) return res.status(400).json({ error: 'artist, title, or album required' });
+
+    // When the album tag is a generic compilation and we have artist + title,
+    // downgrade all album-based searches to phase 'C' so Discogs results for
+    // the specific artist/song (phase B) always rank above compilation covers.
+    const compilationAlbum = isCompilationAlbum(album);
+    const albumPhase = (compilationAlbum && artist && title) ? 'C' : 'A';
 
     // Strip common multi-disc suffixes from album title:
     // "CD2", "Disc 2", "(Disc 2)", "[CD 2]", "Vol. 2", "Part 2" etc.
@@ -187,13 +209,15 @@ export function setup(mstream) {
     const albumBareTitle    = cleanAlbum.replace(/\s*\([^)]*\)\s*$/, '').trim();
 
     // ── PHASE A: ID3 album tag (leading) ─────────────────────────────────────
+    // When the album is a generic compilation but artist+title are known,
+    // albumPhase = 'C' so these searches rank after the artist/song searches.
     // A1. Exact album + artist + year
     if (album) {
       const p = new URLSearchParams({ type: 'release', per_page: '8' });
       if (artist) p.set('artist', artist);
       p.set('release_title', album);
       if (year) p.set('year', year);
-      addSearch(p, 'A');
+      addSearch(p, albumPhase);
     }
 
     // A2. Disc-suffix-stripped album + artist (no year)
@@ -201,7 +225,7 @@ export function setup(mstream) {
       const p = new URLSearchParams({ type: 'release', per_page: '8' });
       if (artist) p.set('artist', artist);
       p.set('release_title', cleanAlbum);
-      addSearch(p, 'A');
+      addSearch(p, albumPhase);
     }
 
     // A3. First segment before comma/dash ("Journey into paradise, The Larry Levan Story" → "Journey into paradise")
@@ -209,7 +233,7 @@ export function setup(mstream) {
       const p = new URLSearchParams({ type: 'release', per_page: '8' });
       if (artist) p.set('artist', artist);
       p.set('release_title', albumFirstSegment);
-      addSearch(p, 'A');
+      addSearch(p, albumPhase);
     }
 
     // A3b. Trailing-parenthetical-stripped album ("The Hustle (12 Inch Classics On CD)" → "The Hustle")
@@ -217,14 +241,14 @@ export function setup(mstream) {
       const p = new URLSearchParams({ type: 'release', per_page: '8' });
       if (artist) p.set('artist', artist);
       p.set('release_title', albumBareTitle);
-      addSearch(p, 'A');
+      addSearch(p, albumPhase);
     }
 
     // A4. Free-text album + artist (handles varied Discogs punctuation)
     if (artist && cleanAlbum) {
       const p = new URLSearchParams({ type: 'release', per_page: '8' });
       p.set('q', `${artist} ${cleanAlbum}`);
-      addSearch(p, 'A');
+      addSearch(p, albumPhase);
     }
 
     // A5. Free-text album only — catches compilations where Discogs album-artist
@@ -232,7 +256,7 @@ export function setup(mstream) {
     if (cleanAlbum && cleanAlbum.length > 4) {
       const p = new URLSearchParams({ type: 'release', per_page: '5' });
       p.set('q', cleanAlbum);
-      addSearch(p, 'A');
+      addSearch(p, albumPhase);
     }
 
     // ── PHASE B: Track title / 12" single logic ───────────────────────────────
