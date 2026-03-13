@@ -66,7 +66,8 @@ async function insertEntries(song) {
     "sID": loadJson.scanId,
     "replaygainTrackDb": song.replaygain_track_gain ? song.replaygain_track_gain.dB : null,
     "genre": song.genre ? String(song.genre) : null,
-    "cuepoints": song.cuepoints || null
+    "cuepoints": song.cuepoints || null,
+    "duration": song._duration ?? null
   };
 
   await ax({
@@ -347,6 +348,10 @@ async function parseMyFile(thisSong, modified) {
   songInfo.filePath = path.relative(loadJson.directory, thisSong);
   songInfo.format = getFileType(thisSong);
   songInfo.hash = await calculateHash(thisSong);
+  // duration from format block (seconds, float) — e.g. 237.43
+  songInfo._duration = (fmtInfo.duration != null && isFinite(fmtInfo.duration))
+    ? Math.round(fmtInfo.duration * 1000) / 1000
+    : null;
 
   // Extract embedded cue sheet (present in single-file FLAC/WAV album rips)
   try {

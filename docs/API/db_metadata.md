@@ -39,7 +39,8 @@
         "title": "Song Title",
         "year": 1990,
         "album-art": "hash.jpg",
-        "hash": "md5 hash"
+        "hash": "md5 hash",
+        "duration": 237.431
       }
     }
     ```

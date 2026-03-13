@@ -18,7 +18,8 @@ export function init(dbDirectory) {
       title TEXT, artist TEXT, year INTEGER, album TEXT,
       filepath TEXT NOT NULL, format TEXT, track INTEGER, disk INTEGER,
       modified REAL, hash TEXT, aaFile TEXT, vpath TEXT NOT NULL,
-      ts INTEGER, sID TEXT, replaygainTrackDb REAL, genre TEXT, cuepoints TEXT
+      ts INTEGER, sID TEXT, replaygainTrackDb REAL, genre TEXT, cuepoints TEXT,
+      duration REAL
     );
     CREATE INDEX IF NOT EXISTS idx_files_filepath_vpath ON files(filepath, vpath);
     CREATE INDEX IF NOT EXISTS idx_files_vpath ON files(vpath);
@@ -69,6 +70,8 @@ export function init(dbDirectory) {
   try { db.exec('ALTER TABLE scan_errors ADD COLUMN fixed_at INTEGER'); } catch (_e) {}
   // Migration: add art_source column to track art provenance (embedded / directory / discogs)
   try { db.exec('ALTER TABLE files ADD COLUMN art_source TEXT'); } catch (_e) {}
+  // Migration: add duration column (track length in seconds)
+  try { db.exec('ALTER TABLE files ADD COLUMN duration REAL'); } catch (_e) {}
 }
 
 export function close() {
@@ -143,14 +146,14 @@ export function insertFile(fileData) {
     const existing = db.prepare('SELECT ts FROM files WHERE hash = ? AND ts IS NOT NULL LIMIT 1').get(fileData.hash);
     if (existing) { ts = existing.ts; }
   }
-  const stmt = db.prepare(`INSERT INTO files (title, artist, year, album, filepath, format, track, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const stmt = db.prepare(`INSERT INTO files (title, artist, year, album, filepath, format, track, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const result = stmt.run(
     fileData.title ?? null, fileData.artist ?? null, fileData.year ?? null, fileData.album ?? null,
     fileData.filepath, fileData.format ?? null, fileData.track ?? null, fileData.disk ?? null,
     fileData.modified ?? null, fileData.hash ?? null, fileData.aaFile ?? null, fileData.vpath,
     ts, fileData.sID ?? null, fileData.replaygainTrackDb ?? null, fileData.genre ?? null, fileData.cuepoints ?? null,
-    fileData.art_source ?? null
+    fileData.art_source ?? null, fileData.duration ?? null
   );
   return { ...fileData, id: Number(result.lastInsertRowid) };
 }
