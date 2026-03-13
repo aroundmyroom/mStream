@@ -6,6 +6,42 @@
 
 ---
 
+## v5.16.2-velvet — 2026-03-13
+
+### 3-theme system: Velvet / Dark / Light
+
+Replaced the 2-step blue/light toggle with a 3-step segmented selector across both the player and admin panel. Admin light mode now matches the player light mode exactly.
+
+**`webapp/v2/style.css`**
+- `:root` (Velvet) — unchanged navy/purple palette
+- `:root.dark` added — true near-black (`#000` background) following Material / Apple dark-mode guidelines; all interactive colours adjusted for WCAG contrast
+- `:root.light` — unchanged; login-screen override kept
+- `:root.dark #login-screen` added — pure-black radial gradient, matching dark palette variables
+- Old `.theme-toggle` / `.theme-toggle-track` / `.theme-toggle-thumb` / `.theme-icon-moon` / `.theme-icon-sun` CSS removed
+- `.theme-seg` / `.theme-seg-btn` / `.theme-seg-btn.active` segmented pill CSS added
+
+**`webapp/v2/index.html`**
+- `<button id="theme-toggle">` (moon/sun 2-step) replaced with `<div id="theme-seg">` containing three `<button class="theme-seg-btn" data-theme="…">` buttons (Velvet / Dark / Light)
+
+**`webapp/v2/app.js`**
+- `applyTheme(light, persist)` boolean signature replaced with `applyTheme(theme, persist)` accepting `'velvet'`|`'dark'`|`'light'`
+- Removes both `dark` and `light` classes before applying, then adds the relevant one (Velvet = no extra class)
+- Active state on `.theme-seg-btn` buttons synced on every call
+- OS colour-scheme listener updated: dark OS → `'velvet'`, light OS → `'light'`
+- Theme toggle click listener replaced with per-button listeners on `.theme-seg-btn`
+- Init IIFE updated: passes saved string theme directly; OS fallback now returns `'velvet'` for dark OS / `'light'` for light OS
+
+**`webapp/admin/index.css`**
+- `:root` (Velvet), `:root.dark`, `:root.light` themes defined with identical values to player
+- Old toggle CSS removed; `.theme-seg` pill CSS added
+
+**`webapp/admin/index.html`**
+- Early-init script updated to read `'velvet'`|`'dark'`|`'light'` from `localStorage`
+- `<button id="theme-toggle">` replaced with `<div id="theme-seg">` 3-step selector
+- `applyTheme()` and button event listeners updated
+
+---
+
 ## v5.16.1-velvet — 2026-03-13
 
 ### Remove all legacy / classic UI code

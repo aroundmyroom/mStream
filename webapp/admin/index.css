@@ -1,5 +1,6 @@
-/* mStream Admin v2 — GUIv2 Design System */
+/* mStream Admin — Design System */
 
+/* ── VELVET (default) ── navy/purple dark ───────────────────── */
 :root {
   color-scheme: dark;
   --bg: #1a1a2e; --surface: #16213e; --raised: #0f3460; --card: #1e2d4a;
@@ -7,15 +8,26 @@
   --t1: #eeeeff; --t2: #8888b0; --t3: #6070a0; --t4: #2a3a5e;
   --border: #2a3a5e; --border2: #3a4e72; --hover: rgba(139,92,246,.08);
   --sidebar-w: 220px; --r: 6px;
-  --theme-icon-moon: block; --theme-icon-sun: none;
 }
+
+/* ── DARK — true near-black, Google/Apple Material dark guidelines ── */
+:root.dark {
+  color-scheme: dark;
+  --bg: #000000; --surface: #0d0d0d; --raised: #1c1c1e; --card: #141414;
+  --primary: #a78bfa; --accent: #60a5fa; --green: #34d399; --red: #f87171; --yellow: #fbbf24;
+  --t1: #f1f1f1; --t2: #8a8a9a; --t3: #4a4a5a; --t4: #252530;
+  --border: rgba(255,255,255,.09); --border2: rgba(255,255,255,.15); --hover: rgba(255,255,255,.05);
+  --sidebar-w: 220px; --r: 6px;
+}
+
+/* ── LIGHT — matches player exactly ─────────────────────────── */
 :root.light {
   color-scheme: light;
-  --bg: #f0f0f7; --surface: #ffffff; --raised: #f7f7fc; --card: #ffffff;
-  --primary: #6d3ce6; --accent: #2563eb; --green: #059669; --red: #dc2626;
-  --t1: #0e0e1a; --t2: #555570; --t3: #aaaacc; --t4: #e0e0f0;
-  --border: #d0d0e8; --border2: #c0c0dc; --hover: rgba(109,60,230,.07);
-  --theme-icon-moon: none; --theme-icon-sun: block;
+  --bg: #e8e8f2; --surface: #f2f2fa; --raised: #e4e4ef; --card: #dcdcec;
+  --primary: #6d3ce6; --accent: #2563eb; --green: #16a34a; --red: #dc2626; --yellow: #d97706;
+  --t1: #0c0c1a; --t2: #42425e; --t3: #7878a0; --t4: #b8b8d0;
+  --border: rgba(0,0,0,.10); --border2: rgba(0,0,0,.17); --hover: rgba(109,60,230,.07);
+  --sidebar-w: 220px; --r: 6px;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -44,27 +56,27 @@ p { margin: 0 0 .75rem; color: var(--t2); }
 }
 .side-nav-brand-label { font-size: .7rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--t3); margin-top: 1px; }
 
-/* ── Theme toggle (identical to GUIv2 player) ──────────────── */
-.theme-toggle {
-  display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--r);
-  font-size: 12px; color: var(--t2); transition: background .15s, color .15s; cursor: pointer;
-  width: calc(100% - 1.5rem); margin: .4rem .75rem 0;
-  text-align: left; background: none; border: none; font-family: inherit;
+/* ── Theme segmented pill (3-step: Velvet / Dark / Light) ───── */
+.theme-seg {
+  display: flex; padding: 3px; gap: 2px;
+  background: var(--border); border-radius: calc(var(--r) + 4px);
+  margin: .55rem .75rem 0;
 }
-.theme-toggle:hover { background: var(--hover); color: var(--t1); }
-.theme-toggle-track {
-  position: relative; width: 32px; height: 18px; border-radius: 99px; flex-shrink: 0;
-  background: var(--border2); border: 1px solid var(--border2); transition: background .25s; margin-left: auto;
+.theme-seg-btn {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 5px 4px; border-radius: var(--r); font-size: 11px; font-weight: 600;
+  color: var(--t3); background: none; border: none; cursor: pointer;
+  transition: background .15s, color .15s; font-family: inherit; white-space: nowrap;
+  line-height: 1;
 }
-.theme-toggle-track.lit { background: var(--primary); border-color: var(--primary); }
-.theme-toggle-thumb {
-  position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%;
-  background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35);
-  transition: transform .25s cubic-bezier(.34,1.56,.64,1);
+.theme-seg-btn:hover { color: var(--t2); }
+.theme-seg-btn.active {
+  background: var(--surface); color: var(--primary);
+  box-shadow: 0 1px 4px rgba(0,0,0,.35);
 }
-.theme-toggle-track.lit .theme-toggle-thumb { transform: translateX(14px); }
-.theme-icon-moon { display: var(--theme-icon-moon); }
-.theme-icon-sun  { display: var(--theme-icon-sun); }
+:root.light .theme-seg-btn.active {
+  box-shadow: 0 1px 3px rgba(0,0,0,.18);
+}
 
 /* ── Sidebar nav ───────────────────────────────────────────── */
 .side-nav-section-label {
@@ -278,7 +290,7 @@ tr:hover td { background: var(--raised); }
 .iziToast > .iziToast-body .iziToast-message {
   color: var(--t2) !important;
 }
-/* Close button: invert icon so it's visible on dark surface */
+/* Close button: invert icon so it's visible on dark surfaces */
 .iziToast > .iziToast-close {
   filter: invert(1) opacity(.65);
 }
@@ -340,7 +352,8 @@ tr:hover td { background: var(--raised); }
 }
 
 /* ── mStream logo — theme-aware fills ───────────────────────── */
-:root       { --mlogo-a: #7aa0d4; --mlogo-b: #aac4e8; --mlogo-c: #7aa0d4; }
+:root,
+:root.dark { --mlogo-a: #7aa0d4; --mlogo-b: #aac4e8; --mlogo-c: #7aa0d4; }
 :root.light { --mlogo-a: #264679; --mlogo-b: #6684b2; --mlogo-c: #26477b; }
 .mstream-logo .st0 { fill-rule: evenodd; clip-rule: evenodd; fill: var(--mlogo-a) !important; }
 .mstream-logo .st1 { fill-rule: evenodd; clip-rule: evenodd; fill: var(--mlogo-b) !important; }
