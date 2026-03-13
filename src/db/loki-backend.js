@@ -148,6 +148,14 @@ export function updateFileCue(filepath, vpath, cuepoints) {
   }
 }
 
+export function updateFileDuration(filepath, vpath, duration) {
+  const dbFile = fileCollection.findOne({ '$and': [{ 'filepath': { '$eq': filepath } }, { 'vpath': { '$eq': vpath } }] });
+  if (dbFile) {
+    dbFile.duration = duration;
+    fileCollection.update(dbFile);
+  }
+}
+
 export function updateFileTags(filepath, vpath, tags) {
   const dbFile = fileCollection.findOne({ '$and': [{ 'filepath': { '$eq': filepath } }, { 'vpath': { '$eq': vpath } }] });
   if (!dbFile) return;

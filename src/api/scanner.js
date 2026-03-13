@@ -35,8 +35,10 @@ export function setup(mstream) {
     if (dbFileInfo.aaFile === null || dbFileInfo.aaFile === undefined) { flags._needsArt = true; }
     // signal cue-only update if cuepoints has never been checked (NULL)
     if (dbFileInfo.cuepoints === null || dbFileInfo.cuepoints === undefined) { flags._needsCue = true; }
+    // signal duration-only update if duration was never stored (NULL)
+    if (dbFileInfo.duration === null || dbFileInfo.duration === undefined) { flags._needsDuration = true; }
 
-    if (flags._needsArt || flags._needsCue) {
+    if (flags._needsArt || flags._needsCue || flags._needsDuration) {
       return res.json({ ...flags, filepath: dbFileInfo.filepath, vpath: dbFileInfo.vpath });
     }
 
@@ -51,6 +53,11 @@ export function setup(mstream) {
   mstream.post('/api/v1/scanner/update-cue', (req, res) => {
     // cuepoints is either a JSON string or '[]' (sentinel: checked, no cue found)
     db.updateFileCue(req.body.filepath, req.body.vpath, req.body.cuepoints);
+    res.json({});
+  });
+
+  mstream.post('/api/v1/scanner/update-duration', (req, res) => {
+    db.updateFileDuration(req.body.filepath, req.body.vpath, req.body.duration);
     res.json({});
   });
 
