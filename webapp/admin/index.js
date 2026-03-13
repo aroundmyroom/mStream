@@ -9,9 +9,6 @@ const ADMINDATA = (() => {
   // Used for modifying a user
   module.selectedUser = { value: '' };
 
-  // For lastFM user data on new user form
-  module.lastFMStorage = { username: '', password: '' };
-
   // folders
   module.folders = {};
   module.foldersUpdated = { ts: 0 };
@@ -160,12 +157,15 @@ const ADMINDATA = (() => {
         method: 'GET',
         url: `${API.url()}/api/v1/federation/stats`
       });
-  
-      module.federationEnabled.val = true;
 
-      Object.keys(res.data).forEach(key=>{
-        module.federationParams[key] = res.data[key];
-      });
+      if (res.data.enabled === false) {
+        module.federationEnabled.val = false;
+      } else {
+        module.federationEnabled.val = true;
+        Object.keys(res.data).forEach(key=>{
+          module.federationParams[key] = res.data[key];
+        });
+      }
     }catch (err) {}
 
     module.federationParamsUpdated.ts = Date.now();
@@ -193,7 +193,6 @@ const ADMINDATA = (() => {
         module.winDrives.push(d);
       });
 
-      console.log(res.data)
       return res;
     }catch(err){}
   }
@@ -206,21 +205,489 @@ ADMINDATA.getTranscodeParams();
 ADMINDATA.getFolders();
 ADMINDATA.getUsers();
 ADMINDATA.getDbParams();
-ADMINDATA.getServerParams();
-ADMINDATA.getFederationParams();
+ADMINDATA.getServerParams().then(() => {
+  ADMINDATA.getFederationParams();
+}).catch(() => {});
 ADMINDATA.getVersion();
 ADMINDATA.getWinDrives();
 
-// initialize modal
-M.Modal.init(document.querySelectorAll('.modal'), {
-  onCloseEnd: () => {
-    // reset modal on every close
-    modVM.currentViewModal = 'null-modal';
-  }
+// Fetch scan error count for sidebar badge on boot
+(async () => {
+  try {
+    const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/db/scan-errors/count` });
+    const badge = document.getElementById('scan-errors-badge');
+    if (badge && res.data.count > 0) {
+      badge.textContent = res.data.count > 99 ? '99+' : res.data.count;
+      badge.style.display = 'inline-flex';
+    }
+  } catch (_e) {}
+})();
+
+// Handle .modal-close class elements
+document.addEventListener('click', function(e) {
+  if (e.target.closest('.modal-close')) modVM.closeModal();
 });
 
 // Intialize Clipboard
 new ClipboardJS('.fed-copy-button');
+
+// ── Confirm dialog helper ──────────────────────────────────────
+function adminConfirm(title, message, confirmLabel, onConfirm) {
+  confirmVM.ask(title, message, confirmLabel, onConfirm);
+}
+
+// ── Modal template helpers ─────────────────────────────────────
+const mHead = (title, subtitle = '') =>
+  `<div class="modal-header"><div><div class="modal-title">${title}</div>${subtitle ? `<div class="modal-subtitle">${subtitle}</div>` : ''}</div><button class="modal-close-x" type="button" @click="closeModal">&times;</button></div>`;
+const mFoot = (saveLabel = 'Save', pendingLabel = 'Saving') =>
+  `<div class="modal-footer-row"><button class="btn-flat" type="button" @click="closeModal">Cancel</button><button class="btn" type="submit" :disabled="submitPending === true">{{submitPending === false ? '${saveLabel}' : '${pendingLabel}...'}}</button></div>`;
+
+// Global mixin: provides closeModal() to every component
+Vue.mixin({
+  methods: {
+    closeModal() { if (typeof modVM !== 'undefined') modVM.closeModal(); }
+  }
+});
+
+// ── Scan Error Audit View ──────────────────────────────────────────────────
+const scanErrorsView = Vue.component('scan-errors-view', {
+  data() {
+    return {
+      errors:          [],
+      loading:         false,
+      loaded:          false,
+      expandedRow:     null,
+      typeFilter:      null,
+      retentionHours:  ADMINDATA.dbParams.scanErrorRetentionHours || 48,
+      savingRetention: false,
+      fixing:          {},   // guid → true while fix API call is in-flight
+    };
+  },
+  computed: {
+    filteredErrors() {
+      if (!this.typeFilter) return this.errors;
+      return this.errors.filter(e => e.error_type === this.typeFilter);
+    },
+    typeCounts() {
+      const c = {};
+      for (const e of this.errors) { c[e.error_type] = (c[e.error_type] || 0) + 1; }
+      return c;
+    },
+    allTypes() {
+      return [...new Set(this.errors.map(e => e.error_type))];
+    },
+    unfixedCount() {
+      return this.errors.filter(e => !e.fixed_at).length;
+    }
+  },
+  mounted() { this.load(); },
+  methods: {
+    async load() {
+      this.loading = true;
+      try {
+        const [errRes, paramRes] = await Promise.all([
+          API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/db/scan-errors` }),
+          API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/db/params` })
+        ]);
+        this.errors = errRes.data;
+        this.loaded = true;
+        if (paramRes.data.scanErrorRetentionHours) {
+          this.retentionHours = paramRes.data.scanErrorRetentionHours;
+        }
+        const badge = document.getElementById('scan-errors-badge');
+        if (badge) {
+          if (errRes.data.length > 0) {
+            badge.textContent = errRes.data.length > 99 ? '99+' : errRes.data.length;
+            badge.style.display = 'inline-flex';
+          } else {
+            badge.style.display = 'none';
+          }
+        }
+      } catch (err) {
+        iziToast.error({ title: 'Failed to load scan errors', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.loading = false;
+      }
+    },
+    confirmClear() {
+      adminConfirm(
+        'Clear all scan errors?',
+        'This deletes the entire error history. Errors will re-appear on the next scan if the underlying problems persist.',
+        'Clear All',
+        () => this.doClear()
+      );
+    },
+    async doClear() {
+      try {
+        await API.axios({ method: 'DELETE', url: `${API.url()}/api/v1/admin/db/scan-errors` });
+        this.errors = [];
+        this.typeFilter = null;
+        const badge = document.getElementById('scan-errors-badge');
+        if (badge) badge.style.display = 'none';
+        iziToast.success({ title: 'Scan errors cleared', position: 'topCenter', timeout: 2500 });
+      } catch (err) {
+        iziToast.error({ title: 'Failed to clear errors', position: 'topCenter', timeout: 3000 });
+      }
+    },
+    async saveRetention() {
+      this.savingRetention = true;
+      try {
+        await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/admin/db/params/scan-error-retention`,
+          data: { hours: Number(this.retentionHours) }
+        });
+        ADMINDATA.dbParams.scanErrorRetentionHours = Number(this.retentionHours);
+        iziToast.success({ title: 'Retention period saved', position: 'topCenter', timeout: 2000 });
+      } catch (err) {
+        iziToast.error({ title: 'Failed to save retention', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.savingRetention = false;
+      }
+    },
+    toggleRow(guid) {
+      this.expandedRow = this.expandedRow === guid ? null : guid;
+    },
+    typeLabel(t) {
+      return { parse: 'Parse Error', art: 'Album Art', cue: 'CUE Sheet', insert: 'DB Insert', other: 'Other' }[t] || t;
+    },
+    typeIcon(t) {
+      const icons = {
+        parse:  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+        art:    '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
+        cue:    '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+        insert: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+        other:  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+      };
+      return icons[t] || icons.other;
+    },
+    typeColor(t) {
+      return { parse: 'var(--red)', art: 'var(--yellow)', cue: 'var(--primary)', insert: 'var(--accent)', other: 'var(--t2)' }[t] || 'var(--t2)';
+    },
+    typeBg(t) {
+      return { parse: 'rgba(248,113,113,.14)', art: 'rgba(251,191,36,.14)', cue: 'rgba(139,92,246,.14)', insert: 'rgba(96,165,250,.12)', other: 'rgba(136,136,176,.10)' }[t] || 'rgba(136,136,176,.10)';
+    },
+    retentionLabel(h) {
+      const map = { 12:'12 hours', 24:'1 day', 48:'2 days', 72:'3 days', 168:'1 week', 336:'2 weeks', 720:'30 days' };
+      return map[h] || h + 'h';
+    },
+    relTime(ts) {
+      const s = Math.floor(Date.now() / 1000) - ts;
+      if (s < 10)     return 'just now';
+      if (s < 60)     return s + 's ago';
+      if (s < 3600)   return Math.floor(s / 60) + 'm ago';
+      if (s < 86400)  return Math.floor(s / 3600) + 'h ago';
+      if (s < 2592000) return Math.floor(s / 86400) + 'd ago';
+      return new Date(ts * 1000).toLocaleDateString();
+    },
+    absTime(ts) {
+      return new Date(ts * 1000).toLocaleString();
+    },
+    shortPath(fp) {
+      if (!fp) return '—';
+      const parts = fp.replace(/\\/g, '/').split('/');
+      if (parts.length <= 3) return fp;
+      return '\u2026/' + parts.slice(-2).join('/');
+    },
+    copyPath(fp) {
+      if (!fp) return;
+      navigator.clipboard.writeText(fp).then(() => {
+        iziToast.info({ title: 'Path copied to clipboard', position: 'topCenter', timeout: 1500 });
+      }).catch(() => {});
+    },
+    async fixError(err) {
+      if (err.fixed_at || this.fixing[err.guid]) return;
+      Vue.set(this.fixing, err.guid, true);
+      try {
+        const r = await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/db/scan-errors/fix`, data: { guid: err.guid } });
+        const idx = this.errors.findIndex(e => e.guid === err.guid);
+        if (idx >= 0) {
+          this.errors[idx].fixed_at  = Math.floor(Date.now() / 1000);
+          this.errors[idx]._fixAction = r.data.action;
+        }
+        const badge = document.getElementById('scan-errors-badge');
+        if (badge) {
+          const cnt = this.unfixedCount;
+          badge.textContent = cnt > 99 ? '99+' : cnt;
+          badge.style.display = cnt === 0 ? 'none' : 'inline-flex';
+        }
+        const labels = { art_fixed: 'Embedded image stripped from file', cue_dismissed: 'Cue error dismissed', dismissed: 'Dismissed' };
+        iziToast.success({ title: 'Fixed', message: labels[r.data.action] || 'Done', position: 'topCenter', timeout: 2500 });
+        if (r.data.note) iziToast.warning({ title: 'Note', message: r.data.note, position: 'topCenter', timeout: 5000 });
+      } catch (e) {
+        iziToast.error({ title: 'Fix failed', message: e?.response?.data?.error || 'Unknown error', position: 'topCenter', timeout: 3000 });
+      } finally {
+        Vue.delete(this.fixing, err.guid);
+      }
+    },
+    fixActionLabel(action) {
+      return { art_fixed: 'Embedded image stripped', cue_dismissed: 'Cue error dismissed', dismissed: 'Dismissed' }[action] || 'Fixed';
+    }
+  },
+  template: `
+    <div>
+      <div class="container">
+
+        <!-- ── Header Card ── -->
+        <div class="row">
+          <div class="col s12">
+            <div class="card">
+              <div class="card-content">
+                <div class="se-header">
+                  <div class="se-title-group">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2" style="flex-shrink:0;margin-top:1px">
+                      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
+                    <div>
+                      <div class="se-main-title">Scan Error Audit</div>
+                      <div class="se-sub">Persistent log of every file that failed during a library scan — deduplicated by file &amp; error type so recurring problems show a count, not duplicate rows.</div>
+                    </div>
+                    <span class="se-total-pill" v-if="loaded && errors.length > 0">
+                      {{errors.length}} issue{{errors.length === 1 ? '' : 's'}}
+                    </span>
+                    <span class="se-total-pill se-total-ok" v-else-if="loaded && errors.length === 0">
+                      ✓ Clean
+                    </span>
+                  </div>
+                  <div class="se-controls-row">
+                    <div class="se-retention-group">
+                      <label class="se-retention-label">Keep errors for</label>
+                      <select v-model.number="retentionHours" @change="saveRetention" class="se-retention-sel" :disabled="savingRetention">
+                        <option :value="12">12 hours</option>
+                        <option :value="24">1 day</option>
+                        <option :value="48">2 days</option>
+                        <option :value="72">3 days</option>
+                        <option :value="168">1 week</option>
+                        <option :value="336">2 weeks</option>
+                        <option :value="720">30 days</option>
+                      </select>
+                      <span class="se-retention-hint">Older entries are pruned at scan start</span>
+                    </div>
+                    <div class="se-action-group">
+                      <button class="btn-flat btn-small" @click="load" :disabled="loading">
+                        <svg v-if="!loading" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        <svg v-else class="se-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                        {{loading ? 'Loading…' : 'Refresh'}}
+                      </button>
+                      <button class="btn btn-small red" @click="confirmClear" v-if="errors.length > 0">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+                        Clear All
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Loading spinner ── -->
+        <div class="row" v-if="loading && !loaded">
+          <div class="col s12" style="display:flex;justify-content:center;padding:3rem 0">
+            <svg class="spinner" width="50px" height="50px" viewBox="0 0 66 66"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
+          </div>
+        </div>
+
+        <!-- ── Empty state ── -->
+        <div class="row" v-else-if="loaded && errors.length === 0">
+          <div class="col s12">
+            <div class="card">
+              <div class="se-empty-state">
+                <div class="se-empty-icon">
+                  <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="1.5">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                  </svg>
+                </div>
+                <div class="se-empty-title">No scan errors</div>
+                <div class="se-empty-msg">Your library scanned cleanly — no file parsing, art extraction, cue sheet or database errors were recorded.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <template v-else-if="loaded && errors.length > 0">
+
+          <!-- ── Type filter chips ── -->
+          <div class="row">
+            <div class="col s12">
+              <div class="se-filter-strip">
+                <button class="se-fchip" :class="{active: typeFilter === null}" @click="typeFilter = null">
+                  All
+                  <span class="se-fchip-cnt">{{errors.length}}</span>
+                </button>
+                <button
+                  v-for="type in allTypes" :key="type"
+                  class="se-fchip"
+                  :class="{active: typeFilter === type}"
+                  :style="typeFilter === type ? {background: typeBg(type), borderColor: typeColor(type), color: typeColor(type)} : {}"
+                  @click="typeFilter = (typeFilter === type ? null : type)"
+                >
+                  <span class="se-fchip-dot" :style="{background: typeColor(type)}"></span>
+                  {{typeLabel(type)}}
+                  <span class="se-fchip-cnt">{{typeCounts[type] || 0}}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Errors table ── -->
+          <div class="row">
+            <div class="col s12">
+              <div class="card se-table-card">
+                <div class="se-table-wrap">
+
+                  <!-- Column headers -->
+                  <div class="se-thead">
+                    <div class="se-th se-col-type">Type</div>
+                    <div class="se-th se-col-file">File</div>
+                    <div class="se-th se-col-msg">Issue</div>
+                    <div class="se-th se-col-count">Detections</div>
+                    <div class="se-th se-col-first">First Seen</div>
+                    <div class="se-th se-col-last">Last Seen</div>
+                    <div class="se-th se-col-exp"></div>
+                  </div>
+
+                  <!-- Body rows -->
+                  <template v-for="err in filteredErrors" :key="err.guid">
+                    <!-- Main row -->
+                    <div
+                      class="se-row"
+                      :class="{expanded: expandedRow === err.guid, 'se-row--fixed': err.fixed_at}"
+                      @click="toggleRow(err.guid)"
+                    >
+                      <!-- Type badge -->
+                      <div class="se-col-type">
+                        <span class="se-type-badge"
+                          :style="{background: typeBg(err.error_type), color: typeColor(err.error_type), borderColor: typeColor(err.error_type)}"
+                        >
+                          <span v-html="typeIcon(err.error_type)"></span>
+                          {{typeLabel(err.error_type)}}
+                        </span>
+                        <span class="se-fixed-badge" v-if="err.fixed_at">&#x2713; Fixed</span>
+                      </div>
+
+                      <!-- File path -->
+                      <div class="se-col-file">
+                        <span class="se-vpath-tag">{{err.vpath}}</span>
+                        <span class="se-filepath" :title="err.filepath" @click.stop="copyPath(err.filepath)">
+                          {{shortPath(err.filepath)}}
+                        </span>
+                      </div>
+
+                      <!-- Error message (truncated) -->
+                      <div class="se-col-msg">
+                        <span class="se-errmsg">{{err.error_msg || '(no message)'}}</span>
+                      </div>
+
+                      <!-- Detection count -->
+                      <div class="se-col-count">
+                        <span class="se-count-badge" v-if="err.count > 1" :title="err.count + ' times detected'">
+                          {{err.count}}&times; detected
+                        </span>
+                        <span class="se-count-once" v-else>Once</span>
+                      </div>
+
+                      <!-- First seen -->
+                      <div class="se-col-first">
+                        <span :title="absTime(err.first_seen)">{{relTime(err.first_seen)}}</span>
+                      </div>
+
+                      <!-- Last seen -->
+                      <div class="se-col-last">
+                        <span :title="absTime(err.last_seen)">{{relTime(err.last_seen)}}</span>
+                      </div>
+
+                      <!-- Expand chevron -->
+                      <div class="se-col-exp">
+                        <svg class="se-chevron" :class="{open: expandedRow === err.guid}"
+                          width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                          <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                      </div>
+                    </div>
+
+                    <!-- Expanded detail panel -->
+                    <div class="se-detail" v-if="expandedRow === err.guid">
+                      <div class="se-detail-grid">
+                        <div class="se-detail-section">
+                          <div class="se-detail-label">Full Path</div>
+                          <div class="se-detail-value se-detail-path" @click="copyPath(err.filepath)" title="Click to copy">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                            {{err.filepath || '—'}}
+                          </div>
+                        </div>
+                        <div class="se-detail-section">
+                          <div class="se-detail-label">Error Message</div>
+                          <div class="se-detail-value">{{err.error_msg || '(none)'}}</div>
+                        </div>
+                        <div class="se-detail-section" v-if="err.stack">
+                          <div class="se-detail-label">Stack Trace</div>
+                          <pre class="se-stack">{{err.stack}}</pre>
+                        </div>
+                        <div class="se-detail-meta-row">
+                          <div class="se-detail-meta-chip">
+                            <span class="se-detail-meta-k">Library path</span>
+                            <span class="se-detail-meta-v">{{err.vpath}}</span>
+                          </div>
+                          <div class="se-detail-meta-chip">
+                            <span class="se-detail-meta-k">First detected</span>
+                            <span class="se-detail-meta-v">{{absTime(err.first_seen)}}</span>
+                          </div>
+                          <div class="se-detail-meta-chip">
+                            <span class="se-detail-meta-k">Last detected</span>
+                            <span class="se-detail-meta-v">{{absTime(err.last_seen)}}</span>
+                          </div>
+                          <div class="se-detail-meta-chip">
+                            <span class="se-detail-meta-k">Total detections</span>
+                            <span class="se-detail-meta-v" :style="{color: err.count > 1 ? typeColor(err.error_type) : 'inherit'}">
+                              {{err.count}} time{{err.count === 1 ? '' : 's'}}
+                            </span>
+                          </div>
+                        </div>
+
+                        <!-- ── Fix action row ── -->
+                        <div class="se-detail-fix-row" v-if="err.fixed_at">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--se-green,#4caf50)" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                          <span class="se-fix-done-txt">
+                            Fixed {{relTime(err.fixed_at)}} — auto-removed from log after 48 h
+                            <span v-if="err._fixAction" style="opacity:.65;margin-left:.35rem">({{fixActionLabel(err._fixAction)}})</span>
+                          </span>
+                        </div>
+                        <div class="se-detail-fix-row" v-else>
+                          <button class="se-fix-btn" @click.stop="fixError(err)" :disabled="fixing[err.guid]">
+                            <svg v-if="!fixing[err.guid]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                            <svg v-else class="se-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                            {{fixing[err.guid] ? 'Fixing\u2026' : 'Fix this error'}}
+                          </button>
+                          <span class="se-fix-hint" v-if="err.error_type === 'art'">Marks file as &ldquo;art checked&rdquo; so the scanner stops retrying</span>
+                          <span class="se-fix-hint" v-else-if="err.error_type === 'cue'">Marks file as &ldquo;cue checked&rdquo; so the scanner stops retrying</span>
+                          <span class="se-fix-hint" v-else>Dismisses this error &mdash; auto-expires in 48 h</span>
+                        </div>
+
+                      </div>
+                    </div>
+
+                  </template>
+
+                  <!-- Row count footer -->
+                  <div class="se-table-footer">
+                    Showing {{filteredErrors.length}} of {{errors.length}} error{{errors.length === 1 ? '' : 's'}}
+                    <span v-if="typeFilter"> &mdash; filtered by <b>{{typeLabel(typeFilter)}}</b></span>
+                    <a v-if="typeFilter" @click="typeFilter = null" style="margin-left:.5rem">&times; clear filter</a>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </template>
+
+      </div>
+    </div>`
+});
+// ─────────────────────────────────────────────────────────────────────────────
 
 const foldersView = Vue.component('folders-view', {
   data() {
@@ -234,73 +701,98 @@ const foldersView = Vue.component('folders-view', {
     };
   },
   template: `
-    <div>
-      <div class="container">
-        <div class="row">
-          <div class="col s12">
-            <div class="card">
-              <div class="card-content">
-                <span class="card-title">Add Folder</span>
-                <form id="choose-directory-form" @submit.prevent="submitForm">
-                  <div class="row">
-                    <div class="input-field col s12">
-                      <input v-on:click="addFolderDialog()" @blur="maybeResetForm()" v-model="folder.value" id="folder-name" required type="text" class="validate">
-                      <label for="folder-name">Select Directory</label>
-                      <span class="helper-text">Click to choose directory</span>
-                    </div>
-                  </div>
-                  <div class="row">
-                    <div class="input-field col s12">
-                      <input @blur="maybeResetForm()" pattern="[a-zA-Z0-9-]+" v-model="dirName" id="add-directory-name" required type="text" class="validate">
-                      <label for="add-directory-name">Server Path Alias (vPath)</label>
-                      <span class="helper-text">No special characters or spaces</span>
-                    </div>
-                  </div>
-                  <div class="row">
-                    <div class="col m6 s12">
-                      <div class="pad-checkbox"><label>
-                        <input id="folder-auto-access" type="checkbox" checked/>
-                        <span>Give Access To All Users</span>
-                      </label></div>
-                      <div class="pad-checkbox"><label>
-                        <input id="folder-is-audiobooks" type="checkbox"/>
-                        <span>Audiobooks & Podcasts</span>
-                      </label></div>
-                    </div>
-                    <button class="btn green waves-effect waves-light col m6 s12" type="submit" :disabled="submitPending === true">
-                      {{submitPending === false ? 'Add Folder' : 'Adding...'}}
-                    </button>
-                  </div>
-                </form>
+    <div class="container">
+
+      <div class="card">
+        <div class="card-content">
+          <span class="card-title">Add Directory</span>
+          <form id="choose-directory-form" @submit.prevent="submitForm">
+
+            <div class="input-field">
+              <label for="folder-name">Directory Path</label>
+              <div style="display:flex;gap:.5rem;align-items:stretch;">
+                <input
+                  v-on:click="addFolderDialog()"
+                  v-model="folder.value"
+                  id="folder-name" required type="text"
+                  placeholder="Click Browse to choose a folder…"
+                  style="cursor:pointer;flex:1;margin-bottom:0;"
+                  readonly />
+                <button type="button" class="btn" @click="addFolderDialog()" style="flex-shrink:0;height:38px;align-self:center;" title="Open folder browser">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 48 48" style="vertical-align:middle;margin-right:4px;"><path fill="#FFA000" d="M38 12H22l-4-4H8c-2.2 0-4 1.8-4 4v24c0 2.2 1.8 4 4 4h31c1.7 0 3-1.3 3-3V16c0-2.2-1.8-4-4-4z"/><path fill="#FFCA28" d="M42.2 18H15.3c-1.9 0-3.6 1.4-3.9 3.3L8 40h31.7c1.9 0 3.6-1.4 3.9-3.3l2.5-14c.5-2.4-1.4-4.7-3.9-4.7z"/></svg>Browse
+                </button>
               </div>
             </div>
-          </div>
+
+            <div class="input-field">
+              <label for="add-directory-name">Path Alias <span style="color:var(--t3);font-weight:400;">(vPath)</span></label>
+              <input
+                pattern="[a-zA-Z0-9-]+"
+                v-model="dirName"
+                id="add-directory-name" required type="text"
+                placeholder="e.g. music" />
+              <small style="display:block;color:var(--t2);font-size:.82rem;margin-top:.25rem;">
+                A short URL-friendly name used to identify this directory in the API and player. Letters, numbers, hyphens only — no spaces.
+              </small>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:.85rem;margin:.25rem 0 .5rem;">
+
+              <label style="display:flex;align-items:flex-start;gap:.6rem;cursor:pointer;">
+                <input id="folder-auto-access" type="checkbox" checked style="width:auto;margin-top:3px;flex-shrink:0;" />
+                <span>
+                  <span style="color:var(--t1);font-weight:600;">Give access to all users</span><br>
+                  <small style="color:var(--t2);font-size:.82rem;">Every existing and new user will automatically have this directory in their allowed paths. Uncheck to manage access per-user manually.</small>
+                </span>
+              </label>
+
+              <label style="display:flex;align-items:flex-start;gap:.6rem;cursor:pointer;">
+                <input id="folder-is-audiobooks" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;" />
+                <span>
+                  <span style="color:var(--t1);font-weight:600;">Audiobooks &amp; Podcasts</span><br>
+                  <small style="color:var(--t2);font-size:.82rem;">Mark this directory as an Audiobooks / Podcasts library. Files will be scanned and displayed separately from your main music collection, allowing you to browse and stream spoken-word content independently.</small>
+                </span>
+              </label>
+
+            </div>
+          </form>
+        </div>
+        <div class="card-action">
+          <button class="btn" type="submit" form="choose-directory-form" :disabled="submitPending === true">
+            {{ submitPending ? 'Adding…' : 'Add Directory' }}
+          </button>
         </div>
       </div>
-      <div v-show="foldersTS.ts === 0" class="row">
-        <svg class="spinner" width="65px" height="65px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
+
+      <div v-show="foldersTS.ts === 0" style="display:flex;justify-content:center;padding:2rem;">
+        <svg class="spinner" width="48" height="48" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
       </div>
-      <div v-show="foldersTS.ts > 0" class="row">
-        <div class="col s12">
-          <h5>Directories</h5>
-          <table>
+
+      <div v-show="foldersTS.ts > 0" class="card">
+        <div class="card-content">
+          <span class="card-title">Directories</span>
+          <div v-if="Object.keys(folders).length === 0" style="color:var(--t2);padding:.5rem 0;">No directories added yet.</div>
+          <table v-else>
             <thead>
               <tr>
-                <th>Server Path Alias (vPath)</th>
+                <th style="width:160px;">Path Alias (vPath)</th>
                 <th>Directory</th>
-                <th>Actions</th>
+                <th style="width:80px;">Action</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="(v, k) in folders">
-                <td>{{k}}</td>
-                <td>{{v.root}}</td>
-                <td>[<a v-on:click="removeFolder(k, v.root)">remove</a>]</td>
+                <td><code style="color:var(--accent);">{{k}}</code></td>
+                <td style="word-break:break-all;color:var(--t2);">{{v.root}}</td>
+                <td>
+                  <button class="btn-small red" type="button" @click="removeFolder(k, v.root)">Remove</button>
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
       </div>
+
     </div>`,
     created: function() {
       ADMINDATA.sharedSelect.value = '';
@@ -318,7 +810,6 @@ const foldersView = Vue.component('folders-view', {
 
         this.dirName = newName;
         this.$nextTick(() => {
-          M.updateTextFields();
         });
       },
       maybeResetForm: function() {
@@ -328,7 +819,7 @@ const foldersView = Vue.component('folders-view', {
       },
       addFolderDialog: function (event) {
         modVM.currentViewModal = 'file-explorer-modal';
-        M.Modal.getInstance(document.getElementById('admin-modal')).open();
+        modVM.openModal();
       },
       submitForm: async function () {
         if (ADMINDATA.folders[this.dirName]) {
@@ -364,7 +855,6 @@ const foldersView = Vue.component('folders-view', {
           this.dirName = '';
           this.folder.value = '';
           this.$nextTick(() => {
-            M.updateTextFields();
           });
         }catch(err) {
           iziToast.error({
@@ -377,50 +867,30 @@ const foldersView = Vue.component('folders-view', {
         }
       },
       removeFolder: async function(vpath, folder) {
-        iziToast.question({
-          timeout: 20000,
-          close: false,
-          overlayClose: true,
-          overlay: true,
-          displayMode: 'once',
-          id: 'question',
-          zindex: 99999,
-          layout: 2,
-          maxWidth: 600,
-          title: `Remove access to <b>${folder}</b>?`,
-          message: `No files will be deleted. Your server will need to reboot.`,
-          position: 'center',
-          buttons: [
-            ['<button><b>Remove</b></button>', (instance, toast) => {
-              instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-              API.axios({
-                method: 'DELETE',
-                url: `${API.url()}/api/v1/admin/directory`,
-                data: { vpath: vpath }
-              }).then(() => {
-                iziToast.warning({
-                  title: 'Server Rebooting. Please wait 30s for the server to come back online',
-                  position: 'topCenter',
-                  timeout: 3500
-                });
-                Vue.delete(ADMINDATA.folders, vpath);
-                Object.values(ADMINDATA.users).forEach(user => {
-                  if (user.vpaths.includes(vpath)) {
-                    user.vpaths.splice(user.vpaths.indexOf(vpath), 1);
-                  }
-                });
-              }).catch(() => {
-                iziToast.error({
-                  title: 'Failed to remove folder',
-                  position: 'topCenter',
-                  timeout: 3500
-                });
-              });
-            }, true],
-            ['<button>Go Back</button>', (instance, toast) => {
-              instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-            }],
-          ]
+                adminConfirm(`Remove access to <b>${folder}</b>?`, `No files will be deleted. Your server will need to reboot.`, 'Remove', () => {
+          API.axios({
+                          method: 'DELETE',
+                          url: `${API.url()}/api/v1/admin/directory`,
+                          data: { vpath: vpath }
+                        }).then(() => {
+                          iziToast.warning({
+                            title: 'Server Rebooting. Please wait 30s for the server to come back online',
+                            position: 'topCenter',
+                            timeout: 3500
+                          });
+                          Vue.delete(ADMINDATA.folders, vpath);
+                          Object.values(ADMINDATA.users).forEach(user => {
+                            if (user.vpaths.includes(vpath)) {
+                              user.vpaths.splice(user.vpaths.indexOf(vpath), 1);
+                            }
+                          });
+                        }).catch(() => {
+                          iziToast.error({
+                            title: 'Failed to remove folder',
+                            position: 'topCenter',
+                            timeout: 3500
+                          });
+                        });
         });
       }
     }
@@ -434,177 +904,160 @@ const usersView = Vue.component('users-view', {
       usersTS: ADMINDATA.usersUpdated,
       newUsername: '',
       newPassword: '',
+      showNewPassword: false,
+      newUserDirs: [],
       makeAdmin: Object.keys(ADMINDATA.users).length === 0 ? true : false,
       submitPending: false,
       selectInstance: null
     };
   },
   template: `
-    <div>
-      <div class="container">
-        <div class="row">
-          <div class="col s12">
-            <div class="card">
-              <div class="card-content">
-              <span class="card-title">Add User</span>
-                <form id="add-user-form" @submit.prevent="addUser">
-                  <div class="row">
-                    <div class="input-field directory-name-field col s12 m6">
-                      <input @blur="maybeResetForm()" v-model="newUsername" id="new-username" required type="text" class="validate">
-                      <label for="new-username">Username</label>
-                    </div>
-                    <div class="input-field directory-name-field col s12 m6">
-                      <input @blur="maybeResetForm()" v-model="newPassword" id="new-password" required type="password" class="validate">
-                      <label for="new-password">Password</label>
-                    </div>
-                  </div>
-                  <div class="row">
-                    <div class="input-field col s12">
-                      <select class="material-select" :disabled="Object.keys(directories).length === 0" id="new-user-dirs" multiple>
-                        <option disabled selected value="" v-if="Object.keys(directories).length === 0">You must add a directory before adding a user</option>
-                        <option selected v-for="(key, value) in directories" :value="value">{{ value }}</option>
-                      </select>
-                      <label for="new-user-dirs">Select User's Directories</label>
-                    </div>
-                  </div>
-                  <div class="row">
-                    <div class="input-field col s12 m6">
-                      <div class="pad-checkbox"><label>
-                        <input id="folder-autoaccess" type="checkbox" v-model="makeAdmin"/>
-                        <span>Make Admin</span>
-                      </label></div>
-                    </div>
-                    <!-- <div class="col s12 m6">
-                      <a v-on:click="openLastFmModal()" href="#!">Add last.fm account</a>
-                    </div> -->
-                  </div>
-                  <div class="row">
-                    <button id="submit-add-user-form" class="btn green waves-effect waves-light col m6 s12" type="submit" :disabled="submitPending === true">
-                      {{submitPending === false ? 'Add User' : 'Adding...'}}
-                    </button>
-                  </div>
-                </form>
+    <div class="container">
+
+      <div class="card">
+        <div class="card-content">
+          <span class="card-title">Add User</span>
+          <p style="color:var(--t2);font-size:.88rem;margin:.25rem 0 1rem;">Create a new account. The first user must have admin access.</p>
+          <form id="add-user-form" @submit.prevent="addUser" autocomplete="off">
+
+            <div style="display:flex;gap:.75rem;flex-wrap:wrap;">
+              <div class="input-field" style="flex:1;min-width:160px;">
+                <label for="new-username">Username</label>
+                <input v-model="newUsername" id="new-username" required type="text" placeholder="e.g. alice" autocomplete="off">
+              </div>
+              <div class="input-field" style="flex:1;min-width:160px;">
+                <label for="new-password">Password</label>
+                <div class="pwd-wrap">
+                  <input v-model="newPassword" id="new-password" required :type="showNewPassword ? 'text' : 'password'" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="new-password">
+                  <button type="button" class="pwd-toggle" @click="showNewPassword = !showNewPassword" tabindex="-1" :title="showNewPassword ? 'Hide password' : 'Show password'">
+                    <svg v-if="!showNewPassword" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+
+            <div class="input-field">
+              <label for="new-user-dirs">Folder Access <span style="color:var(--red);font-size:.8rem;">*</span></label>
+              <select id="new-user-dirs" :disabled="Object.keys(directories).length === 0" multiple :size="Math.max(2, Object.keys(directories).length)" v-model="newUserDirs">
+                <option disabled value="" v-if="Object.keys(directories).length === 0">No directories &mdash; add a music folder first</option>
+                <option v-for="(val, key) in directories" :key="key" :value="key">{{ key }}</option>
+              </select>
+              <small style="display:block;color:var(--t2);font-size:.82rem;margin-top:.25rem;" v-if="Object.keys(directories).length > 0">Select at least one folder. Hold Ctrl / Cmd to select multiple.</small>
+              <small style="display:block;color:var(--t2);font-size:.82rem;margin-top:.25rem;" v-else>Add a music directory before creating users.</small>
+            </div>
+
+            <label style="display:flex;align-items:center;gap:.6rem;cursor:pointer;margin:.25rem 0 .5rem;">
+              <input id="make-admin-cb" type="checkbox" v-model="makeAdmin" style="width:auto;margin:0;flex-shrink:0;">
+              <span><span style="color:var(--t1);font-weight:600;">Grant admin access</span><br><small style="color:var(--t2);font-size:.82rem;">Admin users can access this settings panel and manage all users.</small></span>
+            </label>
+
+          </form>
+        </div>
+        <div class="card-action">
+          <button class="btn" type="submit" form="add-user-form" :disabled="submitPending === true">
+            {{submitPending === false ? 'Add User' : 'Adding...'}}
+          </button>
         </div>
       </div>
-      <div v-if="usersTS.ts === 0" class="row">
-        <svg class="spinner" width="65px" height="65px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
+
+      <div v-if="usersTS.ts === 0" style="display:flex;justify-content:center;padding:2rem;">
+        <svg class="spinner" width="48" height="48" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
       </div>
-      <div v-else-if="Object.keys(users).length === 0" class="container">
-        <h5>
-          There are currently no users. Authentication is disabled when no users exist.
-        </h5>
-        <h5>
-          Adding a user will enable authentication. Make sure the user add is has admin access. If you add a non-admin user, you will not be able to access this page.
-        </h5>
-      </div>
-      <div v-else="usersTS.ts > 0" class="row">
-        <div class="col s12">
-          <h5>Users</h5>
-          <table>
+
+      <div v-else class="card">
+        <div class="card-content">
+          <span class="card-title">Users</span>
+          <p v-if="Object.keys(users).length === 0" style="color:var(--t2);margin:.5rem 0 0;">No users &mdash; authentication is currently <strong>disabled</strong>. The first user you create must have admin access.</p>
+          <table v-else>
             <thead>
               <tr>
-                <th>User</th>
-                <th>Directories</th>
-                <th>Admin</th>
-                <th>Modify</th>
+                <th style="width:140px;">Username</th>
+                <th>Folders</th>
+                <th style="width:70px;">Role</th>
+                <th style="text-align:right;">Actions</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="(v, k) in users">
-                <td>{{k}}</td>
-                <td>{{v.vpaths.join(', ')}}</td>
+                <td style="font-weight:600;color:var(--t1);">{{k}}</td>
+                <td><span style="color:var(--t2);font-size:.85rem;">{{v.vpaths.join(', ') || '&mdash;'}}</span></td>
                 <td>
-                  <svg v-if="v.admin === true" height="24px" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 117.72 117.72"><path d="M58.86 0c9.13 0 17.77 2.08 25.49 5.79-3.16 2.5-6.09 4.9-8.82 7.21a48.673 48.673 0 00-16.66-2.92c-13.47 0-25.67 5.46-34.49 14.29-8.83 8.83-14.29 21.02-14.29 34.49 0 13.47 5.46 25.66 14.29 34.49 8.83 8.83 21.02 14.29 34.49 14.29s25.67-5.46 34.49-14.29c8.83-8.83 14.29-21.02 14.29-34.49 0-3.2-.31-6.34-.9-9.37 2.53-3.3 5.12-6.59 7.77-9.85a58.762 58.762 0 013.21 19.22c0 16.25-6.59 30.97-17.24 41.62-10.65 10.65-25.37 17.24-41.62 17.24-16.25 0-30.97-6.59-41.62-17.24C6.59 89.83 0 75.11 0 58.86c0-16.25 6.59-30.97 17.24-41.62S42.61 0 58.86 0zM31.44 49.19L45.8 49l1.07.28c2.9 1.67 5.63 3.58 8.18 5.74a56.18 56.18 0 015.27 5.1c5.15-8.29 10.64-15.9 16.44-22.9a196.16 196.16 0 0120.17-20.98l1.4-.54H114l-3.16 3.51C101.13 30 92.32 41.15 84.36 52.65a325.966 325.966 0 00-21.41 35.62l-1.97 3.8-1.81-3.87c-3.34-7.17-7.34-13.75-12.11-19.63-4.77-5.88-10.32-11.1-16.79-15.54l1.17-3.84z" fill="#01a601"/></svg>
+                  <span v-if="v.admin === true" style="background:rgba(139,92,246,.15);color:var(--primary);font-size:.75rem;font-weight:700;padding:.15rem .45rem;border-radius:4px;">Admin</span>
+                  <span v-else style="background:var(--raised);color:var(--t2);font-size:.75rem;padding:.15rem .45rem;border-radius:4px;">User</span>
                 </td>
                 <td>
-                  [<a v-on:click="changePassword(k)">change pass</a>]
-                  [<a v-on:click="changeVPaths(k)">change folders</a>]
-                  [<a v-on:click="changeAccess(k)">access</a>]
-                  [<a v-on:click="deleteUser(k)">del</a>]
+                  <div style="display:flex;gap:.4rem;justify-content:flex-end;flex-wrap:wrap;">
+                    <button class="btn-small btn-flat" type="button" @click="changePassword(k)">Password</button>
+                    <button class="btn-small btn-flat" type="button" @click="changeVPaths(k)">Folders</button>
+                    <button class="btn-small btn-flat" type="button" @click="changeAccess(k)">Access</button>
+                    <button class="btn-small" type="button" style="background:var(--red);border-color:var(--red);" @click="deleteUser(k)">Delete</button>
+                  </div>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
       </div>
+
     </div>`,
     mounted: function () {
-      this.selectInstance = M.FormSelect.init(document.querySelectorAll(".material-select"));
     },
     beforeDestroy: function() {
-      this.selectInstance[0].destroy();
     },
     methods: {
-      openLastFmModal: function() {
-        modVM.currentViewModal = 'lastfm-modal';
-        M.Modal.getInstance(document.getElementById('admin-modal')).open();
-      },
-      maybeResetForm: function() {
-
-      },
       changeVPaths: function(username) {
         ADMINDATA.selectedUser.value = username;
         modVM.currentViewModal = 'user-vpaths-modal';
-        M.Modal.getInstance(document.getElementById('admin-modal')).open();
+        modVM.openModal();
       },
       changeAccess: function(username) {
         ADMINDATA.selectedUser.value = username;
         modVM.currentViewModal = 'user-access-modal';
-        M.Modal.getInstance(document.getElementById('admin-modal')).open();
+        modVM.openModal();
       },
       changePassword: function(username) {
         ADMINDATA.selectedUser.value = username;
         modVM.currentViewModal = 'user-password-modal';
-        M.Modal.getInstance(document.getElementById('admin-modal')).open();
+        modVM.openModal();
       },
       deleteUser: function (username) {
-        iziToast.question({
-          timeout: 20000,
-          close: false,
-          overlayClose: true,
-          overlay: true,
-          displayMode: 'once',
-          id: 'question',
-          zindex: 99999,
-          title: `Delete <b>${username}</b>?`,
-          position: 'center',
-          buttons: [
-            ['<button><b>Delete</b></button>', async (instance, toast) => {
-              instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-              try {
-                await API.axios({
-                  method: 'DELETE',
-                  url: `${API.url()}/api/v1/admin/users`,
-                  data: { username: username }
-                });
-                Vue.delete(ADMINDATA.users, username);
-              } catch (err) {
-                iziToast.error({
-                  title: 'Failed to delete user',
-                  position: 'topCenter',
-                  timeout: 3500
-                });
-              }
-            }, true],
-            ['<button>Go Back</button>', (instance, toast) => {
-              instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-            }],
-          ]
+                adminConfirm(`Delete <b>${username}</b>?`, '', 'Delete', async () => {
+          try {
+                          await API.axios({
+                            method: 'DELETE',
+                            url: `${API.url()}/api/v1/admin/users`,
+                            data: { username: username }
+                          });
+                          Vue.delete(ADMINDATA.users, username);
+                        } catch (err) {
+                          iziToast.error({
+                            title: 'Failed to delete user',
+                            position: 'topCenter',
+                            timeout: 3500
+                          });
+                        }
         });
       },
       addUser: async function (event) {
         try {
           this.submitPending = true;
 
-          const selected = document.querySelectorAll('#new-user-dirs option:checked');
+          if (this.newUserDirs.length === 0) {
+            iziToast.warning({
+              title: 'No folder selected',
+              message: 'Please select at least one folder for this user.',
+              position: 'topCenter',
+              timeout: 4000
+            });
+            this.submitPending = false;
+            return;
+          }
 
           const data = {
             username: this.newUsername,
             password: this.newPassword,
-            vpaths: Array.from(selected).map(el => el.value),
+            vpaths: this.newUserDirs,
             admin: this.makeAdmin
           };
 
@@ -615,30 +1068,22 @@ const usersView = Vue.component('users-view', {
           });
 
           Vue.set(ADMINDATA.users, this.newUsername, { vpaths: data.vpaths, admin: data.admin });
+
+          const isFirstUser = Object.keys(ADMINDATA.users).length === 1;
+
           this.newUsername = '';
           this.newPassword = '';
+          this.showNewPassword = false;
+          this.makeAdmin = false;
+          this.newUserDirs = [];
 
-          // if this is the first user, prompt user and take them to login page
-          if (Object.keys(ADMINDATA.users).length === 1) {
-            iziToast.question({
-              timeout: false,
-              close: false,
-              overlay: true,
-              displayMode: 'once',
-              id: 'question',
-              zindex: 99999,
-              title: 'You will be taken the login page',
-              position: 'center',
-              buttons: [['<button>Go!</button>', (instance, toast) => {
-                API.logout();
-                instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-              }, true]],
+          iziToast.success({ title: 'User added', position: 'topCenter', timeout: 3000 });
+
+          if (isFirstUser) {
+            adminConfirm('First user created', 'You will now be taken to the login page.', 'Go to Login', () => {
+              window.location.href = '/login';
             });
           }
-
-          this.$nextTick(() => {
-            M.updateTextFields();
-          });
         }catch(err) {
           iziToast.error({
             title: 'Failed to add user',
@@ -723,7 +1168,7 @@ const advancedView = Vue.component('advanced-view', {
               <div v-if="!params.ssl || !params.ssl.cert">
                 <div class="card-content">
                   <span class="card-title">SSL Settings</span>
-                  <a v-on:click="openModal('edit-ssl-modal')" class="waves-effect waves-light btn">Add SSL Certs</a>
+                  <a v-on:click="openModal('edit-ssl-modal')" class="btn">Add SSL Certs</a>
                 </div>
               </div>
               <div v-else>
@@ -741,8 +1186,8 @@ const advancedView = Vue.component('advanced-view', {
                   </table>
                 </div>
                 <div class="card-action">
-                  <a v-on:click="openModal('edit-ssl-modal')" class="waves-effect waves-light btn">Edit SSL</a>
-                  <a v-on:click="removeSSL()" class="waves-effect waves-light btn">Remove SSL</a>
+                  <a v-on:click="openModal('edit-ssl-modal')" class="btn">Edit SSL</a>
+                  <a v-on:click="removeSSL()" class="btn">Remove SSL</a>
                 </div>
               </div>
             </div>
@@ -754,136 +1199,73 @@ const advancedView = Vue.component('advanced-view', {
   methods: {
     openModal: function(modalView) {
       modVM.currentViewModal = modalView;
-      M.Modal.getInstance(document.getElementById('admin-modal')).open();
+      modVM.openModal();
     },
     removeSSL: function() {
-      iziToast.question({
-        timeout: 20000,
-        close: false,
-        overlayClose: true,
-        overlay: true,
-        displayMode: 'once',
-        id: 'question',
-        zindex: 99999,
-        layout: 2,
-        maxWidth: 600,
-        title: 'Remove SSL Keys?',
-        message: 'Your server will need to reboot',
-        position: 'center',
-        buttons: [
-          [`<button><b>Remove SSL</b></button>`, async (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-            try {
-              await API.axios({
-                method: 'DELETE',
-                url: `${API.url()}/api/v1/admin/ssl`
-              });
+            adminConfirm('Remove SSL Keys?', 'Your server will need to reboot', 'Remove SSL', async () => {
+        try {
+                      await API.axios({
+                        method: 'DELETE',
+                        url: `${API.url()}/api/v1/admin/ssl`
+                      });
 
-              setTimeout(() => {
-                window.location.href = window.location.href.replace('https://', 'http://'); 
-              }, 4000);
-      
-              iziToast.success({
-                title: 'Certs Deleted. You will be redirected shortly',
-                position: 'topCenter',
-                timeout: 8500
-              });
-            } catch (err) {
-              iziToast.error({
-                title: 'Failed to Delete Cert',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            }
-          }, true],
-          ['<button>Go Back</button>', (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-          }],
-        ]
+                      setTimeout(() => {
+                        window.location.href = window.location.href.replace('https://', 'http://'); 
+                      }, 4000);
+
+                      iziToast.success({
+                        title: 'Certs Deleted. You will be redirected shortly',
+                        position: 'topCenter',
+                        timeout: 8500
+                      });
+                    } catch (err) {
+                      iziToast.error({
+                        title: 'Failed to Delete Cert',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    }
       });
     },
-    openModal: function(modalView) {
-      modVM.currentViewModal = modalView;
-      M.Modal.getInstance(document.getElementById('admin-modal')).open();
-    },
     generateNewKey: function() {
-      iziToast.question({
-        timeout: 20000,
-        close: false,
-        overlayClose: true,
-        overlay: true,
-        displayMode: 'once',
-        id: 'question',
-        zindex: 99999,
-        layout: 2,
-        maxWidth: 600,
-        title: '<b>Generate a New Auth Key?</b>',
-        message: 'All active login sessions will be invalidated.  You will need to login after',
-        position: 'center',
-        buttons: [
-          [`<button><b>Generate Key</b></button>`, (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-            API.axios({
-              method: 'POST',
-              url: `${API.url()}/api/v1/admin/config/secret`,
-              data: { strength: 128 }
-            }).then(() => {
-              API.logout();
-            }).catch(() => {
-              iziToast.error({
-                title: 'Failed',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            });
-          }, true],
-          ['<button>Go Back</button>', (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-          }],
-        ]
+            adminConfirm('<b>Generate a New Auth Key?</b>', 'All active login sessions will be invalidated.  You will need to login after', 'Generate Key', () => {
+        API.axios({
+                      method: 'POST',
+                      url: `${API.url()}/api/v1/admin/config/secret`,
+                      data: { strength: 128 }
+                    }).then(() => {
+                      API.logout();
+                    }).catch(() => {
+                      iziToast.error({
+                        title: 'Failed',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    });
       });
     },
     toggleFileUpload: function() {
-      iziToast.question({
-        timeout: 20000,
-        close: false,
-        overlayClose: true,
-        overlay: true,
-        displayMode: 'once',
-        id: 'question',
-        zindex: 99999,
-        layout: 2,
-        maxWidth: 600,
-        title: `<b>${this.params.noUpload === false ? 'Disable' : 'Enable'} File Uploading?</b>`,
-        position: 'center',
-        buttons: [
-          [`<button><b>${this.params.noUpload === false ? 'Disable' : 'Enable'}</b></button>`, (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-            API.axios({
-              method: 'POST',
-              url: `${API.url()}/api/v1/admin/config/noupload`,
-              data: { noUpload: !this.params.noUpload }
-            }).then(() => {
-              // update fronted data
-              Vue.set(ADMINDATA.serverParams, 'noUpload', !this.params.noUpload);
+            adminConfirm(`<b>${this.params.noUpload === false ? 'Disable' : 'Enable'} File Uploading?</b>`, '', `${this.params.noUpload === false ? 'Disable' : 'Enable'}`, () => {
+        API.axios({
+                      method: 'POST',
+                      url: `${API.url()}/api/v1/admin/config/noupload`,
+                      data: { noUpload: !this.params.noUpload }
+                    }).then(() => {
+                      // update frontend data
+                      Vue.set(ADMINDATA.serverParams, 'noUpload', !this.params.noUpload);
 
-              iziToast.success({
-                title: 'Updated Successfully',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            }).catch(() => {
-              iziToast.error({
-                title: 'Failed',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            });
-          }, true],
-          ['<button>Go Back</button>', (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-          }],
-        ]
+                      iziToast.success({
+                        title: 'Updated Successfully',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    }).catch(() => {
+                      iziToast.error({
+                        title: 'Failed',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    });
       });
     }
   }
@@ -894,12 +1276,21 @@ const dbView = Vue.component('db-view', {
   data() {
     return {
       dbParams: ADMINDATA.dbParams,
-      dbStats: '',
+      dbStats: null,
       sharedPlaylists: ADMINDATA.sharedPlaylists,
       sharedPlaylistsTS: ADMINDATA.sharedPlaylistUpdated,
       isPullingStats: false,
-      isPullingShared: false
+      isPullingShared: false,
+      scanProgress: [],
+      spPollTimer: null,
     };
+  },
+  mounted: async function() {
+    await this.pollProgress();
+    this.spPollTimer = setInterval(() => this.pollProgress(), 3000);
+  },
+  beforeDestroy: function() {
+    if (this.spPollTimer) { clearInterval(this.spPollTimer); this.spPollTimer = null; }
   },
   template: `
     <div>
@@ -960,6 +1351,12 @@ const dbView = Vue.component('db-view', {
                         [<a v-on:click="openModal('edit-db-engine-modal')">edit</a>]
                       </td>
                     </tr>
+                    <tr>
+                      <td><b>Allow ID3 Tag Editing:</b> {{dbParams.allowId3Edit || false}}</td>
+                      <td>
+                        [<a v-on:click="toggleAllowId3Edit()">edit</a>]
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -971,14 +1368,156 @@ const dbView = Vue.component('db-view', {
             <div class="card">
               <div class="card-content">
                 <span class="card-title">Scan Queue & Stats</span>
-                <a v-on:click="scanDB" class="waves-effect waves-light btn">Start A Scan</a>
-                <a v-on:click="pullStats" class="waves-effect waves-light btn">Pull Stats</a>
+                <a v-on:click="scanDB" class="btn">Start A Scan</a>
+                <a v-if="scanProgress.length > 0" v-on:click="stopScan" class="btn red" style="margin-left:.5rem">Stop Scanning</a>
+                <a v-on:click="pullStats" class="btn">Pull Stats</a>
+                <div v-if="scanProgress.length > 0" class="sp-container">
+                  <div v-for="sp in scanProgress" :key="sp.scanId" class="sp-card">
+                    <div class="sp-header">
+                      <span class="sp-live-dot"></span>
+                      <span class="sp-vpath">{{sp.vpath}}</span>
+                      <span v-if="sp.pct !== null" class="sp-pct-badge">{{sp.pct}}%</span>
+                      <span v-else class="sp-firstscan-badge">first scan</span>
+                      <span class="sp-spacer"></span>
+                      <span v-if="sp.etaSec" class="sp-eta">est. {{formatEta(sp.etaSec)}}</span>
+                      <span v-if="sp.filesPerSec" class="sp-rate">{{sp.filesPerSec}}/s</span>
+                    </div>
+                    <div class="sp-track">
+                      <div v-if="sp.pct !== null" class="sp-fill" :style="{width: sp.pct + '%'}"></div>
+                      <div v-else class="sp-fill-indeterminate"></div>
+                    </div>
+                    <div class="sp-counts">
+                      <span v-if="sp.expected">{{sp.scanned.toLocaleString()}} / ~{{sp.expected.toLocaleString()}} files</span>
+                      <span v-else>{{sp.scanned.toLocaleString()}} files checked</span>
+                      <span class="sp-elapsed">elapsed: {{formatElapsed(sp.elapsedSec)}}</span>
+                    </div>
+                    <div v-if="sp.currentFile" class="sp-current-file">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                      <span class="sp-filepath" :title="sp.currentFile">{{truncatePath(sp.currentFile)}}</span>
+                    </div>
+                  </div>
+                </div>
                 <div v-if="isPullingStats === true">
                   <svg class="spinner" width="65px" height="65px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
                 </div>
-                <pre v-else>
-                  {{dbStats}}
-                </pre>
+                <div v-else-if="dbStats && dbStats.totalFiles != null">
+                  <div class="stat-grid">
+                    <div class="stat-chip">
+                      <div class="sc-num">{{(dbStats.totalFiles||0).toLocaleString()}}</div>
+                      <div class="sc-label">Total Tracks</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num">{{(dbStats.totalArtists||0).toLocaleString()}}</div>
+                      <div class="sc-label">Artists</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num">{{(dbStats.totalAlbums||0).toLocaleString()}}</div>
+                      <div class="sc-label">Albums</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num">{{(dbStats.totalGenres||0).toLocaleString()}}</div>
+                      <div class="sc-label">Genres</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num">{{(dbStats.withArt||0).toLocaleString()}}</div>
+                      <div class="sc-label">With Cover Art</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num" style="color:var(--t2)">{{(dbStats.withoutArt||0).toLocaleString()}}</div>
+                      <div class="sc-label">No Cover Art</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num">{{(dbStats.artEmbedded||0).toLocaleString()}}</div>
+                      <div class="sc-label">Art Embedded in File</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num">{{(dbStats.artFromDirectory||0).toLocaleString()}}</div>
+                      <div class="sc-label">Art from Folder Image</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num" style="color:var(--accent)">{{(dbStats.artFromDiscogs||0).toLocaleString()}}</div>
+                      <div class="sc-label">Art Picked by User (Discogs)</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num" style="color:var(--accent)">{{(dbStats.withReplaygain||0).toLocaleString()}}</div>
+                      <div class="sc-label">ReplayGain Tagged</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num" style="color:var(--accent)">{{(dbStats.withCue||0).toLocaleString()}}</div>
+                      <div class="sc-label">CUE Sheet Files</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num" style="color:var(--t2)">{{(dbStats.cueUnchecked||0).toLocaleString()}}</div>
+                      <div class="sc-label">CUE Not Yet Scanned</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num">{{(dbStats.addedLast7Days||0).toLocaleString()}}</div>
+                      <div class="sc-label">Added Last 7 Days</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num">{{(dbStats.addedLast30Days||0).toLocaleString()}}</div>
+                      <div class="sc-label">Added Last 30 Days</div>
+                    </div>
+                    <div class="stat-chip" v-if="dbStats.oldestYear">
+                      <div class="sc-num">{{dbStats.oldestYear}}&thinsp;&ndash;&thinsp;{{dbStats.newestYear}}</div>
+                      <div class="sc-label">Year Range</div>
+                    </div>
+                    <div class="stat-chip">
+                      <div class="sc-num" style="color:var(--accent)">{{(dbStats.waveformCount||0).toLocaleString()}}</div>
+                      <div class="sc-label">Waveforms Cached</div>
+                    </div>
+                  </div>
+
+                  <div class="stat-section-row">
+                    <div class="stat-section" v-if="dbStats.formats.length > 1">
+                      <div class="stat-section-title">Formats</div>
+                      <div v-for="f in dbStats.formats" class="stat-bar-row">
+                        <span class="stat-bar-label">{{f.format ? f.format.toUpperCase() : '?'}}</span>
+                        <div class="stat-bar-bg"><div class="stat-bar-fill" :style="{width: Math.round(f.cnt/dbStats.totalFiles*100)+'%'}"></div></div>
+                        <span class="stat-bar-count">{{f.cnt.toLocaleString()}}</span>
+                      </div>
+                    </div>
+                    <div class="stat-section" v-if="dbStats.topArtists.length > 0">
+                      <div class="stat-section-title">Top Artists by Track Count</div>
+                      <div v-for="a in dbStats.topArtists" class="stat-bar-row">
+                        <span class="stat-bar-label">{{a.artist}}</span>
+                        <div class="stat-bar-bg"><div class="stat-bar-fill" :style="{width: Math.round(a.cnt/dbStats.topArtists[0].cnt*100)+'%', background:'var(--accent)'}"></div></div>
+                        <span class="stat-bar-count">{{a.cnt.toLocaleString()}}</span>
+                      </div>
+                    </div>
+                    <div class="stat-section" v-if="dbStats.topGenres.length > 0">
+                      <div class="stat-section-title">Top Genres</div>
+                      <div v-for="g in dbStats.topGenres" class="stat-bar-row">
+                        <span class="stat-bar-label">{{g.genre}}</span>
+                        <div class="stat-bar-bg"><div class="stat-bar-fill" :style="{width: Math.round(g.cnt/dbStats.topGenres[0].cnt*100)+'%', background:'var(--red)'}"></div></div>
+                        <span class="stat-bar-count">{{g.cnt.toLocaleString()}}</span>
+                      </div>
+                    </div>
+                    <div class="stat-section" v-if="dbStats.decades && dbStats.decades.length > 1">
+                      <div class="stat-section-title">Music by Decade</div>
+                      <div v-for="d in dbStats.decades" class="stat-bar-row">
+                        <span class="stat-bar-label">{{d.decade}}s</span>
+                        <div class="stat-bar-bg"><div class="stat-bar-fill" :style="{width: Math.round(d.cnt / Math.max(...dbStats.decades.map(x=>x.cnt)) * 100)+'%', background:'var(--t2)'}"></div></div>
+                        <span class="stat-bar-count">{{d.cnt.toLocaleString()}}</span>
+                      </div>
+                    </div>
+                    <div class="stat-section" v-if="dbStats.perVpath.length > 1">
+                      <div class="stat-section-title">Tracks per Folder</div>
+                      <div v-for="v in dbStats.perVpath" class="stat-bar-row">
+                        <span class="stat-bar-label">{{v.vpath}}</span>
+                        <div class="stat-bar-bg"><div class="stat-bar-fill" :style="{width: Math.round(v.cnt/dbStats.totalFiles*100)+'%', background:'var(--accent)'}"></div></div>
+                        <span class="stat-bar-count">{{v.cnt.toLocaleString()}}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-if="dbStats.lastScannedTs" style="font-size:.8rem;color:var(--t2);margin-top:.75rem">
+                    Last file added: {{new Date(dbStats.lastScannedTs).toLocaleString()}}
+                  </div>
+                </div>
+                <div v-else-if="dbStats" style="color:var(--t2);font-size:.88rem;margin-top:.75rem">
+                  {{(dbStats.fileCount||0).toLocaleString()}} files indexed &mdash; restart the server to see full statistics.
+                </div>
               </div>
             </div>
           </div>
@@ -988,7 +1527,7 @@ const dbView = Vue.component('db-view', {
             <div class="card">
               <div class="card-content">
                 <span class="card-title">Shared Playlists</span>
-                <a v-on:click="loadShared" class="waves-effect waves-light btn">Load Playlists</a>
+                <a v-on:click="loadShared" class="btn">Load Playlists</a>
                 <br><br>
                 <div v-if="isPullingShared === true">
                   <svg class="spinner" width="65px" height="65px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
@@ -1027,6 +1566,29 @@ const dbView = Vue.component('db-view', {
       </div>
     </div>`,
   methods: {
+    pollProgress: async function() {
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/db/scan/progress` });
+        this.scanProgress = res.data;
+      } catch (_e) {}
+    },
+    formatEta: function(sec) {
+      if (!sec || sec <= 0) return null;
+      if (sec < 60) return `${sec}s`;
+      if (sec < 3600) return `${Math.floor(sec/60)}m ${sec%60}s`;
+      return `${Math.floor(sec/3600)}h ${Math.floor((sec%3600)/60)}m`;
+    },
+    formatElapsed: function(sec) {
+      if (!sec || sec <= 0) return '0s';
+      if (sec < 60) return `${sec}s`;
+      if (sec < 3600) return `${Math.floor(sec/60)}m ${sec%60}s`;
+      return `${Math.floor(sec/3600)}h ${Math.floor((sec%3600)/60)}m`;
+    },
+    truncatePath: function(fp, maxLen = 60) {
+      if (!fp) return '';
+      if (fp.length <= maxLen) return fp;
+      return '\u2026' + fp.slice(-(maxLen - 1));
+    },
     pullStats: async function() {
       try {
         this.isPullingStats = true;
@@ -1061,71 +1623,33 @@ const dbView = Vue.component('db-view', {
       }
     },
     deletePlaylist: async function(playlistObj) {
-      iziToast.question({
-        timeout: 20000,
-        close: false,
-        overlayClose: true,
-        overlay: true,
-        displayMode: 'once',
-        id: 'question',
-        zindex: 99999,
-        layout: 2,
-        maxWidth: 600,
-        title: `Delete playlist <b>${playlistObj.playlistId}</b>?`,
-        position: 'center',
-        buttons: [
-          [`<button><b>Delete</b></button>`, async (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-            try {
-              await ADMINDATA.deleteSharedPlaylist(playlistObj);
-            } catch (err) {
-              iziToast.error({
-                title: 'Failed to Delete Playlist',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            }
-          }, true],
-          ['<button>Go Back</button>', (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-          }],
-        ]
+            adminConfirm(`Delete playlist <b>${playlistObj.playlistId}</b>?`, '', 'Delete', async () => {
+        try {
+                      await ADMINDATA.deleteSharedPlaylist(playlistObj);
+                    } catch (err) {
+                      iziToast.error({
+                        title: 'Failed to Delete Playlist',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    }
       });
     },
     deleteUnxpShared: async function() {
-      iziToast.question({
-        timeout: 20000,
-        close: false,
-        overlayClose: true,
-        overlay: true,
-        displayMode: 'once',
-        id: 'question',
-        zindex: 99999,
-        layout: 2,
-        maxWidth: 600,
-        title: `Delete all playlists without expiration dates?`,
-        position: 'center',
-        buttons: [
-          [`<button><b>Delete</b></button>`, async (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-            try {
-              this.isPullingShared = true;
-              await ADMINDATA.deleteUnxpShared();
-              await ADMINDATA.getSharedPlaylists();
-            } catch (err) {
-              iziToast.error({
-                title: 'Failed to Delete Shared Playlists',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            } finally {
-              this.isPullingShared = false;
-            }
-          }, true],
-          ['<button>Go Back</button>', (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-          }],
-        ]
+            adminConfirm(`Delete all playlists without expiration dates?`, '', 'Delete', async () => {
+        try {
+                      this.isPullingShared = true;
+                      await ADMINDATA.deleteUnxpShared();
+                      await ADMINDATA.getSharedPlaylists();
+                    } catch (err) {
+                      iziToast.error({
+                        title: 'Failed to Delete Shared Playlists',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    } finally {
+                      this.isPullingShared = false;
+                    }
       });
     },
     deleteExpiredShared: async function() {
@@ -1163,147 +1687,118 @@ const dbView = Vue.component('db-view', {
         });
       }
     },
+    stopScan: async function() {
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/db/scan/stop` });
+        iziToast.success({ title: 'Scan Stopped', position: 'topCenter', timeout: 3500 });
+        this.scanProgress = [];
+      } catch (err) {
+        iziToast.error({ title: 'Failed to Stop Scan', position: 'topCenter', timeout: 3500 });
+      }
+    },
     recompressImages: function() {
-      iziToast.question({
-        timeout: 20000,
-        close: false,
-        overlayClose: true,
-        overlay: true,
-        displayMode: 'once',
-        id: 'question',
-        zindex: 99999,
-        layout: 2,
-        maxWidth: 600,
-        title: `<b>Compress All Images?</b>`,
-        message: 'This process will run in the background',
-        position: 'center',
-        buttons: [
-          [`<button><b>Start</b></button>`, async (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-            
-            try {
-              const res = await API.axios({
-                method: 'POST',
-                url: `${API.url()}/api/v1/admin/db/force-compress-images`,
-              });
+            adminConfirm(`<b>Compress All Images?</b>`, 'This process will run in the background', 'Start', async () => {
+        try {
+                      const res = await API.axios({
+                        method: 'POST',
+                        url: `${API.url()}/api/v1/admin/db/force-compress-images`,
+                      });
 
-              if (res.data.started === true) {
-                iziToast.success({
-                  title: 'Process Started',
-                  position: 'topCenter',
-                  timeout: 3500
-                });
-              } else {
-                iziToast.warning({
-                  title: 'Image Compression In Progress',
-                  position: 'topCenter',
-                  timeout: 3500
-                });
-              }
+                      if (res.data.started === true) {
+                        iziToast.success({
+                          title: 'Process Started',
+                          position: 'topCenter',
+                          timeout: 3500
+                        });
+                      } else {
+                        iziToast.warning({
+                          title: 'Image Compression In Progress',
+                          position: 'topCenter',
+                          timeout: 3500
+                        });
+                      }
 
-            } catch (err) {
-              iziToast.error({
-                title: 'Failed',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            }
-          }, true],
-          ['<button>Go Back</button>', (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-          }],
-        ]
+                    } catch (err) {
+                      iziToast.error({
+                        title: 'Failed',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    }
       });
     },
     toggleCompressImage: function() {
-      iziToast.question({
-        timeout: 20000,
-        close: false,
-        overlayClose: true,
-        overlay: true,
-        displayMode: 'once',
-        id: 'question',
-        zindex: 99999,
-        layout: 2,
-        maxWidth: 600,
-        title: `<b>${this.dbParams.compressImage === true ? 'Disable' : 'Enable'} Compress Images?</b>`,
-        position: 'center',
-        buttons: [
-          [`<button><b>${this.dbParams.compressImage === true ? 'Disable' : 'Enable'}</b></button>`, (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-            API.axios({
-              method: 'POST',
-              url: `${API.url()}/api/v1/admin/db/params/compress-image`,
-              data: { compressImage: !this.dbParams.compressImage }
-            }).then(() => {
-              // update fronted data
-              Vue.set(ADMINDATA.dbParams, 'compressImage', !this.dbParams.compressImage);
+            adminConfirm(`<b>${this.dbParams.compressImage === true ? 'Disable' : 'Enable'} Compress Images?</b>`, '', `${this.dbParams.compressImage === true ? 'Disable' : 'Enable'}`, () => {
+        API.axios({
+                      method: 'POST',
+                      url: `${API.url()}/api/v1/admin/db/params/compress-image`,
+                      data: { compressImage: !this.dbParams.compressImage }
+                    }).then(() => {
+                      // update frontend data
+                      Vue.set(ADMINDATA.dbParams, 'compressImage', !this.dbParams.compressImage);
 
-              iziToast.success({
-                title: 'Updated Successfully',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            }).catch(() => {
-              iziToast.error({
-                title: 'Failed',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            });
-          }, true],
-          ['<button>Go Back</button>', (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-          }],
-        ]
+                      iziToast.success({
+                        title: 'Updated Successfully',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    }).catch(() => {
+                      iziToast.error({
+                        title: 'Failed',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    });
       });
     },
+    toggleAllowId3Edit: function() {
+            adminConfirm(
+        `<b>${this.dbParams.allowId3Edit ? 'Disable' : 'Enable'} ID3 Tag Editing?</b>`,
+        this.dbParams.allowId3Edit
+          ? 'Admins will no longer be able to edit ID3 tags in the Now Playing modal.'
+          : 'Allows admins to edit ID3 tags (title, artist, album, year, genre…) in the Now Playing modal. Tags are written directly to the file via ffmpeg.',
+        this.dbParams.allowId3Edit ? 'Disable' : 'Enable',
+        () => {
+          API.axios({
+                        method: 'POST',
+                        url: `${API.url()}/api/v1/admin/db/params/allow-id3edit`,
+                        data: { allowId3Edit: !this.dbParams.allowId3Edit }
+                      }).then(() => {
+                        Vue.set(ADMINDATA.dbParams, 'allowId3Edit', !this.dbParams.allowId3Edit);
+                        iziToast.success({ title: 'Updated Successfully', position: 'topCenter', timeout: 3500 });
+                      }).catch(() => {
+                        iziToast.error({ title: 'Failed', position: 'topCenter', timeout: 3500 });
+                      });
+        }
+      );
+    },
     toggleSkipImg: function() {
-      iziToast.question({
-        timeout: 20000,
-        close: false,
-        overlayClose: true,
-        overlay: true,
-        displayMode: 'once',
-        id: 'question',
-        zindex: 99999,
-        layout: 2,
-        maxWidth: 600,
-        title: `<b>${this.dbParams.skipImg === true ? 'Disable' : 'Enable'} Image Skip?</b>`,
-        position: 'center',
-        buttons: [
-          [`<button><b>${this.dbParams.skipImg === true ? 'Disable' : 'Enable'}</b></button>`, (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-            API.axios({
-              method: 'POST',
-              url: `${API.url()}/api/v1/admin/db/params/skip-img`,
-              data: { skipImg: !this.dbParams.skipImg }
-            }).then(() => {
-              // update fronted data
-              Vue.set(ADMINDATA.dbParams, 'skipImg', !this.dbParams.skipImg);
+            adminConfirm(`<b>${this.dbParams.skipImg === true ? 'Disable' : 'Enable'} Image Skip?</b>`, '', `${this.dbParams.skipImg === true ? 'Disable' : 'Enable'}`, () => {
+        API.axios({
+                      method: 'POST',
+                      url: `${API.url()}/api/v1/admin/db/params/skip-img`,
+                      data: { skipImg: !this.dbParams.skipImg }
+                    }).then(() => {
+                      // update frontend data
+                      Vue.set(ADMINDATA.dbParams, 'skipImg', !this.dbParams.skipImg);
 
-              iziToast.success({
-                title: 'Updated Successfully',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            }).catch(() => {
-              iziToast.error({
-                title: 'Failed',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            });
-          }, true],
-          ['<button>Go Back</button>', (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-          }],
-        ]
+                      iziToast.success({
+                        title: 'Updated Successfully',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    }).catch(() => {
+                      iziToast.error({
+                        title: 'Failed',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    });
       });
     },
     openModal: function(modalView) {
       modVM.currentViewModal = modalView;
-      M.Modal.getInstance(document.getElementById('admin-modal')).open();
+      modVM.openModal();
     }
   }
 });
@@ -1311,7 +1806,7 @@ const dbView = Vue.component('db-view', {
 const rpnView = Vue.component('rpn-view', {
   data() {
     return {
-      tabs: null,
+      activeTab: 'standard',
       submitPending: false
     };
   },
@@ -1321,11 +1816,11 @@ const rpnView = Vue.component('rpn-view', {
         <div class="col s12">
           <h1>mStream RPN</h1>
           <div class="card">
-            <ul id="tab-thing" class="tabs tabs-fixed-width">
-              <li class="tab"><a class="active" href="#test1">Standard</a></li>
-              <li class="tab"><a href="#test2">Advanced</a></li>
-            </ul>
-            <div id="test1">
+            <div class="tabs">
+              <div class="tab"><button :class="{active: activeTab==='standard'}" @click="activeTab='standard'">Standard</button></div>
+              <div class="tab"><button :class="{active: activeTab==='advanced'}" @click="activeTab='advanced'">Advanced</button></div>
+            </div>
+            <div id="test1" v-show="activeTab==='standard'">
               <form @submit.prevent="standardLogin">
                 <div class="card-content">
                   <span class="card-title">Login</span>
@@ -1350,20 +1845,20 @@ const rpnView = Vue.component('rpn-view', {
                       </div>
                       <div class="row">
                         <div class="col s2"></div>
-                        <a target="_blank" href="https://mstream.io/reverse-proxy-network" class="col s8 blue darken-3 waves-effect waves-light btn">Sign Up</a>
+                        <a target="_blank" href="https://mstream.io/reverse-proxy-network" class="btn blue">Sign Up</a>
                         <div class="col s2"></div>
                       </div>
                     </div>
                   </div>
                 </div>
                 <div class="card-action">
-                  <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
+                  <button class="btn" type="submit" :disabled="submitPending === true">
                     {{submitPending === false ? 'Login to RPN' : 'Pending...'}}
                   </button>
                 </div>
               </form>
             </div>
-            <div id="test2">
+            <div id="test2" v-show="activeTab==='advanced'">
               <form @submit.prevent="advancedLogin">
                 <div class="card-content">
                   <span class="card-title">Config</span>
@@ -1404,7 +1899,7 @@ const rpnView = Vue.component('rpn-view', {
                   </div>
                 </div>
                 <div class="card-action">
-                  <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
+                  <button class="btn" type="submit" :disabled="submitPending === true">
                     {{submitPending === false ? 'Connect To Server' : 'Connecting...'}}
                   </button>
                 </div>
@@ -1423,13 +1918,6 @@ const rpnView = Vue.component('rpn-view', {
         </ul>
       </div>
     </div>`,
-  mounted: function () {
-    this.tabs = M.Tabs.init(document.getElementById('tab-thing'), {});
-    this.tabs.select('test1')
-  },
-  beforeDestroy: function() {
-    this.tabs.destroy();
-  },
   methods: {
     standardLogin: function() {
       console.log('STAND')
@@ -1448,23 +1936,34 @@ const infoView = Vue.component('info-view', {
   },
   template: `
     <div class="container">
-      <div class="row logo-row-mstream">
-        <svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" x="0" y="0" viewBox="0 0 612 153" xml:space="preserve"><style>.st0,.st1{fill-rule:evenodd;clip-rule:evenodd;fill:#264679}.st1{fill:#6684b2}</style><path class="st0" d="M179.9 45.5c-6.2 0-11.5 1.7-15.9 5s-6.5 8.1-6.5 14.4c0 4.9 1.3 9.1 3.8 12.4 2.5 3.4 5.7 5.8 9.3 7.3 3.7 1.5 7.3 2.8 11 3.8s6.8 2.3 9.3 3.9c2.5 1.5 3.8 3.5 3.8 5.8 0 4.8-4.4 7.2-13.1 7.2h-24.1V118h24.1c17.1 0 25.6-6.7 25.6-20.2 0-1.9-.2-3.8-.6-5.8-.4-2-1.2-4-2.6-6-1.3-2.1-3.3-3.7-5.8-4.9-2.5-1.2-6.4-2.7-11.5-4.5l-8.8-3.1c-.7-.2-1.7-.7-2.9-1.3-1.3-.7-2.2-1.3-2.8-1.9-.6-.6-1.1-1.4-1.6-2.3-.5-.9-.7-2-.7-3.2 0-2 1-3.5 2.9-4.6 1.9-1.1 4.3-1.6 7-1.6h24.6V45.5h-24.5zM226.4 58.3v31c0 10.2 2.5 17.6 7.6 22 5.1 4.4 13 6.6 23.7 6.6v-12.8c-2.7 0-4.9-.2-6.8-.4-1.8-.3-3.7-.9-5.8-1.9-2-.9-3.6-2.6-4.7-4.9-1.1-2.3-1.6-5.2-1.6-8.7V58.3h18.8V45.5h-18.8V31.6L214 58.3h12.4zM281.1 118V76.8c0-7.2.9-12 2.6-14.5 1-1.3 2.2-2.2 3.6-2.8 1.4-.6 2.6-1 3.6-1.1 1-.1 2.5-.1 4.3-.1H310V45.5h-12.2c-3.6 0-6.5.1-8.6.3-2.1.2-4.5.9-7.3 2s-5.1 2.8-7.1 5c-4 4.4-6 12.4-6 24V118h12.3zM326.2 53.8c-6.2 7.4-9.3 17-9.3 28.9 0 10.7 3.2 19.4 9.5 26.2s14.7 10.1 25.3 10.1c8.7 0 16.3-2.7 22.7-8.1L366 102c-3.7 2.1-8.5 3.2-14.3 3.2-6.5 0-11.8-2.3-15.8-6.9-4-4.6-6-10.5-6-17.9 0-7 1.9-12.9 5.6-17.9 3.8-5 8.9-7.5 15.5-7.5 3.3 0 6.1.8 8.2 2.4 2.1 1.6 3.2 4 3.2 7.2 0 5-1.2 8.5-3.6 10.6-2.4 2.1-6.7 3.2-12.9 3.2h-6.7v11.7h5.7c20.3 0 30.5-8.5 30.5-25.4 0-13.6-7.9-20.7-23.7-21.5-10.8-.2-19.3 3.3-25.5 10.6zM412.3 73.2c-7.4 0-13.6 1.9-18.5 5.7-4.9 3.8-7.4 9.4-7.4 16.7 0 7.3 2.3 12.9 7 16.7 4.6 3.8 10.9 5.7 18.8 5.7h31V73.6c0-9.1-2.4-16-7.2-20.8-4.8-4.8-11.7-7.2-20.7-7.2h-22.9v12.8h22.3c10.9 0 16.4 6.1 16.4 18.2v28.7h-18.4c-9.1 0-13.6-3.2-13.6-9.8 0-3.3 1.2-5.9 3.6-7.8 2.4-1.8 5.8-2.7 10.2-2.7 5.1 0 9.4 1.4 12.9 4.3v-14c-4.9-1.4-9.3-2.1-13.5-2.1zM458.8 118H471V58.3h24.4V118h12.2V58.3h5.7c6.8 0 11.3.7 13.5 2 4.3 2.5 6.5 7.7 6.5 15.5V118h12.2V75.7c0-6-.6-11.2-1.9-15.5-1.2-4.3-3.9-7.8-7.9-10.6-3.9-2.7-9.1-4.1-15.7-4.1h-61.4V118z"/><path class="st1" d="M75 118.5v-83l21 13v70z"/><path fill-rule="evenodd" clip-rule="evenodd" fill="#26477b" d="M99 118.5v-69l11.5 7 10.5-7v69z"/><path class="st1" d="M124 118.5v-70l21-13v83z"/></svg>
+      <div class="row logo-row-mstream" style="display:flex;align-items:center;gap:14px;padding:0 0 8px;">
+        <svg width="72" height="72" viewBox="72 33 76 89">
+          <defs>
+            <linearGradient id="aa-vg-o" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c4b5fd"/><stop offset="100%" stop-color="#6d28d9" stop-opacity=".85"/></linearGradient>
+            <linearGradient id="aa-vg-i" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#4c1d95"/><stop offset="100%" stop-color="#a78bfa"/></linearGradient>
+          </defs>
+          <polygon fill="url(#aa-vg-o)" points="75,118.5 75,35.5 96,48.5 96,118.5"/>
+          <polygon fill="url(#aa-vg-i)" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/>
+          <polygon fill="url(#aa-vg-o)" points="124,118.5 124,48.5 145,35.5 145,118.5"/>
+        </svg>
+        <div>
+          <div style="font-size:1.6rem;font-weight:700;line-height:1.1;"><span style="font-weight:300;color:var(--t2);">m</span><span style="color:var(--t1);">Stream</span> <span style="font-size:.7rem;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--primary);opacity:.85;">Velvet</span></div>
+          <div style="font-size:.8rem;color:var(--t3);margin-top:2px;">Admin Panel</div>
+        </div>
+        <!-- legacy mstream-logo placeholder: replaced by velvet mark above<path class="st0" d="M179.9 45.5c-6.2 0-11.5 1.7-15.9 5s-6.5 8.1-6.5 14.4c0 4.9 1.3 9.1 3.8 12.4 2.5 3.4 5.7 5.8 9.3 7.3 3.7 1.5 7.3 2.8 11 3.8s6.8 2.3 9.3 3.9c2.5 1.5 3.8 3.5 3.8 5.8 0 4.8-4.4 7.2-13.1 7.2h-24.1V118h24.1c17.1 0 25.6-6.7 25.6-20.2 0-1.9-.2-3.8-.6-5.8-.4-2-1.2-4-2.6-6-1.3-2.1-3.3-3.7-5.8-4.9-2.5-1.2-6.4-2.7-11.5-4.5l-8.8-3.1c-.7-.2-1.7-.7-2.9-1.3-1.3-.7-2.2-1.3-2.8-1.9-.6-.6-1.1-1.4-1.6-2.3-.5-.9-.7-2-.7-3.2 0-2 1-3.5 2.9-4.6 1.9-1.1 4.3-1.6 7-1.6h24.6V45.5h-24.5zM226.4 58.3v31c0 10.2 2.5 17.6 7.6 22 5.1 4.4 13 6.6 23.7 6.6v-12.8c-2.7 0-4.9-.2-6.8-.4-1.8-.3-3.7-.9-5.8-1.9-2-.9-3.6-2.6-4.7-4.9-1.1-2.3-1.6-5.2-1.6-8.7V58.3h18.8V45.5h-18.8V31.6L214 58.3h12.4zM281.1 118V76.8c0-7.2.9-12 2.6-14.5 1-1.3 2.2-2.2 3.6-2.8 1.4-.6 2.6-1 3.6-1.1 1-.1 2.5-.1 4.3-.1H310V45.5h-12.2c-3.6 0-6.5.1-8.6.3-2.1.2-4.5.9-7.3 2s-5.1 2.8-7.1 5c-4 4.4-6 12.4-6 24V118h12.3zM326.2 53.8c-6.2 7.4-9.3 17-9.3 28.9 0 10.7 3.2 19.4 9.5 26.2s14.7 10.1 25.3 10.1c8.7 0 16.3-2.7 22.7-8.1L366 102c-3.7 2.1-8.5 3.2-14.3 3.2-6.5 0-11.8-2.3-15.8-6.9-4-4.6-6-10.5-6-17.9 0-7 1.9-12.9 5.6-17.9 3.8-5 8.9-7.5 15.5-7.5 3.3 0 6.1.8 8.2 2.4 2.1 1.6 3.2 4 3.2 7.2 0 5-1.2 8.5-3.6 10.6-2.4 2.1-6.7 3.2-12.9 3.2h-6.7v11.7h5.7c20.3 0 30.5-8.5 30.5-25.4 0-13.6-7.9-20.7-23.7-21.5-10.8-.2-19.3 3.3-25.5 10.6zM412.3 73.2c-7.4 0-13.6 1.9-18.5 5.7-4.9 3.8-7.4 9.4-7.4 16.7 0 7.3 2.3 12.9 7 16.7 4.6 3.8 10.9 5.7 18.8 5.7h31V73.6c0-9.1-2.4-16-7.2-20.8-4.8-4.8-11.7-7.2-20.7-7.2h-22.9v12.8h22.3c10.9 0 16.4 6.1 16.4 18.2v28.7h-18.4c-9.1 0-13.6-3.2-13.6-9.8 0-3.3 1.2-5.9 3.6-7.8 2.4-1.8 5.8-2.7 10.2-2.7 5.1 0 9.4 1.4 12.9 4.3v-14c-4.9-1.4-9.3-2.1-13.5-2.1zM458.8 118H471V58.3h24.4V118h12.2V58.3h5.7c6.8 0 11.3.7 13.5 2 4.3 2.5 6.5 7.7 6.5 15.5V118h12.2V75.7c0-6-.6-11.2-1.9-15.5-1.2-4.3-3.9-7.8-7.9-10.6-3.9-2.7-9.1-4.1-15.7-4.1h-61.4V118z"/><path class="st1" d="M75 118.5v-83l21 13v70z"/><path fill-rule="evenodd" clip-rule="evenodd" fill="#26477b" d="M99 118.5v-69l11.5 7 10.5-7v69z"/><path class="st1" d="M124 118.5v-70l21-13v83z"/>-->
       </div>
       <div class="row">
         <div class="col s12">
           <div class="card">
             <div class="card-content">
-              <blockquote>
-                <h4><b>mStream v{{version.val}}</b></h4>
-                <h4>Developed By: Paul Sori</h4>
-                <h5><a href="mailto:paul.sori@pm.me">paul@mstream.io</a></h5>
-              </blockquote>
-              <br>
-              <div>
-                <iframe src="https://github.com/sponsors/IrosTheBeggar/button" title="Donate" height="35" width="200px" style="border: 0;"></iframe>
+              <h4 style="margin:0 0 .25rem;font-size:1.3rem;font-weight:700;color:var(--t1);"><span style="font-weight:300;color:var(--t2);">m</span><span style="font-weight:700;color:var(--t1);">Stream</span> <span style="font-size:10px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--primary);opacity:.85;vertical-align:middle;position:relative;top:-1px;">Velvet</span> <span style="color:var(--primary);font-size:1rem;">v{{version.val}}</span> <span style="color:var(--t2);font-size:.8rem;font-weight:400;">— a fork of mStream</span></h4>
+              <p style="margin:0 0 1.25rem;color:var(--t2);">Developed by <a href="mailto:paul@mstream.io" style="color:var(--accent);">Paul Sori</a></p>
+              <div style="background:var(--raised);border:1px solid var(--border);border-radius:8px;padding:.85rem 1.1rem;margin-bottom:1.25rem;">
+                <div style="color:var(--t2);font-size:.85rem;">The entire application — player, admin panel, scanner, API and more — expanded by <strong style="color:var(--t1);">AroundMyRoom</strong> (Dennis Slagers) with Claude Sonnet and serious prompting.</div>
               </div>
-              <br>
+              <div style="display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;margin-bottom:1.25rem;">
+                <iframe src="https://github.com/sponsors/IrosTheBeggar/button" title="Donate" height="35" width="116" style="border:0;border-radius:6px;"></iframe>
+              </div>
               <a href="https://discord.gg/AM896Rr" target="_blank">
                 <svg style="max-height:70px;" viewBox="0 0 292 80" fill="none" xmlns="http://www.w3.org/2000/svg"><g clip-path="url(#clip0)"><g clip-path="url(#clip1)" fill="#5865F2"><path d="M61.796 16.494a59.415 59.415 0 00-15.05-4.73 44.128 44.128 0 00-1.928 4.003c-5.612-.844-11.172-.844-16.68 0a42.783 42.783 0 00-1.95-4.002 59.218 59.218 0 00-15.062 4.74C1.6 30.9-.981 44.936.31 58.772c6.317 4.717 12.44 7.583 18.458 9.458a45.906 45.906 0 003.953-6.51 38.872 38.872 0 01-6.225-3.03 30.957 30.957 0 001.526-1.208c12.004 5.615 25.046 5.615 36.906 0 .499.416 1.01.82 1.526 1.208a38.775 38.775 0 01-6.237 3.035 45.704 45.704 0 003.953 6.511c6.025-1.875 12.153-4.74 18.47-9.464 1.515-16.04-2.588-29.947-10.844-42.277zm-37.44 33.767c-3.603 0-6.558-3.363-6.558-7.46 0-4.096 2.892-7.466 6.559-7.466 3.666 0 6.621 3.364 6.558 7.466.006 4.097-2.892 7.46-6.558 7.46zm24.237 0c-3.603 0-6.558-3.363-6.558-7.46 0-4.096 2.892-7.466 6.558-7.466 3.667 0 6.622 3.364 6.558 7.466 0 4.097-2.891 7.46-6.558 7.46zM98.03 26.17h15.663c3.776 0 6.966.604 9.583 1.806 2.61 1.201 4.567 2.877 5.864 5.022 1.296 2.145 1.95 4.6 1.95 7.367 0 2.707-.677 5.163-2.031 7.36-1.354 2.204-3.414 3.944-6.185 5.228-2.771 1.283-6.203 1.928-10.305 1.928h-14.54V26.17zm14.378 21.414c2.542 0 4.499-.65 5.864-1.945 1.366-1.301 2.049-3.071 2.049-5.316 0-2.08-.609-3.739-1.825-4.98-1.216-1.243-3.058-1.87-5.52-1.87h-4.9v14.111h4.332zM154.541 54.846c-2.169-.575-4.126-1.407-5.864-2.503v-6.81c1.314 1.038 3.075 1.893 5.284 2.567 2.209.668 4.344 1.002 6.409 1.002.964 0 1.693-.128 2.186-.386.494-.258.741-.569.741-.926 0-.41-.132-.75-.402-1.026-.27-.275-.792-.504-1.566-.697l-4.82-1.108c-2.76-.656-4.717-1.565-5.881-2.73-1.165-1.161-1.745-2.685-1.745-4.572 0-1.588.505-2.965 1.527-4.143 1.015-1.178 2.461-2.087 4.337-2.725 1.877-.645 4.068-.967 6.587-.967 2.249 0 4.309.246 6.186.738 1.876.492 3.425 1.12 4.659 1.887v6.44c-1.263-.767-2.709-1.37-4.361-1.828a19.138 19.138 0 00-5.084-.674c-2.519 0-3.775.44-3.775 1.313 0 .41.195.715.585.92.39.205 1.107.416 2.146.639l4.016.738c2.623.463 4.579 1.278 5.864 2.438 1.286 1.16 1.928 2.878 1.928 5.152 0 2.49-1.061 4.465-3.19 5.93-2.129 1.465-5.147 2.198-9.06 2.198a26.36 26.36 0 01-6.707-.867zM182.978 53.984c-2.3-1.149-4.039-2.708-5.198-4.677-1.159-1.969-1.744-4.184-1.744-6.645 0-2.462.602-4.665 1.807-6.605 1.205-1.94 2.972-3.464 5.302-4.571 2.329-1.108 5.112-1.659 8.354-1.659 4.016 0 7.35.862 10.001 2.585v7.507c-.935-.656-2.026-1.19-3.271-1.6-1.245-.41-2.576-.615-3.999-.615-2.49 0-4.435.463-5.841 1.395-1.406.931-2.111 2.144-2.111 3.65 0 1.477.682 2.685 2.048 3.634 1.366.944 3.345 1.418 5.944 1.418 1.337 0 2.657-.2 3.959-.592 1.297-.398 2.416-.885 3.351-1.459v7.261c-2.943 1.805-6.357 2.707-10.242 2.707-3.27-.011-6.059-.586-8.36-1.734zM211.518 53.984c-2.318-1.148-4.085-2.72-5.302-4.718-1.216-1.998-1.83-4.225-1.83-6.686 0-2.462.608-4.66 1.83-6.587 1.222-1.928 2.978-3.44 5.285-4.536 2.3-1.096 5.049-1.641 8.233-1.641 3.185 0 5.933.545 8.234 1.64 2.301 1.097 4.057 2.597 5.262 4.513 1.205 1.917 1.807 4.114 1.807 6.605 0 2.461-.602 4.688-1.807 6.687-1.205 1.998-2.967 3.569-5.285 4.717-2.318 1.149-5.055 1.723-8.216 1.723-3.162 0-5.899-.568-8.211-1.717zm12.204-7.279c.976-.996 1.469-2.314 1.469-3.955s-.488-2.948-1.469-3.915c-.975-.973-2.307-1.46-3.993-1.46-1.716 0-3.059.487-4.04 1.46-.975.973-1.463 2.274-1.463 3.915 0 1.64.488 2.96 1.463 3.956.976.996 2.324 1.5 4.04 1.5 1.686-.006 3.018-.504 3.993-1.5zM259.17 31.34v8.86c-1.021-.685-2.341-1.025-3.976-1.025-2.141 0-3.793.662-4.941 1.986-1.153 1.325-1.727 3.388-1.727 6.177v7.548h-9.84V30.888h9.64v7.63c.533-2.79 1.4-4.846 2.593-6.176 1.188-1.325 2.725-1.987 4.596-1.987 1.417 0 2.634.328 3.655.985zM291.864 25.35v29.537h-9.841v-5.374c-.832 2.022-2.094 3.563-3.792 4.618-1.699 1.049-3.799 1.576-6.289 1.576-2.226 0-4.165-.55-5.824-1.658-1.658-1.108-2.937-2.626-3.838-4.554-.895-1.928-1.349-4.108-1.349-6.546-.028-2.514.448-4.77 1.429-6.769.976-1.998 2.358-3.557 4.137-4.676 1.779-1.12 3.81-1.682 6.088-1.682 4.688 0 7.832 2.08 9.438 6.235V25.35h9.841zm-11.309 21.191c1.004-.996 1.503-2.29 1.503-3.873 0-1.53-.488-2.778-1.463-3.733-.976-.956-2.313-1.436-3.994-1.436-1.658 0-2.983.486-3.976 1.46-.993.972-1.486 2.232-1.486 3.79 0 1.56.493 2.831 1.486 3.816.993.984 2.301 1.477 3.936 1.477 1.658-.006 2.989-.504 3.994-1.5zM139.382 33.443c2.709 0 4.906-2.015 4.906-4.5 0-2.486-2.197-4.501-4.906-4.501-2.71 0-4.906 2.015-4.906 4.5 0 2.486 2.196 4.501 4.906 4.501zM134.472 36.544c3.006 1.324 6.736 1.383 9.811 0v18.471h-9.811V36.544z"></path></g></g><defs><clipPath id="clip0"><path fill="#fff" transform="translate(0 11.765)" d="M0 0h292v56.471H0z"></path></clipPath><clipPath id="clip1"><path fill="#fff" transform="translate(0 11.765)" d="M0 0h292v56.471H0z"></path></clipPath></defs></svg>
               </a>
@@ -1485,10 +1984,9 @@ const transcodeView = Vue.component('transcode-view', {
   },
   template: `
     <div class="container">
-      <div class="row logo-row">
-        <h4>Powered By</h4>
-        <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-        <svg xmlns="http://www.w3.org/2000/svg" width="100%" xmlns:xlink="http://www.w3.org/1999/xlink" height="120" viewBox="0 0 224.44334 60.186738" version="1.1">
+      <div class="powered-by-row">
+        <span class="powered-by-label">Powered by</span>
+        <svg class="ffmpeg-logo" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 224.44334 60.186738">
           <defs>
             <radialGradient id="a" gradientUnits="userSpaceOnUse" cy="442.72311" cx="-122.3936" gradientTransform="matrix(1,0,0,-1,134.4463,453.7334)" r="29.5804">
               <stop stop-color="#fff" offset="0"/>
@@ -1516,7 +2014,7 @@ const transcodeView = Vue.component('transcode-view', {
             <polygon points="60.507 0 61.351 2.432 19.834 45.706 15.82 47.006" fill="#1a5c34"/>
             <polygon points="23.808 3.106 11.004 18.039 11.004 24.358 30.022 2.58 60.507 0 15.82 47.006 21.714 47.346 54.168 13.9 54.168 45.648 50.538 49.059 59.759 49.604 59.759 58.403 30.973 55.965 45.597 41.737 45.597 34.677 24.721 55.437 0 53.344 39.798 10.042 33.195 10.432 4.455 42.317 4.455 15.226 7.159 11.971 0.511 12.364 0.511 5.078" fill="url(#a)"/>
           </g>
-          <g transform="matrix(2.6160433,0,0,2.6160433,70,-145)">
+          <g class="ffmpeg-text" transform="matrix(2.6160433,0,0,2.6160433,70,-145)">
             <polygon points="2.907 66.777 6.825 66.777 6.825 69.229 2.907 69.229 2.907 74.687 0.797 74.687 0.797 74.688 0.797 61.504 8.218 61.504 8.218 63.965 2.907 63.965"/>
             <polygon points="11.13 66.777 15.049 66.777 15.049 69.229 11.13 69.229 11.13 74.687 9.021 74.687 9.021 74.688 9.021 61.504 16.442 61.504 16.442 63.965 11.13 63.965"/>
             <path d="m19.69 69.063v5.625h-2.461v-8.534l2.461-0.264v0.782c0.551-0.517 1.254-0.773 2.109-0.773 1.113 0 1.963 0.337 2.549 1.011 0.645-0.674 1.611-1.011 2.9-1.011 1.113 0 1.963 0.337 2.549 1.011 0.586 0.675 0.879 1.45 0.879 2.329v5.449h-2.461v-4.834c0-0.586-0.132-1.04-0.396-1.362-0.264-0.321-0.691-0.491-1.283-0.51-0.486 0.035-0.908 0.357-1.266 0.967-0.029 0.183-0.044 0.366-0.044 0.555v5.186h-2.461v-4.834c0-0.586-0.132-1.04-0.396-1.362-0.264-0.321-0.689-0.492-1.281-0.511-0.539 0.034-1.005 0.394-1.398 1.08z"/>
@@ -1544,9 +2042,7 @@ const transcodeView = Vue.component('transcode-view', {
                   </tr>
                   <tr>
                     <td><b>FFmpeg Directory:</b> {{params.ffmpegDirectory}}</td>
-                    <td>
-                      [<a v-on:click="changeFolder()">edit</a>]
-                    </td>
+                    <td style="color:var(--t2);font-size:.82rem">Edit in config file</td>
                   </tr>
                   <tr>
                     <td><b>FFmpeg Downloaded:</b> {{downloadPending.val === true ? 'pending...' : params.downloaded}}</td>
@@ -1581,63 +2077,43 @@ const transcodeView = Vue.component('transcode-view', {
     </div>`,
   methods: {
     toggleEnabled: function() {
-      iziToast.question({
-        timeout: 20000,
-        close: false,
-        overlayClose: true,
-        overlay: true,
-        displayMode: 'once',
-        id: 'question',
-        zindex: 99999,
-        layout: 2,
-        maxWidth: 600,
-        title: `<b>${this.params.enabled === true ? 'Disable' : 'Enable'} Transcoding?</b>`,
-        message: 'Enabling this will download FFmpeg',
-        position: 'center',
-        buttons: [
-          [`<button><b>${this.params.enabled === true ? 'Disable' : 'Enable'}</b></button>`, async (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-            try {
-              await API.axios({
-                method: 'POST',
-                url: `${API.url()}/api/v1/admin/transcode/enable`,
-                data: { enable: !this.params.enabled }
-              });
-              Vue.set(ADMINDATA.transcodeParams, 'enabled', !this.params.enabled);
+            adminConfirm(`<b>${this.params.enabled === true ? 'Disable' : 'Enable'} Transcoding?</b>`, 'Enabling this will download FFmpeg', `${this.params.enabled === true ? 'Disable' : 'Enable'}`, async () => {
+        try {
+                      await API.axios({
+                        method: 'POST',
+                        url: `${API.url()}/api/v1/admin/transcode/enable`,
+                        data: { enable: !this.params.enabled }
+                      });
+                      Vue.set(ADMINDATA.transcodeParams, 'enabled', !this.params.enabled);
 
-              // download ffmpeg
-              if (this.params.enabled === true) { this.downloadFFMpeg(); }
+                      // download ffmpeg
+                      if (this.params.enabled === true) { this.downloadFFMpeg(); }
 
-              iziToast.success({
-                title: 'Updated Successfully',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            } catch (err) {
-              iziToast.error({
-                title: 'Failed',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            }
-          }, true],
-          ['<button>Go Back</button>', (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-          }],
-        ]
+                      iziToast.success({
+                        title: 'Updated Successfully',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    } catch (err) {
+                      iziToast.error({
+                        title: 'Failed',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    }
       });
     },
     changeCodec: function() {
       modVM.currentViewModal = 'edit-transcode-codec-modal';
-      M.Modal.getInstance(document.getElementById('admin-modal')).open();
+      modVM.openModal();
     },
     changeBitrate: function() {
       modVM.currentViewModal = 'edit-transcode-bitrate-modal';
-      M.Modal.getInstance(document.getElementById('admin-modal')).open();
+      modVM.openModal();
     },
     changeAlgorithm: function() {
       modVM.currentViewModal = 'edit-transcode-algorithm-modal';
-      M.Modal.getInstance(document.getElementById('admin-modal')).open();
+      modVM.openModal();
     },
     downloadFFMpeg: async function() {
       if (this.downloadPending.val === true) {
@@ -1666,38 +2142,33 @@ const transcodeView = Vue.component('transcode-view', {
         this.downloadPending.val = false;
       }
     },
-    changeFolder: function() {
-      iziToast.warning({
-        title: 'Coming Soon',
-        position: 'topCenter',
-        timeout: 3500
-      });
-    }
+    changeFolder: function() {}
   }
 });
 
-const federationMainPanel = Vue.component('federation-main-panel', {
+const federationMainPanel = Vue.component('federation-main-panel', { // activeTab-patched
   data() {
     return {
       params: ADMINDATA.federationParams,
       paramsTS: ADMINDATA.federationParamsUpdated,
       enabled: ADMINDATA.federationEnabled,
       syncthingUrl: "",
-      tabs: null,
+      activeTab: 'federation',
       enablePending: false,
 
       currentToken: '',
+      inviteServerUrl: '',
       parsedTokenData: null,
       submitPending: false
     };
   },
   template: `
     <div>
-      <ul id="syncthing-tabs" class="tabs tabs-fixed-width">
-        <li class="tab"><a class="active" href="#sync-tab-1">Federation</a></li>
-        <li v-on:click="setSyncthingUrl()" class="tab"><a href="#sync-tab-2">Syncthing</a></li>
-      </ul>
-      <div id="sync-tab-1">
+      <div class="tabs">
+        <div class="tab"><button :class="{active: activeTab==='federation'}" @click="activeTab='federation'">Federation</button></div>
+        <div class="tab"><button :class="{active: activeTab==='syncthing'}" @click="activeTab='syncthing'; setSyncthingUrl()">Syncthing</button></div>
+      </div>
+      <div id="sync-tab-1" v-show="activeTab==='federation'">
         <div class="container">
           <div class="row">
             <div class="col s12">
@@ -1711,10 +2182,10 @@ const federationMainPanel = Vue.component('federation-main-panel', {
                       </tr>
                     </tbody>
                   </table>
-                  <p v-on:click="openFederationGenerateInviteModal()">Generate Invite Token</p>
+                  <button type="button" class="btn-flat btn-small" style="margin-top:.25rem;" @click="openFederationGenerateInviteModal()">Generate Invite Token</button>
                 </div>
                 <div class="card-action flow-root">
-                  <a v-on:click="enableFederation()" v-bind:class="{ 'red': enabled.val }" class="waves-effect waves-light btn right">Disable Federation</a>
+                  <a v-on:click="enableFederation()" v-bind:class="{ 'red': enabled.val }" class="btn">Disable Federation</a>
                 </div>
               </div>
             </div>
@@ -1734,11 +2205,9 @@ const federationMainPanel = Vue.component('federation-main-panel', {
                           <textarea id="fed-invite-token" v-model="currentToken" style="height: auto;" rows="4" cols="60" placeholder="Paste your token here"></textarea>
                         </div>
                       </div>
-                      <div class="row">
-                        <div class="input-field col s12">
-                          <input id="fed-invite-url" required type="text" class="validate">
-                          <label for="fed-invite-url">Server URL</label>
-                        </div>
+                      <div class="input-field" style="margin-top:.5rem;">
+                        <label for="fed-invite-url">Server URL (optional)</label>
+                        <input id="fed-invite-url" v-model="inviteServerUrl" type="text" placeholder="https://your-server.example.com">
                       </div>
                     </div>
                     <div class="col s12 m12 l6">
@@ -1750,7 +2219,7 @@ const federationMainPanel = Vue.component('federation-main-panel', {
                             <span>{{key}}</span>
                           </label>
                         </div>
-                        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
+                        <button class="btn" type="submit" :disabled="submitPending === true">
                           {{submitPending === false ? 'Accept Invite' : 'Working ...'}}
                         </button>
                       </form>
@@ -1765,7 +2234,7 @@ const federationMainPanel = Vue.component('federation-main-panel', {
           </div>
         </div>
       </div>
-      <div id="sync-tab-2">
+      <div id="sync-tab-2" v-show="activeTab==='syncthing'">
         <iframe id="syncthing-iframe" :src="syncthingUrl"></iframe>
       </div>
     </div>`,
@@ -1783,13 +2252,6 @@ const federationMainPanel = Vue.component('federation-main-panel', {
         this.parsedTokenData = null;
       }
     }
-  },
-  mounted: function () {
-    this.tabs = M.Tabs.init(document.getElementById('syncthing-tabs'), {});
-    this.tabs.select('test1')
-  },
-  beforeDestroy: function() {
-    this.tabs.destroy();
   },
   methods: {
     editName: async function() {
@@ -1856,58 +2318,32 @@ const federationMainPanel = Vue.component('federation-main-panel', {
     },
     openFederationGenerateInviteModal: function() {
       modVM.currentViewModal = 'federation-generate-invite-modal';
-      M.Modal.getInstance(document.getElementById('admin-modal')).open();
+      modVM.openModal();
     },
     enableFederation: function() {
-      iziToast.question({
-        timeout: 20000,
-        close: false,
-        overlayClose: true,
-        overlay: true,
-        displayMode: 'once',
-        id: 'question',
-        zindex: 99999,
-        layout: 2,
-        maxWidth: 600,
-        title: `${this.enabled.val === true ? 'Disable' : 'Enable'} Federation?`,
-        position: 'center',
-        buttons: [
-          [`<button><b>${this.enabled.val === true ? 'Disable' : 'Enable'}</b></button>`, async (instance, toast) => {
-            try {
-              this.enablePending = true;
-      
-              await API.axios({
-                method: 'POST',
-                url: `${API.url()}/api/v1/admin/federation/enable`,
-                data: {
-                  enable: !this.enabled.val,
-                }
-              });
-      
-              // update fronted data
-              Vue.set(ADMINDATA.federationEnabled, 'val', !this.enabled.val);
-        
-              instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-
-              iziToast.success({
-                title: `Syncthing ${this.enabled.val === true ? 'Enabled' : 'Disabled'}`,
-                position: 'topCenter',
-                timeout: 3500
-              });
-            } catch(err) {
-              iziToast.error({
-                title: 'Toggle Failed',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            }finally {
-              this.enablePending = false;
-            }
-          }, true],
-          ['<button>Go Back</button>', (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-          }],
-        ]
+      adminConfirm(`${this.enabled.val === true ? 'Disable' : 'Enable'} Federation?`, '', `${this.enabled.val === true ? 'Disable' : 'Enable'}`, async () => {
+        try {
+          this.enablePending = true;
+          await API.axios({
+            method: 'POST',
+            url: `${API.url()}/api/v1/admin/federation/enable`,
+            data: { enable: !this.enabled.val }
+          });
+          Vue.set(ADMINDATA.federationEnabled, 'val', !this.enabled.val);
+          iziToast.success({
+            title: `Syncthing ${this.enabled.val === true ? 'Enabled' : 'Disabled'}`,
+            position: 'topCenter',
+            timeout: 3500
+          });
+        } catch(err) {
+          iziToast.error({
+            title: 'Toggle Failed',
+            position: 'topCenter',
+            timeout: 3500
+          });
+        } finally {
+          this.enablePending = false;
+        }
       });
     }
   }
@@ -1927,11 +2363,11 @@ const federationView = Vue.component('federation-view', {
     </div>
     <div v-else-if="enabled.val === false" class="row">
       <div class="container">
-        <div class="row logo-row">
-          <h4>Powered By</h4>
-          <svg xmlns="http://www.w3.org/2000/svg" max-width="200px" viewBox="0 0 429 117.3"><linearGradient id="a" gradientUnits="userSpaceOnUse" x1="58.666" y1="117.332" x2="58.666" y2="0"><stop offset="0" stop-color="#0882c8"/><stop offset="1" stop-color="#26b6db"/></linearGradient><circle fill="url(#a)" cx="58.7" cy="58.7" r="58.7"/><circle fill="none" stroke="#FFF" stroke-width="6" stroke-miterlimit="10" cx="58.7" cy="58.5" r="43.7"/><path fill="#FFF" d="M94.7 47.8c4.7 1.6 9.8-.9 11.4-5.6 1.6-4.7-.9-9.8-5.6-11.4-4.7-1.6-9.8.9-11.4 5.6-1.6 4.7.9 9.8 5.6 11.4z"/><path fill="none" stroke="#FFF" stroke-width="6" stroke-miterlimit="10" d="M97.6 39.4l-30.1 25"/><path fill="#FFF" d="M77.6 91c-.4 4.9 3.2 9.3 8.2 9.8 5 .4 9.3-3.2 9.8-8.2.4-4.9-3.2-9.3-8.2-9.8-5-.4-9.4 3.2-9.8 8.2z"/><path fill="none" stroke="#FFF" stroke-width="6" stroke-miterlimit="10" d="M86.5 91.8l-19-27.4"/><path fill="#FFF" d="M60 69.3c2.7 4.2 8.3 5.4 12.4 2.7 4.2-2.7 5.4-8.3 2.7-12.4-2.7-4.2-8.3-5.4-12.4-2.7-4.2 2.6-5.4 8.2-2.7 12.4z"/><g><path fill="#FFF" d="M21.2 61.4c-4.3-2.5-9.8-1.1-12.3 3.1-2.5 4.3-1.1 9.8 3.1 12.3 4.3 2.5 9.8 1.1 12.3-3.1s1.1-9.7-3.1-12.3z"/><path fill="none" stroke="#FFF" stroke-width="6" stroke-miterlimit="10" d="M16.6 69.1l50.9-4.7"/></g><g fill="#0891D1"><path d="M163.8 50.2c-.6-.7-6.3-4.1-11.4-4.1-3.4 0-5.2 1.2-5.2 3.5 0 2.9 3.2 3.7 8.9 5.2 8.2 2.2 13.3 5 13.3 12.9 0 9.7-7.8 13-16 13-6.2 0-13.1-2-18.2-5.3l4.3-8.6c.8.8 7.5 5 14 5 3.5 0 5.2-1.1 5.2-3.2 0-3.2-4.4-4-10.3-5.8-7.9-2.4-11.5-5.3-11.5-11.8 0-9 7.2-13.9 15.7-13.9 6.1 0 11.6 2.5 15.4 4.7l-4.2 8.4zM175 85.1c1.7.5 3.3.8 4.4.8 2 0 3.3-1.5 4.2-5.5l-11.9-31.5h9.8l7.4 23.3 6.3-23.3h8.9L192 85.5c-1.7 5.3-6.2 8.7-11.8 8.8-1.7 0-3.5-.2-5.3-.9v-8.3zM239.3 80.3h-9.6V62.6c0-4.1-1.7-5.9-4.3-5.9-2.6 0-5.8 2.3-7 5.6v18.1h-9.6V48.8h8.6v5.3c2.3-3.7 6.8-5.9 12.2-5.9 8.2 0 9.5 6.7 9.5 11.9v20.2zM261.6 48.2c7.2 0 12.3 3.4 14.8 8.3l-9.4 2.8c-1.2-1.9-3.1-3-5.5-3-4 0-7 3.2-7 8.2 0 5 3.1 8.3 7 8.3 2.4 0 4.6-1.3 5.5-3.1l9.4 2.9c-2.3 4.9-7.6 8.3-14.8 8.3-10.6 0-16.9-7.7-16.9-16.4s6.2-16.3 16.9-16.3zM302.1 78.7c-2.6 1.1-6.2 2.3-9.7 2.3-4.7 0-8.8-2.3-8.8-8.4V56.1h-4v-7.3h4v-10h9.6v10h6.4v7.3h-6.4v13.1c0 2.1 1.2 2.9 2.8 2.9 1.4 0 3-.6 4.2-1.1l1.9 7.7zM337.2 80.3h-9.6V62.6c0-4.1-1.8-5.9-4.6-5.9-2.3 0-5.5 2.2-6.7 5.6v18.1h-9.6V36.5h9.6v17.6c2.3-3.7 6.3-5.9 10.9-5.9 8.5 0 9.9 6.5 9.9 11.9v20.2zM343.4 45.2v-8.7h9.6v8.7h-9.6zm0 35.1V48.8h9.6v31.5h-9.6zM389.9 80.3h-9.6V62.6c0-4.1-1.7-5.9-4.3-5.9-2.6 0-5.8 2.3-7 5.6v18.1h-9.6V48.8h8.6v5.3c2.3-3.7 6.8-5.9 12.2-5.9 8.2 0 9.5 6.7 9.5 11.9v20.2zM395.5 64.6c0-9.2 6-16.3 14.6-16.3 4.7 0 8.4 2.2 10.6 5.8v-5.2h8.3v29.3c0 9.6-7.5 15.5-18.2 15.5-6.8 0-11.5-2.3-15-6.3l5.1-5.2c2.3 2.6 6 4.3 9.9 4.3 4.6 0 8.6-2.4 8.6-8.3v-3.1c-1.9 3.5-5.9 5.3-10 5.3-8.3.1-13.9-7.1-13.9-15.8zm23.9 3.9v-6.6c-1.3-3.3-4.2-5.5-7.1-5.5-4.1 0-7 4-7 8.4 0 4.6 3.2 8 7.5 8 2.9 0 5.3-1.8 6.6-4.3z"/></g></svg>
+        <div class="powered-by-row">
+          <span class="powered-by-label">Powered By</span>
+          <svg xmlns="http://www.w3.org/2000/svg" class="syncthing-logo" viewBox="0 0 429 117.3"><linearGradient id="a" gradientUnits="userSpaceOnUse" x1="58.666" y1="117.332" x2="58.666" y2="0"><stop offset="0" stop-color="#0882c8"/><stop offset="1" stop-color="#26b6db"/></linearGradient><circle fill="url(#a)" cx="58.7" cy="58.7" r="58.7"/><circle fill="none" stroke="#FFF" stroke-width="6" stroke-miterlimit="10" cx="58.7" cy="58.5" r="43.7"/><path fill="#FFF" d="M94.7 47.8c4.7 1.6 9.8-.9 11.4-5.6 1.6-4.7-.9-9.8-5.6-11.4-4.7-1.6-9.8.9-11.4 5.6-1.6 4.7.9 9.8 5.6 11.4z"/><path fill="none" stroke="#FFF" stroke-width="6" stroke-miterlimit="10" d="M97.6 39.4l-30.1 25"/><path fill="#FFF" d="M77.6 91c-.4 4.9 3.2 9.3 8.2 9.8 5 .4 9.3-3.2 9.8-8.2.4-4.9-3.2-9.3-8.2-9.8-5-.4-9.4 3.2-9.8 8.2z"/><path fill="none" stroke="#FFF" stroke-width="6" stroke-miterlimit="10" d="M86.5 91.8l-19-27.4"/><path fill="#FFF" d="M60 69.3c2.7 4.2 8.3 5.4 12.4 2.7 4.2-2.7 5.4-8.3 2.7-12.4-2.7-4.2-8.3-5.4-12.4-2.7-4.2 2.6-5.4 8.2-2.7 12.4z"/><g><path fill="#FFF" d="M21.2 61.4c-4.3-2.5-9.8-1.1-12.3 3.1-2.5 4.3-1.1 9.8 3.1 12.3 4.3 2.5 9.8 1.1 12.3-3.1s1.1-9.7-3.1-12.3z"/><path fill="none" stroke="#FFF" stroke-width="6" stroke-miterlimit="10" d="M16.6 69.1l50.9-4.7"/></g><g fill="#0891D1"><path d="M163.8 50.2c-.6-.7-6.3-4.1-11.4-4.1-3.4 0-5.2 1.2-5.2 3.5 0 2.9 3.2 3.7 8.9 5.2 8.2 2.2 13.3 5 13.3 12.9 0 9.7-7.8 13-16 13-6.2 0-13.1-2-18.2-5.3l4.3-8.6c.8.8 7.5 5 14 5 3.5 0 5.2-1.1 5.2-3.2 0-3.2-4.4-4-10.3-5.8-7.9-2.4-11.5-5.3-11.5-11.8 0-9 7.2-13.9 15.7-13.9 6.1 0 11.6 2.5 15.4 4.7l-4.2 8.4zM175 85.1c1.7.5 3.3.8 4.4.8 2 0 3.3-1.5 4.2-5.5l-11.9-31.5h9.8l7.4 23.3 6.3-23.3h8.9L192 85.5c-1.7 5.3-6.2 8.7-11.8 8.8-1.7 0-3.5-.2-5.3-.9v-8.3zM239.3 80.3h-9.6V62.6c0-4.1-1.7-5.9-4.3-5.9-2.6 0-5.8 2.3-7 5.6v18.1h-9.6V48.8h8.6v5.3c2.3-3.7 6.8-5.9 12.2-5.9 8.2 0 9.5 6.7 9.5 11.9v20.2zM261.6 48.2c7.2 0 12.3 3.4 14.8 8.3l-9.4 2.8c-1.2-1.9-3.1-3-5.5-3-4 0-7 3.2-7 8.2 0 5 3.1 8.3 7 8.3 2.4 0 4.6-1.3 5.5-3.1l9.4 2.9c-2.3 4.9-7.6 8.3-14.8 8.3-10.6 0-16.9-7.7-16.9-16.4s6.2-16.3 16.9-16.3zM302.1 78.7c-2.6 1.1-6.2 2.3-9.7 2.3-4.7 0-8.8-2.3-8.8-8.4V56.1h-4v-7.3h4v-10h9.6v10h6.4v7.3h-6.4v13.1c0 2.1 1.2 2.9 2.8 2.9 1.4 0 3-.6 4.2-1.1l1.9 7.7zM337.2 80.3h-9.6V62.6c0-4.1-1.8-5.9-4.6-5.9-2.3 0-5.5 2.2-6.7 5.6v18.1h-9.6V36.5h9.6v17.6c2.3-3.7 6.3-5.9 10.9-5.9 8.5 0 9.9 6.5 9.9 11.9v20.2zM343.4 45.2v-8.7h9.6v8.7h-9.6zm0 35.1V48.8h9.6v31.5h-9.6zM389.9 80.3h-9.6V62.6c0-4.1-1.7-5.9-4.3-5.9-2.6 0-5.8 2.3-7 5.6v18.1h-9.6V48.8h8.6v5.3c2.3-3.7 6.8-5.9 12.2-5.9 8.2 0 9.5 6.7 9.5 11.9v20.2zM395.5 64.6c0-9.2 6-16.3 14.6-16.3 4.7 0 8.4 2.2 10.6 5.8v-5.2h8.3v29.3c0 9.6-7.5 15.5-18.2 15.5-6.8 0-11.5-2.3-15-6.3l5.1-5.2c2.3 2.6 6 4.3 9.9 4.3 4.6 0 8.6-2.4 8.6-8.3v-3.1c-1.9 3.5-5.9 5.3-10 5.3-8.3.1-13.9-7.1-13.9-15.8zm23.9 3.9v-6.6c-1.3-3.3-4.2-5.5-7.1-5.5-4.1 0-7 4-7 8.4 0 4.6 3.2 8 7.5 8 2.9 0 5.3-1.8 6.6-4.3z"/></g></svg>
         </div>
-        <a v-on:click="enableFederation()" class="waves-effect waves-light btn-large">Enable Federation</a>
+        <a v-on:click="enableFederation()" class="btn-large">Enable Federation</a>
       </div>
     </div>
     <federation-main-panel v-else>
@@ -1949,7 +2385,7 @@ const federationView = Vue.component('federation-view', {
           }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.federationEnabled, 'val', !this.enabled.val);
   
         iziToast.success({
@@ -1998,15 +2434,13 @@ const logsView = Vue.component('logs-view', {
                     </tr>
                     <tr>
                       <td><b>Logs Directory:</b> {{params.storage.logsDirectory}}</td>
-                      <td>
-                        [<a v-on:click="changeLogsDir()">edit</a>]
-                      </td>
+                      <td style="color:var(--t2);font-size:.82rem">Edit in config file</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
               <div class="card-action">
-                <a v-on:click="downloadLogs()" class="waves-effect waves-light btn">Download Log File</a>
+                <a v-on:click="downloadLogs()" class="btn">Download Log File</a>
               </div>
             </div>
           </div>
@@ -2014,13 +2448,6 @@ const logsView = Vue.component('logs-view', {
       </div>
     </div>`,
   methods: {
-    changeLogsDir: function() {
-      iziToast.warning({
-        title: 'Coming Soon',
-        position: 'topCenter',
-        timeout: 3500
-      });
-    },
     downloadLogs: async function() {
       try {
         const response = await API.axios({
@@ -2045,46 +2472,27 @@ const logsView = Vue.component('logs-view', {
       }
     },
     toggleWriteLogs: function() {
-      iziToast.question({
-        timeout: 20000,
-        close: false,
-        overlayClose: true,
-        overlay: true,
-        displayMode: 'once',
-        id: 'question',
-        zindex: 99999,
-        layout: 2,
-        maxWidth: 600,
-        title: `<b>${this.params.writeLogs === true ? 'Disable' : 'Enable'} Writing Logs To Disk?</b>`,
-        position: 'center',
-        buttons: [
-          [`<button><b>${this.params.writeLogs === true ? 'Disable' : 'Enable'}</b></button>`, (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-            API.axios({
-              method: 'POST',
-              url: `${API.url()}/api/v1/admin/config/write-logs`,
-              data: { writeLogs: !this.params.writeLogs }
-            }).then(() => {
-              // update fronted data
-              Vue.set(ADMINDATA.serverParams, 'writeLogs', !this.params.writeLogs);
+            adminConfirm(`<b>${this.params.writeLogs === true ? 'Disable' : 'Enable'} Writing Logs To Disk?</b>`, '', `${this.params.writeLogs === true ? 'Disable' : 'Enable'}`, () => {
+        API.axios({
+                      method: 'POST',
+                      url: `${API.url()}/api/v1/admin/config/write-logs`,
+                      data: { writeLogs: !this.params.writeLogs }
+                    }).then(() => {
+                      // update frontend data
+                      Vue.set(ADMINDATA.serverParams, 'writeLogs', !this.params.writeLogs);
 
-              iziToast.success({
-                title: 'Updated Successfully',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            }).catch(() => {
-              iziToast.error({
-                title: 'Failed',
-                position: 'topCenter',
-                timeout: 3500
-              });
-            });
-          }, true],
-          ['<button>Go Back</button>', (instance, toast) => {
-            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-          }],
-        ]
+                      iziToast.success({
+                        title: 'Updated Successfully',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    }).catch(() => {
+                      iziToast.error({
+                        title: 'Failed',
+                        position: 'topCenter',
+                        timeout: 3500
+                      });
+                    });
       });
     },
   }
@@ -2096,57 +2504,223 @@ const lockView = Vue.component('lock-view', {
   },
   template: `
     <div class="container">
-      <div class="row">
-        <h2>Lock Admin Panel</h2>
-        <p>
-          This will prevent anyone from making configuration changes with the Admin Panel. If you want undo this you will need to:
-          <br><br>
-          -- Open the config file<br>
-          -- Change the value of 'lockAdmin' to 'false'<br>
-          -- Reboot mStream
-        </p>
-        <br>
-        <a class="waves-effect waves-light btn-large" v-on:click="disableAdmin()">Disable Admin Panel</a>
+      <div class="card">
+        <div class="card-content">
+          <span class="card-title">Lock Admin Panel</span>
+          <p style="color:var(--t2);">Disabling the admin panel will prevent anyone from making configuration changes through this interface.</p>
+          <p style="color:var(--t2);">To re-enable it you will need to:</p>
+          <ul style="color:var(--t2);padding-left:1.25rem;margin:.25rem 0 1rem;line-height:1.9;">
+            <li>Open the mStream config file</li>
+            <li>Set <code style="color:var(--accent);background:var(--raised);padding:.1rem .35rem;border-radius:4px;">lockAdmin</code> to <code style="color:var(--accent);background:var(--raised);padding:.1rem .35rem;border-radius:4px;">false</code></li>
+            <li>Reboot mStream</li>
+          </ul>
+        </div>
+        <div class="card-action">
+          <button class="btn red" type="button" @click="disableAdmin()">Disable Admin Panel</button>
+        </div>
       </div>
     </div>`,
+
     methods: {
       disableAdmin: function() {
-        iziToast.question({
-          timeout: 20000,
-          close: false,
-          overlayClose: true,
-          overlay: true,
-          displayMode: 'once',
-          id: 'question',
-          zindex: 99999,
-          layout: 2,
-          maxWidth: 600,
-          title: '<b>Disable Admin Panel?</b>',
-          position: 'center',
-          buttons: [
-            [`<button><b>Disable</b></button>`, (instance, toast) => {
-              instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-              API.axios({
-                method: 'POST',
-                url: `${API.url()}/api/v1/admin/lock-api`,
-                data: { lock: true }
-              }).then(() => {
-                window.location.reload();
-              }).catch(() => {
-                iziToast.error({
-                  title: 'Failed to disable admin panel',
-                  position: 'topCenter',
-                  timeout: 3500
-                });
-              });
-            }, true],
-            ['<button>Go Back</button>', (instance, toast) => {
-              instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
-            }],
-          ]
+                adminConfirm('<b>Disable Admin Panel?</b>', '', 'Disable', () => {
+          API.axios({
+                          method: 'POST',
+                          url: `${API.url()}/api/v1/admin/lock-api`,
+                          data: { lock: true }
+                        }).then(() => {
+                          window.location.reload();
+                        }).catch(() => {
+                          iziToast.error({
+                            title: 'Failed to disable admin panel',
+                            position: 'topCenter',
+                            timeout: 3500
+                          });
+                        });
         });
       }
     }
+});
+
+const lastFMView = Vue.component('lastfm-view', {
+  data() {
+    return {
+      enabled: true,
+      apiKey: '',
+      apiSecret: '',
+      pending: false,
+    };
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">Last.fm</span>
+              <p style="margin-bottom:0.5rem;">
+                When enabled, users can link their Last.fm account to scrobble every track they play.
+                mStream ships with built-in API credentials — you can optionally override them with
+                <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener">your own key &amp; shared secret</a>.
+              </p>
+              <p style="margin-bottom:1rem;font-size:0.85rem;color:#999;">The shared secret is stored server-side only and is never sent to clients.</p>
+              <table>
+                <tbody>
+                  <tr>
+                    <td style="width:140px"><b>Enable</b></td>
+                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> Enable Last.fm scrobbling for users</td>
+                  </tr>
+                  <tr>
+                    <td><b>API Key</b></td>
+                    <td><input v-model="apiKey" type="text" placeholder="Leave blank to use built-in key" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore spellcheck="false" style="margin:0" /></td>
+                  </tr>
+                  <tr>
+                    <td><b>Shared Secret</b></td>
+                    <td><input v-model="apiSecret" type="password" placeholder="Leave blank to use built-in secret" autocomplete="new-password" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore style="margin:0" /></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-action">
+              <button class="btn" v-on:click="save()" :disabled="pending">
+                {{ pending ? 'Saving...' : 'Save' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  async mounted() {
+    try {
+      const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/lastfm/config` });
+      this.enabled   = res.data.enabled !== false;
+      this.apiKey    = res.data.apiKey    || '';
+      this.apiSecret = res.data.apiSecret || '';
+    } catch(e) { /* ignore */ }
+  },
+  methods: {
+    save: async function() {
+      this.pending = true;
+      try {
+        await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/admin/lastfm/config`,
+          data: { enabled: this.enabled, apiKey: this.apiKey.trim(), apiSecret: this.apiSecret.trim() }
+        });
+        iziToast.success({ title: 'Last.fm settings saved', position: 'topCenter', timeout: 3000 });
+      } catch(err) {
+        iziToast.error({ title: 'Failed to save Last.fm settings', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.pending = false;
+      }
+    }
+  }
+});
+
+const discogsView = Vue.component('discogs-view', {
+  data() {
+    return {
+      enabled: false,
+      allowArtUpdate: false,
+      apiKey: '',
+      apiSecret: '',
+      userAgentTag: '',
+      pending: false,
+    };
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">Discogs Cover Art</span>
+              <p style="margin-bottom:0.5rem;">
+                When a song is missing album art &#8212; or has art that looks wrong &#8212; the Now Playing modal
+                shows a <b>"Fix Art"</b> button. Clicking it searches the
+                <a href="https://www.discogs.com/developers/" target="_blank" rel="noopener">Discogs API</a>
+                and presents up to <b>3 front-cover proposals</b> to choose from.
+                Selecting one permanently embeds the image into the audio file (mp3, flac, ogg, m4a&hellip;),
+                so every client sees the correct art from that point on.
+                This picker is only visible to admins.
+              </p>
+              <p style="margin-bottom:0.5rem;">
+                <b>API key &amp; secret are optional.</b>
+                Without them, Discogs allows <b>25 unauthenticated requests per minute</b> — enough for casual use.
+                With your own key + secret (free, register at <a href="https://www.discogs.com/settings/developers" target="_blank" rel="noopener">discogs.com/settings/developers</a>)
+                the limit rises to <b>60 requests per minute</b>.
+                Each cover art search uses up to ~10 requests, so you may hit the unauthenticated limit quickly if you search often.
+              </p>
+              <p style="margin-bottom:1rem; font-size:0.85rem; color:#999;">
+                The key and secret are stored server-side only and are never exposed to non-admin users.
+              </p>
+              <table>
+                <tbody>
+                  <tr>
+                    <td style="width:160px"><b>Enable</b></td>
+                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> Enable Discogs cover art</td>
+                  </tr>
+                  <tr>
+                    <td><b>Allow Art Update</b></td>
+                    <td>
+                      <input type="checkbox" v-model="allowArtUpdate" style="margin:0;width:auto;height:auto;" /> Allow replacing existing album art
+                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">When enabled, the Fix Art button also appears on songs that <i>already have</i> album art, letting you update it. The old art is removed from the cache and database once no other song references it.</div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><b>API Key</b></td>
+                    <td><input v-model="apiKey" type="text" placeholder="Consumer Key" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore spellcheck="false" style="margin:0" /></td>
+                  </tr>
+                  <tr>
+                    <td><b>API Secret</b></td>
+                    <td><input v-model="apiSecret" type="password" placeholder="Consumer Secret" autocomplete="new-password" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore style="margin:0" /></td>
+                  </tr>
+                  <tr>
+                    <td><b>Instance Tag</b></td>
+                    <td>
+                      <input v-model="userAgentTag" type="text" maxlength="4" placeholder="e.g. amr" autocomplete="off" spellcheck="false" style="margin:0;width:80px;text-transform:lowercase" />
+                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">Optional. Up to 4 letters/digits. Your tag is appended to the User-Agent sent to Discogs: <code>mStreamVelvet/dev/{{ userAgentTag || 'tag' }} +…</code></div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-action">
+              <button class="btn" v-on:click="save()" :disabled="pending">
+                {{ pending ? 'Saving...' : 'Save' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  async mounted() {
+    try {
+      const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/discogs/config` });
+      this.enabled        = !!res.data.enabled;
+      this.allowArtUpdate = !!res.data.allowArtUpdate;
+      this.apiKey         = res.data.apiKey       || '';
+      this.apiSecret      = res.data.apiSecret    || '';
+      this.userAgentTag   = res.data.userAgentTag || '';
+    } catch(e) { /* ignore */ }
+  },
+  methods: {
+    save: async function() {
+      this.pending = true;
+      try {
+        await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/admin/discogs/config`,
+          data: { enabled: this.enabled, allowArtUpdate: this.allowArtUpdate, apiKey: this.apiKey.trim(), apiSecret: this.apiSecret.trim(), userAgentTag: this.userAgentTag.trim().slice(0,4).replace(/[^a-zA-Z0-9]/g,'') }
+        });
+        iziToast.success({ title: 'Discogs settings saved', position: 'topCenter', timeout: 3000 });
+      } catch(err) {
+        iziToast.error({ title: 'Failed to save Discogs settings', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.pending = false;
+      }
+    }
+  }
 });
 
 const vm = new Vue({
@@ -2162,7 +2736,9 @@ const vm = new Vue({
     'logs-view': logsView,
     'rpn-view': rpnView,
     'lock-view': lockView,
+    'scan-errors-view': scanErrorsView,
     'lastfm-view': lastFMView,
+    'discogs-view': discogsView,
   },
   data: {
     currentViewMain: 'folders-view',
@@ -2199,30 +2775,53 @@ const fileExplorerModal = Vue.component('file-explorer-modal', {
   },
   template: `
     <div>
-      <div class="row">
-        <h5>File Explorer</h5>
-        <span>
-          [<a v-on:click="goToDirectory(currentDirectory, '..')">back</a>]
-          [<a v-on:click="goToDirectory('~')">home</a>]
-          [<a v-on:click="goToDirectory(currentDirectory)">refresh</a>]
-        </span>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.5rem .75rem;border-bottom:1px solid var(--border);">
+        <h5 style="margin:0;">Browse Directories</h5>
+        <button class="modal-close-x" type="button" title="Close" @click="closeModal">&times;</button>
       </div>
-      <div v-if="currentDirectory === null || pending === true" class="row">
-        <svg class="spinner" width="65px" height="65px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
-      </div>
-      <div v-else="currentDirectory !== null" class="row">
-        <div class="flex">
-          <select @change="goToDirectory($event.target.value)" v-if="winDrives.length > 0" id="select-win-drive" class="browser-default">
-            <option v-for="(value) in winDrives" :selected="currentDirectory.startsWith(value)" :value="value">{{ value }}</option>
+
+      <div style="padding:.65rem 1.5rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">
+        <button class="btn-flat btn-small" type="button" @click="goToDirectory(currentDirectory, '..')" title="Go up one level">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+          Up
+        </button>
+        <button class="btn-flat btn-small" type="button" @click="goToDirectory('~')" title="Home directory">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          Home
+        </button>
+        <button class="btn-flat btn-small" type="button" @click="goToDirectory(currentDirectory)" title="Reload">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Refresh
+        </button>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:.5rem;">
+          <select @change="goToDirectory($event.target.value)" v-if="winDrives.length > 0" style="width:auto;padding:.25rem .4rem;font-size:.82rem;background:var(--raised);color:var(--t1);border:1px solid var(--border);border-radius:6px;">
+            <option v-for="(value) in winDrives" :selected="currentDirectory && currentDirectory.startsWith(value)" :value="value">{{ value }}</option>
           </select>
-          <h6>{{currentDirectory}}</h6>
+          <button class="btn btn-small" type="button" @click="selectDirectory(currentDirectory)" :disabled="currentDirectory === null">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Select Current
+          </button>
         </div>
-        [<a v-on:click="selectDirectory(currentDirectory)">Select Current Directory</a>]
-        <ul class="collection">
-          <li v-on:click="goToDirectory(currentDirectory, dir.name)" v-for="dir in contents" class="collection-item">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" height="32.4px"><path fill="#FFA000" d="M38 12H22l-4-4H8c-2.2 0-4 1.8-4 4v24c0 2.2 1.8 4 4 4h31c1.7 0 3-1.3 3-3V16c0-2.2-1.8-4-4-4z"/><path fill="#FFCA28" d="M42.2 18H15.3c-1.9 0-3.6 1.4-3.9 3.3L8 40h31.7c1.9 0 3.6-1.4 3.9-3.3l2.5-14c.5-2.4-1.4-4.7-3.9-4.7z"/></svg>
-            <div>{{dir.name}}</div>
-            <a v-on:click.stop="selectDirectory(currentDirectory, dir.name)" class="secondary-content waves-effect waves-light btn-small">Select</a>
+      </div>
+
+      <div v-if="currentDirectory !== null" style="padding:.4rem 1.5rem;background:var(--card);border-bottom:1px solid var(--border);">
+        <code style="font-size:.8rem;color:var(--accent);word-break:break-all;">{{ currentDirectory }}</code>
+      </div>
+
+      <div v-if="currentDirectory === null || pending === true" style="display:flex;justify-content:center;padding:2rem;">
+        <svg class="spinner" width="40" height="40" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
+      </div>
+      <div v-else style="max-height:50vh;overflow-y:auto;">
+        <div v-if="contents.length === 0" style="padding:1.25rem 1.5rem;color:var(--t3);text-align:center;">No subdirectories</div>
+        <ul class="collection" style="margin:0;border-radius:0;border-left:none;border-right:none;" v-else>
+          <li
+            v-for="dir in contents"
+            class="collection-item"
+            @click="goToDirectory(currentDirectory, dir.name)"
+            style="display:flex;align-items:center;gap:.75rem;padding:.5rem 1.25rem;cursor:pointer;">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" height="20" style="flex-shrink:0;"><path fill="#FFA000" d="M38 12H22l-4-4H8c-2.2 0-4 1.8-4 4v24c0 2.2 1.8 4 4 4h31c1.7 0 3-1.3 3-3V16c0-2.2-1.8-4-4-4z"/><path fill="#FFCA28" d="M42.2 18H15.3c-1.9 0-3.6 1.4-3.9 3.3L8 40h31.7c1.9 0 3.6-1.4 3.9-3.3l2.5-14c.5-2.4-1.4-4.7-3.9-4.7z"/></svg>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ dir.name }}</span>
+            <button class="btn-small" type="button" @click.stop="selectDirectory(currentDirectory, dir.name)">Select</button>
           </li>
         </ul>
       </div>
@@ -2232,6 +2831,8 @@ const fileExplorerModal = Vue.component('file-explorer-modal', {
   },
   methods: {
     goToDirectory: async function (dir, joinDir) {
+      if (this.pending) { return; }
+      this.pending = true;
       try {
         const params = { directory: dir };
         if (joinDir) { params.joinDirectory = joinDir; }
@@ -2253,7 +2854,9 @@ const fileExplorerModal = Vue.component('file-explorer-modal', {
         });
 
         this.$nextTick(() => {
-          document.getElementById('dynamic-modal').scrollIntoView();
+          // scroll modal back to top after navigation
+          const dlg = document.querySelector('.modal-dialog');
+          if (dlg) dlg.scrollTop = 0;
         });
       } catch(err) {
         iziToast.error({
@@ -2261,7 +2864,12 @@ const fileExplorerModal = Vue.component('file-explorer-modal', {
           position: 'topCenter',
           timeout: 3500
         });
+      } finally {
+        this.pending = false;
       }
+    },
+    closeModal: function () {
+      modVM.closeModal();
     },
     selectDirectory: async function (dir, joinDir) {
       try {
@@ -2280,7 +2888,7 @@ const fileExplorerModal = Vue.component('file-explorer-modal', {
         Vue.set(ADMINDATA.sharedSelect, 'value', selectThis);
   
         // close the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
+        modVM.closeModal();
       }catch(err) {
         iziToast.error({
           title: 'Cannot Select Directory',
@@ -2298,25 +2906,26 @@ const userPasswordView = Vue.component('user-password-view', {
       users: ADMINDATA.users,
       currentUser: ADMINDATA.selectedUser,
       resetPassword: '',
+      showResetPassword: false,
       submitPending: false
     };
   }, 
   template: `
     <form @submit.prevent="updatePassword">
-      <div class="modal-content">
-        <h4>Password Reset</h4>
-        <p>User: <b>{{currentUser.value}}</b></p>
-        <div class="input-field">
-          <input v-model="resetPassword" id="reset-password" required type="password">
+      ${mHead('Reset Password', '{{"User: " + currentUser.value}}')}
+      <div class="modal-body">
+        <div class="field-group">
           <label for="reset-password">New Password</label>
+          <div class="pwd-wrap">
+            <input v-model="resetPassword" id="reset-password" required :type="showResetPassword ? 'text' : 'password'" placeholder="Enter new password" autocomplete="new-password">
+            <button type="button" class="pwd-toggle" @click="showResetPassword = !showResetPassword" tabindex="-1" :title="showResetPassword ? 'Hide' : 'Show'">
+              <svg v-if="!showResetPassword" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+            </button>
+          </div>
         </div>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update Password' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Update Password', 'Updating')}
     </form>`,
   methods: {
     updatePassword: async function() {
@@ -2333,7 +2942,7 @@ const userPasswordView = Vue.component('user-password-view', {
         });  
   
         // close & reset the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
+        modVM.closeModal();
 
         iziToast.success({
           title: 'Password Updated',
@@ -2359,31 +2968,32 @@ const usersVpathsView = Vue.component('user-vpaths-view', {
       users: ADMINDATA.users,
       directories: ADMINDATA.folders,
       currentUser: ADMINDATA.selectedUser,
+      selectedDirs: [],
       submitPending: false,
       selectInstance: null
     };
   },
   template: `
     <form @submit.prevent="updateFolders">
-      <div class="modal-content">
-        <h4>Change Folders</h4>
-        <p>User: <b>{{currentUser.value}}</b></p>
-        <select :disabled="Object.keys(directories).length === 0" id="edit-user-dirs" multiple>
-          <option :selected="users[currentUser.value].vpaths.includes(value)" v-for="(key, value) in directories" :value="value">{{ value }}</option>
-        </select>
+      ${mHead('Folder Access', '{{"User: " + currentUser.value}}')}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="edit-user-dirs">Accessible Folders</label>
+          <select id="edit-user-dirs" :disabled="Object.keys(directories).length === 0" multiple :size="Math.max(2, Object.keys(directories).length)" v-model="selectedDirs">
+            <option disabled v-if="Object.keys(directories).length === 0">No directories available</option>
+            <option v-for="(val, key) in directories" :key="key" :value="key">{{ key }}</option>
+          </select>
+          <span class="field-hint">Hold Ctrl / Cmd to select multiple folders.</span>
+        </div>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Save', 'Saving')}
     </form>`,
     mounted: function () {
-      this.selectInstance = M.FormSelect.init(document.querySelectorAll("#edit-user-dirs"));
+      if (this.currentUser.value && this.users[this.currentUser.value]) {
+        this.selectedDirs = (this.users[this.currentUser.value].vpaths || []).slice();
+      }
     },
     beforeDestroy: function() {
-      this.selectInstance[0].destroy();
     },
     methods: {
       updateFolders: async function() {
@@ -2395,15 +3005,15 @@ const usersVpathsView = Vue.component('user-vpaths-view', {
             url: `${API.url()}/api/v1/admin/users/vpaths`,
             data: {
               username: this.currentUser.value,
-              vpaths: this.selectInstance[0].getSelectedValues()
+              vpaths: this.selectedDirs
             }
           });
 
-          // update fronted data
-          Vue.set(ADMINDATA.users[this.currentUser.value], 'vpaths', this.selectInstance[0].getSelectedValues());
+          // update frontend data
+          Vue.set(ADMINDATA.users[this.currentUser.value], 'vpaths', this.selectedDirs.slice());
     
           // close & reset the modal
-          M.Modal.getInstance(document.getElementById('admin-modal')).close();
+          modVM.closeModal();
   
           iziToast.success({
             title: 'User Permissions Updated',
@@ -2434,20 +3044,15 @@ const userAccessView = Vue.component('user-access-view', {
   },
   template: `
     <form @submit.prevent="updateUser">
-      <div class="modal-content">
-        <h4>Change User Access</h4>
-        <p>User: <b>{{currentUser.value}}</b></p>
-        <div class="pad-checkbox"><label>
-          <input type="checkbox" v-model="isAdmin"/>
-          <span>Admin</span>
-        </label></div>
+      ${mHead('User Access', '{{"User: " + currentUser.value}}')}
+      <div class="modal-body">
+        <div style="display:flex;align-items:center;gap:.6rem;">
+          <input id="user-admin-cb" type="checkbox" v-model="isAdmin" style="width:auto;margin:0;">
+          <label for="user-admin-cb" style="font-size:.95rem;color:var(--t1);">Grant admin access</label>
+        </div>
+        <p class="field-hint" style="color:var(--red);" v-if="!isAdmin">Warning: removing the last admin account will lock you out of this panel.</p>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Save', 'Saving')}
     </form>`,
     methods: {
       updateUser: async function() {
@@ -2467,11 +3072,11 @@ const userAccessView = Vue.component('user-access-view', {
             }
           });
 
-          // update fronted data
+          // update frontend data
           Vue.set(ADMINDATA.users[this.currentUser.value], 'admin', this.isAdmin);
     
           // close & reset the modal
-          M.Modal.getInstance(document.getElementById('admin-modal')).close();
+          modVM.closeModal();
   
           iziToast.success({
             title: 'User Permissions Updated',
@@ -2501,26 +3106,17 @@ const editRequestSizeModal = Vue.component('edit-request-size-modal', {
   },
   template: `
     <form @submit.prevent="updatePort">
-      <div class="modal-content">
-        <h4>Change Max Request Size</h4>
-        <p>Accepts KB or MB</p>
-        <div class="input-field">
-          <input v-model="maxRequestSize" id="edit-max-request-size" required type="text">
-          <label for="edit-port">Edit Max Request Size</label>
+      ${mHead('Max Request Size', 'Accepts KB or MB — e.g. 50mb')}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="edit-max-request-size">Max Request Size</label>
+          <input v-model="maxRequestSize" id="edit-max-request-size" required type="text" placeholder="e.g. 50mb">
+          <span class="field-hint">⚠ Requires a server reboot to apply.</span>
         </div>
-        <blockquote>
-          Requires a reboot.
-        </blockquote>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Update', 'Updating')}
     </form>`,
   mounted: function () {
-    M.updateTextFields();
   },
   methods: {
     updatePort: async function() {
@@ -2534,11 +3130,11 @@ const editRequestSizeModal = Vue.component('edit-request-size-modal', {
           data: { maxRequestSize: this.maxRequestSize }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.serverParams, 'maxRequestSize', this.maxRequestSize);
   
         // close & reset the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
+        modVM.closeModal();
 
         iziToast.success({
           title: 'Success: Allow the server 30 seconds to reboot',
@@ -2569,25 +3165,17 @@ const editPortModal = Vue.component('edit-port-modal', {
   },
   template: `
     <form @submit.prevent="updatePort">
-      <div class="modal-content">
-        <h4>Change Port</h4>
-        <div class="input-field">
-          <input v-model="currentPort" id="edit-port" required type="number" min="2" max="65535">
-          <label for="edit-port">Edit Port</label>
+      ${mHead('Server Port', 'Change the port mStream listens on')}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="edit-port">Port Number</label>
+          <input v-model="currentPort" id="edit-port" required type="number" min="2" max="65535" placeholder="3000">
+          <span class="field-hint">⚠ Requires a reboot. You will be redirected automatically.</span>
         </div>
-        <blockquote>
-          Requires a reboot.
-        </blockquote>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Update', 'Updating')}
     </form>`,
   mounted: function () {
-    M.updateTextFields();
   },
   methods: {
     updatePort: async function() {
@@ -2600,11 +3188,11 @@ const editPortModal = Vue.component('edit-port-modal', {
           data: { port: this.currentPort }
         });
 
-        // update fronted data
+        // update frontend data
         // Vue.set(ADMINDATA.serverParams, 'port', this.currentPort);
   
         // close & reset the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
+        modVM.closeModal();
 
         setTimeout(() => {
           window.location.href = window.location.href.replace(`:${ADMINDATA.serverParams.port}`, `:${this.currentPort}`); 
@@ -2638,26 +3226,17 @@ const editAddressModal = Vue.component('edit-address-modal', {
   },
   template: `
     <form @submit.prevent="updateParam">
-      <div class="modal-content">
-        <h4>Server Address</h4>
-        <div class="input-field">
-          <input v-model="editValue" id="edit-server-address" required type="text">
-          <label for="edit-server-address">Server Address</label>
+      ${mHead('Server Address', "Only change if you know what you're doing")}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="edit-server-address">Bind Address</label>
+          <input v-model="editValue" id="edit-server-address" required type="text" placeholder="0.0.0.0">
+          <span class="field-hint">⚠ Requires a reboot. Default <code>0.0.0.0</code> binds to all interfaces.</span>
         </div>
-        <blockquote>
-          Requires a Reboot<br>
-          <b>Don't edit this unless you know what you're doing</b>
-        </blockquote>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Update', 'Updating')}
     </form>`,
   mounted: function () {
-    M.updateTextFields();
   },
   methods: {
     updateParam: async function() {
@@ -2670,11 +3249,11 @@ const editAddressModal = Vue.component('edit-address-modal', {
           data: { address: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.serverParams, 'address', this.editValue);
   
         // close & reset the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
+        modVM.closeModal();
 
         iziToast.success({
           title: 'Address Updated.  Server is rebooting',
@@ -2704,25 +3283,17 @@ const editMaxScanModal = Vue.component('edit-max-scans-modal', {
   },
   template: `
     <form @submit.prevent="updateParam">
-      <div class="modal-content">
-        <h4>Max Concurrent Scans</h4>
-        <div class="input-field">
+      ${mHead('Max Concurrent Scans')}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="edit-max-scans">Max Concurrent Scans</label>
           <input v-model="editValue" id="edit-max-scans" required type="number" min="1">
-          <label for="edit-max-scans">Edit Max Scans</label>
+          <span class="field-hint">⚠ Values above 1 are experimental and may cause instability.</span>
         </div>
-        <blockquote>
-          <b>Using a value more than '1' is experimental</b>
-        </blockquote>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Update', 'Updating')}
     </form>`,
   mounted: function () {
-    M.updateTextFields();
   },
   methods: {
     updateParam: async function() {
@@ -2735,11 +3306,11 @@ const editMaxScanModal = Vue.component('edit-max-scans-modal', {
           data: { maxConcurrentTasks: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.dbParams, 'maxConcurrentTasks', this.editValue);
   
         // close & reset the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
+        modVM.closeModal();
 
         iziToast.success({
           title: 'Updated Successfully',
@@ -2769,22 +3340,16 @@ const editPauseModal = Vue.component('edit-pause-modal', {
   },
   template: `
     <form @submit.prevent="updateParam">
-      <div class="modal-content">
-        <h4>Scan Pause</h4>
-        <div class="input-field">
+      ${mHead('Scan Pause', 'Delay between file scan iterations (ms)')}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="edit-db-pause">Pause (ms)</label>
           <input v-model="editValue" id="edit-db-pause" required type="number" min="1">
-          <label for="edit-db-pause">Edit Pause</label>
         </div>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Update', 'Updating')}
     </form>`,
   mounted: function () {
-    M.updateTextFields();
   },
   methods: {
     updateParam: async function() {
@@ -2797,11 +3362,11 @@ const editPauseModal = Vue.component('edit-pause-modal', {
           data: { pause: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.dbParams, 'pause', this.editValue);
   
         // close & reset the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
+        modVM.closeModal();
 
         iziToast.success({
           title: 'Updated Successfully',
@@ -2831,22 +3396,16 @@ const editBootScanView = Vue.component('edit-boot-scan-delay-modal', {
   },
   template: `
     <form @submit.prevent="updateParam">
-      <div class="modal-content">
-        <h4>Boot Scan Delay</h4>
-        <div class="input-field">
+      ${mHead('Boot Scan Delay', 'Seconds to wait before first scan after startup')}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="edit-scan-delay">Delay (seconds)</label>
           <input v-model="editValue" id="edit-scan-delay" required type="number" min="1">
-          <label for="edit-scan-delay">Boot Scan Delay</label>
         </div>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Update', 'Updating')}
     </form>`,
   mounted: function () {
-    M.updateTextFields();
   },
   methods: {
     updateParam: async function() {
@@ -2859,11 +3418,11 @@ const editBootScanView = Vue.component('edit-boot-scan-delay-modal', {
           data: { bootScanDelay: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.dbParams, 'bootScanDelay', this.editValue);
   
         // close & reset the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
+        modVM.closeModal();
 
         iziToast.success({
           title: 'Updated Successfully',
@@ -2893,22 +3452,16 @@ const editSaveIntervalView = Vue.component('edit-save-interval-modal', {
   },
   template: `
     <form @submit.prevent="updateParam">
-      <div class="modal-content">
-        <h4>Save Interval</h4>
-        <div class="input-field">
+      ${mHead('Save Interval', 'Number of files processed between each save')}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="edit-save-interval">Interval (files)</label>
           <input v-model="editValue" id="edit-save-interval" required type="number" min="1">
-          <label for="edit-save-interval">Save Interval</label>
         </div>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Update', 'Updating')}
     </form>`,
   mounted: function () {
-    M.updateTextFields();
   },
   methods: {
     updateParam: async function() {
@@ -2921,11 +3474,11 @@ const editSaveIntervalView = Vue.component('edit-save-interval-modal', {
           data: { saveInterval: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.dbParams, 'saveInterval', this.editValue);
   
         // close & reset the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
+        modVM.closeModal();
 
         iziToast.success({
           title: 'Updated Successfully',
@@ -2955,23 +3508,17 @@ const editScanIntervalView = Vue.component('edit-scan-interval-modal', {
   },
   template: `
     <form @submit.prevent="updateParam">
-      <div class="modal-content">
-        <h4>Edit Scan Interval</h4>
-        <div class="input-field">
+      ${mHead('Scan Interval', 'Automatic library scan frequency (hours)')}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="edit-scan-interval">Interval (hours)</label>
           <input v-model="editValue" id="edit-scan-interval" required type="number" min="0">
-          <label for="edit-scan-interval">Scan Interval</label>
-          <span class="helper-text">Set to '0' to disable automatic scans</span>
+          <span class="field-hint">Set to 0 to disable automatic scans.</span>
         </div>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Update', 'Updating')}
     </form>`,
   mounted: function () {
-    M.updateTextFields();
   },
   methods: {
     updateParam: async function() {
@@ -2984,11 +3531,11 @@ const editScanIntervalView = Vue.component('edit-scan-interval-modal', {
           data: { scanInterval: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.dbParams, 'scanInterval', this.editValue);
   
         // close & reset the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
+        modVM.closeModal();
 
         iziToast.success({
           title: 'Updated Successfully',
@@ -3010,34 +3557,28 @@ const editScanIntervalView = Vue.component('edit-scan-interval-modal', {
 
 const editSslModal =  Vue.component('edit-ssl-modal', {
   data() {
+    const ssl = ADMINDATA.serverParams && ADMINDATA.serverParams.ssl;
     return {
-      certPath: '',
-      keyPath: '',
+      certPath: (ssl && ssl.cert) || '',
+      keyPath: (ssl && ssl.key) || '',
       submitPending: false
     };
   },
   template: `
     <form @submit.prevent="updateSSL">
-      <div class="modal-content">
-        <h4>Set SSL Files</h4>
-        <div class="input-field">
-          <input v-model="certPath" id="edit-ssl-cert" required type="text">
-          <label for="edit-ssl-cert">Cert File Path</label>
+      ${mHead('SSL Certificate', 'Enable HTTPS by providing certificate files')}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="edit-ssl-cert">Certificate File Path</label>
+          <input v-model="certPath" id="edit-ssl-cert" required type="text" placeholder="/path/to/cert.pem">
         </div>
-        <div class="input-field">
-          <input v-model="keyPath" id="edit-ssl-key" required type="text">
+        <div class="field-group">
           <label for="edit-ssl-key">Key File Path</label>
+          <input v-model="keyPath" id="edit-ssl-key" required type="text" placeholder="/path/to/key.pem">
+          <span class="field-hint">&#9888; Requires a reboot. You will be redirected to HTTPS automatically.</span>
         </div>
-        <blockquote>
-          Requires a Reboot
-        </blockquote>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Update', 'Updating')}
     </form>`,
   methods: {
     updateSSL: async function() {
@@ -3050,21 +3591,22 @@ const editSslModal =  Vue.component('edit-ssl-modal', {
           data: { cert: this.certPath, key: this.keyPath }
         });
 
-        // update fronted data
-        Vue.set(ADMINDATA.dbParams, 'scanInterval', this.editValue);
+        // update frontend data
+        if (!ADMINDATA.serverParams.ssl) Vue.set(ADMINDATA.serverParams, 'ssl', {});
+        Vue.set(ADMINDATA.serverParams.ssl, 'cert', this.certPath);
+        Vue.set(ADMINDATA.serverParams.ssl, 'key', this.keyPath);
   
-        // close & reset the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
-
-        setTimeout(() => {
-          window.location.href = window.location.href.replace('http://', 'https://'); 
-        }, 4000);
+        modVM.closeModal();
 
         iziToast.success({
-          title: 'Updated Successfully. You will be redirected shortly',
+          title: 'Updated. Rebooting — you will be redirected to HTTPS shortly.',
           position: 'topCenter',
-          timeout: 3500
+          timeout: 5000
         });
+
+        setTimeout(() => {
+          window.location.href = window.location.href.replace('http://', 'https://');
+        }, 5000);
       } catch(err) {
         iziToast.error({
           title: 'Update Failed',
@@ -3089,26 +3631,22 @@ const editTranscodeCodecModal = Vue.component('edit-transcode-codec-modal', {
   },
   template: `
     <form @submit.prevent="updateParam">
-      <div class="modal-content">
-        <h4>Set Default Codec</h4>
-        <select v-model="editValue" id="transcode-codec-dropdown">
-          <option value="mp3">MP3</option>
-          <option value="opus">Opus</option>
-          <option value="aac">AAC</option>
-        </select>
+      ${mHead('Default Codec', 'Format used when transcoding audio')}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="transcode-codec-dropdown">Codec</label>
+          <select v-model="editValue" id="transcode-codec-dropdown">
+            <option value="mp3">MP3 — best compatibility</option>
+            <option value="opus">Opus — best quality / size ratio</option>
+            <option value="aac">AAC — iOS &amp; Apple devices</option>
+          </select>
+        </div>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Update', 'Updating')}
     </form>`,
   mounted: function () {
-    this.selectInstance = M.FormSelect.init(document.querySelectorAll("#transcode-codec-dropdown"));
   },
   beforeDestroy: function() {
-    this.selectInstance[0].destroy();
   },
   methods: {
     updateParam: async function() {
@@ -3121,11 +3659,11 @@ const editTranscodeCodecModal = Vue.component('edit-transcode-codec-modal', {
           data: { defaultCodec: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.transcodeParams, 'defaultCodec', this.editValue);
   
         // close & reset the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
+        modVM.closeModal();
 
         iziToast.success({
           title: 'Updated Successfully',
@@ -3156,28 +3694,21 @@ const editTranscodeDefaultAlgorithm = Vue.component('edit-transcode-algorithm-mo
   },
   template: `
     <form @submit.prevent="updateParam">
-      <div class="modal-content">
-        <h4>Set Default Algorithm</h4>
-        <select v-model="editValue" id="transcode-algorithm-dropdown">
-          <option value="buffer">Buffer</option>
-          <option value="stream">Stream</option>
-        </select>
-        <blockquote>
-          <b>Buffer</b> takes longer to load and uses more memory, but it works on everything. <b>Stream</b> starts instantaneously, but it might not work on every device
-        </blockquote>
+      ${mHead('Transcode Algorithm', 'How audio is processed and delivered')}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="transcode-algorithm-dropdown">Algorithm</label>
+          <select v-model="editValue" id="transcode-algorithm-dropdown">
+            <option value="buffer">Buffer — slower start, maximum compatibility</option>
+            <option value="stream">Stream — instant start, may not work on all devices</option>
+          </select>
+        </div>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Update', 'Updating')}
     </form>`,
   mounted: function () {
-    this.selectInstance = M.FormSelect.init(document.querySelectorAll("#transcode-algorithm-dropdown"));
   },
   beforeDestroy: function() {
-    this.selectInstance[0].destroy();
   },
   methods: {
     updateParam: async function() {
@@ -3190,11 +3721,11 @@ const editTranscodeDefaultAlgorithm = Vue.component('edit-transcode-algorithm-mo
           data: { algorithm: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.transcodeParams, 'algorithm', this.editValue);
   
         // close & reset the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
+        modVM.closeModal();
 
         iziToast.success({
           title: 'Updated Successfully',
@@ -3225,27 +3756,23 @@ const editTranscodeDefaultBitrate = Vue.component('edit-transcode-bitrate-modal'
   },
   template: `
     <form @submit.prevent="updateParam">
-      <div class="modal-content">
-        <h4>Set Default Bitrate</h4>
-        <select v-model="editValue" id="transcode-bitrate-dropdown">
-          <option value="64k">64k</option>
-          <option value="96k">96k</option>
-          <option value="128k">128k</option>
-          <option value="192k">192k</option>
-        </select>
+      ${mHead('Default Bitrate', 'Quality setting for transcoded streams')}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="transcode-bitrate-dropdown">Bitrate</label>
+          <select v-model="editValue" id="transcode-bitrate-dropdown">
+            <option value="64k">64k — low bandwidth</option>
+            <option value="96k">96k — moderate</option>
+            <option value="128k">128k — good quality</option>
+            <option value="192k">192k — high quality</option>
+          </select>
+        </div>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Update', 'Updating')}
     </form>`,
   mounted: function () {
-    this.selectInstance = M.FormSelect.init(document.querySelectorAll("#transcode-bitrate-dropdown"));
   },
   beforeDestroy: function() {
-    this.selectInstance[0].destroy();
   },
   methods: {
     updateParam: async function() {
@@ -3258,11 +3785,11 @@ const editTranscodeDefaultBitrate = Vue.component('edit-transcode-bitrate-modal'
           data: { defaultBitrate: this.editValue }
         });
 
-        // update fronted data
+        // update frontend data
         Vue.set(ADMINDATA.transcodeParams, 'defaultBitrate', this.editValue);
   
         // close & reset the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
+        modVM.closeModal();
 
         iziToast.success({
           title: 'Updated Successfully',
@@ -3282,149 +3809,47 @@ const editTranscodeDefaultBitrate = Vue.component('edit-transcode-bitrate-modal'
   }
 });
 
-const lastFMView = Vue.component('lastfm-view', {
-  data() {
-    return {
-      apiKey: '',
-      apiSecret: '',
-      pending: false,
-    };
-  },
-  template: `
-    <div class="container">
-      <div class="row">
-        <div class="col s12">
-          <div class="card">
-            <div class="card-content">
-              <span class="card-title">Last.fm API Credentials</span>
-              <p style="margin-bottom:16px;color:#aaa;font-size:.92em;">
-                This mStream installation ships with built-in Last.fm credentials.
-                You can optionally override them with your own
-                <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener">API key &amp; shared secret</a>.
-                The secret is stored server-side only and is never sent to clients.
-              </p>
-              <table>
-                <tbody>
-                  <tr>
-                    <td style="width:140px"><b>API Key</b></td>
-                    <td>
-                      <input v-model="apiKey" type="text" placeholder="Enter API key" style="margin:0" />
-                    </td>
-                  </tr>
-                  <tr>
-                    <td><b>Shared Secret</b></td>
-                    <td>
-                      <input v-model="apiSecret" type="password" placeholder="Enter shared secret" style="margin:0" />
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div class="card-action">
-              <a class="waves-effect waves-light btn" v-on:click="save()" :class="{disabled: pending}">
-                {{ pending ? 'Saving...' : 'Save Credentials' }}
-              </a>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>`,
-  methods: {
-    save: async function() {
-      if (!this.apiKey.trim() || !this.apiSecret.trim()) {
-        iziToast.warning({ title: 'Both fields are required', position: 'topCenter', timeout: 3500 });
-        return;
-      }
-      this.pending = true;
-      try {
-        await API.axios({
-          method: 'POST',
-          url: `${API.url()}/api/v1/admin/lastfm/config`,
-          data: { apiKey: this.apiKey.trim(), apiSecret: this.apiSecret.trim() }
-        });
-        this.apiKey = '';
-        this.apiSecret = '';
-        iziToast.success({ title: 'Last.fm credentials saved', position: 'topCenter', timeout: 3500 });
-      } catch(err) {
-        iziToast.error({ title: 'Failed to save credentials', position: 'topCenter', timeout: 3500 });
-      } finally {
-        this.pending = false;
-      }
-    }
-  }
-});
-
-const lastFMModal = Vue.component('lastfm-modal', {
-  data() {
-    return {
-      lastFMUser: '',
-      lastFMPassword: '',
-    };
-  },
-  template: `
-    <div>
-      Coming Soon
-    </div>`,
-  methods: {
-    setLastFM: async function() {
-      try {
-
-      } catch(err) {
-        
-      }
-    }
-  }
-});
-
 const federationGenerateInvite = Vue.component('federation-generate-invite-modal', {
   data() {
     return {
       submitPending: false,
       selectInstance: null,
+      fedDirs: [],
       directories: ADMINDATA.folders,
       federationInviteToken: ADMINDATA.federationInviteToken
     };
   },
   template: `
-    <div class="modal-content">
-      <div class="row">
-        <div class="col s12 m12 l6">
-          <h4>Generate Invite Token</h4>
-          <form @submit.prevent="generateToken">
-            <div class="row">
-              <div class="input-field col s12">
-                <select class="material-select" :disabled="Object.keys(directories).length === 0" id="fed-invite-dirs" multiple>
-                  <option disabled selected value="" v-if="Object.keys(directories).length === 0">You must add a directory before adding a user</option>
-                  <option selected v-for="(key, value) in directories" :value="value">{{ value }}</option>
-                </select>
-                <label for="fed-invite-dirs">Directories To Share</label>
-              </div>
-            </div>
-            <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-              {{submitPending === false ? 'Create Invite' : 'Creating ...'}}
-            </button>
-          </form>
+    <div>
+      ${mHead('Federation Invite', 'Tokens expire after 30 minutes')}
+      <form @submit.prevent="generateToken">
+        <div class="modal-body">
+          <div class="field-group">
+            <label for="fed-invite-dirs">Folders to Share</label>
+            <select id="fed-invite-dirs" :disabled="Object.keys(directories).length === 0" multiple :size="Math.max(2, Object.keys(directories).length)" v-model="fedDirs">
+              <option disabled value="" v-if="Object.keys(directories).length === 0">No directories &mdash; add one first</option>
+              <option v-for="(val, key) in directories" :key="key" :value="key">{{ key }}</option>
+            </select>
+            <span class="field-hint">Hold Ctrl / Cmd to select multiple folders.</span>
+          </div>
+          <div class="field-group" v-if="federationInviteToken.val">
+            <label>Invite Token</label>
+            <textarea v-model="federationInviteToken.val" id="fed-textarea" rows="5" readonly style="resize:none;font-size:.82rem;font-family:monospace;"></textarea>
+            <a href="#" class="fed-copy-button btn-flat btn-small" data-clipboard-target="#fed-textarea" style="align-self:flex-start;margin-top:.25rem;">Copy to Clipboard</a>
+          </div>
         </div>
-        <div class="col s12 m12 l6">
-          <blockquote>
-            Invite tokens expire in 30 min
-          </blockquote>
-          <textarea v-model="federationInviteToken.val" id="fed-textarea" style="height: auto;" rows="6" cols="60" placeholder="Your invite token will be put here" readonly="readonly"></textarea>
-          <a href="#" class="fed-copy-button" data-clipboard-target="#fed-textarea">Copy To Clipboard</a>
-        </div>
-      </div>
+        ${mFoot('Create Invite', 'Creating')}
+      </form>
     </div>`,
   mounted: function () {
-    this.selectInstance = M.FormSelect.init(document.querySelectorAll(".material-select"));
   },
   beforeDestroy: function() {
-    this.selectInstance[0].destroy();
   },
   methods: {
     generateToken: async function() {
       try {
         this.submitPending = true;
-        const selectedDirs = Array.from(document.querySelectorAll('#fed-invite-dirs option:checked')).map(el => el.value);
+        const selectedDirs = this.fedDirs;
 
         if(selectedDirs.length === 0) {
           iziToast.warning({
@@ -3436,7 +3861,7 @@ const federationGenerateInvite = Vue.component('federation-generate-invite-modal
         }
 
         const postData =  { vpaths: selectedDirs };
-        if (window.location.protocol === 'https') {
+        if (window.location.protocol === 'https:') {
           postData.url = window.location.origin;
         }
 
@@ -3473,25 +3898,21 @@ const editDbEngineModal = Vue.component('edit-db-engine-modal', {
   },
   template: `
     <form @submit.prevent="updateParam">
-      <div class="modal-content">
-        <h4>Set DB Engine</h4>
-        <select v-model="editValue" id="db-engine-dropdown">
-          <option value="loki">LokiJS</option>
-          <option value="sqlite">SQLite</option>
-        </select>
+      ${mHead('Database Engine', '⚠ Requires a server reboot to apply')}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="db-engine-dropdown">Engine</label>
+          <select v-model="editValue" id="db-engine-dropdown">
+            <option value="loki">LokiJS — in-memory, fast</option>
+            <option value="sqlite">SQLite — persistent, reliable</option>
+          </select>
+        </div>
       </div>
-      <div class="modal-footer">
-        <a href="#!" class="modal-close waves-effect waves-green btn-flat">Go Back</a>
-        <button class="btn green waves-effect waves-light" type="submit" :disabled="submitPending === true">
-          {{submitPending === false ? 'Update' : 'Updating...'}}
-        </button>
-      </div>
+      ${mFoot('Update', 'Updating')}
     </form>`,
   mounted: function () {
-    this.selectInstance = M.FormSelect.init(document.querySelectorAll("#db-engine-dropdown"));
   },
   beforeDestroy: function() {
-    this.selectInstance[0].destroy();
   },
   methods: {
     updateParam: async function() {
@@ -3508,7 +3929,7 @@ const editDbEngineModal = Vue.component('edit-db-engine-modal', {
         Vue.set(ADMINDATA.dbParams, 'engine', this.editValue);
 
         // close & reset the modal
-        M.Modal.getInstance(document.getElementById('admin-modal')).close();
+        modVM.closeModal();
 
         iziToast.success({
           title: 'Server Rebooting',
@@ -3533,7 +3954,7 @@ const nullModal = Vue.component('null-modal', {
 });
 
 const modVM = new Vue({
-  el: '#dynamic-modal',
+  el: '#admin-modal-wrapper',
   components: {
     'user-password-modal': userPasswordView,
     'user-vpaths-modal': usersVpathsView,
@@ -3545,18 +3966,50 @@ const modVM = new Vue({
     'edit-scan-interval-modal': editScanIntervalView,
     'edit-save-interval-modal': editSaveIntervalView,
     'edit-boot-scan-delay-modal': editBootScanView,
-    'edit-select-codec-modal': editTranscodeCodecModal,
+    'edit-transcode-codec-modal': editTranscodeCodecModal,
     'edit-transcode-bitrate-modal': editTranscodeDefaultBitrate,
     'edit-transcode-algorithm-modal': editTranscodeDefaultAlgorithm,
     'edit-pause-modal': editPauseModal,
     'edit-max-scan-modal': editMaxScanModal,
     'edit-ssl-modal': editSslModal,
-    'lastfm-modal': lastFMModal,
     'federation-generate-invite-modal': federationGenerateInvite,
     'edit-db-engine-modal': editDbEngineModal,
     'null-modal': nullModal
   },
   data: {
-    currentViewModal: 'null-modal'
+    currentViewModal: 'null-modal',
+    modalOpen: false
+  },
+  methods: {
+    openModal() { this.modalOpen = true; },
+    closeModal() { this.modalOpen = false; this.currentViewModal = 'null-modal'; }
+  }
+});
+
+
+const confirmVM = new Vue({
+  el: '#confirm-modal-wrapper',
+  data: {
+    show: false,
+    title: '',
+    message: '',
+    confirmLabel: 'Confirm',
+    _onConfirm: null
+  },
+  methods: {
+    ask(title, message, confirmLabel, onConfirm) {
+      this.title = title;
+      this.message = message || '';
+      this.confirmLabel = confirmLabel || 'Confirm';
+      this._onConfirm = onConfirm;
+      this.show = true;
+    },
+    confirm() {
+      this.show = false;
+      if (this._onConfirm) this._onConfirm();
+    },
+    cancel() {
+      this.show = false;
+    }
   }
 });

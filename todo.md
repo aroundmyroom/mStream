@@ -309,12 +309,9 @@ before the clean branch becomes `main`. Check each item off when confirmed safe 
 
 ### Directories
 
-- [ ] **`webapp/admin/`** — original upstream admin panel. No longer served by any route (routes removed).
-  Safe to delete. _After deleting: no server changes needed — the `/old-admin` route was already removed._
+- [x] ~~**`webapp/admin/`**~~ — old upstream admin deleted.
 
-- [ ] **`webapp/admin-v2/`** — should be renamed to `webapp/admin/` once `webapp/admin/` is deleted.
-  The server currently maps it to `/admin` via an explicit static mount.
-  _After renaming: update the `mstream.use('/admin', express.static(...))` path in `src/server.js`._
+- [x] ~~**`webapp/admin-v2/`**~~ — renamed to `webapp/admin/`; server mount updated to `admin-v2` → `admin`.
 
 - [ ] **`webapp/v2/`** — the main UI directory, still named `v2` from the old routing era.
   Should be renamed to something neutral (e.g. `webapp/player/` or `webapp/app/`) when convenient.

@@ -104,7 +104,7 @@ export async function serveIt(configFile) {
     next();
   });
 
-  // Admin panel (new UI — content served from webapp/admin-v2/) — auth guard
+  // Admin panel (webapp/admin/) — auth guard
   mstream.get('/admin', (req, res, next) => {
     if (config.program.lockAdmin === true) {
       return res.send('<p>Admin Page Disabled</p>');
@@ -145,8 +145,8 @@ export async function serveIt(configFile) {
     }
   });
 
-  // Mount new admin (webapp/admin-v2/) at /admin — must be before general static
-  mstream.use('/admin', express.static(path.join(config.program.webAppDirectory, 'admin-v2')));
+  // Mount admin panel (webapp/admin/) at /admin — must be before general static
+  mstream.use('/admin', express.static(path.join(config.program.webAppDirectory, 'admin')));
 
   // Give access to public folder
   mstream.use('/', express.static(config.program.webAppDirectory));
