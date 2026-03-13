@@ -139,6 +139,32 @@ Client-side gapless is complete. Scan-time silence detection moved to FUTURE.
 
 ## FUTURE — Library Management
 
+### Discogs URL: Direct Release Lookup (art + tags from a single URL)
+
+Instead of searching Discogs by metadata, let the user paste a Discogs release or master URL and have mStream fetch the cover art and all tag fields in one shot — no searching, no ambiguity.
+
+**How it works:**
+- User pastes `https://www.discogs.com/release/1234567-…` or `.../master/1234567` into a field in the Now Playing modal
+- Client extracts the numeric ID and type (`release` / `master`) from the URL with a regex — no round-trip needed for parsing
+- If `master`, server auto-resolves to the main release version via `GET /api/v1/discogs/release?type=master&id=…`
+- Single API call returns: `artist`, `title`, `year`, `label`, `catno`, `genres`, full `tracklist[]`, and primary cover image (base64 thumb for preview + full-res embed URI)
+- Metadata note: image fetch (`i.discogs.com`) requires the Discogs `Authorization` header — art works when API key is configured; without a key only tag metadata is returned
+- User can choose to apply: **cover art only**, **tags only**, or **both** — matching the existing embed pipeline (`POST /api/v1/discogs/embed`)
+
+**Why this is better than search for known releases:**
+- Zero ambiguity — user picked the exact release on Discogs.com themselves
+- No search quota consumed (1 call vs 3–10 search calls)
+- Fetches full tracklist, label, catalog number — fields the current search flow doesn't expose
+
+**Implementation steps:**
+- [ ] Server: `GET /api/v1/discogs/release?id=<id>&type=release|master` — call `discogsGet()`, for master issues second call to get main release; return flattened `{ artist, title, year, label, catno, genres[], tracklist[], thumb: base64 | null }`
+- [ ] Client NP modal: add "Discogs URL" text input below the existing art grid; on paste/submit extract ID + type and call the new endpoint
+- [ ] Pre-fill all ID3 tag form fields from the response; show cover thumbnail preview
+- [ ] Apply buttons: "Art + Tags", "Art Only", "Tags Only" — art path reuses existing `POST /api/v1/discogs/embed`, tag path reuses `POST /api/v1/admin/tags/write`
+- [ ] Graceful fallback: if API key is missing, grey out the "Art" buttons with tooltip "Discogs API key required for image download" but still allow tag fill
+
+---
+
 ### Inline Tag Editor
 - [ ] Server: add `PUT /api/v1/db/tag` endpoint — accept `{ filepath, title, artist, album, year, genre, trackNumber }`, write ID3/FLAC tags via a Node library (e.g. `music-metadata` + `node-id3`), re-index the track
 - [ ] Client: add an "Edit Tags" option to the song context menu
@@ -272,3 +298,69 @@ This is a first-class concern and must be designed clearly up front.
 - [ ] Render a plays-per-day sparkline chart (pure canvas, no library dependency)
 - [ ] Render top-10 artists / albums / tracks with play counts and mini bar indicators
 - [ ] Show current listening streak (consecutive days with at least one play)
+
+---
+
+## LEGACY BURDEN — Marked for Deletion
+
+These items are code or directories that served the old GUI era and are no longer part of the canonical path.
+They are kept temporarily for safety (backward compat, cache warm-down, reference) but **must be removed**
+before the clean branch becomes `main`. Check each item off when confirmed safe to delete.
+
+### Directories
+
+- [ ] **`webapp/admin/`** — original upstream admin panel, now served at `/old-admin`.
+  New admin (`webapp/admin-v2/`) is mounted at `/admin`.
+  Delete after confirming `/admin` (new UI) is fully stable and no admin bookmarks point to `/old-admin`.
+  _Also remove the `/old-admin` route block and static mount from `src/server.js`._
+
+- [ ] **`webapp/admin-v2/`** — should be renamed to `webapp/admin/` once `webapp/admin/` is deleted.
+  The directory name `admin-v2` is legacy; the server currently maps it to `/admin` via an explicit static mount.
+  _After renaming: update the `mstream.use('/admin', express.static(...))` mount path in `src/server.js`._
+
+- [ ] **`webapp/v2/`** — the main UI directory, still named `v2` from the old routing era.
+  Should be renamed to something neutral (e.g. `webapp/player/` or `webapp/app/`) once routing is settled.
+  _After renaming: update the `res.sendFile(...)` call at `GET /` in `src/server.js` and all absolute asset paths
+  in `webapp/v2/index.html` (`/v2/style.css`, `/v2/app.js`)._
+
+- [ ] **`webapp/alpha/`** — an unmaintained Vue.js prototype player (files: `api.js`, `m.js`, `spa.js`, `spa.css`, `vp.js`).
+  There is NO server route serving this directory as an entry point; it is dead code.
+  It predates the current v2/Velvet architecture and uses a different Vue-based component model.
+  **Safe to delete immediately** — no routes reference it and no active feature depends on it.
+
+- [ ] **`webapp/old.html`** — a standalone HTML file at the webapp root. Unclear purpose; likely an old index backup.
+  Investigate before deleting (check if any route or link references it; none found in current server code).
+
+### Server routes (`src/server.js`)
+
+- [ ] **`/admin-v2` redirect (301 → `/admin`)** — kept for bookmarks and old PWA cache.
+  Remove once `/admin` is well-established (suggest: after first release on the clean branch).
+
+- [ ] **`/v2` and `/v2/` redirects (301 → `/`)** — kept for bookmarks and PWA installs with old `start_url`.
+  Remove once transition period ends. Check `webapp/v2/site.webmanifest` LEGACY route at the same time.
+
+- [ ] **`/v2/site.webmanifest` route** — kept so existing PWA installs can still fetch the manifest.
+  Remove together with the `/v2` redirect above.
+
+- [ ] **`/old-admin` route block + static mount** — tied to deletion of `webapp/admin/` above.
+
+### Client code (`webapp/v2/`)
+
+- [ ] **`classic-admin-btn` in `webapp/v2/index.html`** (line ~438) — the footer link to `/old-admin` labelled "Classic Admin".
+  Hidden unless `localStorage.ms2_show_classic === '1'`. Remove the button and the `ms2_show_classic` checks in
+  `app.js` once `webapp/admin/` is deleted.
+
+- [ ] **`classic-player-btn` in `webapp/v2/index.html`** (line ~452) — the footer link to `/classic`.
+  Hidden unless `ms2_show_classic`. Remove with the classic UI deletion pass.
+
+- [ ] **`classic-login-link` in `webapp/v2/index.html`** (line ~59) — link to `/classic` on the login screen.
+  Remove when the classic UI is removed.
+
+- [ ] **All `ms2_show_classic` localStorage checks in `webapp/v2/app.js`** — remove with the classic UI pass.
+
+### Classic / old UI (`/classic` route)
+
+- [ ] **`webapp/index.html` + related classic assets** — the original mStream player UI.
+  Served at `/classic` as a tombstone. Mark for deletion in a separate cleanup pass once users/docs have been notified.
+  _Remove the `/classic` route from `src/server.js` at the same time._
+

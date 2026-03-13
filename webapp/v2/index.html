@@ -12,7 +12,7 @@
     // Generate PWA manifest inline — avoids proxy auth blocking a separate HTTP request
     (function(){
       var o=window.location.origin;
-      var m={"name":"mStream","short_name":"mStream","icons":[{"src":o+"/assets/fav/android-chrome-192x192.png","sizes":"192x192","type":"image/png"},{"src":o+"/assets/fav/android-chrome-512x512.png","sizes":"512x512","type":"image/png"}],"theme_color":"#1e1e2e","background_color":"#1e1e2e","display":"standalone","start_url":o+"/v2"};
+      var m={"name":"mStream","short_name":"mStream","icons":[{"src":o+"/assets/fav/android-chrome-192x192.png","sizes":"192x192","type":"image/png"},{"src":o+"/assets/fav/android-chrome-512x512.png","sizes":"512x512","type":"image/png"}],"theme_color":"#1e1e2e","background_color":"#1e1e2e","display":"standalone","start_url":o+"/"};
       var b=new Blob([JSON.stringify(m)],{type:'application/manifest+json'});
       var l=document.createElement('link');l.rel='manifest';l.href=URL.createObjectURL(b);
       document.head.appendChild(l);
@@ -22,7 +22,7 @@
   <script defer src="../assets/js/lib/butterchurn-presets.min.js"></script>
   <script defer src="../assets/js/lib/butterchurn-presets-extra.js"></script>
   <script src="../assets/js/lib/qr.js"></script>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="/v2/style.css">
 </head>
 <body>
 
@@ -435,7 +435,7 @@
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9,12 11,14 15,10"/></svg>
         Admin Panel
       </span>
-      <a id="classic-admin-btn" href="/admin" target="_blank" rel="noopener" class="footer-link hidden">
+      <a id="classic-admin-btn" href="/old-admin" target="_blank" rel="noopener" class="footer-link hidden">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         Classic Admin
       </a>
@@ -761,6 +761,6 @@
 <canvas id="egg-canvas" style="display:none;position:fixed;left:0;right:0;bottom:var(--player);height:180px;z-index:9999;"></canvas>
 
 <div id="tip-box"></div>
-<script src="app.js"></script>
+<script src="/v2/app.js"></script>
 </body>
 </html>

@@ -6214,7 +6214,7 @@ function openAdminPanel() {
   if (_adminWin && !_adminWin.closed) {
     _adminWin.focus();
   } else {
-    _adminWin = window.open('/admin-v2', '_blank');
+    _adminWin = window.open('/admin', '_blank');
   }
 }
 
