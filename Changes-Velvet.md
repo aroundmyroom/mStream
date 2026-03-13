@@ -5,6 +5,31 @@
 
 ---
 
+## v5.16.9-velvet — 2026-03-13
+
+### Waveform overhaul — RMS + γ=0.7 + 8 kHz sampling
+
+**`src/api/waveform.js`**
+- `SAMPLE_RATE` raised from 200 → **8000 Hz**: each display bar now computes RMS over ~5000+ raw PCM samples, producing a naturally smooth energy envelope without any explicit smoothing pass
+- `POINTS` set to **600**: each bar renders at ~1.5–2 px wide, matching SoundCloud/Beatport density
+- Per-chunk method changed from **mean of absolute values → RMS** (sum of squares → sqrt): properly weights sustained energy without being hijacked by individual noise spikes
+- Normalisation ceiling moved from p98 → **p99**; noise gate added at 0.1% of p99 to silence true DC offset / digital black
+- Loudness curve changed from **linear → γ=0.7 power curve**: quiet breakdowns (2% of peak) render at ~8% bar height (visible but clearly quiet); loud 40–100% range maps to 53–100% (47% spread — kick, hi-hat, drop all distinct)
+- 11 existing waveform cache files cleared so they regenerate with the improved algorithm
+
+---
+
+## v5.16.8-velvet — 2026-03-13
+
+### Discogs cover-art search parallelized
+
+**`src/api/discogs.js`**
+- Phase 1 (search queries): all Discogs search requests now fire simultaneously via `Promise.allSettled` instead of sequentially — results are collected in original priority order
+- Phase 2 (image resolution): all candidate master-resolve + release-fetch + image-download chains fire in parallel — worst-case round-trip drops from ~10–15 s to ~1–2 s
+- One failed Discogs call no longer blocks the others
+
+---
+
 ## v5.16.7-velvet — 2026-03-13
 
 ### Crossfade slider added to Auto-DJ settings

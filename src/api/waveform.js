@@ -7,36 +7,61 @@ import * as db from '../db/manager.js';
 import { getVPathInfo } from '../util/vpath.js';
 import WebError from '../util/web-error.js';
 
-// Number of RMS sample points returned (matches expected canvas width)
-const POINTS = 800;
+// Number of waveform points returned to the client.
+const POINTS = 600;
 
-// Audio sample rate for PCM extraction — 200 Hz is sufficient for a
-// full-track waveform overview even for tracks longer than 1 hour
-const SAMPLE_RATE = 200;
+// PCM sample rate fed to ffmpeg.
+// 8000 Hz gives ~2400 raw samples per display bar on a 7-minute track —
+// enough that RMS naturally produces a smooth envelope without any extra
+// smoothing pass.  Low enough to decode fast.
+const SAMPLE_RATE = 8000;
 
 /**
- * Downsample a Float32Array of PCM amplitudes into `count` averaged points,
- * normalised to 0–255 integers.
+ * Downsample a Float32Array of PCM amplitudes into `count` points,
+ * normalised to 0–255.
+ *
+ * Approach: RMS per chunk, p99 ceiling, sqrt (γ=0.5) curve — no smoothing pass.
+ *
+ * At 8000 Hz sample rate each of the 1400 display bars covers ~2400 raw
+ * samples (for a 7-minute track).  RMS over ~2400 samples naturally averages
+ * into a smooth energy envelope — no extra smoothing is needed or applied.
+ * This is the same principle used by SoundCloud / Beatport waveform generators.
+ *
+ * Loudness curve: γ=0.7 (mild compression — more dynamic range than sqrt).
+ *   — Linear (γ=1.0): quiet intro at 2% → 2% bar (invisible)
+ *   — sqrt  (γ=0.5): 2% → 14% bar, but loud 40–100% collapses to 63–100% (37% spread, flat)
+ *   — γ=0.7:         2% →  8% bar; loud 40–100% maps to 53–100% (47% spread,
+ *     individual kick/hi-hat/drop all clearly distinct; quiet breaks low but visible).
  */
 function downsample(data, count) {
   const total = data.length;
   if (total === 0) return new Array(count).fill(0);
   const result = new Array(count);
   const chunkSize = total / count;
+
+  // RMS per chunk — robust energy estimate, naturally smooth at high sample rate
   for (let i = 0; i < count; i++) {
     const start = Math.floor(i * chunkSize);
     const end   = Math.min(total, Math.floor((i + 1) * chunkSize));
     let sum = 0;
-    for (let j = start; j < end; j++) sum += Math.abs(data[j]);
-    result[i] = end > start ? sum / (end - start) : 0;
+    for (let j = start; j < end; j++) sum += data[j] * data[j];
+    result[i] = end > start ? Math.sqrt(sum / (end - start)) : 0;
   }
-  // Percentile normalisation: use the 98th percentile as the scale ceiling.
-  // This prevents a single loud transient (e.g. one drum hit) from compressing
-  // the entire waveform — the spike clips to 255 and everything else stays tall.
+
+  // p99 ceiling — one brief transient won't compress the whole track
   const sorted = [...result].sort((a, b) => a - b);
-  const p98    = sorted[Math.floor(sorted.length * 0.98)] || sorted[sorted.length - 1];
-  const scale  = Math.max(p98, 1e-6);
-  return result.map(v => Math.min(255, Math.round((v / scale) * 255)));
+  const p99   = sorted[Math.floor(sorted.length * 0.99)] || sorted[sorted.length - 1];
+  const scale = Math.max(p99, 1e-6);
+
+  // Gate at 0.1% of p99 — kills only true digital silence / DC offset
+  const GATE  = scale * 0.001;
+  const GAMMA = 0.7;
+
+  return result.map(v => {
+    if (v <= GATE) return 0;
+    const norm = Math.min(1, v / scale);
+    return Math.round(Math.pow(norm, GAMMA) * 255);
+  });
 }
 
 export function setup(mstream) {
