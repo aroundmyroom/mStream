@@ -1020,8 +1020,8 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .dj-face-t{transform:rotateX(90deg)  translateZ(32px);}
 .dj-face-d{transform:rotateX(-90deg) translateZ(32px);}
 /* ───────────────────────────────────────────────── */
-.dj-light{color:var(--t2);position:relative;}
-.dj-light.dj-inactive{color:var(--t3);}
+.dj-light{position:relative;}
+.dj-light.dj-inactive{color:var(--t1);}
 .dj-light:not(.dj-inactive){color:var(--primary);}
 .dj-light:not(.dj-inactive)::after{content:'';position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--primary);}
 .q-count{position:absolute;top:1px;right:1px;font-size:9px;font-weight:700;min-width:15px;height:15px;line-height:15px;text-align:center;background:var(--primary);color:var(--badge-fg,#fff);border-radius:99px;padding:0 3px;box-shadow:0 0 0 2px var(--bg);display:none;}
