@@ -1504,7 +1504,8 @@ const MINI_SPEC = (() => {
 
     const cs2     = getComputedStyle(document.documentElement);
     const colIdle = cs2.getPropertyValue('--primary').trim();
-    const dark    = !document.documentElement.classList.contains('light');
+    const isLight = document.documentElement.classList.contains('light');
+    const dark    = !isLight;  // Velvet (no class) and Dark both use dark-bg rendering
     const GAP  = 1.5 * dpr;
     const cg   = 2 * dpr;
     const hw   = (W - cg) / 2;
@@ -1565,7 +1566,8 @@ const MINI_SPEC = (() => {
     const cs     = getComputedStyle(document.documentElement);
     const colPri = cs.getPropertyValue('--primary').trim();
     const colAcc = cs.getPropertyValue('--accent').trim();
-    const dark   = !document.documentElement.classList.contains('light');
+    const isLight = document.documentElement.classList.contains('light');
+    const dark    = !isLight;  // Velvet (no class) and Dark both use dark-bg rendering
     _ensurePalette(colPri, colAcc, dark);
 
     // Subtle floor line anchoring bars (#5)
@@ -1942,7 +1944,8 @@ const VU_NEEDLE = (() => {
     // CY=VH=120 → pivot at bottom edge. Tail (nTail=10) exits below → clipped.
     const sx = W / VW;
     const sy = H / VH;
-    const dark = !document.documentElement.classList.contains('light');
+    const isLight = document.documentElement.classList.contains('light');
+    const dark    = !isLight;  // Velvet (no class) and Dark both use dark-bg rendering
 
     ctx.clearRect(0, 0, W, H);
     ctx.save();
@@ -2097,7 +2100,8 @@ const VU_NEEDLE = (() => {
     if (W < 2 || H < 2) return;
     if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
     const ctx  = canvas.getContext('2d');
-    const dark = !document.documentElement.classList.contains('light');
+    const isLight = document.documentElement.classList.contains('light');
+    const dark    = !isLight;  // Velvet (no class) and Dark both use dark-bg rendering
 
     ctx.clearRect(0, 0, W, H);
     ctx.save();
@@ -2338,7 +2342,8 @@ const VU_NEEDLE = (() => {
     if (S < 4) return;
     if (canvas.width !== S || canvas.height !== S) { canvas.width = S; canvas.height = S; }
     const ctx  = canvas.getContext('2d');
-    const dark = !document.documentElement.classList.contains('light');
+    const isLight = document.documentElement.classList.contains('light');
+    const dark    = !isLight;  // Velvet (no class) and Dark both use dark-bg rendering
     const cx = S/2, cy = S/2;
     const outerR = S/2 - dpr;
     const capR   = outerR * 0.68;
@@ -5478,12 +5483,17 @@ function _drawWaveform() {
   ctx.restore();
 
   // Pass 2 — unplayed region: clip right of splitX, fill dim
-  const dark = !document.documentElement.classList.contains('light');
+  const html = document.documentElement;
+  const unplayedAlpha = html.classList.contains('light')
+    ? 'rgba(0,0,0,0.22)'
+    : html.classList.contains('dark')
+      ? 'rgba(255,255,255,0.28)'
+      : 'rgba(255,255,255,0.35)';  // Velvet — navy bg needs stronger contrast
   ctx.save();
   ctx.beginPath();
   ctx.rect(splitX, 0, W - splitX, H);
   ctx.clip();
-  ctx.fillStyle = dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.20)';
+  ctx.fillStyle = unplayedAlpha;
   for (let i = 0; i < data.length; i++) {
     const x    = (i / data.length) * W;
     const barH = Math.max(2, (data[i] / 255) * midY * 1.8);
@@ -5847,42 +5857,54 @@ function _throwDjDice(xfSec) {
   const totalMs = Math.max(3000, Math.min((xfSec || S.crossfade) * 1000, 20000));
 
   // Random rotations — multiples of 90° so it lands on a face
-  // Use many turns (8–14) so the initial spin looks forcefully thrown
+  // Use many turns (10–16) so the initial spin looks forcefully thrown
   const signX = Math.random() > .5 ? 1 : -1;
   const signY = Math.random() > .5 ? 1 : -1;
-  const rx = signX * (8 + Math.ceil(Math.random() * 6)) * 90;
-  const ry = signY * (8 + Math.ceil(Math.random() * 6)) * 90;
+  const rx = signX * (10 + Math.ceil(Math.random() * 6)) * 90;
+  const ry = signY * (10 + Math.ceil(Math.random() * 6)) * 90;
 
   // Land 60–88 % of viewport width to the left
   const throwFrac = 0.60 + Math.random() * 0.28;
   const arcX = -Math.floor(window.innerWidth * throwFrac);
   // High arc
-  const arcY = -(250 + Math.floor(Math.random() * 200));
+  const arcY = -(260 + Math.floor(Math.random() * 180));
 
   // ─ Phase timing ───────────
-  const flightMs = Math.floor(totalMs * 0.48);   // 48 % flying
-  const b1Ms    = Math.floor(totalMs * 0.16);    // bounce 1 (big)
-  const b2Ms    = Math.floor(totalMs * 0.11);    // bounce 2 (medium)
-  const b3Ms    = Math.floor(totalMs * 0.07);    // bounce 3 (small)
-  const restMs  = totalMs - flightMs - b1Ms - b2Ms - b3Ms; // rest + fade
+  // Flight is short — the die arrives fast like a real throw (25% of total)
+  const flightMs = Math.floor(totalMs * 0.25);
+  const b1Ms    = Math.floor(totalMs * 0.14);    // bounce 1 (big)
+  const b2Ms    = Math.floor(totalMs * 0.09);    // bounce 2 (medium)
+  const b3Ms    = Math.floor(totalMs * 0.06);    // bounce 3 (small)
+  const b4Ms    = Math.floor(totalMs * 0.04);    // bounce 4 (tiny skitter)
+  const restMs  = totalMs - flightMs - b1Ms - b2Ms - b3Ms - b4Ms; // rest + fade
 
   const tx = `${arcX}px`;
 
-  // ─ Flight arc ────────────────
+  // Pre-compute ALL bounce rotations as multiples of 90° so the die always
+  // lands perfectly face-flat — never balancing on an edge or corner.
+  const b1rx = rx   + signX * (2 + Math.floor(Math.random() * 2)) * 90;  // +180° or +270°
+  const b1ry = ry   + signY * (2 + Math.floor(Math.random() * 2)) * 90;
+  const b2rx = b1rx + signX * (1 + Math.floor(Math.random() * 2)) * 90;  // +90°  or +180°
+  const b2ry = b1ry + signY * (1 + Math.floor(Math.random() * 2)) * 90;
+  const b3rx = b2rx + signX * 90;   // still rolling (+90° — die is decelerating)
+  const b3ry = b2ry + signY * 90;
+  // b4: die is nearly settled — no more rotation, just a tiny positional bounce
+
+  // ─ Flight arc — fast cubic-bezier to snap it to landing quickly ──────────
   wrap._djw = wrap.animate([
     { opacity: 0, transform: `translate(0px,30px) scale(.18)` },
-    { opacity: 1, transform: `translate(${arcX * .28}px,${arcY}px) scale(1.30)`,        offset: .30 },
-    { opacity: 1, transform: `translate(${arcX * .66}px,${arcY * .25}px) scale(1.12)`,  offset: .70 },
+    { opacity: 1, transform: `translate(${arcX * .22}px,${arcY}px) scale(1.35)`,        offset: .22 },
+    { opacity: 1, transform: `translate(${arcX * .62}px,${arcY * .20}px) scale(1.14)`,  offset: .65 },
     { opacity: 1, transform: `translate(${tx},0px) scale(1.0)` },
-  ], { duration: flightMs, easing: 'ease-in-out', fill: 'forwards' });
+  ], { duration: flightMs, easing: 'cubic-bezier(.18,.8,.4,1)', fill: 'forwards' });
 
-  // Cube spin during flight — frontloaded: most rotation in first 20% of flight,
-  // then decelerates like a real thrown object losing angular momentum.
+  // Cube spin during flight — very front-heavy: 85% of rotation in first 15%,
+  // then nearly stops — like a real throw losing angular momentum in mid-air.
   cube._djc = cube.animate([
     { transform: `rotateX(0deg) rotateY(0deg)` },
-    { transform: `rotateX(${rx * .72}deg) rotateY(${ry * .72}deg)`, offset: .18 },
-    { transform: `rotateX(${rx * .91}deg) rotateY(${ry * .91}deg)`, offset: .42 },
-    { transform: `rotateX(${rx * .97}deg) rotateY(${ry * .97}deg)`, offset: .70 },
+    { transform: `rotateX(${rx * .85}deg) rotateY(${ry * .85}deg)`, offset: .15 },
+    { transform: `rotateX(${rx * .95}deg) rotateY(${ry * .95}deg)`, offset: .38 },
+    { transform: `rotateX(${rx * .99}deg) rotateY(${ry * .99}deg)`, offset: .65 },
     { transform: `rotateX(${rx}deg)       rotateY(${ry}deg)` },
   ], { duration: flightMs, easing: 'linear', fill: 'forwards' });
 
@@ -5890,48 +5912,69 @@ function _throwDjDice(xfSec) {
   wrap._djTimers.push(setTimeout(() => {
     wrap.animate([
       { transform: `translate(${tx},0px) scale(1.0)` },
-      { transform: `translate(${tx},-52px) scale(1.10)` },
-      { transform: `translate(${tx},0px) scale(0.95)` },
-    ], { duration: b1Ms, easing: 'cubic-bezier(.33,0,.66,1)', fill: 'forwards' });
+      { transform: `translate(${tx},-78px) scale(1.14)`, offset: .45 },
+      { transform: `translate(${tx},0px) scale(0.92)` },
+    ], { duration: b1Ms, easing: 'cubic-bezier(.25,0,.55,1)', fill: 'forwards' });
+    // ease-in-out: still spinning freely, not settling yet
     cube.animate([
-      { transform: `rotateX(${rx}deg) rotateY(${ry}deg)` },
-      { transform: `rotateX(${rx + signX*55}deg) rotateY(${ry + signY*65}deg)` },
-    ], { duration: b1Ms, easing: 'ease-out', fill: 'forwards' });
+      { transform: `rotateX(${rx}deg)   rotateY(${ry}deg)` },
+      { transform: `rotateX(${b1rx}deg) rotateY(${b1ry}deg)` },
+    ], { duration: b1Ms, easing: 'ease-in-out', fill: 'forwards' });
   }, flightMs));
 
   // ─ Bounce 2 – medium ────────
   wrap._djTimers.push(setTimeout(() => {
     wrap.animate([
-      { transform: `translate(${tx},0px) scale(0.95)` },
-      { transform: `translate(${tx},-24px) scale(1.05)` },
-      { transform: `translate(${tx},0px) scale(0.97)` },
-    ], { duration: b2Ms, easing: 'cubic-bezier(.33,0,.66,1)', fill: 'forwards' });
+      { transform: `translate(${tx},0px) scale(0.92)` },
+      { transform: `translate(${tx},-38px) scale(1.06)`, offset: .45 },
+      { transform: `translate(${tx},0px) scale(0.96)` },
+    ], { duration: b2Ms, easing: 'cubic-bezier(.25,0,.55,1)', fill: 'forwards' });
+    // ease-in-out: still visible spin, losing energy
     cube.animate([
-      { transform: `rotateX(${rx + signX*55}deg) rotateY(${ry + signY*65}deg)` },
-      { transform: `rotateX(${rx + signX*80}deg) rotateY(${ry + signY*90}deg)` },
-    ], { duration: b2Ms, easing: 'ease-out', fill: 'forwards' });
+      { transform: `rotateX(${b1rx}deg) rotateY(${b1ry}deg)` },
+      { transform: `rotateX(${b2rx}deg) rotateY(${b2ry}deg)` },
+    ], { duration: b2Ms, easing: 'ease-in-out', fill: 'forwards' });
   }, flightMs + b1Ms));
 
   // ─ Bounce 3 – small ─────────
   wrap._djTimers.push(setTimeout(() => {
     wrap.animate([
-      { transform: `translate(${tx},0px) scale(0.97)` },
-      { transform: `translate(${tx},-9px) scale(1.02)` },
+      { transform: `translate(${tx},0px) scale(0.96)` },
+      { transform: `translate(${tx},-16px) scale(1.03)`, offset: .45 },
       { transform: `translate(${tx},0px) scale(0.98)` },
-    ], { duration: b3Ms, easing: 'cubic-bezier(.33,0,.66,1)', fill: 'forwards' });
+    ], { duration: b3Ms, easing: 'cubic-bezier(.25,0,.55,1)', fill: 'forwards' });
+    // ease-out: decelerates into a face — the die is settling
+    cube.animate([
+      { transform: `rotateX(${b2rx}deg) rotateY(${b2ry}deg)` },
+      { transform: `rotateX(${b3rx}deg) rotateY(${b3ry}deg)` },
+    ], { duration: b3Ms, easing: 'ease-out', fill: 'forwards' });
   }, flightMs + b1Ms + b2Ms));
+
+  // ─ Bounce 4 – tiny skitter — die is settled, no rotation ──
+  wrap._djTimers.push(setTimeout(() => {
+    wrap.animate([
+      { transform: `translate(${tx},0px) scale(0.98)` },
+      { transform: `translate(${tx},-5px) scale(1.01)`, offset: .45 },
+      { transform: `translate(${tx},0px) scale(1.0)` },
+    ], { duration: b4Ms, easing: 'cubic-bezier(.25,0,.55,1)', fill: 'forwards' });
+    // Hold the face-flat final position — no extra rotation
+    cube.animate([
+      { transform: `rotateX(${b3rx}deg) rotateY(${b3ry}deg)` },
+      { transform: `rotateX(${b3rx}deg) rotateY(${b3ry}deg)` },
+    ], { duration: b4Ms, fill: 'forwards' });
+  }, flightMs + b1Ms + b2Ms + b3Ms));
 
   // ─ Rest then fade out at end of crossfade ──────
   wrap._djTimers.push(setTimeout(() => {
     const fadeMs = Math.max(500, restMs);
     const out = wrap.animate([
-      { opacity: 1, transform: `translate(${tx},0px) scale(0.98)` },
+      { opacity: 1, transform: `translate(${tx},0px) scale(1.0)` },
       { opacity: 0, transform: `translate(${tx},-18px) scale(.55)` },
     ], { duration: fadeMs, delay: Math.max(0, restMs - fadeMs), easing: 'ease-in', fill: 'forwards' });
     out.onfinish = () => {
       try { wrap._djw.cancel(); cube._djc.cancel(); } catch(_){}
     };
-  }, flightMs + b1Ms + b2Ms + b3Ms));
+  }, flightMs + b1Ms + b2Ms + b3Ms + b4Ms));
 }
 
 function _startCrossfade(nextIdx) {
@@ -7520,6 +7563,8 @@ function applyTheme(theme, persist = true) {
   });
   if (persist) localStorage.setItem(_uKey('theme'), theme);
   requestAnimationFrame(() => requestAnimationFrame(_updateBadgeFg));
+  // Redraw waveform so unplayed-bar colour matches new theme immediately
+  requestAnimationFrame(_drawWaveform);
 }
 function _updateBadgeFg() {
   const val = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim();

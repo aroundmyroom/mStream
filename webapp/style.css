@@ -125,8 +125,9 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 /* ── SIDEBAR ───────────────────────────────────────────────── */
 .sidebar{
   grid-area:side;display:flex;flex-direction:column;
-  background:var(--surface);border-right:1px solid var(--border);overflow:hidden;
-  min-height:0; /* allow grid item to shrink so inner flex-scroll gets a constrained height */
+  width:var(--sidebar);min-width:0;max-width:var(--sidebar);overflow:hidden;
+  background:var(--surface);border-right:1px solid var(--border);
+  min-height:0;
 }
 .sidebar-brand{
   display:flex;align-items:center;gap:10px;padding:18px 16px 14px;flex-shrink:0;
@@ -195,12 +196,12 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .footer-link:hover,.footer-action:hover{background:var(--hover);color:var(--t1);}
 
 /* ── THEME SEGMENTED PILL (3-step: Velvet / Dark / Light) ───── */
-.theme-seg{display:flex;padding:3px;gap:2px;background:var(--border);border-radius:calc(var(--r) + 4px);margin:0 .75rem .55rem;}
+.theme-seg{display:flex;width:calc(100% - 1.5rem);box-sizing:border-box;padding:3px;gap:2px;background:var(--border);border-radius:calc(var(--r) + 4px);margin:0 .75rem .55rem;overflow:hidden;}
 .theme-seg-btn{
-  flex:1;display:flex;align-items:center;justify-content:center;gap:4px;
+  flex:1 1 0;width:0;display:flex;align-items:center;justify-content:center;gap:4px;
   padding:5px 4px;border-radius:var(--r);font-size:11px;font-weight:600;
   color:var(--t3);background:none;border:none;cursor:pointer;
-  transition:background .15s,color .15s;font-family:inherit;white-space:nowrap;line-height:1;
+  transition:background .15s,color .15s;font-family:inherit;white-space:nowrap;line-height:1;overflow:hidden;
 }
 .theme-seg-btn:hover{color:var(--t2);}
 .theme-seg-btn.active{background:var(--surface);color:var(--primary);box-shadow:0 1px 4px rgba(0,0,0,.4);}
@@ -1472,11 +1473,11 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 
 /* Tablet / Safari iPad desktop mode (landscape ~1366 px) */
 @media(max-width:1366px){
-  :root{--qp-width:280px;--sidebar:200px;}
+  :root,:root.dark,:root.light{--qp-width:280px;--sidebar:200px;}
 }
 /* Responsive: shrink VU column on medium screens */
 @media(max-width:1024px){
-  :root{--qp-width:280px;--sidebar:200px;}
+  :root,:root.dark,:root.light{--qp-width:280px;--sidebar:200px;}
   .player{padding:8px 12px 0 12px;column-gap:10px;}
   .player-thumb{width:64px;height:64px;}
   .player-controls{gap:3px;}
@@ -1497,7 +1498,7 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 }
 /* Large / TV screens — expand sidebar and increase base sizes for comfortable viewing */
 @media(min-width:1600px){
-  :root{--sidebar:260px;}
+  :root,:root.dark,:root.light{--sidebar:260px;}
   .player-title{font-size:20px;}
   .player-artist{font-size:16px;}
   .nav-btn{font-size:14px;padding:9px 12px;}

@@ -43,7 +43,7 @@ p { margin: 0 0 .75rem; color: var(--t2); }
 #sidenav {
   position: fixed; top: 0; left: 0; width: var(--sidebar-w); height: 100vh;
   background: var(--surface); border-right: 1px solid var(--border);
-  overflow-y: auto; z-index: 100; display: flex; flex-direction: column; padding-bottom: 1rem;
+  overflow-x: hidden; overflow-y: auto; z-index: 100; display: flex; flex-direction: column; padding-bottom: 1rem;
 }
 #content { margin-left: var(--sidebar-w); padding: 1.5rem 2rem; min-height: 100vh; }
 
@@ -58,16 +58,17 @@ p { margin: 0 0 .75rem; color: var(--t2); }
 
 /* ── Theme segmented pill (3-step: Velvet / Dark / Light) ───── */
 .theme-seg {
-  display: flex; padding: 3px; gap: 2px;
+  display: flex; width: calc(100% - 1.5rem); box-sizing: border-box;
+  padding: 3px; gap: 2px; overflow: hidden;
   background: var(--border); border-radius: calc(var(--r) + 4px);
   margin: .55rem .75rem 0;
 }
 .theme-seg-btn {
-  flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px;
+  flex: 1 1 0; width: 0; display: flex; align-items: center; justify-content: center; gap: 4px;
   padding: 5px 4px; border-radius: var(--r); font-size: 11px; font-weight: 600;
   color: var(--t3); background: none; border: none; cursor: pointer;
   transition: background .15s, color .15s; font-family: inherit; white-space: nowrap;
-  line-height: 1;
+  line-height: 1; overflow: hidden;
 }
 .theme-seg-btn:hover { color: var(--t2); }
 .theme-seg-btn.active {
