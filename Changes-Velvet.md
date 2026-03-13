@@ -5,6 +5,29 @@
 
 ---
 
+## v5.16.5-velvet — 2026-03-13
+
+### Track duration stored in DB and exposed via API
+
+**`src/db/scanner.mjs`**
+- `parseMyFile()` now extracts `format.duration` from the `music-metadata` parse result and stores it as `songInfo._duration` (seconds, float, 3 decimal places; `null` if not present or non-finite)
+- `insertEntries()` passes `duration` through to the `add-file` API call
+
+**`src/db/sqlite-backend.js`**
+- `duration REAL` column added to the `files` table schema
+- Migration: `ALTER TABLE files ADD COLUMN duration REAL` runs silently on existing databases
+- `insertFile()` now stores `duration`
+
+**`src/db/loki-backend.js`**
+- No changes needed — Loki stores documents as plain objects so `duration` persists automatically
+
+**`src/api/db.js`**
+- `renderMetadataObj()` now includes `"duration"` in every track metadata response
+- Covers all track-returning endpoints: `/api/v1/db/metadata`, `/album-songs`, `/search`, `/rated`, `/recent/added`, `/stats/recently-played`, `/stats/most-played`, `/random-songs`, `/playlist/load`, `/genre/songs`
+- Value is seconds as a float (e.g. `237.431`); `null` for tracks not yet rescanned
+
+---
+
 ## v5.16.4-velvet — 2026-03-13
 
 ### webapp moved to root; theme-aware canvas rendering; media-query specificity fix

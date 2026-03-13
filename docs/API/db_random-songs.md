@@ -61,7 +61,8 @@
           "rating": 8,
           "play-count": 5,
           "last-played": 1740000000,
-          "replaygain-track": -7.2
+          "replaygain-track": -7.2,
+          "duration": 237.431
         }
       }
     ],

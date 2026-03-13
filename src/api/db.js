@@ -24,7 +24,8 @@ function renderMetadataObj(row) {
       "play-count": row.playCount ? row.playCount : null,
       "last-played": row.lastPlayed ? row.lastPlayed : null,
       "genre": row.genre || null,
-      "replaygain-track-db": row.replaygainTrackDb != null ? row.replaygainTrackDb : null
+      "replaygain-track-db": row.replaygainTrackDb != null ? row.replaygainTrackDb : null,
+      "duration": row.duration != null ? row.duration : null
     }
   };
 }

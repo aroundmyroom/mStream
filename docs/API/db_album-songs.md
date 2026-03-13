@@ -41,7 +41,8 @@
             "year": 1988,
             "album-art": 'album-art-filename.jpg',
             "filename":  file.mp3,
-            "hash": "md5 hash"
+            "hash": "md5 hash",
+            "duration": 237.431
           }
         },
         ...
