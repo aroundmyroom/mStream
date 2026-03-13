@@ -271,6 +271,32 @@ async function recursiveScan(dir) {
               await reportError(filepath, 'cue', `Cue update failed: ${_cueErr.message}`, _cueErr.stack);
             }
           }
+
+          if (dbFileInfo.data._needsDuration) {
+            try {
+              let duration = null;
+              try {
+                const parsed = await parseFile(filepath, { skipCovers: true });
+                const d = parsed.format?.duration;
+                if (d != null && isFinite(d)) { duration = Math.round(d * 1000) / 1000; }
+              } catch (_e) {
+                await reportError(filepath, 'duration', `Duration parse failed: ${_e.message}`, _e.stack);
+              }
+              // Only write back when we got a real value — corrupted files stay NULL
+              // and won't be re-checked on every scan, but a future rescan (mtime change) will retry.
+              if (duration !== null) {
+                await ax({
+                  method: 'POST',
+                  url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-duration`,
+                  headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+                  responseType: 'json',
+                  data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, duration }
+                });
+              }
+            } catch (_durErr) {
+              await reportError(filepath, 'duration', `Duration update failed: ${_durErr.message}`, _durErr.stack);
+            }
+          }
         }
       } catch (err) {
         // console.log(err)

@@ -124,6 +124,10 @@ export function updateFileCue(filepath, vpath, cuepoints) {
   db.prepare('UPDATE files SET cuepoints = ? WHERE filepath = ? AND vpath = ?').run(cuepoints, filepath, vpath);
 }
 
+export function updateFileDuration(filepath, vpath, duration) {
+  db.prepare('UPDATE files SET duration = ? WHERE filepath = ? AND vpath = ?').run(duration, filepath, vpath);
+}
+
 export function updateFileTags(filepath, vpath, tags) {
   const fields = [], values = [];
   if ('title'  in tags) { fields.push('title = ?');  values.push(tags.title  ?? null); }
