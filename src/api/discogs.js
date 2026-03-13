@@ -321,15 +321,22 @@ export function setup(mstream) {
     }
 
     try {
-      // Phase 1: collect raw search results (metadata only, no image fetch yet)
-      // so we can sort by artist-match score before spending API quota on images.
+      // Phase 1: run all searches in parallel — preserves priority order via
+      // Promise.allSettled index alignment, deduplicate across results.
       const candidates = [];
       const seenIds    = new Set();
 
-      for (const { params, phase } of searches) {
+      const searchSettled = await Promise.allSettled(
+        searches.map(({ params }) =>
+          discogsGet(`https://api.discogs.com/database/search?${params}`)
+        )
+      );
+      for (let i = 0; i < searches.length; i++) {
         if (candidates.length >= 18) break;
-        const searchData = await discogsGet(`https://api.discogs.com/database/search?${params}`);
-        const results    = (searchData.results || []).filter(r => r.id && !seenIds.has(r.id));
+        const settled = searchSettled[i];
+        if (settled.status !== 'fulfilled') continue;
+        const { phase } = searches[i];
+        const results = (settled.value.results || []).filter(r => r.id && !seenIds.has(r.id));
         for (const result of results) {
           if (candidates.length >= 18) break;
           seenIds.add(result.id);
@@ -348,37 +355,39 @@ export function setup(mstream) {
         (phaseOrder[a.phase] - phaseOrder[b.phase]) || (b.score - a.score)
       );
 
-      // Phase 2: fetch images for the top candidates until we have 3 choices.
-      const choices      = [];
-      const seenReleases = new Set();
-
-      for (const { result } of candidates) {
-        if (choices.length >= 8) break;
-        try {
+      // Phase 2: resolve all candidates' images in parallel, then deduplicate.
+      const imageSettled = await Promise.allSettled(
+        candidates.slice(0, 12).map(async ({ result }) => {
           let releaseId = result.id;
-
-          // For master results, resolve to their main release first.
           if (result.type === 'master') {
             const master = await discogsGet(`https://api.discogs.com/masters/${result.id}`);
-            if (!master.main_release) continue;
+            if (!master.main_release) throw new Error('no main_release');
             releaseId = master.main_release;
-            if (seenReleases.has(releaseId)) continue;
           }
-          seenReleases.add(releaseId);
-
           const release = await discogsGet(`https://api.discogs.com/releases/${releaseId}`);
           const images  = release.images || [];
           const img     = images.find(i => i.type === 'primary') || images[0];
-          if (!img?.uri) continue;
+          if (!img?.uri) throw new Error('no image');
           const imgBuf   = await fetchImageBuf(img.uri);
           const thumbB64 = `data:image/jpeg;base64,${imgBuf.toString('base64')}`;
-          choices.push({
+          return {
             releaseId,
             releaseTitle: release.title || result.title || '',
             year:         String(release.year || result.year || ''),
             thumbB64,
-          });
-        } catch (_) { /* skip this release */ }
+          };
+        })
+      );
+
+      const choices      = [];
+      const seenReleases = new Set();
+      for (const s of imageSettled) {
+        if (choices.length >= 8) break;
+        if (s.status !== 'fulfilled') continue;
+        const { releaseId } = s.value;
+        if (seenReleases.has(releaseId)) continue;
+        seenReleases.add(releaseId);
+        choices.push(s.value);
       }
 
       res.json({ choices });
