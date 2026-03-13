@@ -1,7 +1,30 @@
 # mStream Velvet — Change Log
 
 > Canonical changelog for the `velvet-master` branch.
-> Covers all changes to `webapp/v2/`, `webapp/admin/`, `src/`, and supporting files.
+> Covers all changes to `webapp/`, `webapp/admin/`, `src/`, and supporting files.
+
+---
+
+## v5.16.4-velvet — 2026-03-13
+
+### webapp moved to root; theme-aware canvas rendering; media-query specificity fix
+
+**`webapp/app.js`** (moved from `webapp/v2/app.js`)
+- All canvas drawing functions (`drawIdle`, spectrum analyser, VU gauge, PPM meter, volume knob) now use explicit `isLight` / `dark` variables — previously all used `!contains('light')` which incorrectly treated Velvet the same as Dark mode
+- Waveform unplayed-bar colour is now theme-aware: Light `rgba(0,0,0,0.22)`, Dark `rgba(255,255,255,0.28)`, Velvet `rgba(255,255,255,0.35)` — was a single value that was too faint on both dark backgrounds
+- `applyTheme()` now calls `_drawWaveform()` via `requestAnimationFrame` immediately on theme switch so the canvas updates without waiting for the next RAF loop
+
+**`webapp/style.css`** (moved from `webapp/v2/style.css`)
+- All `@media` breakpoint `:root` overrides now target `:root,:root.dark,:root.light` — previously plain `:root` was overriding Velvet's `--sidebar` variable at narrower widths due to CSS specificity
+
+**`webapp/index.html`** (moved from `webapp/v2/index.html`)
+- Asset paths updated: `/v2/style.css` → `/style.css`, `/v2/app.js` → `/app.js`
+
+**`src/server.js`**
+- `sendFile` path updated from `v2/index.html` → `index.html`
+
+**`webapp/v2/`**
+- Directory and all contents removed; player now served directly from `webapp/`
 
 ---
 

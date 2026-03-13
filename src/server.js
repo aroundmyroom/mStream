@@ -128,7 +128,7 @@ export async function serveIt(configFile) {
   });
 
   // Main UI — served directly at root
-  mstream.get('/', (_req, res) => res.sendFile(path.join(config.program.webAppDirectory, 'v2/index.html')));
+  mstream.get('/', (_req, res) => res.sendFile(path.join(config.program.webAppDirectory, 'index.html')));
 
   // Classic UI has been removed. /classic returns 410 Gone.
   mstream.get('/classic', (_req, res) => res.status(410).send('<p>Classic UI has been removed.</p>'));
