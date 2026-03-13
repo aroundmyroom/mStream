@@ -5,6 +5,17 @@
 
 ---
 
+## v5.16.7-velvet — 2026-03-13
+
+### Crossfade slider added to Auto-DJ settings
+
+**`webapp/app.js`**
+- Auto-DJ settings view (`viewAutoDJ`) now includes a **Crossfade Duration** row with a `0–12 s` range slider, matching the one in Playback Settings
+- Both sliders read from and write to the same `S.crossfade` state variable and the same `ms2_crossfade_<user>` localStorage key — changing one is immediately reflected in the other if both views were somehow in the DOM simultaneously
+- Slider uses existing `.xf-ctrl` / `.xf-slider` / `.xf-val` CSS classes for consistent look across both panels
+
+---
+
 ## v5.16.6-velvet — 2026-03-13
 
 ### Waveform percentile normalisation — fixes flat waveforms on tracks with transient peaks
