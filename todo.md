@@ -309,58 +309,41 @@ before the clean branch becomes `main`. Check each item off when confirmed safe 
 
 ### Directories
 
-- [ ] **`webapp/admin/`** — original upstream admin panel, now served at `/old-admin`.
-  New admin (`webapp/admin-v2/`) is mounted at `/admin`.
-  Delete after confirming `/admin` (new UI) is fully stable and no admin bookmarks point to `/old-admin`.
-  _Also remove the `/old-admin` route block and static mount from `src/server.js`._
+- [ ] **`webapp/admin/`** — original upstream admin panel. No longer served by any route (routes removed).
+  Safe to delete. _After deleting: no server changes needed — the `/old-admin` route was already removed._
 
 - [ ] **`webapp/admin-v2/`** — should be renamed to `webapp/admin/` once `webapp/admin/` is deleted.
-  The directory name `admin-v2` is legacy; the server currently maps it to `/admin` via an explicit static mount.
-  _After renaming: update the `mstream.use('/admin', express.static(...))` mount path in `src/server.js`._
+  The server currently maps it to `/admin` via an explicit static mount.
+  _After renaming: update the `mstream.use('/admin', express.static(...))` path in `src/server.js`._
 
 - [ ] **`webapp/v2/`** — the main UI directory, still named `v2` from the old routing era.
-  Should be renamed to something neutral (e.g. `webapp/player/` or `webapp/app/`) once routing is settled.
-  _After renaming: update the `res.sendFile(...)` call at `GET /` in `src/server.js` and all absolute asset paths
+  Should be renamed to something neutral (e.g. `webapp/player/` or `webapp/app/`) when convenient.
+  _After renaming: update the `res.sendFile(...)` call at `GET /` in `src/server.js` and the absolute asset paths
   in `webapp/v2/index.html` (`/v2/style.css`, `/v2/app.js`)._
 
-- [ ] **`webapp/alpha/`** — an unmaintained Vue.js prototype player (files: `api.js`, `m.js`, `spa.js`, `spa.css`, `vp.js`).
-  There is NO server route serving this directory as an entry point; it is dead code.
-  It predates the current v2/Velvet architecture and uses a different Vue-based component model.
-  **Safe to delete immediately** — no routes reference it and no active feature depends on it.
+- [ ] **`webapp/alpha/`** — an unmaintained Vue.js prototype player. No route serves it.
+  **Safe to delete immediately.**
 
-- [ ] **`webapp/old.html`** — a standalone HTML file at the webapp root. Unclear purpose; likely an old index backup.
-  Investigate before deleting (check if any route or link references it; none found in current server code).
+- [ ] **`webapp/old.html`** — a standalone HTML file at the webapp root. Likely an old index backup.
+  Verify no route or link references it, then delete.
+
+- [x] ~~**`webapp/index.html`** (classic UI)~~ — `/classic` route removed (returns 410). Directory still on disk;
+  delete `webapp/index.html` and all classic-specific assets when ready.
 
 ### Server routes (`src/server.js`)
 
-- [ ] **`/admin-v2` redirect (301 → `/admin`)** — kept for bookmarks and old PWA cache.
-  Remove once `/admin` is well-established (suggest: after first release on the clean branch).
-
-- [ ] **`/v2` and `/v2/` redirects (301 → `/`)** — kept for bookmarks and PWA installs with old `start_url`.
-  Remove once transition period ends. Check `webapp/v2/site.webmanifest` LEGACY route at the same time.
-
-- [ ] **`/v2/site.webmanifest` route** — kept so existing PWA installs can still fetch the manifest.
-  Remove together with the `/v2` redirect above.
-
-- [ ] **`/old-admin` route block + static mount** — tied to deletion of `webapp/admin/` above.
+- [x] ~~`/admin-v2` redirect~~ — removed
+- [x] ~~`/v2` and `/v2/` redirects~~ — removed
+- [x] ~~`/v2/site.webmanifest` route~~ — removed
+- [x] ~~`/old-admin` route block + static mount~~ — removed
+- [x] ~~`/classic` route (serving classic UI)~~ — replaced with 410 Gone stub
 
 ### Client code (`webapp/v2/`)
 
-- [ ] **`classic-admin-btn` in `webapp/v2/index.html`** (line ~438) — the footer link to `/old-admin` labelled "Classic Admin".
-  Hidden unless `localStorage.ms2_show_classic === '1'`. Remove the button and the `ms2_show_classic` checks in
-  `app.js` once `webapp/admin/` is deleted.
+- [x] ~~`classic-admin-btn`~~ — removed from `index.html`
+- [x] ~~`classic-player-btn`~~ — removed from `index.html`
+- [x] ~~`classic-login-link`~~ — removed from `index.html`
+- [x] ~~All `ms2_show_classic` localStorage checks in `app.js`~~ — removed
+- [x] ~~`.classic-link` CSS rules in `style.css`~~ — removed
 
-- [ ] **`classic-player-btn` in `webapp/v2/index.html`** (line ~452) — the footer link to `/classic`.
-  Hidden unless `ms2_show_classic`. Remove with the classic UI deletion pass.
-
-- [ ] **`classic-login-link` in `webapp/v2/index.html`** (line ~59) — link to `/classic` on the login screen.
-  Remove when the classic UI is removed.
-
-- [ ] **All `ms2_show_classic` localStorage checks in `webapp/v2/app.js`** — remove with the classic UI pass.
-
-### Classic / old UI (`/classic` route)
-
-- [ ] **`webapp/index.html` + related classic assets** — the original mStream player UI.
-  Served at `/classic` as a tombstone. Mark for deletion in a separate cleanup pass once users/docs have been notified.
-  _Remove the `/classic` route from `src/server.js` at the same time._
 

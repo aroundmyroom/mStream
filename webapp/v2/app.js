@@ -6225,14 +6225,8 @@ function showApp() {
     document.getElementById('scan-btn').classList.remove('hidden');
     document.getElementById('admin-panel-btn').classList.remove('hidden');
     if (S.discogsEnabled) document.getElementById('discogs-nav-btn').classList.remove('hidden');
-    if (localStorage.getItem('ms2_show_classic') === '1') {
-      document.getElementById('classic-admin-btn').classList.remove('hidden');
-    }
   }
   if (S.lastfmEnabled) document.getElementById('lastfm-nav-btn').classList.remove('hidden');
-  if (localStorage.getItem('ms2_show_classic') === '1') {
-    document.getElementById('classic-player-btn').classList.remove('hidden');
-  }
   // Mark queue btn active (panel is visible by default)
   document.getElementById('queue-btn').classList.add('active');
   loadPlaylists();
@@ -7870,11 +7864,6 @@ try {
     _savedTheme ? _savedTheme === 'light' : !window.matchMedia('(prefers-color-scheme: dark)').matches,
     !!_savedTheme   // only persist if the user had already made an explicit choice
   );
-
-  // Hide classic UI login link unless explicitly enabled
-  if (localStorage.getItem('ms2_show_classic') !== '1') {
-    document.getElementById('classic-login-link').classList.add('hidden');
-  }
 
   const ok = await checkSession();
   ok ? showApp() : showLogin();

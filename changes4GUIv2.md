@@ -6,7 +6,37 @@
 
 ---
 
-## v5.16.0-velvet — 2026-03-13
+## v5.16.1-velvet — 2026-03-13
+
+### Remove all legacy / classic UI code
+
+All remaining classic-UI entry points, UI elements, routes, and CSS have been removed.
+
+**`src/server.js`**
+- `/classic` route no longer serves the old player — returns `410 Gone`
+- `/old-admin` auth guard, static mount, and `webapp/admin/` serving removed
+- `/admin-v2 → /admin` 301 redirect removed
+- `/v2` and `/v2/` 301 redirects to `/` removed
+- `/v2/site.webmanifest` compatibility route removed
+
+**`webapp/v2/index.html`**
+- `<a id="classic-login-link">` (login screen link to `/classic`) removed
+- `<a id="classic-admin-btn">` (sidebar footer link to `/old-admin`) removed
+- `<a id="classic-player-btn">` (sidebar footer link to `/classic`) removed
+
+**`webapp/v2/app.js`**
+- Both `ms2_show_classic` localStorage checks in `showApp()` removed
+- Classic-login-link hide block removed from the init IIFE
+
+**`webapp/v2/style.css`**
+- `.classic-link` and `.classic-link:hover` rules removed
+
+**`todo.md`**
+- LEGACY BURDEN section updated: removed items checked off, remaining directory renames tracked
+
+---
+
+
 
 ### Routing cleanup: v2 and admin-v2 paths retired
 

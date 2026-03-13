@@ -96,8 +96,7 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 #login-btn:active{transform:scale(.97);}
 #login-btn:disabled{opacity:.6;cursor:default;}
 #login-error{color:var(--red);font-size:13px;text-align:center;margin-top:12px;min-height:18px;}
-.classic-link{display:block;text-align:center;margin-top:24px;color:var(--t3);font-size:12px;transition:color .18s;}
-.classic-link:hover{color:var(--t2);}
+
 
 /* ── APP LAYOUT ────────────────────────────────────────────── */
 #app{

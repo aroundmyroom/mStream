@@ -127,54 +127,11 @@ export async function serveIt(configFile) {
     next();
   });
 
-  // LEGACY: /admin-v2 was the old path for the new admin — redirect to /admin
-  // TODO LEGACY: remove this redirect once all bookmarks/clients have updated
-  mstream.use('/admin-v2', (_req, res) => res.redirect(301, '/admin'));
-
-  // LEGACY: old admin panel — served from webapp/admin/ at /old-admin
-  // TODO LEGACY: delete this entire block and webapp/admin/ once migration is confirmed
-  mstream.get('/old-admin', (req, res, next) => {
-    if (config.program.lockAdmin === true) {
-      return res.send('<p>Admin Page Disabled</p>');
-    }
-    if (Object.keys(config.program.users).length === 0) {
-      return next();
-    }
-    try {
-      jwt.verify(req.cookies['x-access-token'], config.program.secret);
-      next();
-    } catch (_err) {
-      return res.redirect(302, '/login');
-    }
-  });
-
-  // LEGACY: old admin index guard
-  // TODO LEGACY: remove with the /old-admin block above
-  mstream.get('/old-admin/index.html', (req, res, next) => {
-    if (config.program.lockAdmin === true) {
-      return res.send('<p>Admin Page Disabled</p>');
-    }
-    next();
-  });
-
-  // Main UI — served directly at root (was /v2, no longer a redirect)
+  // Main UI — served directly at root
   mstream.get('/', (_req, res) => res.sendFile(path.join(config.program.webAppDirectory, 'v2/index.html')));
 
-  // LEGACY: /v2 base path redirects to / — assets (app.js, style.css) still served from webapp/v2/
-  // TODO LEGACY: remove these redirects once bookmarks and PWA installs have settled
-  mstream.get('/v2',  (_req, res) => res.redirect(301, '/'));
-  mstream.get('/v2/', (_req, res) => res.redirect(301, '/'));
-
-  // Classic UI — still available at /classic
-  mstream.get('/classic', (req, res, next) => {
-    if (Object.keys(config.program.users).length === 0) return next();
-    try {
-      jwt.verify(req.cookies['x-access-token'], config.program.secret);
-      return res.sendFile(path.join(config.program.webAppDirectory, 'index.html'));
-    } catch (_err) {
-      return res.redirect(302, '/login');
-    }
-  });
+  // Classic UI has been removed. /classic returns 410 Gone.
+  mstream.get('/classic', (_req, res) => res.status(410).send('<p>Classic UI has been removed.</p>'));
   mstream.get('/login', (req, res, next) => {
     if (Object.keys(config.program.users).length === 0) {
       return res.redirect(302, '..');
@@ -191,10 +148,6 @@ export async function serveIt(configFile) {
   // Mount new admin (webapp/admin-v2/) at /admin — must be before general static
   mstream.use('/admin', express.static(path.join(config.program.webAppDirectory, 'admin-v2')));
 
-  // LEGACY: mount old admin (webapp/admin/) at /old-admin
-  // TODO LEGACY: remove this mount after deleting webapp/admin/
-  mstream.use('/old-admin', express.static(path.join(config.program.webAppDirectory, 'admin')));
-
   // Give access to public folder
   mstream.use('/', express.static(config.program.webAppDirectory));
 
@@ -203,11 +156,8 @@ export async function serveIt(configFile) {
   mstream.get('/robots.txt', (_req, res) => {
     res.type('text/plain').send('User-agent: *\nDisallow: /\n');
   });
-  // PWA manifest served at the canonical path; /v2/site.webmanifest kept for existing PWA installs
-  // TODO LEGACY: remove /v2/site.webmanifest once PWA clients have re-installed with new start_url (/)
   const manifestFile = path.join(config.program.webAppDirectory, 'assets/fav/site.webmanifest');
   mstream.get('/assets/fav/site.webmanifest', (_req, res) => res.sendFile(manifestFile));
-  mstream.get('/v2/site.webmanifest',          (_req, res) => res.sendFile(manifestFile));
 
   // Public APIs
   remoteApi.setupBeforeAuth(mstream, server);
