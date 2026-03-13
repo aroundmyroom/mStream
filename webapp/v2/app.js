@@ -50,6 +50,7 @@ const S = {
   rgEnabled: localStorage.getItem('ms2_rg_'       + _u) === '1',
   gapless:   localStorage.getItem('ms2_gapless_'  + _u) === '1',
   dynColor:  localStorage.getItem('ms2_dyn_color_' + _u) !== '0',  // default ON; stored as '0' when disabled
+  barTop:    localStorage.getItem('ms2_bar_top_'   + _u) === '1',
   // Auto-DJ: similar-artists mode
   djSimilar: localStorage.getItem('ms2_dj_similar_' + _u) === '1',
   djDice:    localStorage.getItem('ms2_dj_dice_'    + _u) === '1',  // default OFF
@@ -5203,6 +5204,27 @@ function viewPlayback() {
         </div>
       </div>
 
+      <!-- ── INTERFACE ── -->
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">🖥️</div>
+          <div>
+            <div class="playback-section-title">Interface</div>
+            <div class="playback-section-desc">Layout preferences for the player window.</div>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Player bar position</div>
+            <div class="playback-row-hint">Move the playback controls and DJ strip to the top or bottom of the window</div>
+          </div>
+          <div id="bar-pos-seg" class="playback-seg">
+            <button class="playback-seg-btn ${!S.barTop ? 'active' : ''}" data-pos="bottom">Bottom</button>
+            <button class="playback-seg-btn ${S.barTop  ? 'active' : ''}" data-pos="top">Top</button>
+          </div>
+        </div>
+      </div>
+
     </div>`)
 
   // Crossfade slider
@@ -5239,6 +5261,17 @@ function viewPlayback() {
     S.gapless = e.target.checked;
     S.gapless ? localStorage.setItem(_uKey('gapless'), '1') : localStorage.removeItem(_uKey('gapless'));
     toast(S.gapless ? 'Gapless playback: On' : 'Gapless playback: Off');
+  });
+
+  // Bar position toggle
+  document.getElementById('bar-pos-seg').addEventListener('click', e => {
+    const btn = e.target.closest('.playback-seg-btn');
+    if (!btn) return;
+    S.barTop = btn.dataset.pos === 'top';
+    S.barTop ? localStorage.setItem(_uKey('bar_top'), '1') : localStorage.removeItem(_uKey('bar_top'));
+    applyBarPos(S.barTop);
+    document.querySelectorAll('#bar-pos-seg .playback-seg-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.pos === (S.barTop ? 'top' : 'bottom')));
   });
 
   // Dynamic colours toggle
@@ -7469,16 +7502,23 @@ document.getElementById('pl-save-name').addEventListener('keydown', e => {
 // atp-cancel
 document.getElementById('atp-cancel').addEventListener('click', () => hideModal('atp-modal'));
 
+// ── BAR POSITION ─────────────────────────────────────────────
+function applyBarPos(top) {
+  document.documentElement.classList.toggle('bar-top', top);
+}
+
 // ── THEME ─────────────────────────────────────────────────────
+// theme: 'velvet' | 'dark' | 'light'
 // persist=true  → user chose explicitly, save to localStorage
 // persist=false → OS-driven, don't overwrite a future explicit choice
-function applyTheme(light, persist = true) {
-  document.documentElement.classList.toggle('light', light);
-  const track = document.getElementById('theme-track');
-  const label = document.getElementById('theme-label');
-  if (track) track.classList.toggle('lit', light);
-  if (label) label.textContent = light ? 'Light Mode' : 'Blue';
-  if (persist) localStorage.setItem(_uKey('theme'), light ? 'light' : 'dark');
+function applyTheme(theme, persist = true) {
+  document.documentElement.classList.remove('dark', 'light');
+  if (theme === 'dark')  document.documentElement.classList.add('dark');
+  if (theme === 'light') document.documentElement.classList.add('light');
+  document.querySelectorAll('.theme-seg-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.theme === theme);
+  });
+  if (persist) localStorage.setItem(_uKey('theme'), theme);
   requestAnimationFrame(() => requestAnimationFrame(_updateBadgeFg));
 }
 function _updateBadgeFg() {
@@ -7505,11 +7545,11 @@ function _updateBadgeFg() {
 // Follow OS colour scheme when the user hasn't stored an explicit preference
 const _osDark = window.matchMedia('(prefers-color-scheme: dark)');
 _osDark.addEventListener('change', e => {
-  if (!localStorage.getItem(_uKey('theme'))) applyTheme(!e.matches, false);
+  if (!localStorage.getItem(_uKey('theme'))) applyTheme(e.matches ? 'velvet' : 'light', false);
 });
 
-document.getElementById('theme-toggle').addEventListener('click', () => {
-  applyTheme(!document.documentElement.classList.contains('light'));
+document.querySelectorAll('.theme-seg-btn').forEach(btn => {
+  btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
 });
 
 // ── EASTER EGG ──────────────────────────────────────────────
@@ -7861,9 +7901,10 @@ try {
   // If no explicit preference stored, honour the OS colour scheme.
   const _savedTheme = localStorage.getItem(_uKey('theme'));
   applyTheme(
-    _savedTheme ? _savedTheme === 'light' : !window.matchMedia('(prefers-color-scheme: dark)').matches,
+    _savedTheme || (!window.matchMedia('(prefers-color-scheme: dark)').matches ? 'light' : 'velvet'),
     !!_savedTheme   // only persist if the user had already made an explicit choice
   );
+  applyBarPos(S.barTop);
 
   const ok = await checkSession();
   ok ? showApp() : showLogin();
