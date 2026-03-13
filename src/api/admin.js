@@ -255,7 +255,15 @@ export function setup(mstream) {
   });
 
   mstream.get("/api/v1/admin/db/scan/stats", (req, res) => {
-    res.json(db.getStats());
+    const stats = db.getStats();
+    // Count cached waveform files (filesystem — not tracked in DB)
+    try {
+      const wfDir = config.program.storage?.waveformDirectory;
+      stats.waveformCount = wfDir
+        ? fs.readdirSync(wfDir).filter(f => f.startsWith('wf-') && f.endsWith('.json')).length
+        : 0;
+    } catch (_) { stats.waveformCount = 0; }
+    res.json(stats);
   });
 
   mstream.get('/api/v1/admin/db/scan/progress', (req, res) => {

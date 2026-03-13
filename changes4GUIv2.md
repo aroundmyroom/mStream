@@ -6,6 +6,39 @@
 
 ---
 
+## v5.16.0-velvet — 2026-03-13
+
+### Routing cleanup: v2 and admin-v2 paths retired
+
+All legacy path references (`/v2`, `/admin-v2`, `GUIv2`) have been replaced with canonical paths.
+The main UI is now served directly at `/`; the admin panel at `/admin`.
+
+**`src/server.js`**
+- `/` now serves `webapp/v2/index.html` directly — no redirect
+- `/admin` auth guard and static mount now point to `webapp/admin-v2/` (the new admin UI)
+- `/old-admin` (new route, LEGACY) serves the original `webapp/admin/` for transition reference
+- `/admin-v2` redirects 301 to `/admin` (LEGACY — for old bookmarks)
+- `/v2` / `/v2/` redirect 301 to `/` (LEGACY — for old bookmarks and PWA installs)
+- Explicit `express.static` mounts added for `/admin` → `admin-v2/` and `/old-admin` → `admin/`, placed before the general static mount so directory-name resolution is deterministic
+- `/v2/site.webmanifest` kept with LEGACY comment for existing PWA installs
+
+**`webapp/v2/index.html`**
+- `style.css` → `/v2/style.css` (absolute path; was relative, broke when page served at `/`)
+- `app.js` → `/v2/app.js` (same reason)
+- PWA `start_url` changed from `origin + "/v2"` to `origin + "/"`
+- Classic Admin footer link `href` changed from `/admin` to `/old-admin`
+
+**`webapp/v2/app.js`**
+- `openAdminPanel()` now opens `/admin` instead of `/admin-v2`
+
+**`todo.md`**
+- New **LEGACY BURDEN — Marked for Deletion** section added, tracking all directories, routes, and UI elements that must be removed before the clean branch becomes `main`
+
+**`webapp/alpha/`** — surveyed and marked for deletion in todo.md.
+This is a dead Vue.js prototype player (no server route serves it). Safe to delete immediately.
+
+---
+
 ## v5.15.3-velvet — 2026-03-10
 
 ### Auto-DJ: Dice Roll Crossfade Animation (new feature)

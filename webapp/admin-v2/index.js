@@ -1485,6 +1485,10 @@ const dbView = Vue.component('db-view', {
                       <div class="sc-num">{{dbStats.oldestYear}}&thinsp;&ndash;&thinsp;{{dbStats.newestYear}}</div>
                       <div class="sc-label">Year Range</div>
                     </div>
+                    <div class="stat-chip">
+                      <div class="sc-num" style="color:var(--accent)">{{(dbStats.waveformCount||0).toLocaleString()}}</div>
+                      <div class="sc-label">Waveforms Cached</div>
+                    </div>
                   </div>
 
                   <div class="stat-section-row">
