@@ -4390,6 +4390,16 @@ async function viewAutoDJ() {
             <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
           </label>
         </div>
+        <div class="autodj-opt-row">
+          <div>
+            <div class="autodj-opt-label">Crossfade Duration</div>
+            <div class="autodj-opt-hint">Smoothly blend between tracks · 0 = disabled · max 12 s</div>
+          </div>
+          <div class="xf-ctrl">
+            <input type="range" id="xf-slider-dj" class="xf-slider" min="0" max="12" step="1" value="${S.crossfade}">
+            <span id="xf-val-dj" class="xf-val">${S.crossfade === 0 ? 'Off' : S.crossfade + 's'}</span>
+          </div>
+        </div>
 ${_webAnimSupported ? `
         <div class="autodj-opt-row">
           <div>
@@ -4416,6 +4426,17 @@ ${_webAnimSupported ? `
       : localStorage.removeItem(_uKey('dj_similar'));
     _syncQueueLabel();
     toast(S.djSimilar ? 'Similar Artists: On' : 'Similar Artists: Off');
+  });
+  const xfSliderDj = document.getElementById('xf-slider-dj');
+  const xfValDj    = document.getElementById('xf-val-dj');
+  xfSliderDj.addEventListener('input', () => {
+    const v = parseInt(xfSliderDj.value);
+    xfValDj.textContent = v === 0 ? 'Off' : v + 's';
+    S.crossfade = v;
+    localStorage.setItem(_uKey('crossfade'), v);
+    const ps = document.getElementById('xf-slider');
+    const pv = document.getElementById('xf-val');
+    if (ps) { ps.value = v; pv.textContent = v === 0 ? 'Off' : v + 's'; }
   });
   if (_webAnimSupported) {
     document.getElementById('dj-dice-toggle').addEventListener('change', e => {
@@ -5240,6 +5261,9 @@ function viewPlayback() {
     xfVal.textContent = v === 0 ? 'Off' : v + 's';
     S.crossfade = v;
     localStorage.setItem(_uKey('crossfade'), v);
+    const dj = document.getElementById('xf-slider-dj');
+    const djv = document.getElementById('xf-val-dj');
+    if (dj) { dj.value = v; djv.textContent = v === 0 ? 'Off' : v + 's'; }
   });
 
   // Sleep presets
