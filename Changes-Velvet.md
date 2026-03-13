@@ -5,6 +5,18 @@
 
 ---
 
+## v5.16.6-velvet — 2026-03-13
+
+### Waveform percentile normalisation — fixes flat waveforms on tracks with transient peaks
+
+**`src/api/waveform.js`**
+- `downsample()` now normalises against the **98th percentile** of bar values instead of the absolute maximum
+- Previously a single loud transient (e.g. one drum hit) became the global max, compressing the entire rest of the track to ~20% height
+- Now the 2% loudest spikes clip to 255 and everything else scales against realistic programme loudness — waveforms are consistently tall and readable across all track types
+- All 602 stale waveform cache files wiped; tracks regenerate on next play
+
+---
+
 ## v5.16.5-velvet — 2026-03-13
 
 ### Track duration stored in DB and exposed via API

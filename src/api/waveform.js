@@ -30,8 +30,13 @@ function downsample(data, count) {
     for (let j = start; j < end; j++) sum += Math.abs(data[j]);
     result[i] = end > start ? sum / (end - start) : 0;
   }
-  const max = Math.max(...result, 1e-6);
-  return result.map(v => Math.round((v / max) * 255));
+  // Percentile normalisation: use the 98th percentile as the scale ceiling.
+  // This prevents a single loud transient (e.g. one drum hit) from compressing
+  // the entire waveform — the spike clips to 255 and everything else stays tall.
+  const sorted = [...result].sort((a, b) => a - b);
+  const p98    = sorted[Math.floor(sorted.length * 0.98)] || sorted[sorted.length - 1];
+  const scale  = Math.max(p98, 1e-6);
+  return result.map(v => Math.min(255, Math.round((v / scale) * 255)));
 }
 
 export function setup(mstream) {
