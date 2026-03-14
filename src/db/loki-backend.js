@@ -220,6 +220,7 @@ export function getStats() {
       oldestYear: null, newestYear: null, lastScannedTs: null,
       addedLast7Days: 0, addedLast30Days: 0,
       formats: [], perVpath: [], topArtists: [], topGenres: [], decades: [],
+      totalDurationSec: 0,
     };
   }
 
@@ -240,6 +241,7 @@ export function getStats() {
   let withArt = 0, withReplaygain = 0, withCue = 0, cueUnchecked = 0;
   let last7 = 0, last30 = 0;
   let oldestYear = null, newestYear = null, lastScannedTs = null;
+  let totalDurationSec = 0;
 
   const docs = fileCollection.data;
   const total = docs.length;
@@ -256,6 +258,7 @@ export function getStats() {
     if (doc.ts > cutoff7)  last7++;
     if (doc.ts > cutoff30) last30++;
     if (doc.ts && (!lastScannedTs || doc.ts > lastScannedTs)) lastScannedTs = doc.ts * 1000;
+    if (doc.duration != null && isFinite(doc.duration)) totalDurationSec += doc.duration;
 
     const yr = doc.year;
     if (yr >= 1900 && yr <= 2030) {
@@ -307,6 +310,7 @@ export function getStats() {
     topArtists,
     topGenres,
     decades,
+    totalDurationSec: Math.round(totalDurationSec),
   };
 }
 
