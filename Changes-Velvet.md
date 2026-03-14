@@ -5,6 +5,36 @@
 
 ---
 
+## v5.16.14-velvet — 2026-03-14
+
+### Now Playing label: shows Crossfade status alongside Auto-DJ
+
+**`webapp/app.js`**
+- Sub-label now reads `· Auto-DJ: Similar Songs & Crossfade` (or `· Auto-DJ & Crossfade`) when crossfade is active (`S.crossfade > 0`), and falls back to the previous text when crossfade is off
+- Both crossfade sliders (DJ panel + Settings panel) now call `_syncQueueLabel()` on `input` so the header updates in real-time as the slider is dragged
+
+---
+
+## v5.16.13-velvet — 2026-03-14
+
+### Fix: VU meter peak lamp glow clipped at top of canvas
+
+**`webapp/app.js`**
+- Virtual drawing height `VH` increased from `120` to `134` — adds 14 units of headroom above the arc without moving any needle/arc geometry (pivot `CY=VH` stays at the canvas bottom)
+- Peak lamp `lampY` moved from `10` → `24` so the radial glow (radius 20) clears the canvas top edge with 4 units to spare
+- Channel label `y` updated `12` → `26` to stay visually aligned with the arc top
+
+---
+
+## v5.16.12-velvet — 2026-03-14
+
+### Fix: search bar loses focus after results arrive
+
+**`webapp/app.js`**
+- Removed the `inp.blur()` calls in `doSearch()` that intentionally defocused the search input after results loaded. This was causing the spacebar to fire play/pause instead of inserting a space, because focus had left the `<input>` and the global keydown handler's INPUT guard no longer applied.
+
+---
+
 ## v5.16.11-velvet — 2026-03-14
 
 ### Admin stats: Total Library Duration

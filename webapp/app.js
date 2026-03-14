@@ -1921,14 +1921,16 @@ const VU_NEEDLE = (() => {
     return 20 * Math.log10(pk);  // dBFS: 0 = full scale
   }
 
-  // Virtual canvas space: VW=200, VH=120 (face only — 5:3 landscape)
-  // CX=100, CY=VH=120 — pivot at absolute bottom-centre of face (AKAI-style).
-  // Needle tail (nTail) extends below y=120 → clipped by canvas edge naturally.
+  // Virtual canvas space: VW=200, VH=134 (face + 14px top glow headroom).
+  // CX=100, CY=VH=134 — pivot at absolute bottom-centre of face (AKAI-style).
+  // Needle tail (nTail) extends below y=134 → clipped by canvas edge naturally.
   // R=108: arc spans x≈12–188 (88% of VW) with ±55° sweep.
+  // Top 14 virtual units of headroom ensure the peak lamp glow (radius=20) is
+  // never clipped — lamp sits at y=24, glow top = y=4 (4 units clear of edge).
   // Non-uniform scale (sx=W/VW, sy=H/VH) fills canvas exactly — no gutters.
-  const VW = 200, VH = 120;
-  const CX = 100, CY = VH;  // pivot at bottom centre, y=120
-  const R  = 108;            // arc radius — arc top at y=12, ends at y≈58
+  const VW = 200, VH = 134;
+  const CX = 100, CY = VH;  // pivot at bottom centre, y=134
+  const R  = 108;            // arc radius — arc top at y=26, ends at y≈72
 
   const toRad = deg => (deg - 90) * Math.PI / 180;
 
@@ -2037,13 +2039,14 @@ const VU_NEEDLE = (() => {
     ctx.font = 'bold 10px system-ui,sans-serif';
     ctx.fillText('VU', CX, VH - 12);
 
-    // Channel label
+    // Channel label — y=26 aligns with arc top (CY-R=134-108=26)
     ctx.fillStyle = dark ? 'rgba(139,92,246,.85)' : 'rgba(109,60,230,.70)';
     ctx.font = 'bold 13px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(label, label === 'L' ? 16 : VW-16, 12);
+    ctx.fillText(label, label === 'L' ? 16 : VW-16, 26);
 
     // ── Peak lamp ────────────────────────────────────────────────
-    const lampX = CX, lampY = 10, lampRad = 5;
+    // lampY=24: 14-unit top pad keeps glow (radius=20) fully within canvas.
+    const lampX = CX, lampY = 24, lampRad = 5;
     if (peakIntensity > 0 && dark) {
       const glow = ctx.createRadialGradient(lampX, lampY, 0, lampX, lampY, lampRad*4);
       glow.addColorStop(0, `rgba(255,60,60,${(0.3+peakIntensity*0.55).toFixed(2)})`);
@@ -4126,14 +4129,9 @@ async function doSearch(q) {
     res.querySelectorAll('.artist-row[data-album]').forEach(r => r.addEventListener('click', () => viewAlbumSongs(r.dataset.album, null, () => viewSearch())));
     attachSongListEvents(res, displaySongs);
     S.curSongs = displaySongs;
-    // Dismiss keyboard after results arrive so the first touch hits a result.
-    const inp = document.getElementById('search-input');
-    if (inp) inp.blur();
   } catch(e) {
     if (e.name === 'AbortError' || gen !== _searchGen) return; // cancelled — ignore silently
     res.innerHTML = `<div class="empty-state">Search failed: ${esc(e.message)}</div>`;
-    const inp = document.getElementById('search-input');
-    if (inp) inp.blur();
   }
 }
 
@@ -4437,6 +4435,7 @@ ${_webAnimSupported ? `
     const ps = document.getElementById('xf-slider');
     const pv = document.getElementById('xf-val');
     if (ps) { ps.value = v; pv.textContent = v === 0 ? 'Off' : v + 's'; }
+    _syncQueueLabel();
   });
   if (_webAnimSupported) {
     document.getElementById('dj-dice-toggle').addEventListener('change', e => {
@@ -5264,6 +5263,7 @@ function viewPlayback() {
     const dj = document.getElementById('xf-slider-dj');
     const djv = document.getElementById('xf-val-dj');
     if (dj) { dj.value = v; djv.textContent = v === 0 ? 'Off' : v + 's'; }
+    _syncQueueLabel();
   });
 
   // Sleep presets
@@ -6843,8 +6843,8 @@ function _syncQueueLabel() {
   }
   const djSub = S.autoDJ
     ? (S.djSimilar
-      ? ' <span class="ql-sub-label">· Auto-DJ: Similar Songs</span>'
-      : ' <span class="ql-sub-label">· Auto-DJ</span>')
+      ? ` <span class="ql-sub-label">· Auto-DJ: Similar Songs${S.crossfade > 0 ? ' &amp; Crossfade' : ''}</span>`
+      : ` <span class="ql-sub-label">· Auto-DJ${S.crossfade > 0 ? ' &amp; Crossfade' : ''}</span>`)
     : '';
   label.innerHTML = icon + ' ' + text + djSub;
 }
