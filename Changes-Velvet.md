@@ -5,6 +5,21 @@
 
 ---
 
+## v5.16.10-velvet — 2026-03-14
+
+### Admin: Directory access test
+
+**`src/api/admin.js`**
+- New `GET /api/v1/admin/directories/test` endpoint (admin-only): iterates every configured vpath, writes a uniquely-named temp file, reads it back, deletes it, and reports `{ readable, writable, storageType, error }` per directory — no artifact is ever left on disk
+
+**`webapp/admin/index.js`**
+- New **"Test Access"** button in the Directories card header — opens a modal that immediately runs the check and shows per-directory read/write status
+- Storage type is auto-detected and shown as a badge: Linux local, Linux mounted drive, Windows local drive, Windows network share, macOS local, macOS external, or Desktop App (Electron)
+- Results use green ✓ / amber ✓ / red ✗ indicators; any OS error code is shown inline
+- Advice panel at the bottom adapts to the overall result: all-good confirmation, or platform-specific instructions to fix permissions (Linux/macOS `chown`+`chmod`, Windows Security properties)
+
+---
+
 ## v5.16.9-velvet — 2026-03-13
 
 ### Waveform overhaul — RMS + γ=0.7 + 8 kHz sampling

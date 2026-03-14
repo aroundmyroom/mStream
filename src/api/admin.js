@@ -79,6 +79,63 @@ export function setup(mstream) {
     res.json(config.program.folders);
   });
 
+  // Test read/write access for every configured vpath directory.
+  // Writes a temp file, reads it back, then deletes it — no artifact is ever left.
+  mstream.get('/api/v1/admin/directories/test', async (req, res) => {
+    const platform   = os.platform();
+    const isElectron = !!process.versions.electron;
+    const fsp        = fs.promises;
+    const results    = [];
+
+    for (const [vpath, info] of Object.entries(config.program.folders)) {
+      const root = info.root;
+
+      // Detect storage type from path shape + platform
+      let storageType;
+      if (isElectron) {
+        storageType = 'electron';
+      } else if (platform === 'win32') {
+        storageType = /^\\\\/.test(root) ? 'windows-network' : 'windows-local';
+      } else if (platform === 'darwin') {
+        storageType = /^\/Volumes\//.test(root) ? 'mac-external' : 'mac-local';
+      } else {
+        // Linux / other POSIX — /mnt/, /media/, /run/media/, /net/ are mount points
+        storageType = /^\/(?:mnt|media|run\/media|net)\//.test(root) ? 'linux-mounted' : 'linux-local';
+      }
+
+      let readable = false;
+      let writable = false;
+      let errorMsg = null;
+
+      // Read test
+      try {
+        await fsp.access(root, fs.constants.R_OK);
+        readable = true;
+      } catch (e) {
+        errorMsg = e.code || e.message;
+      }
+
+      // Write test — temp file uses random suffix so it never collides; always cleaned up
+      if (readable) {
+        const rnd     = Math.random().toString(36).slice(2, 9);
+        const tmpFile = path.join(root, `.mstream-writetest-${Date.now()}-${rnd}`);
+        try {
+          await fsp.writeFile(tmpFile, 'mstream-access-test', { flag: 'wx' });
+          const data = await fsp.readFile(tmpFile, 'utf8');
+          writable = (data === 'mstream-access-test');
+        } catch (e) {
+          if (!errorMsg) errorMsg = e.code || e.message;
+        } finally {
+          try { await fsp.unlink(tmpFile); } catch (_) { /* already gone */ }
+        }
+      }
+
+      results.push({ vpath, root, storageType, readable, writable, error: errorMsg });
+    }
+
+    res.json({ platform, isElectron, results });
+  });
+
   mstream.get("/api/v1/admin/db/params", (req, res) => {
     res.json({ ...config.program.scanOptions, engine: config.program.db.engine });
   });
