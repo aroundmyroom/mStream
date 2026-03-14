@@ -689,6 +689,128 @@ const scanErrorsView = Vue.component('scan-errors-view', {
 });
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Directory Access Test Modal ────────────────────────────────────────────
+const dirAccessTestModal = Vue.component('dir-access-test-modal', {
+  data() {
+    return {
+      loading: true,
+      platform: '',
+      isElectron: false,
+      results: []
+    };
+  },
+  computed: {
+    allGood()    { return !this.loading && this.results.length > 0 && this.results.every(r => r.readable && r.writable); },
+    hasNoAccess(){ return this.results.some(r => !r.readable); },
+    hasReadOnly(){ return this.results.some(r => r.readable && !r.writable); },
+    adviceLevel(){
+      if (this.loading || this.results.length === 0) return 'ok';
+      if (this.hasNoAccess) return 'error';
+      if (this.hasReadOnly) return 'warn';
+      return 'ok';
+    },
+    adviceText() {
+      if (this.loading || this.results.length === 0) return '';
+      if (this.allGood) return 'All directories are accessible with full read/write permissions. No action needed.';
+      const parts = [];
+      if (this.hasNoAccess)
+        parts.push('One or more directories cannot be read at all. Verify the path still exists and that the mStream process has at least read permission on that location.');
+      if (this.hasReadOnly) {
+        if (this.platform === 'win32')
+          parts.push('One or more directories are read-only. mStream can stream music but cannot embed cover art or write tags. Right-click the folder → Properties → Security → grant the mStream service account Modify permission.');
+        else
+          parts.push('One or more directories are read-only. mStream can stream music but cannot embed cover art or write tags. Fix with: sudo chown -R $(whoami) /path/to/dir && chmod -R u+rw /path/to/dir');
+      }
+      return parts.join('  ');
+    },
+    adviceBox() {
+      const common = 'border-radius:8px;padding:.7rem 1rem;margin-top:.75rem;font-size:.88rem;line-height:1.6;';
+      if (this.adviceLevel === 'error') return common + 'background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.3);color:#f87171;';
+      if (this.adviceLevel === 'warn')  return common + 'background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);color:#fbbf24;';
+      return common + 'background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.3);color:#4ade80;';
+    },
+    adviceTitle() {
+      if (this.adviceLevel === 'error') return '✘  Access Problem';
+      if (this.adviceLevel === 'warn')  return '⚠  Action Required';
+      return '✔  All Good';
+    }
+  },
+  template: `
+    <div>
+      ${mHead('Directory Access Test', 'Read / write check for each configured directory')}
+      <div class="modal-body">
+        <div v-if="loading" style="display:flex;align-items:center;justify-content:center;padding:2.5rem 0;gap:1rem;color:var(--t2);">
+          <svg class="spinner" width="28" height="28" viewBox="0 0 66 66"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
+          Testing access…
+        </div>
+        <div v-else-if="results.length === 0" style="color:var(--t2);padding:.75rem 0;">No directories configured yet.</div>
+        <div v-else>
+          <div v-for="r in results" :key="r.vpath" style="margin-bottom:.75rem;border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:.5rem .85rem;background:var(--c1b);gap:.5rem;flex-wrap:wrap;">
+              <div style="min-width:0;flex:1;">
+                <code style="color:var(--accent);font-size:.9rem;">{{r.vpath}}</code>
+                <div style="color:var(--t3);font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px;">{{r.root}}</div>
+              </div>
+              <span :style="storageBadgeStyle(r.storageType)" style="font-size:.72rem;padding:.18rem .52rem;border-radius:4px;font-weight:600;letter-spacing:.03em;white-space:nowrap;flex-shrink:0;">{{storageLabel(r.storageType)}}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:1.5rem;padding:.5rem .85rem;flex-wrap:wrap;">
+              <span :style="r.readable ? 'color:#4ade80;font-weight:700;' : 'color:#f87171;font-weight:700;'">
+                {{r.readable ? '✓' : '✗'}} Read
+              </span>
+              <span :style="r.writable ? 'color:#4ade80;font-weight:700;' : r.readable ? 'color:#fbbf24;font-weight:700;' : 'color:#f87171;font-weight:700;'">
+                {{r.writable ? '✓' : '✗'}} Write
+              </span>
+              <span v-if="r.error" style="color:var(--t3);font-size:.75rem;font-family:monospace;">{{r.error}}</span>
+            </div>
+          </div>
+          <div :style="adviceBox">
+            <strong>{{adviceTitle}}</strong><br>
+            {{adviceText}}
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer-row">
+        <button class="btn" type="button" @click="closeModal">Close</button>
+      </div>
+    </div>`,
+  mounted() { this.runTest(); },
+  methods: {
+    async runTest() {
+      this.loading = true;
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/directories/test` });
+        this.platform   = res.data.platform;
+        this.isElectron = res.data.isElectron;
+        this.results    = res.data.results;
+      } catch (err) {
+        iziToast.error({ title: 'Access test failed', position: 'topCenter', timeout: 3500 });
+        modVM.closeModal();
+      } finally {
+        this.loading = false;
+      }
+    },
+    storageLabel(t) {
+      const m = {
+        'electron':        'Desktop App',
+        'windows-local':   'Windows local drive',
+        'windows-network': 'Windows network share',
+        'linux-local':     'Linux local',
+        'linux-mounted':   'Linux mounted drive',
+        'mac-local':       'macOS local',
+        'mac-external':    'macOS external drive'
+      };
+      return m[t] || t;
+    },
+    storageBadgeStyle(t) {
+      if (t === 'electron')
+        return 'background:rgba(167,139,250,.15);color:#a78bfa;border:1px solid rgba(167,139,250,.3);';
+      if (t === 'windows-network' || t === 'linux-mounted' || t === 'mac-external')
+        return 'background:rgba(251,191,36,.12);color:#fbbf24;border:1px solid rgba(251,191,36,.3);';
+      return 'background:rgba(99,102,241,.12);color:#818cf8;border:1px solid rgba(99,102,241,.25);';
+    }
+  }
+});
+
 const foldersView = Vue.component('folders-view', {
   data() {
     return {
@@ -770,7 +892,10 @@ const foldersView = Vue.component('folders-view', {
 
       <div v-show="foldersTS.ts > 0" class="card">
         <div class="card-content">
-          <span class="card-title">Directories</span>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;">
+            <span class="card-title" style="margin-bottom:0;">Directories</span>
+            <button class="btn-small" type="button" @click="testAccess" title="Check read / write access for all configured directories">Test Access</button>
+          </div>
           <div v-if="Object.keys(folders).length === 0" style="color:var(--t2);padding:.5rem 0;">No directories added yet.</div>
           <table v-else>
             <thead>
@@ -865,6 +990,10 @@ const foldersView = Vue.component('folders-view', {
         } finally {
           this.submitPending = false;
         }
+      },
+      testAccess: function() {
+        modVM.currentViewModal = 'dir-access-test-modal';
+        modVM.openModal();
       },
       removeFolder: async function(vpath, folder) {
                 adminConfirm(`Remove access to <b>${folder}</b>?`, `No files will be deleted. Your server will need to reboot.`, 'Remove', () => {
@@ -3974,6 +4103,7 @@ const modVM = new Vue({
     'edit-ssl-modal': editSslModal,
     'federation-generate-invite-modal': federationGenerateInvite,
     'edit-db-engine-modal': editDbEngineModal,
+    'dir-access-test-modal': dirAccessTestModal,
     'null-modal': nullModal
   },
   data: {
