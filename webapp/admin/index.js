@@ -1595,6 +1595,10 @@ const dbView = Vue.component('db-view', {
                       <div class="sc-num" style="color:var(--accent)">{{(dbStats.waveformCount||0).toLocaleString()}}</div>
                       <div class="sc-label">Waveforms Cached</div>
                     </div>
+                    <div class="stat-chip" v-if="dbStats.totalDurationSec > 0">
+                      <div class="sc-num" style="color:var(--primary)">{{formatDuration(dbStats.totalDurationSec)}}</div>
+                      <div class="sc-label">Total Library Duration</div>
+                    </div>
                   </div>
 
                   <div class="stat-section-row">
@@ -1706,6 +1710,15 @@ const dbView = Vue.component('db-view', {
       if (sec < 60) return `${sec}s`;
       if (sec < 3600) return `${Math.floor(sec/60)}m ${sec%60}s`;
       return `${Math.floor(sec/3600)}h ${Math.floor((sec%3600)/60)}m`;
+    },
+    formatDuration: function(sec) {
+      if (!sec || sec <= 0) return '0m';
+      const d = Math.floor(sec / 86400);
+      const h = Math.floor((sec % 86400) / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      if (d > 0) return `${d}d ${h}h ${m}m`;
+      if (h > 0) return `${h}h ${m}m`;
+      return `${m}m`;
     },
     formatElapsed: function(sec) {
       if (!sec || sec <= 0) return '0s';

@@ -234,6 +234,9 @@ export function getStats() {
     'SELECT (year / 10 * 10) AS decade, COUNT(*) AS cnt FROM files WHERE year >= 1900 AND year <= 2030 GROUP BY decade ORDER BY decade'
   ).all();
 
+  const durRow = db.prepare('SELECT SUM(duration) AS s FROM files WHERE duration IS NOT NULL').get();
+  const totalDurationSec = durRow.s ? Math.round(durRow.s) : 0;
+
   return {
     totalFiles,
     totalArtists,
@@ -257,6 +260,7 @@ export function getStats() {
     topArtists,
     topGenres,
     decades: decadeRows,
+    totalDurationSec,
   };
 }
 
