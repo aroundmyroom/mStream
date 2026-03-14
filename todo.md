@@ -4,37 +4,18 @@
 
 ## NOW — In Progress / Remaining
 
-### ⚠️ File-Write Access Check (prerequisite for Discogs embed + ID3 Tag Editor)
+### ~~⚠️ File-Write Access Check~~ — Phase 1 ✅ DONE (admin test), Phase 2 still open
 
-Before exposing any feature that writes to the user's music files (Discogs cover-art embedding, ID3 tag editor), the server must **prove** it actually has read/write/delete access to each configured vpath root. Showing the button and only failing at embed time is a bad experience — the check must happen at startup and the result exposed to the UI.
+**Phase 1 — Admin directory access test (implemented v5.16.10):**
+- [x] `GET /api/v1/admin/directories/test` — write/read/delete a uniquely-named temp file per vpath, no artifact left
+- [x] Admin UI: "Test Access" button in Directories card → modal with per-directory read/write indicators, storage-type badge (Linux local/mounted, Windows local/network, macOS local/external, Electron desktop app), and platform-specific fix advice
 
-**How the check works (server side):**
-- At startup (after vpaths are loaded), for each vpath root: write a small temp file (`.mstream-writetest`), read it back, then delete it
-- If all three operations succeed → that vpath is `writable: true`
-- If any step fails (EACCES, EROFS, ENOENT, etc.) → `writable: false`, log a clear warning with the path and error
-- Result stored in memory as `vpathWriteAccess: { [vpath]: bool }`
-- Exposed on the existing `GET /api/v1/ping` response (admin only field) so the client knows without an extra round-trip
-
-**UI gating:**
-- `S.vpathWriteAccess` map populated from the ping response on login
-- **Discogs "Search Album Art"** button: only shown when the song's vpath is writable (or it's a WAV/AIFF where art is cache-only and no file write is needed)
-- **ID3 Tag Editor** (future): same gate — the "Edit Tags" menu item is hidden for songs on read-only vpaths
-- When a vpath is not writable: show a dimmed button with a tooltip "Album art embedding unavailable — mStream does not have write access to this folder"
-
-**Why not just catch the error on embed?**
-- The user has already waited for Discogs to respond and picked an image — failing at that moment is frustrating
-- A clearly labelled unavailable button tells the admin immediately that a permission needs fixing
-- It also prevents the edge case where ffmpeg creates a partial `tmpOut` file and then `renameSync` fails, leaving a stray temp file in the music directory
-
-**Implementation steps:**
-- [ ] Server: `src/util/writability.js` — `checkVpathWriteAccess(vpaths)` async function: for each root, write/read/delete `.mstream-writetest`; returns `{ [vpath]: bool }`
-- [ ] Call at startup in `src/server.js` after vpaths are configured; store result in `config.program.vpathWriteAccess`
-- [ ] Add `vpathWriteAccess` to the `GET /api/v1/ping` response (admin only; non-admins don't need it)
-- [ ] Re-run the check on `POST /api/v1/admin/rescan` (admin may have fixed permissions)
-- [ ] Client: read `vpathWriteAccess` from ping into `S.vpathWriteAccess`; helper `_canWriteVpath(song)` returns bool
+**Phase 2 — Automatic gating of write features (still to do):**
+- [ ] Server: expose `vpathWriteAccess: { [vpath]: bool }` on `GET /api/v1/ping` (admin-only field); re-check on rescan
+- [ ] Client: read into `S.vpathWriteAccess`; helper `_canWriteVpath(song)` returns bool
 - [ ] Gate Discogs "Search Album Art" button: hide/disable when `!_canWriteVpath(song)` (except cache-only formats WAV/AIFF/W64)
-- [ ] Gate future ID3 Tag Editor menu item with the same helper
-- [ ] Show tooltip on disabled button explaining the issue
+- [ ] Gate future ID3 Tag Editor with the same helper
+- [ ] Show tooltip on disabled button: "mStream does not have write access to this folder"
 
 ---
 
