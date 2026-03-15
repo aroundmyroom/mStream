@@ -34,6 +34,14 @@
 
 ## DONE — Completed features
 
+### Dynamic colour extraction from album art ✅ (v5.16.15)
+- [x] Canvas upscaled 8×8 → 32×32 for better hue separation
+- [x] Winner-takes-all replaced with 36 hue-bucket scoring (Σ s²)
+- [x] Readability clamping (L and S ranges) preserved unchanged
+
+### Balance reset button alignment ✅ (v5.16.15)
+- [x] `vertical-align: text-top` → `middle` on `.bal-center-btn`
+
 ### Upload in GUIv2 ✅
 - [x] `S.canUpload` set from `noUpload` flag in the `/api/v1/ping` response on login
 - [x] **Upload** button in File Explorer toolbar — visible only when `S.canUpload === true` and not at the root `/`
