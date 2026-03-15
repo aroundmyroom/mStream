@@ -216,7 +216,9 @@ export function getStats() {
   if (!fileCollection) {
     return {
       totalFiles: 0, totalArtists: 0, totalAlbums: 0, totalGenres: 0,
-      withArt: 0, withoutArt: 0, withReplaygain: 0, withCue: 0, cueUnchecked: 0,
+      withArt: 0, withoutArt: 0,
+      artFromDiscogs: 0, artEmbedded: 0, artFromDirectory: 0,
+      withReplaygain: 0, withCue: 0, cueUnchecked: 0,
       oldestYear: null, newestYear: null, lastScannedTs: null,
       addedLast7Days: 0, addedLast30Days: 0,
       formats: [], perVpath: [], topArtists: [], topGenres: [], decades: [],
@@ -242,6 +244,7 @@ export function getStats() {
   let last7 = 0, last30 = 0;
   let oldestYear = null, newestYear = null, lastScannedTs = null;
   let totalDurationSec = 0;
+  let artFromDiscogs = 0, artEmbedded = 0, artFromDirectory = 0;
 
   const docs = fileCollection.data;
   const total = docs.length;
@@ -251,7 +254,13 @@ export function getStats() {
     if (doc.album)   albums.add(doc.album);
     if (doc.genre && doc.genre.trim()) genres.add(doc.genre.trim());
 
-    if (doc.aaFile && doc.aaFile.trim()) withArt++;
+    if (doc.aaFile && doc.aaFile.trim()) {
+      withArt++;
+      const src = doc.art_source;
+      if (src === 'discogs')   artFromDiscogs++;
+      else if (src === 'embedded')   artEmbedded++;
+      else if (src === 'directory')  artFromDirectory++;
+    }
     if (doc.replaygainTrackDb != null)   withReplaygain++;
     if (doc.cuepoints != null && doc.cuepoints !== '[]') withCue++;
     else if (doc.cuepoints == null) cueUnchecked++;
@@ -297,6 +306,9 @@ export function getStats() {
     totalGenres:  genres.size,
     withArt,
     withoutArt: total - withArt,
+    artFromDiscogs,
+    artEmbedded,
+    artFromDirectory,
     withReplaygain,
     withCue,
     cueUnchecked,

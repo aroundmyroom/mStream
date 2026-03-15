@@ -5581,38 +5581,69 @@ function _applyAlbumArtTheme(url) {
   img.crossOrigin = 'anonymous';
   img.onload = () => {
     try {
-      const cv  = document.createElement('canvas');
-      cv.width  = 8; cv.height = 8;
-      const cx  = cv.getContext('2d');
-      cx.drawImage(img, 0, 0, 8, 8);
-      const px  = cx.getImageData(0, 0, 8, 8).data;
-      // Find the most vibrant pixel (highest saturation), ignoring near-white/near-black
-      let bestS = -1, bestH = 0, bestL = 0.5;
+      // 32×32 = 1024 pixels — enough detail to distinguish hues without heavy blur.
+      const cv = document.createElement('canvas');
+      cv.width = 32; cv.height = 32;
+      const cx = cv.getContext('2d');
+      cx.drawImage(img, 0, 0, 32, 32);
+      const px = cx.getImageData(0, 0, 32, 32).data;
+
+      // Divide the hue wheel into 36 buckets (10° each).
+      // Score each bucket by Σ s² — rewards colours that are both vibrant AND prevalent.
+      const BUCKETS = 36;
+      const score = new Float64Array(BUCKETS);
+      const sumH  = new Float64Array(BUCKETS);
+      const sumS  = new Float64Array(BUCKETS);
+      const sumL  = new Float64Array(BUCKETS);
+      const cnt   = new Int32Array(BUCKETS);
+
       for (let i = 0; i < px.length; i += 4) {
         const [h, s, l] = _rgbToHsl(px[i], px[i+1], px[i+2]);
-        // Skip pixels that are too light (>0.88) or too dark (<0.08) — they carry no real hue
-        if (l > 0.88 || l < 0.08) continue;
-        if (s > bestS) { bestS = s; bestH = h; bestL = l; }
+        if (l > 0.88 || l < 0.08) continue;   // skip near-white / near-black
+        if (s < 0.12) continue;                // skip near-grey
+        const b = Math.min(Math.floor(h * BUCKETS), BUCKETS - 1);
+        score[b] += s * s;   // s² rewards both frequency and vibrancy
+        sumH[b]  += h;
+        sumS[b]  += s;
+        sumL[b]  += l;
+        cnt[b]++;
       }
-      // If the art is essentially colourless (greyscale / white / black cover),
-      // remove any previous override and let the CSS defaults take over.
-      if (bestS < 0.18) { _resetAlbumArtTheme(); return; }
-      // Clamp lightness so colours are neither too dark nor washed out
-      const l  = Math.min(Math.max(bestL, 0.42), 0.68);
-      const s  = Math.min(Math.max(bestS, 0.45), 0.90);
-      const hDeg = Math.round(bestH * 360);
+
+      // Pick the winning bucket
+      let bestBucket = -1, bestScore = 0;
+      for (let b = 0; b < BUCKETS; b++) {
+        if (score[b] > bestScore) { bestScore = score[b]; bestBucket = b; }
+      }
+
+      // No vibrant pixels at all — colourless cover, fall back to defaults
+      if (bestBucket < 0 || cnt[bestBucket] === 0) { _resetAlbumArtTheme(); return; }
+
+      // Average H, S, L across all pixels in the winning bucket
+      const n    = cnt[bestBucket];
+      const avgH = sumH[bestBucket] / n;
+      const avgS = sumS[bestBucket] / n;
+      const avgL = sumL[bestBucket] / n;
+
+      if (avgS < 0.18) { _resetAlbumArtTheme(); return; }
+
+      // Clamp lightness/saturation so colours are readable at all times
+      const l    = Math.min(Math.max(avgL, 0.42), 0.68);
+      const s    = Math.min(Math.max(avgS, 0.45), 0.90);
+      const hDeg = Math.round(avgH * 360);
+
       // Accent: rotate hue 35° and slightly shift lightness for contrast
       const aHDeg = (hDeg + 35) % 360;
       const aL    = Math.min(Math.max(l + (l < 0.55 ? 0.10 : -0.06), 0.42), 0.72);
       const primary = `hsl(${hDeg},${Math.round(s * 100)}%,${Math.round(l * 100)}%)`;
       const accent  = `hsl(${aHDeg},${Math.round(s * 100)}%,${Math.round(aL * 100)}%)`;
-      // --primary-fg: same hue/sat but lightness forced to be readable as text
-      // on the card background. Dark mode card is ~#1a1a26 → need L≥0.65.
-      // Light mode card is ~#dcdcec → need L≤0.40.
+
+      // --primary-fg: forced into readable lightness range for text on card backgrounds
+      // Dark mode card ~#1a1a26 → L≥0.65 | Light mode card ~#dcdcec → L≤0.40
       const isLight = document.documentElement.classList.contains('light');
-      const fgL   = isLight ? Math.min(l, 0.40) : Math.max(l, 0.65);
-      const fgS   = Math.min(Math.max(s, 0.55), 0.95);
+      const fgL   = isLight ? Math.min(avgL, 0.40) : Math.max(avgL, 0.65);
+      const fgS   = Math.min(Math.max(avgS, 0.55), 0.95);
       const primaryFg = `hsl(${hDeg},${Math.round(fgS * 100)}%,${Math.round(fgL * 100)}%)`;
+
       document.documentElement.style.setProperty('--primary', primary);
       document.documentElement.style.setProperty('--accent',  accent);
       document.documentElement.style.setProperty('--primary-fg', primaryFg);
