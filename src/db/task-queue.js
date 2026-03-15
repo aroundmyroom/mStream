@@ -98,6 +98,7 @@ function runScan(scanObj) {
   forkedScan.on('close', (code) => {
     winston.info(`File scan completed with code ${code}`);
     scanProgress.finish(scanObj.id);
+    db.clearAaFileForDirCache();
     runningTasks.delete(forkedScan);
     vpathLimiter.delete(scanObj.vpath);
     currentScanDirs.delete(scanObj.vpath);

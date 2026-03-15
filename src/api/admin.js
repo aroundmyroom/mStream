@@ -232,6 +232,7 @@ export function setup(mstream) {
     Object.keys(memClone).forEach(username => {
       delete memClone[username].password;
       delete memClone[username].salt;
+      delete memClone[username]['subsonic-password'];
     });
 
     res.json(memClone);
@@ -419,6 +420,17 @@ export function setup(mstream) {
     joiValidate(schema, req.body);
 
     await admin.editUserPassword(req.body.username, req.body.password);
+    res.json({});
+  });
+
+  mstream.post("/api/v1/admin/users/subsonic-password", async (req, res) => {
+    const schema = Joi.object({
+      username: Joi.string().required(),
+      password: Joi.string().required()
+    });
+    joiValidate(schema, req.body);
+
+    await admin.editSubsonicPassword(req.body.username, req.body.password);
     res.json({});
   });
 

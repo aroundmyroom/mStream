@@ -154,6 +154,19 @@ export async function editUserPassword(username, password) {
   config.program.users[username].salt = hash.salt;
 }
 
+export async function editSubsonicPassword(username, password) {
+  if (!config.program.users[username]) { throw new Error(`'${username}' does not exist`); }
+
+  const memClone = JSON.parse(JSON.stringify(config.program.users));
+  memClone[username]['subsonic-password'] = password;
+
+  const loadConfig = await loadFile(config.configFile);
+  loadConfig.users = memClone;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.users[username]['subsonic-password'] = password;
+}
+
 export async function editUserVPaths(username, vpaths) {
   if (!config.program.users[username]) { throw new Error(`'${username}' does not exist`); }
 
