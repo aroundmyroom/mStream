@@ -93,6 +93,7 @@ Written by `_uKey(k)` → resolved to `ms2_<k>_<username>`.
 | `ppm_bright` | float `0.0`–`1.0` | `0.38` | PPM canvas brightness |
 | `ref` | float `-20`–`-10` | `-13` | VU reference level in dBFS |
 | `gapless` | `'1'` / absent | absent | Gapless playback enabled |
+| `dynColor` | `'1'` / absent | absent | Tint UI with dominant colour sampled from current album art |
 
 ---
 
