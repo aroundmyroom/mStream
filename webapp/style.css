@@ -1035,7 +1035,7 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .vol-divider{width:1px;height:52px;background:linear-gradient(180deg,transparent,rgba(139,92,246,.25) 30%,rgba(139,92,246,.25) 70%,transparent);flex-shrink:0;margin:0 14px;}
 .bal-center-btn{
   background:none;border:none;padding:0 0 0 3px;cursor:pointer;
-  color:var(--t3);font-size:11px;line-height:1;vertical-align:text-top;
+  color:var(--t3);font-size:11px;line-height:1;vertical-align:middle;
   opacity:.6;transition:opacity .15s, color .15s;
 }
 .bal-center-btn:hover{opacity:1;color:var(--primary);}
