@@ -94,6 +94,8 @@ export function init(dbDirectory) {
   // Ensure indexes exist (IF NOT EXISTS is idempotent — safe on every startup)
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_artist_id ON files(artist_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_album_id ON files(album_id)');
+  // Covering index for getAaFileForDir: fast folder-art lookups by (vpath, filepath prefix)
+  db.exec('CREATE INDEX IF NOT EXISTS idx_files_vpath_filepath_aa ON files(vpath, filepath, aaFile)');
   // One-time backfill: compute artist_id / album_id for all records added before this migration
   const _bfCount = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE artist_id IS NULL').get().cnt;
   if (_bfCount > 0) {
@@ -130,6 +132,14 @@ function inClause(column, values) {
   if (values.length === 0) { return { sql: '1=0', params: [] }; }
   const placeholders = values.map(() => '?').join(',');
   return { sql: `${column} IN (${placeholders})`, params: values };
+}
+
+// Returns an additional AND clause that restricts filepath to a subfolder prefix.
+// Used when a Subsonic client selects a child vpath (stored in DB under a parent vpath).
+function prefixClause(prefix, col = 'filepath') {
+  if (!prefix) return { sql: '', params: [] };
+  const escaped = prefix.replace(/[%_\\]/g, '\\$&');
+  return { sql: ` AND ${col} LIKE ? ESCAPE '\\'`, params: [escaped + '%'] };
 }
 
 // File Operations
@@ -444,48 +454,51 @@ export function getRatedSongs(vpaths, username, ignoreVPaths) {
   return rows.map(mapFileRow);
 }
 
-export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths) {
+export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts = {}) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
   const vIn = inClause('f.vpath', filtered);
+  const pf = prefixClause(opts.filepathPrefix, 'f.filepath');
   const rows = db.prepare(`
     SELECT f.rowid AS id, f.*, um.rating
     FROM files f
     LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
-    WHERE ${vIn.sql} AND f.ts > 0
+    WHERE ${vIn.sql}${pf.sql} AND f.ts > 0
     ORDER BY f.ts DESC
     LIMIT ?
-  `).all(username, ...vIn.params, limit);
+  `).all(username, ...vIn.params, ...pf.params, limit);
   return rows.map(mapFileRow);
 }
 
-export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths) {
+export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts = {}) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
   const vIn = inClause('f.vpath', filtered);
+  const pf = prefixClause(opts.filepathPrefix, 'f.filepath');
   const rows = db.prepare(`
     SELECT f.rowid AS id, f.*, um.rating, um.lp AS lastPlayed, um.pc AS playCount
     FROM user_metadata um
     INNER JOIN files f ON f.hash = um.hash
-    WHERE um.user = ? AND um.lp > 0 AND ${vIn.sql}
+    WHERE um.user = ? AND um.lp > 0 AND ${vIn.sql}${pf.sql}
     ORDER BY um.lp DESC
     LIMIT ?
-  `).all(username, ...vIn.params, limit);
+  `).all(username, ...vIn.params, ...pf.params, limit);
   return rows.map(mapFileRow);
 }
 
-export function getMostPlayed(vpaths, username, limit, ignoreVPaths) {
+export function getMostPlayed(vpaths, username, limit, ignoreVPaths, opts = {}) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
   const vIn = inClause('f.vpath', filtered);
+  const pf = prefixClause(opts.filepathPrefix, 'f.filepath');
   const rows = db.prepare(`
     SELECT f.rowid AS id, f.*, um.rating, um.lp AS lastPlayed, um.pc AS playCount
     FROM user_metadata um
     INNER JOIN files f ON f.hash = um.hash
-    WHERE um.user = ? AND um.pc > 0 AND ${vIn.sql}
+    WHERE um.user = ? AND um.pc > 0 AND ${vIn.sql}${pf.sql}
     ORDER BY um.pc DESC
     LIMIT ?
-  `).all(username, ...vIn.params, limit);
+  `).all(username, ...vIn.params, ...pf.params, limit);
   return rows.map(mapFileRow);
 }
 
@@ -534,26 +547,28 @@ export function getAllFilesWithMetadata(vpaths, username, opts) {
   return rows.map(mapFileRow);
 }
 
-export function getGenres(vpaths, ignoreVPaths) {
+export function getGenres(vpaths, ignoreVPaths, opts = {}) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) return [];
   const vIn = inClause('vpath', filtered);
+  const pf = prefixClause(opts.filepathPrefix);
   return db.prepare(
-    `SELECT genre, COUNT(*) AS cnt FROM files WHERE ${vIn.sql} AND genre IS NOT NULL AND genre != '' GROUP BY genre ORDER BY genre COLLATE NOCASE`
-  ).all(...vIn.params);
+    `SELECT genre, COUNT(*) AS cnt FROM files WHERE ${vIn.sql}${pf.sql} AND genre IS NOT NULL AND genre != '' GROUP BY genre ORDER BY genre COLLATE NOCASE`
+  ).all(...vIn.params, ...pf.params);
 }
 
-export function getSongsByGenre(genre, vpaths, username, ignoreVPaths) {
+export function getSongsByGenre(genre, vpaths, username, ignoreVPaths, opts = {}) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) return [];
   const vIn = inClause('f.vpath', filtered);
+  const pf = prefixClause(opts.filepathPrefix, 'f.filepath');
   const rows = db.prepare(`
     SELECT f.rowid AS id, f.*, um.rating
     FROM files f
     LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
-    WHERE ${vIn.sql} AND f.genre = ?
+    WHERE ${vIn.sql}${pf.sql} AND f.genre = ?
     ORDER BY f.artist COLLATE NOCASE, f.album COLLATE NOCASE, f.disk, f.track
-  `).all(username, ...vIn.params, genre);
+  `).all(username, ...vIn.params, ...pf.params, genre);
   return rows.map(mapFileRow);
 }
 
@@ -769,4 +784,273 @@ export function markFileCueChecked(filepath, vpath) {
 /** Count only unfixed errors (used for the sidebar badge). */
 export function getScanErrorCount() {
   return db.prepare('SELECT COUNT(*) AS cnt FROM scan_errors WHERE fixed_at IS NULL').get().cnt;
+}
+
+// ── Subsonic-specific queries ────────────────────────────────────────────────
+
+export function getFilesByArtistId(artistId, vpaths, username, opts = {}) {
+  const filtered = vpathFilter(vpaths, null);
+  if (filtered.length === 0) return [];
+  const vIn = inClause('f.vpath', filtered);
+  const pf = prefixClause(opts.filepathPrefix, 'f.filepath');
+  const rows = db.prepare(`
+    SELECT f.rowid AS id, f.*, um.rating, um.starred, um.lp AS lastPlayed, um.pc AS playCount
+    FROM files f
+    LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
+    WHERE f.artist_id = ? AND ${vIn.sql}${pf.sql}
+    ORDER BY f.album COLLATE NOCASE, f.disk, f.track, f.filepath
+  `).all(username, artistId, ...vIn.params, ...pf.params);
+  return rows.map(mapFileRow);
+}
+
+export function getFilesByAlbumId(albumId, vpaths, username, opts = {}) {
+  const filtered = vpathFilter(vpaths, null);
+  if (filtered.length === 0) return [];
+  const vIn = inClause('f.vpath', filtered);
+  const pf = prefixClause(opts.filepathPrefix, 'f.filepath');
+  const rows = db.prepare(`
+    SELECT f.rowid AS id, f.*, um.rating, um.starred, um.lp AS lastPlayed, um.pc AS playCount
+    FROM files f
+    LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
+    WHERE f.album_id = ? AND ${vIn.sql}${pf.sql}
+    ORDER BY f.disk, f.track, f.filepath
+  `).all(username, albumId, ...vIn.params, ...pf.params);
+  return rows.map(mapFileRow);
+}
+
+export function getSongByHash(hash, username) {
+  const row = db.prepare(`
+    SELECT f.rowid AS id, f.*, um.rating, um.starred, um.lp AS lastPlayed, um.pc AS playCount
+    FROM files f
+    LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
+    WHERE f.hash = ?
+    LIMIT 1
+  `).get(username, hash);
+  return row ? mapFileRow(row) : null;
+}
+
+/**
+ * Resolve a raw coverArt/id string to an aaFile filename.
+ * Handles album_id (16-char hex), artist_id (16-char hex), and song hash (32-char hex).
+ * Returns null if nothing is found.
+ */
+export function getAaFileById(id) {
+  if (!db || !id) return null;
+  let row = db.prepare('SELECT MAX(aaFile) AS aaFile FROM files WHERE album_id = ? AND aaFile IS NOT NULL').get(id);
+  if (row?.aaFile) return row.aaFile;
+  row = db.prepare('SELECT MAX(aaFile) AS aaFile FROM files WHERE artist_id = ? AND aaFile IS NOT NULL').get(id);
+  if (row?.aaFile) return row.aaFile;
+  row = db.prepare('SELECT aaFile FROM files WHERE hash = ? AND aaFile IS NOT NULL LIMIT 1').get(id);
+  return row?.aaFile || null;
+}
+
+// In-memory cache for getAaFileForDir — cleared on scan to stay consistent.
+const _aaFileForDirCache = new Map();
+export function clearAaFileForDirCache() { _aaFileForDirCache.clear(); }
+
+export function getAaFileForDir(vpath, dirRelPath) {
+  if (!db) return null;
+  const cacheKey = vpath + '\0' + (dirRelPath || '');
+  if (_aaFileForDirCache.has(cacheKey)) return _aaFileForDirCache.get(cacheKey);
+  const prefix = dirRelPath ? dirRelPath + '/' : '';
+  const escaped = prefix.replace(/[%_\\]/g, '\\$&');
+  const row = db.prepare(
+    `SELECT MAX(aaFile) AS aaFile FROM files WHERE vpath = ? AND filepath LIKE ? ESCAPE '\\' AND aaFile IS NOT NULL`
+  ).get(vpath, escaped + '%');
+  const result = row?.aaFile || null;
+  _aaFileForDirCache.set(cacheKey, result);
+  return result;
+}
+
+export function getStarredSongs(vpaths, username, opts = {}) {
+  const filtered = vpathFilter(vpaths, null);
+  if (filtered.length === 0) return [];
+  const vIn = inClause('f.vpath', filtered);
+  const pf = prefixClause(opts.filepathPrefix, 'f.filepath');
+  const rows = db.prepare(`
+    SELECT f.rowid AS id, f.*, um.rating, um.starred, um.lp AS lastPlayed, um.pc AS playCount
+    FROM user_metadata um
+    INNER JOIN files f ON f.hash = um.hash
+    WHERE um.user = ? AND um.starred = 1 AND ${vIn.sql}${pf.sql}
+    ORDER BY f.artist COLLATE NOCASE, f.album COLLATE NOCASE, f.disk, f.track
+  `).all(username, ...vIn.params, ...pf.params);
+  return rows.map(mapFileRow);
+}
+
+export function getStarredAlbums(vpaths, username, opts = {}) {
+  const filtered = vpathFilter(vpaths, null);
+  if (filtered.length === 0) return [];
+  const vIn = inClause('f.vpath', filtered);
+  const pf = prefixClause(opts.filepathPrefix, 'f.filepath');
+  // Return one representative row per album_id that has at least one starred song
+  const rows = db.prepare(`
+    SELECT f.rowid AS id, f.*, um.rating, um.starred
+    FROM files f
+    INNER JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
+    WHERE um.starred = 1 AND ${vIn.sql}${pf.sql}
+    GROUP BY f.album_id
+    ORDER BY f.album COLLATE NOCASE
+  `).all(username, ...vIn.params, ...pf.params);
+  return rows.map(mapFileRow);
+}
+
+export function setStarred(hash, username, starred) {
+  const existing = db.prepare('SELECT rowid FROM user_metadata WHERE hash = ? AND user = ?').get(hash, username);
+  if (existing) {
+    db.prepare('UPDATE user_metadata SET starred = ? WHERE hash = ? AND user = ?').run(starred ? 1 : 0, hash, username);
+  } else {
+    db.prepare('INSERT INTO user_metadata (hash, user, rating, pc, lp, starred) VALUES (?, ?, NULL, 0, NULL, ?)').run(hash, username, starred ? 1 : 0);
+  }
+}
+
+export function getRandomSongs(vpaths, username, opts) {
+  const filtered = vpathFilter(vpaths, null);
+  if (filtered.length === 0) return [];
+  const vIn = inClause('f.vpath', filtered);
+  const pf = prefixClause(opts.filepathPrefix, 'f.filepath');
+  const limit = Math.min(Number(opts.size) || 10, 500);
+
+  let sql = `
+    SELECT f.rowid AS id, f.*, um.rating, um.starred, um.lp AS lastPlayed, um.pc AS playCount
+    FROM files f
+    LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
+    WHERE ${vIn.sql}${pf.sql}
+  `;
+  const params = [username, ...vIn.params, ...pf.params];
+
+  if (opts.genre) {
+    sql += ' AND f.genre = ?';
+    params.push(opts.genre);
+  }
+  if (opts.fromYear) {
+    sql += ' AND f.year >= ?';
+    params.push(Number(opts.fromYear));
+  }
+  if (opts.toYear) {
+    sql += ' AND f.year <= ?';
+    params.push(Number(opts.toYear));
+  }
+
+  sql += ' ORDER BY RANDOM() LIMIT ?';
+  params.push(limit);
+
+  const rows = db.prepare(sql).all(...params);
+  return rows.map(mapFileRow);
+}
+
+export function getAlbumsByArtistId(artistId, vpaths, opts = {}) {
+  const filtered = vpathFilter(vpaths, null);
+  if (filtered.length === 0) return [];
+  const vIn = inClause('vpath', filtered);
+  const pf = prefixClause(opts.filepathPrefix);
+  const rows = db.prepare(`
+    SELECT DISTINCT album_id, artist_id, album, artist,
+           MAX(year) AS year, MAX(aaFile) AS aaFile, COUNT(*) AS songCount
+    FROM files
+    WHERE artist_id = ? AND ${vIn.sql}${pf.sql}
+    GROUP BY album_id
+    ORDER BY year DESC, album COLLATE NOCASE
+  `).all(artistId, ...vIn.params, ...pf.params);
+  return rows;
+}
+
+export function getAllAlbumIds(vpaths, opts = {}) {
+  const filtered = vpathFilter(vpaths, null);
+  if (filtered.length === 0) return [];
+  const vIn = inClause('vpath', filtered);
+  const pf = prefixClause(opts.filepathPrefix);
+  const rows = db.prepare(`
+    SELECT DISTINCT album_id, artist_id, album, artist,
+           MAX(year) AS year, MAX(aaFile) AS aaFile, COUNT(*) AS songCount, MAX(ts) AS ts
+    FROM files
+    WHERE ${vIn.sql}${pf.sql} AND album IS NOT NULL
+    GROUP BY album_id
+    ORDER BY album COLLATE NOCASE
+  `).all(...vIn.params, ...pf.params);
+  return rows;
+}
+
+export function getAllArtistIds(vpaths, opts = {}) {
+  const filtered = vpathFilter(vpaths, null);
+  if (filtered.length === 0) return [];
+  const vIn = inClause('vpath', filtered);
+  const pf = prefixClause(opts.filepathPrefix);
+  const rows = db.prepare(`
+    SELECT DISTINCT artist_id, artist, MAX(aaFile) AS aaFile,
+           COUNT(DISTINCT album_id) AS albumCount
+    FROM files
+    WHERE ${vIn.sql}${pf.sql} AND artist IS NOT NULL
+    GROUP BY artist_id
+    ORDER BY artist COLLATE NOCASE
+  `).all(...vIn.params, ...pf.params);
+  return rows;
+}
+
+/**
+ * Return the immediate children of a directory within a single vpath.
+ * dirRelPath: path relative to vpath root, NO trailing slash.
+ *   ""                  → list root of vpath
+ *   "12 inches A-Z/A"  → list that sub-folder
+ * Returns { dirs: string[], files: row[] }
+ */
+export function getDirectoryContents(vpath, dirRelPath, username) {
+  if (!db) return { dirs: [], files: [] };
+
+  const prefix = dirRelPath ? dirRelPath + '/' : '';
+  const escaped = prefix.replace(/[%_\\]/g, '\\$&');
+
+  let dirRows, fileRows;
+
+  if (prefix) {
+    // Sub-directory names + one representative cover art per dir
+    dirRows = db.prepare(`
+      SELECT
+        substr(filepath, length(?) + 1,
+          instr(substr(filepath, length(?) + 1), '/') - 1
+        ) AS subdir,
+        MAX(aaFile) AS aaFile
+      FROM files
+      WHERE vpath = ?
+        AND filepath LIKE ? ESCAPE '\\'
+        AND instr(substr(filepath, length(?) + 1), '/') > 0
+      GROUP BY subdir
+      ORDER BY subdir COLLATE NOCASE
+    `).all(prefix, prefix, vpath, escaped + '%', prefix);
+
+    fileRows = db.prepare(`
+      SELECT f.*, um.rating, um.starred, um.lp AS lastPlayed, um.pc AS playCount
+      FROM files f
+      LEFT JOIN user_metadata um ON um.hash = f.hash AND um.user = ?
+      WHERE f.vpath = ?
+        AND f.filepath LIKE ? ESCAPE '\\'
+        AND instr(substr(f.filepath, length(?) + 1), '/') = 0
+      ORDER BY f.track, f.title COLLATE NOCASE
+    `).all(username || '', vpath, escaped + '%', prefix);
+  } else {
+    // Root of vpath: no LIKE filter needed
+    dirRows = db.prepare(`
+      SELECT
+        substr(filepath, 1, instr(filepath, '/') - 1) AS subdir,
+        MAX(aaFile) AS aaFile
+      FROM files
+      WHERE vpath = ?
+        AND instr(filepath, '/') > 0
+      GROUP BY subdir
+      ORDER BY subdir COLLATE NOCASE
+    `).all(vpath);
+
+    fileRows = db.prepare(`
+      SELECT f.*, um.rating, um.starred, um.lp AS lastPlayed, um.pc AS playCount
+      FROM files f
+      LEFT JOIN user_metadata um ON um.hash = f.hash AND um.user = ?
+      WHERE f.vpath = ?
+        AND instr(f.filepath, '/') = 0
+      ORDER BY f.track, f.title COLLATE NOCASE
+    `).all(username || '', vpath);
+  }
+
+  return {
+    dirs: dirRows.map(r => r.subdir ? { name: r.subdir, aaFile: r.aaFile || null } : null).filter(Boolean),
+    files: fileRows,
+  };
 }

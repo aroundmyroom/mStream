@@ -3049,6 +3049,8 @@ const userPasswordView = Vue.component('user-password-view', {
       currentUser: ADMINDATA.selectedUser,
       resetPassword: '',
       showResetPassword: false,
+      subsonicPassword: '',
+      showSubsonicPassword: false,
       submitPending: false
     };
   }, 
@@ -3057,11 +3059,22 @@ const userPasswordView = Vue.component('user-password-view', {
       ${mHead('Reset Password', '{{"User: " + currentUser.value}}')}
       <div class="modal-body">
         <div class="field-group">
-          <label for="reset-password">New Password</label>
+          <label for="reset-password">New mStream Password</label>
           <div class="pwd-wrap">
-            <input v-model="resetPassword" id="reset-password" required :type="showResetPassword ? 'text' : 'password'" placeholder="Enter new password" autocomplete="new-password">
+            <input v-model="resetPassword" id="reset-password" :type="showResetPassword ? 'text' : 'password'" placeholder="Leave blank to keep unchanged" autocomplete="new-password">
             <button type="button" class="pwd-toggle" @click="showResetPassword = !showResetPassword" tabindex="-1" :title="showResetPassword ? 'Hide' : 'Show'">
               <svg v-if="!showResetPassword" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="field-group" style="margin-top:1rem;">
+          <label for="subsonic-password">Subsonic API Password</label>
+          <div style="font-size:.78rem;color:var(--t2);margin-bottom:.35rem;">Used by Subsonic-compatible apps (Ultrasonic, DSub, Symfonium, etc.). Must be stored in plain text for MD5 token auth.</div>
+          <div class="pwd-wrap">
+            <input v-model="subsonicPassword" id="subsonic-password" :type="showSubsonicPassword ? 'text' : 'password'" placeholder="Leave blank to keep unchanged" autocomplete="new-password">
+            <button type="button" class="pwd-toggle" @click="showSubsonicPassword = !showSubsonicPassword" tabindex="-1" :title="showSubsonicPassword ? 'Hide' : 'Show'">
+              <svg v-if="!showSubsonicPassword" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
               <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
             </button>
           </div>
@@ -3074,14 +3087,38 @@ const userPasswordView = Vue.component('user-password-view', {
       try {
         this.submitPending = true;
 
-        await API.axios({
-          method: 'POST',
-          url: `${API.url()}/api/v1/admin/users/password`,
-          data: {
-            username: this.currentUser.value,
-            password: this.resetPassword
-          }
-        });  
+        if (!this.resetPassword && !this.subsonicPassword) {
+          iziToast.warning({
+            title: 'Nothing to update',
+            message: 'Enter a new mStream password, Subsonic password, or both.',
+            position: 'topCenter',
+            timeout: 3500
+          });
+          this.submitPending = false;
+          return;
+        }
+
+        if (this.resetPassword) {
+          await API.axios({
+            method: 'POST',
+            url: `${API.url()}/api/v1/admin/users/password`,
+            data: {
+              username: this.currentUser.value,
+              password: this.resetPassword
+            }
+          });
+        }
+
+        if (this.subsonicPassword) {
+          await API.axios({
+            method: 'POST',
+            url: `${API.url()}/api/v1/admin/users/subsonic-password`,
+            data: {
+              username: this.currentUser.value,
+              password: this.subsonicPassword
+            }
+          });
+        }
   
         // close & reset the modal
         modVM.closeModal();

@@ -533,24 +533,24 @@ export function getRatedSongs(vpaths, username, ignoreVPaths) {
     }).simplesort('rating', true).data();
 }
 
-export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths) {
+export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts = {}) {
   if (!fileCollection) { return []; }
 
   const leftFun = (leftData) => {
     return leftData.hash + '-' + username;
   };
 
-  return fileCollection.chain().find({
-    '$and': [
-      renderOrClause(vpaths, ignoreVPaths),
-      { 'ts': { '$gt': 0 } }
-    ]
-  }).simplesort('ts', true).limit(limit)
+  const fCond = [renderOrClause(vpaths, ignoreVPaths), { 'ts': { '$gt': 0 } }];
+  if (opts.filepathPrefix) {
+    const esc = opts.filepathPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    fCond.push({ filepath: { '$regex': new RegExp('^' + esc) } });
+  }
+  return fileCollection.chain().find({ '$and': fCond }).simplesort('ts', true).limit(limit)
     .eqJoin(userMetadataCollection.chain(), leftFun, rightFunDefault, mapFunDefault)
     .data();
 }
 
-export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths) {
+export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts = {}) {
   if (!fileCollection) { return []; }
 
   const mapFun = (left, right) => {
@@ -579,17 +579,17 @@ export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths) {
     return rightData.hash + '-' + username;
   };
 
+  const fCond = [renderOrClause(vpaths, ignoreVPaths), { 'lastPlayed': { '$gt': 0 } }];
+  if (opts.filepathPrefix) {
+    const esc = opts.filepathPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    fCond.push({ filepath: { '$regex': new RegExp('^' + esc) } });
+  }
   return userMetadataCollection.chain()
     .eqJoin(fileCollection.chain(), leftFun, rightFun, mapFun)
-    .find({
-      '$and': [
-        renderOrClause(vpaths, ignoreVPaths),
-        { 'lastPlayed': { '$gt': 0 } }
-      ]
-    }).simplesort('lastPlayed', true).limit(limit).data();
+    .find({ '$and': fCond }).simplesort('lastPlayed', true).limit(limit).data();
 }
 
-export function getMostPlayed(vpaths, username, limit, ignoreVPaths) {
+export function getMostPlayed(vpaths, username, limit, ignoreVPaths, opts = {}) {
   if (!fileCollection) { return []; }
 
   const mapFun = (left, right) => {
@@ -618,14 +618,14 @@ export function getMostPlayed(vpaths, username, limit, ignoreVPaths) {
     return rightData.hash + '-' + username;
   };
 
+  const fCond = [renderOrClause(vpaths, ignoreVPaths), { 'playCount': { '$gt': 0 } }];
+  if (opts.filepathPrefix) {
+    const esc = opts.filepathPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    fCond.push({ filepath: { '$regex': new RegExp('^' + esc) } });
+  }
   return userMetadataCollection.chain()
     .eqJoin(fileCollection.chain(), leftFun, rightFun, mapFun)
-    .find({
-      '$and': [
-        renderOrClause(vpaths, ignoreVPaths),
-        { 'playCount': { '$gt': 0 } }
-      ]
-    }).simplesort('playCount', true).limit(limit).data();
+    .find({ '$and': fCond }).simplesort('playCount', true).limit(limit).data();
 }
 
 export function getAllFilesWithMetadata(vpaths, username, opts) {
@@ -859,4 +859,221 @@ export function markFileCueChecked(filepath, vpath) {
 
 export function getScanErrorCount() {
   return scanErrorCollection.count({ fixed_at: { '$eq': null } });
+}
+
+// ── Subsonic-specific queries ────────────────────────────────────────────────
+
+export function getFilesByArtistId(artistId, vpaths, username, opts = {}) {
+  if (!fileCollection) return [];
+  let docs = fileCollection.find({
+    '$and': [renderOrClause(vpaths, null), { artist_id: { '$eq': artistId } }]
+  });
+  if (opts.filepathPrefix) docs = docs.filter(d => (d.filepath || '').startsWith(opts.filepathPrefix));
+  return docs.map(d => {
+    const meta = userMetadataCollection
+      ? userMetadataCollection.findOne({ '$and': [{ hash: d.hash }, { user: username }] })
+      : null;
+    return { ...d, rating: meta?.rating ?? null, starred: meta?.starred ?? 0,
+      lastPlayed: meta?.lp ?? null, playCount: meta?.pc ?? 0 };
+  });
+}
+
+export function getFilesByAlbumId(albumId, vpaths, username, opts = {}) {
+  if (!fileCollection) return [];
+  let docs = fileCollection.find({
+    '$and': [renderOrClause(vpaths, null), { album_id: { '$eq': albumId } }]
+  });
+  if (opts.filepathPrefix) docs = docs.filter(d => (d.filepath || '').startsWith(opts.filepathPrefix));
+  return docs.map(d => {
+    const meta = userMetadataCollection
+      ? userMetadataCollection.findOne({ '$and': [{ hash: d.hash }, { user: username }] })
+      : null;
+    return { ...d, rating: meta?.rating ?? null, starred: meta?.starred ?? 0,
+      lastPlayed: meta?.lp ?? null, playCount: meta?.pc ?? 0 };
+  });
+}
+
+export function getSongByHash(hash, username) {
+  if (!fileCollection) return null;
+  const d = fileCollection.findOne({ hash: { '$eq': hash } });
+  if (!d) return null;
+  const meta = userMetadataCollection
+    ? userMetadataCollection.findOne({ '$and': [{ hash }, { user: username }] })
+    : null;
+  return { ...d, rating: meta?.rating ?? null, starred: meta?.starred ?? 0,
+    lastPlayed: meta?.lp ?? null, playCount: meta?.pc ?? 0 };
+}
+
+export function getAaFileById(id) {
+  if (!fileCollection || !id) return null;
+  let doc = fileCollection.findOne({ '$and': [{ album_id: { '$eq': id } }, { aaFile: { '$ne': null } }] });
+  if (doc?.aaFile) return doc.aaFile;
+  doc = fileCollection.findOne({ '$and': [{ artist_id: { '$eq': id } }, { aaFile: { '$ne': null } }] });
+  if (doc?.aaFile) return doc.aaFile;
+  doc = fileCollection.findOne({ '$and': [{ hash: { '$eq': id } }, { aaFile: { '$ne': null } }] });
+  return doc?.aaFile || null;
+}
+
+// In-memory cache for getAaFileForDir
+const _aaFileForDirCache = new Map();
+export function clearAaFileForDirCache() { _aaFileForDirCache.clear(); }
+
+export function getAaFileForDir(vpath, dirRelPath) {
+  if (!fileCollection) return null;
+  const cacheKey = vpath + '\0' + (dirRelPath || '');
+  if (_aaFileForDirCache.has(cacheKey)) return _aaFileForDirCache.get(cacheKey);
+  const prefix = dirRelPath ? dirRelPath + '/' : '';
+  const docs = fileCollection.find({ vpath: { '$eq': vpath } });
+  const hit = docs.find(d => (!prefix || d.filepath.startsWith(prefix)) && d.aaFile);
+  const result = hit?.aaFile || null;
+  _aaFileForDirCache.set(cacheKey, result);
+  return result;
+}
+
+export function getStarredSongs(vpaths, username, opts = {}) {
+  if (!userMetadataCollection || !fileCollection) return [];
+  const metaDocs = userMetadataCollection.find({ '$and': [{ user: { '$eq': username } }, { starred: { '$eq': 1 } }] });
+  const results = [];
+  for (const m of metaDocs) {
+    const d = fileCollection.findOne({ hash: { '$eq': m.hash } });
+    if (!d) continue;
+    const vOk = vpaths.some(v => d.vpath === v);
+    if (!vOk) continue;
+    if (opts.filepathPrefix && !(d.filepath || '').startsWith(opts.filepathPrefix)) continue;
+    results.push({ ...d, rating: m.rating ?? null, starred: 1,
+      lastPlayed: m.lp ?? null, playCount: m.pc ?? 0 });
+  }
+  return results;
+}
+
+export function getStarredAlbums(vpaths, username, opts = {}) {
+  const songs = getStarredSongs(vpaths, username, opts);
+  const seen = {};
+  return songs.filter(s => {
+    if (!s.album_id || seen[s.album_id]) return false;
+    seen[s.album_id] = true;
+    return true;
+  });
+}
+
+export function setStarred(hash, username, starred) {
+  if (!userMetadataCollection) return;
+  const existing = userMetadataCollection.findOne({ '$and': [{ hash }, { user: username }] });
+  if (existing) {
+    existing.starred = starred ? 1 : 0;
+    userMetadataCollection.update(existing);
+  } else {
+    userMetadataCollection.insert({ hash, user: username, rating: null, pc: 0, lp: null, starred: starred ? 1 : 0 });
+  }
+}
+
+export function getRandomSongs(vpaths, username, opts) {
+  if (!fileCollection) return [];
+  const limit = Math.min(Number(opts.size) || 10, 500);
+  let docs = fileCollection.find(renderOrClause(vpaths, null));
+  if (opts.filepathPrefix) docs = docs.filter(d => (d.filepath || '').startsWith(opts.filepathPrefix));
+  if (opts.genre) docs = docs.filter(d => d.genre === opts.genre);
+  if (opts.fromYear) docs = docs.filter(d => d.year >= Number(opts.fromYear));
+  if (opts.toYear) docs = docs.filter(d => d.year <= Number(opts.toYear));
+  // shuffle
+  for (let i = docs.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [docs[i], docs[j]] = [docs[j], docs[i]];
+  }
+  return docs.slice(0, limit).map(d => {
+    const meta = userMetadataCollection
+      ? userMetadataCollection.findOne({ '$and': [{ hash: d.hash }, { user: username }] })
+      : null;
+    return { ...d, rating: meta?.rating ?? null, starred: meta?.starred ?? 0,
+      lastPlayed: meta?.lp ?? null, playCount: meta?.pc ?? 0 };
+  });
+}
+
+export function getAlbumsByArtistId(artistId, vpaths, opts = {}) {
+  if (!fileCollection) return [];
+  let docs = fileCollection.find({
+    '$and': [renderOrClause(vpaths, null), { artist_id: { '$eq': artistId } }]
+  });
+  if (opts.filepathPrefix) docs = docs.filter(d => (d.filepath || '').startsWith(opts.filepathPrefix));
+  const map = {};
+  for (const d of docs) {
+    if (!map[d.album_id]) {
+      map[d.album_id] = { album_id: d.album_id, artist_id: d.artist_id, album: d.album,
+        artist: d.artist, year: d.year, aaFile: d.aaFile, songCount: 0 };
+    }
+    map[d.album_id].songCount++;
+  }
+  return Object.values(map).sort((a, b) => (b.year || 0) - (a.year || 0));
+}
+
+export function getAllAlbumIds(vpaths, opts = {}) {
+  if (!fileCollection) return [];
+  let docs = fileCollection.find(renderOrClause(vpaths, null));
+  if (opts.filepathPrefix) docs = docs.filter(d => (d.filepath || '').startsWith(opts.filepathPrefix));
+  const map = {};
+  for (const d of docs) {
+    if (!d.album) continue;
+    if (!map[d.album_id]) {
+      map[d.album_id] = { album_id: d.album_id, artist_id: d.artist_id, album: d.album,
+        artist: d.artist, year: d.year, aaFile: d.aaFile, songCount: 0, ts: d.ts ?? 0 };
+    }
+    map[d.album_id].songCount++;
+    if ((d.ts ?? 0) > map[d.album_id].ts) map[d.album_id].ts = d.ts ?? 0;
+  }
+  return Object.values(map).sort((a, b) => (a.album || '').localeCompare(b.album || ''));
+}
+
+export function getAllArtistIds(vpaths, opts = {}) {
+  if (!fileCollection) return [];
+  let docs = fileCollection.find(renderOrClause(vpaths, null));
+  if (opts.filepathPrefix) docs = docs.filter(d => (d.filepath || '').startsWith(opts.filepathPrefix));
+  const map = {};
+  for (const d of docs) {
+    if (!d.artist) continue;
+    if (!map[d.artist_id]) {
+      map[d.artist_id] = { artist_id: d.artist_id, artist: d.artist, aaFile: d.aaFile, albumCount: new Set() };
+    }
+    map[d.artist_id].albumCount.add(d.album_id);
+  }
+  return Object.values(map).map(a => ({ ...a, albumCount: a.albumCount.size }))
+    .sort((a, b) => (a.artist || '').localeCompare(b.artist || ''));
+}
+
+export function getDirectoryContents(vpath, dirRelPath, username) {
+  if (!fileCollection) return { dirs: [], files: [] };
+
+  const prefix = dirRelPath ? dirRelPath + '/' : '';
+  let docs;
+  if (prefix) {
+    const re = new RegExp('^' + prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    docs = fileCollection.find({ '$and': [{ vpath: { '$eq': vpath } }, { filepath: { '$regex': re } }] });
+  } else {
+    docs = fileCollection.find({ vpath: { '$eq': vpath } });
+  }
+
+  const dirMap = new Map(); // name -> aaFile
+  const files = [];
+  for (const doc of docs) {
+    const rel = doc.filepath.slice(prefix.length);
+    const slashPos = rel.indexOf('/');
+    if (slashPos >= 0) {
+      const name = rel.slice(0, slashPos);
+      if (!dirMap.has(name) || (!dirMap.get(name) && doc.aaFile)) {
+        dirMap.set(name, doc.aaFile || null);
+      }
+    } else {
+      const meta = userMetadataCollection
+        ? userMetadataCollection.findOne({ '$and': [{ hash: doc.hash }, { user: username }] })
+        : null;
+      files.push({ ...doc, rating: meta?.rating ?? null, starred: meta?.starred ?? 0,
+        lastPlayed: meta?.lp ?? null, playCount: meta?.pc ?? 0 });
+    }
+  }
+
+  return {
+    dirs: [...dirMap.entries()]
+      .map(([name, aaFile]) => ({ name, aaFile }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    files: files.sort((a, b) => (a.track || 0) - (b.track || 0) || (a.title || '').localeCompare(b.title || '')),
+  };
 }

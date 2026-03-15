@@ -5,6 +5,80 @@
 
 ---
 
+## v5.16.18-velvet — 2026-03-15
+
+### Subsonic: Folders navigation, folder art, getCoverArt fixes, performance
+
+**`src/api/subsonic.js`**
+- `getIndexes`: rewritten for folder-browsing clients (e.g. Substreamer Folders tab)
+  - No `musicFolderId` → returns vpaths as top-level entries so user sees "Music, 12-inches, Disco…" instead of a flat artist list
+  - `musicFolderId=N` → returns first-level filesystem directories of that vpath, A-Z indexed
+- `getMusicDirectory`: full real-filesystem hierarchy browsing using `getDirectoryContents()` — three cases: vpath root (integer id), encoded sub-directory (`d:…`), legacy album_id fallback
+- `makeDirId()` / `parseDirId()`: opaque base64url-encoded directory IDs carrying `{v: vpath, p: relPath}`
+- Debug request logging middleware on `/rest/*`: logs every Subsonic request to mStream log files with password scrubbed
+- `getCoverArt`: handles folder IDs (`d:…`, vpath integers) — resolves to real album art via `getAaFileForDir`; falls back to SVG folder icon; bare album_id / artist_id / song_hash looked up via `getAaFileById`; literal `"null"` id returns 404; folder art responses include `Cache-Control: public, max-age=86400`
+- `serveFolderIcon()`: inline SVG folder icon served for directories with no art (transparent background, indigo folder shape)
+
+**`src/db/sqlite-backend.js`**
+- `getDirectoryContents(vpath, dirRelPath, username)`: returns `{dirs: [{name, aaFile}], files:[]}` via `GROUP BY + MAX(aaFile)` per sub-directory; full user metadata join on files
+- `getAaFileById(id)`: resolves bare album_id / artist_id / song_hash → aaFile filename
+- `getAaFileForDir(vpath, dirRelPath)`: resolves a directory path → representative aaFile; results cached in `_aaFileForDirCache` (Map) for O(1) repeat lookups
+- Covering index `idx_files_vpath_filepath_aa (vpath, filepath, aaFile)` added — makes initial `getAaFileForDir` queries index-only
+
+**`src/db/loki-backend.js`**
+- Same `getDirectoryContents`, `getAaFileById`, `getAaFileForDir` + in-memory cache added
+
+**`src/db/manager.js`**
+- New proxy exports: `getDirectoryContents`, `getAaFileById`, `getAaFileForDir`, `clearAaFileForDirCache`
+
+**`src/db/task-queue.js`**
+- `db.clearAaFileForDirCache()` called when a file scan completes so stale art lookups are evicted
+
+---
+
+## v5.16.17-velvet — 2026-03-16
+
+### Subsonic REST API 1.16.1 + Open Subsonic extensions
+
+**`src/api/subsonic.js`** — new file
+- Full Subsonic 1.16.1 REST API with `openSubsonic: true` in every response
+- All responses carry `type: "mstream"` and `serverVersion` per Open Subsonic spec
+- Auth: MD5 token auth (`?t=MD5(password+salt)&s=salt`) and plaintext (`?p=`) both supported; separate `subsonic-password` field on each user enables standard Subsonic apps to connect without conflicting with mStream's PBKDF2 password
+- XML and JSON response formats (`?f=xml|json`), JSONP supported
+- Endpoints: `ping`, `getLicense`, `getMusicFolders`, `getIndexes`, `getArtists`, `getArtist`, `getAlbum`, `getSong`, `getMusicDirectory`, `search2`, `search3`, `getAlbumList`, `getAlbumList2`, `getRandomSongs`, `getSongsByGenre`, `getGenres`, `getNowPlaying`, `getStarred`, `getStarred2`, `star`, `unstar`, `setRating`, `scrobble`, `stream`, `download`, `getCoverArt`, `getLyrics`, `getUser`, `getUsers`, `getPlaylists`, `getPlaylist`, `createPlaylist`, `updatePlaylist`, `deletePlaylist`, `getBookmarks`, `saveBookmark`, `deleteBookmark`, `getScanStatus`, `getOpenSubsonicExtensions`, `createUser`, `updateUser`, `deleteUser`, `changePassword` + stub responses for podcast/radio endpoints
+- `stream`/`download` use `res.sendFile()` directly (no JWT redirect); `getCoverArt` reads from albumArtDirectory directly — no 401 on media/art requests from Subsonic clients
+- `buildSong()` maps DB rows to Subsonic objects including replayGain, starred, playCount, genre, track, disc, year, contentType, suffix
+- Child vpath support: `getVpathMeta()` detects sub-folder vpaths at startup; `resolveVpaths()` maps them to their DB parent; `resolvePrefix()` derives the filepath prefix — `musicFolderId` filtering now works correctly across all 5 vpaths including nested sub-folders
+
+**`src/db/sqlite-backend.js` / `src/db/loki-backend.js`**
+- New query functions: `getFilesByArtistId`, `getFilesByAlbumId`, `getSongByHash`, `getStarredSongs`, `getStarredAlbums`, `setStarred`, `getRandomSongs`, `getAlbumsByArtistId`, `getAllAlbumIds`, `getAllArtistIds`
+- `setStarred` uses UPSERT pattern — creates or updates `user_metadata` row
+- All Subsonic browse functions accept `opts.filepathPrefix` for sub-folder filtering; `prefixClause()` helper added to sqlite backend; loki backend uses regex chain condition
+
+**`src/db/manager.js`**
+- Proxy exports added for all ten new DB functions; all Subsonic browse proxies accept and forward `opts` parameter
+
+**`src/util/admin.js`**
+- `editSubsonicPassword(username, password)` — stores plaintext subsonic password on user config (same pattern as `editUserPassword`)
+
+**`src/api/admin.js`**
+- `POST /api/v1/admin/users/subsonic-password` — set subsonic password for any user (admin only)
+- `GET /api/v1/admin/users` now scrubs `subsonic-password` from the response (same as regular password scrubbing)
+
+**`src/server.js`**
+- `subsonicApi.setup(mstream)` registered before `authApi.setup()` so Subsonic routes bypass mStream session auth and use their own auth middleware
+
+**`webapp/admin/index.js`**
+- Password modal now has two separate fields: "New mStream Password" and "New Subsonic Password"; each is optional — blank = skip; validation requires at least one field filled
+
+**`webapp/index.html`**
+- "Subsonic API" nav button added to sidebar (always visible)
+
+**`webapp/app.js`**
+- `viewSubsonic()` — shows server URL with copy button, subsonic password change form, and connection hint card (username, API path, token auth note)
+
+---
+
 ## v5.16.16-velvet — 2026-03-15
 
 ### DB: Add artist_id / album_id / starred columns for Subsonic readiness

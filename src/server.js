@@ -28,6 +28,7 @@ import * as dbQueue from './db/task-queue.js';
 import * as syncthing from './state/syncthing.js';
 import * as federationApi from './api/federation.js';
 import * as scannerApi from './api/scanner.js';
+import * as subsonicApi from './api/subsonic.js';
 import WebError from './util/web-error.js';
 import { sanitizeFilename } from './util/validation.js';
 
@@ -162,6 +163,9 @@ export async function serveIt(configFile) {
   // Public APIs
   remoteApi.setupBeforeAuth(mstream, server);
   await sharedApi.setupBeforeSecurity(mstream);
+
+  // Subsonic REST API — has its own auth, must be before authApi.setup()
+  subsonicApi.setup(mstream);
 
   // Everything below this line requires authentication
   authApi.setup(mstream);

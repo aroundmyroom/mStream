@@ -19,6 +19,29 @@
 
 ---
 
+### Subsonic / OpenSubsonic API — compliance audit & further testing
+
+> See `docs/subsonic.md` for the full implementation reference.
+
+- [ ] **Auth**: verify `enc:` hex-encoded password variant works (some clients use it instead of MD5 token)
+- [ ] **`getIndexes`**: confirm `ifModifiedSince` filtering behaves correctly — currently ignored, always returns full list
+- [ ] **`getMusicDirectory`**: test with DSub, Ultrasonic, Jamstash — confirm folder hierarchy and parent-id navigation work in each client
+- [ ] **`search2` / `search3`**: test wildcard edge-cases and empty-query behaviour across clients
+- [ ] **`getAlbumList` / `getAlbumList2`**: audit `byYear`, `byGenre`, `newest`, `recent`, `random`, `alphabeticalByName/Artist`, `starred` — compare response shape with OpenSubsonic reference
+- [ ] **`getArtistInfo` / `getArtistInfo2`**: currently returns empty biography — wire up local cache or skip gracefully
+- [ ] **`getAlbumInfo` / `getAlbumInfo2`**: stub; add LastFM/Discogs info when available
+- [ ] **`getSimilarSongs` / `getSimilarSongs2`** and **`getTopSongs`**: currently empty — investigate Listenbrainz / last.fm fallback
+- [ ] **Bookmarks**: `getBookmarks` / `saveBookmark` / `deleteBookmark` — verify persistence and that multiple clients share bookmarks correctly
+- [ ] **Playlists**: `createPlaylist`, `updatePlaylist`, `deletePlaylist` — end-to-end test with Substreamer and Nautiline
+- [ ] **Scrobble**: currently a no-op; consider wiring to the same play-count path as the native player
+- [ ] **`stream` transcoding**: `maxBitRate` and `format` params are currently ignored — document this limitation
+- [ ] **`getOpenSubsonicExtensions`**: returns `formPost: 1` — test POST auth with at least one client
+- [ ] **`createUser` / `updateUser` / `deleteUser`**: confirm round-trip through admin API and that subsonic-password is preserved on update
+- [ ] **XML format**: run a quick smoke-test with a client that defaults to XML (e.g. DSub) to verify the XML serialisation is well-formed
+- [ ] Once testing token budget allows: run through the full [OpenSubsonic conformance checklist](https://opensubsonic.netlify.app/)
+
+---
+
 ### Admin Area — GUIv2 ✅ (skipped — already done by user)
 
 ### Smart Playlists
@@ -33,6 +56,14 @@
 ---
 
 ## DONE — Completed features
+
+### Subsonic REST API 1.16.1 + Open Subsonic ✅ (v5.16.17)
+- [x] Full `/rest/*` endpoint suite: ping, getLicense, getMusicFolders, getIndexes, getArtists, getArtist, getAlbum, getSong, getMusicDirectory, search2/3, getAlbumList/2, getRandomSongs, getSongsByGenre, getGenres, getNowPlaying, getStarred/2, star, unstar, setRating, scrobble, stream, download, getCoverArt, getLyrics, getUser, getUsers, getPlaylists + CRUD, getBookmarks + CRUD, getScanStatus, getOpenSubsonicExtensions, createUser, updateUser, deleteUser, changePassword
+- [x] MD5 token auth (`?t=&s=`) + plaintext auth (`?p=`); separate `subsonic-password` field per user
+- [x] `openSubsonic: true` + `type: "mstream"` in every response
+- [x] Admin UI: Password modal has separate mStream and Subsonic password fields
+- [x] Player UI: "Subsonic API" nav item shows server URL, password change form, connection hints
+- [x] DB: `getFilesByArtistId/AlbumId`, `getSongByHash`, `getStarredSongs/Albums`, `setStarred`, `getRandomSongs`, `getAllAlbumIds/ArtistIds` (SQLite + Loki)
 
 ### Subsonic DB prerequisites ✅ (v5.16.16)
 - [x] `artist_id` + `album_id` columns in `files` table (indexed) — computed as `MD5(normalised name).slice(0,16)`

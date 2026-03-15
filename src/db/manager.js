@@ -63,12 +63,12 @@ export function getAlbums(vpaths, ignoreVPaths) { return backend.getAlbums(vpath
 export function getAlbumSongs(album, vpaths, username, opts) { return backend.getAlbumSongs(album, vpaths, username, opts); }
 export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths) { return backend.searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths); }
 export function getRatedSongs(vpaths, username, ignoreVPaths) { return backend.getRatedSongs(vpaths, username, ignoreVPaths); }
-export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths) { return backend.getRecentlyAdded(vpaths, username, limit, ignoreVPaths); }
-export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths) { return backend.getRecentlyPlayed(vpaths, username, limit, ignoreVPaths); }
-export function getMostPlayed(vpaths, username, limit, ignoreVPaths) { return backend.getMostPlayed(vpaths, username, limit, ignoreVPaths); }
+export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts); }
+export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts); }
+export function getMostPlayed(vpaths, username, limit, ignoreVPaths, opts) { return backend.getMostPlayed(vpaths, username, limit, ignoreVPaths, opts); }
 export function getAllFilesWithMetadata(vpaths, username, opts) { return backend.getAllFilesWithMetadata(vpaths, username, opts); }
-export function getGenres(vpaths, ignoreVPaths) { return backend.getGenres(vpaths, ignoreVPaths); }
-export function getSongsByGenre(genre, vpaths, username, ignoreVPaths) { return backend.getSongsByGenre(genre, vpaths, username, ignoreVPaths); }
+export function getGenres(vpaths, ignoreVPaths, opts) { return backend.getGenres(vpaths, ignoreVPaths, opts); }
+export function getSongsByGenre(genre, vpaths, username, ignoreVPaths, opts) { return backend.getSongsByGenre(genre, vpaths, username, ignoreVPaths, opts); }
 export function getSongsByGenreRaw(rawGenres, vpaths, username, ignoreVPaths) { return backend.getSongsByGenreRaw(rawGenres, vpaths, username, ignoreVPaths); }
 export function getDecades(vpaths, ignoreVPaths) { return backend.getDecades(vpaths, ignoreVPaths); }
 export function getAlbumsByDecade(decade, vpaths, ignoreVPaths) { return backend.getAlbumsByDecade(decade, vpaths, ignoreVPaths); }
@@ -108,3 +108,19 @@ export function getScanErrorCount() { return backend.getScanErrorCount(); }
 export function markScanErrorFixed(guid) { return backend.markScanErrorFixed(guid); }
 export function markFileArtChecked(filepath, vpath) { return backend.markFileArtChecked(filepath, vpath); }
 export function markFileCueChecked(filepath, vpath) { return backend.markFileCueChecked(filepath, vpath); }
+
+// Subsonic queries
+export function getFilesByArtistId(artistId, vpaths, username, opts) { return backend.getFilesByArtistId(artistId, vpaths, username, opts); }
+export function getFilesByAlbumId(albumId, vpaths, username, opts) { return backend.getFilesByAlbumId(albumId, vpaths, username, opts); }
+export function getSongByHash(hash, username) { return backend.getSongByHash(hash, username); }
+export function getAaFileById(id) { return backend.getAaFileById(id); }
+export function getAaFileForDir(vpath, dirRelPath) { return backend.getAaFileForDir(vpath, dirRelPath); }
+export function clearAaFileForDirCache() { if (backend.clearAaFileForDirCache) backend.clearAaFileForDirCache(); }
+export function getStarredSongs(vpaths, username, opts) { return backend.getStarredSongs(vpaths, username, opts); }
+export function getStarredAlbums(vpaths, username, opts) { return backend.getStarredAlbums(vpaths, username, opts); }
+export function setStarred(hash, username, starred) { return backend.setStarred(hash, username, starred); }
+export function getRandomSongs(vpaths, username, opts) { return backend.getRandomSongs(vpaths, username, opts); }
+export function getAlbumsByArtistId(artistId, vpaths, opts) { return backend.getAlbumsByArtistId(artistId, vpaths, opts); }
+export function getAllAlbumIds(vpaths, opts) { return backend.getAllAlbumIds(vpaths, opts); }
+export function getAllArtistIds(vpaths, opts) { return backend.getAllArtistIds(vpaths, opts); }
+export function getDirectoryContents(vpath, dirRelPath, username) { return backend.getDirectoryContents(vpath, dirRelPath, username); }
