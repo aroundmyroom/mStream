@@ -2,6 +2,17 @@ import path from 'path';
 import loki from 'lokijs';
 import winston from 'winston';
 import escapeStringRegexp from 'escape-string-regexp';
+import { createHash } from 'crypto';
+
+// ── Subsonic ID helpers ───────────────────────────────────────────────────────
+function _makeArtistId(artist) {
+  return createHash('md5').update((artist || '').toLowerCase().trim()).digest('hex').slice(0, 16);
+}
+function _makeAlbumId(artist, album) {
+  return createHash('md5')
+    .update(`${(artist || '').toLowerCase().trim()}|||${(album || '').toLowerCase().trim()}`)
+    .digest('hex').slice(0, 16);
+}
 
 const userDataDbName = 'user-data.loki-v1.db';
 const filesDbName = 'files.loki-v3.db';
@@ -33,6 +44,17 @@ export function init(dbDirectory) {
       fileCollection = filesDB.getCollection('files');
       if (!fileCollection) {
         fileCollection = filesDB.addCollection('files');
+      }
+      fileCollection.ensureIndex('artist_id');
+      fileCollection.ensureIndex('album_id');
+      // One-time backfill: compute artist_id/album_id for docs predating this migration
+      const _bfDocs = fileCollection.where(d => !d.artist_id);
+      if (_bfDocs.length > 0) {
+        for (const doc of _bfDocs) {
+          doc.artist_id = _makeArtistId(doc.artist);
+          doc.album_id  = _makeAlbumId(doc.artist, doc.album);
+          fileCollection.update(doc);
+        }
       }
       scanErrorCollection = filesDB.getCollection('scan_errors');
       if (!scanErrorCollection) {
@@ -160,6 +182,10 @@ export function updateFileTags(filepath, vpath, tags) {
   const dbFile = fileCollection.findOne({ '$and': [{ 'filepath': { '$eq': filepath } }, { 'vpath': { '$eq': vpath } }] });
   if (!dbFile) return;
   Object.assign(dbFile, tags);
+  if ('artist' in tags || 'album' in tags) {
+    dbFile.artist_id = _makeArtistId(dbFile.artist);
+    dbFile.album_id  = _makeAlbumId(dbFile.artist, dbFile.album);
+  }
   fileCollection.update(dbFile);
 }
 

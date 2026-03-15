@@ -1,5 +1,19 @@
 import path from 'path';
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'crypto';
+
+// ── Subsonic ID helpers ───────────────────────────────────────────────────────
+// Artist ID = MD5(normalised artist name).slice(0,16)
+// Album ID  = MD5(normalised "artist|||album").slice(0,16)
+// 16 hex chars = 64 bits — collision-free for any practical library size.
+function _makeArtistId(artist) {
+  return createHash('md5').update((artist || '').toLowerCase().trim()).digest('hex').slice(0, 16);
+}
+function _makeAlbumId(artist, album) {
+  return createHash('md5')
+    .update(`${(artist || '').toLowerCase().trim()}|||${(album || '').toLowerCase().trim()}`)
+    .digest('hex').slice(0, 16);
+}
 
 let db;
 
@@ -19,7 +33,7 @@ export function init(dbDirectory) {
       filepath TEXT NOT NULL, format TEXT, track INTEGER, disk INTEGER,
       modified REAL, hash TEXT, aaFile TEXT, vpath TEXT NOT NULL,
       ts INTEGER, sID TEXT, replaygainTrackDb REAL, genre TEXT, cuepoints TEXT,
-      duration REAL
+      duration REAL, artist_id TEXT, album_id TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_files_filepath_vpath ON files(filepath, vpath);
     CREATE INDEX IF NOT EXISTS idx_files_vpath ON files(vpath);
@@ -32,7 +46,7 @@ export function init(dbDirectory) {
 
     CREATE TABLE IF NOT EXISTS user_metadata (
       hash TEXT NOT NULL, user TEXT NOT NULL,
-      rating INTEGER, pc INTEGER DEFAULT 0, lp INTEGER,
+      rating INTEGER, pc INTEGER DEFAULT 0, lp INTEGER, starred INTEGER DEFAULT 0,
       UNIQUE(hash, user)
     );
     CREATE INDEX IF NOT EXISTS idx_um_user ON user_metadata(user);
@@ -72,6 +86,23 @@ export function init(dbDirectory) {
   try { db.exec('ALTER TABLE files ADD COLUMN art_source TEXT'); } catch (_e) {}
   // Migration: add duration column (track length in seconds)
   try { db.exec('ALTER TABLE files ADD COLUMN duration REAL'); } catch (_e) {}
+  // Migration: add artist_id / album_id columns for indexed Subsonic-style lookups
+  try { db.exec('ALTER TABLE files ADD COLUMN artist_id TEXT'); } catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN album_id TEXT'); } catch (_e) {}
+  // Migration: add starred column to user_metadata for Subsonic star/unstar
+  try { db.exec('ALTER TABLE user_metadata ADD COLUMN starred INTEGER DEFAULT 0'); } catch (_e) {}
+  // Ensure indexes exist (IF NOT EXISTS is idempotent — safe on every startup)
+  db.exec('CREATE INDEX IF NOT EXISTS idx_files_artist_id ON files(artist_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_files_album_id ON files(album_id)');
+  // One-time backfill: compute artist_id / album_id for all records added before this migration
+  const _bfCount = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE artist_id IS NULL').get().cnt;
+  if (_bfCount > 0) {
+    const _bfRows = db.prepare('SELECT rowid, artist, album FROM files WHERE artist_id IS NULL').all();
+    const _bfUpd  = db.prepare('UPDATE files SET artist_id = ?, album_id = ? WHERE rowid = ?');
+    db.exec('BEGIN');
+    for (const r of _bfRows) _bfUpd.run(_makeArtistId(r.artist), _makeAlbumId(r.artist, r.album), r.rowid);
+    db.exec('COMMIT');
+  }
 }
 
 export function close() {
@@ -137,6 +168,13 @@ export function updateFileTags(filepath, vpath, tags) {
   if ('genre'  in tags) { fields.push('genre = ?');  values.push(tags.genre  ?? null); }
   if ('track'  in tags) { fields.push('track = ?');  values.push(tags.track  ?? null); }
   if ('disk'   in tags) { fields.push('disk = ?');   values.push(tags.disk   ?? null); }
+  if ('artist' in tags || 'album' in tags) {
+    const cur = db.prepare('SELECT artist, album FROM files WHERE filepath = ? AND vpath = ?').get(filepath, vpath);
+    const a = 'artist' in tags ? (tags.artist ?? null) : (cur?.artist ?? null);
+    const b = 'album'  in tags ? (tags.album  ?? null) : (cur?.album  ?? null);
+    fields.push('artist_id = ?'); values.push(_makeArtistId(a));
+    fields.push('album_id = ?');  values.push(_makeAlbumId(a, b));
+  }
   if (!fields.length) return;
   values.push(filepath, vpath);
   db.prepare(`UPDATE files SET ${fields.join(', ')} WHERE filepath = ? AND vpath = ?`).run(...values);
@@ -150,14 +188,15 @@ export function insertFile(fileData) {
     const existing = db.prepare('SELECT ts FROM files WHERE hash = ? AND ts IS NOT NULL LIMIT 1').get(fileData.hash);
     if (existing) { ts = existing.ts; }
   }
-  const stmt = db.prepare(`INSERT INTO files (title, artist, year, album, filepath, format, track, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const stmt = db.prepare(`INSERT INTO files (title, artist, year, album, filepath, format, track, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration, artist_id, album_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const result = stmt.run(
     fileData.title ?? null, fileData.artist ?? null, fileData.year ?? null, fileData.album ?? null,
     fileData.filepath, fileData.format ?? null, fileData.track ?? null, fileData.disk ?? null,
     fileData.modified ?? null, fileData.hash ?? null, fileData.aaFile ?? null, fileData.vpath,
     ts, fileData.sID ?? null, fileData.replaygainTrackDb ?? null, fileData.genre ?? null, fileData.cuepoints ?? null,
-    fileData.art_source ?? null, fileData.duration ?? null
+    fileData.art_source ?? null, fileData.duration ?? null,
+    fileData.artist_id ?? _makeArtistId(fileData.artist), fileData.album_id ?? _makeAlbumId(fileData.artist, fileData.album)
   );
   return { ...fileData, id: Number(result.lastInsertRowid) };
 }
