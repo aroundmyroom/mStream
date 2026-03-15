@@ -34,6 +34,13 @@
 
 ## DONE — Completed features
 
+### Subsonic DB prerequisites ✅ (v5.16.16)
+- [x] `artist_id` + `album_id` columns in `files` table (indexed) — computed as `MD5(normalised name).slice(0,16)`
+- [x] `starred` column in `user_metadata` table
+- [x] One-time backfill at startup for all 137k existing records (SQLite + Loki)
+- [x] Scanner computes IDs for all new files at scan time
+- [x] `updateFileTags` recomputes IDs when artist/album is edited
+
 ### Dynamic colour extraction from album art ✅ (v5.16.15)
 - [x] Canvas upscaled 8×8 → 32×32 for better hue separation
 - [x] Winner-takes-all replaced with 36 hue-bucket scoring (Σ s²)

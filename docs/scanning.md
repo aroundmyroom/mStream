@@ -128,4 +128,29 @@ mStream supports two database backends:
 | `sqlite` | `save/db/mstream.sqlite` | **Recommended.** Fast, persistent, WAL mode for concurrent reads |
 | `loki` | `save/db/files.loki-v3.db` | In-memory LokiJS, saved periodically — legacy option |
 
+---
+
+## Fields stored per file (`files` table)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `title`, `artist`, `album` | TEXT | ID3/Vorbis tags |
+| `year`, `genre` | INTEGER / TEXT | From tags |
+| `track`, `disk` | INTEGER | Track number and disc number from tags |
+| `filepath`, `vpath` | TEXT | Relative path within the vpath root; vpath key |
+| `format` | TEXT | File extension (e.g. `flac`, `mp3`) |
+| `hash` | TEXT | MD5 of file contents — used as stable song ID |
+| `aaFile` | TEXT | Filename of the cached album art image |
+| `art_source` | TEXT | How art was obtained: `embedded`, `directory`, `discogs` |
+| `replaygainTrackDb` | REAL | ReplayGain track gain in dB |
+| `duration` | REAL | Track length in seconds |
+| `cuepoints` | TEXT | JSON array of embedded cue sheet markers |
+| `artist_id` | TEXT | 16-char hex MD5 of `artist.toLowerCase().trim()` — stable artist ID for Subsonic API |
+| `album_id` | TEXT | 16-char hex MD5 of `"artist|||album"` (both lowercased) — stable album ID for Subsonic API |
+| `ts` | INTEGER | Unix timestamp of first insertion into the DB |
+| `modified` | REAL | File mtime in milliseconds at scan time |
+| `sID` | TEXT | Scan run ID — used to detect stale rows after a rescan |
+
+`artist_id` and `album_id` are computed at scan time and backfilled on startup for any records that predate their introduction.
+
 The engine can be changed in Admin → DB.  A rescan is required after switching engines.

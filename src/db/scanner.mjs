@@ -47,6 +47,16 @@ if (validationError) {
   process.exit(1);
 }
 
+// ── Subsonic ID helpers ───────────────────────────────────────────────────────
+function _makeArtistId(artist) {
+  return crypto.createHash('md5').update((artist || '').toLowerCase().trim()).digest('hex').slice(0, 16);
+}
+function _makeAlbumId(artist, album) {
+  return crypto.createHash('md5')
+    .update(`${(artist || '').toLowerCase().trim()}|||${(album || '').toLowerCase().trim()}`)
+    .digest('hex').slice(0, 16);
+}
+
 async function insertEntries(song) {
   const data = {
     "title": song.title ? String(song.title) : null,
@@ -67,7 +77,9 @@ async function insertEntries(song) {
     "replaygainTrackDb": song.replaygain_track_gain ? song.replaygain_track_gain.dB : null,
     "genre": song.genre ? String(song.genre) : null,
     "cuepoints": song.cuepoints || null,
-    "duration": song._duration ?? null
+    "duration": song._duration ?? null,
+    "artist_id": _makeArtistId(song.artist ? String(song.artist) : null),
+    "album_id": _makeAlbumId(song.artist ? String(song.artist) : null, song.album ? String(song.album) : null)
   };
 
   await ax({
