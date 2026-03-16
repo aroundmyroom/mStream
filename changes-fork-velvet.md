@@ -18,9 +18,10 @@
 
 ### Documentation: new README, per-release notes in releases/
 
-- `README.md` fully rewritten — introduces mStream Velvet as a distinct fork; adds feature comparison table vs classic mStream, full feature overview by area, install/update instructions, Subsonic mobile app info, technical details
+- `README.md` fully rewritten — introduces mStream Velvet as a distinct fork; adds feature comparison table vs classic mStream, full feature overview by area, install/update instructions, mobile app info, technical details
+- Mobile Apps section corrected: official Niera Tech app uses the native mStream API (not Subsonic); Subsonic clients listed separately
 - `releases/` folder created — 25 per-version `.md` files (v5.15.1-velvet through v5.16.21-velvet) extracted from `changes-fork-velvet.md` Part 1; README links to the current version file
-- GitHub release `v5.16.21-velvet` tagged from current HEAD
+- GitHub release `v5.16.22-velvet` tagged from current HEAD
 
 ---
 

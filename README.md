@@ -120,15 +120,24 @@ systemctl restart music.service   # or: pm2 restart all
 
 ---
 
-## Mobile Apps (Subsonic-compatible)
+## Mobile Apps
 
-The Subsonic API is built in — any Subsonic-compatible mobile app works out of the box.
+### Official mStream app (uses native mStream API)
 
 [<img src="/webapp/assets/img/app-store-logo.png" alt="mStream iOS App" width="200" />](https://apps.apple.com/us/app/mstream-player/id1605378892)
 
 [<img src="/webapp/assets/img/play-store-logo.png" alt="mStream Android App" width="200" />](https://play.google.com/store/apps/details?id=com.nieratechinc.mstreamplayer&hl=en_US)
 
-[Made by Niera Tech](https://mplayer.nieratech.com/) — the official mStream mobile app (works via Subsonic API with this fork).
+[Made by Niera Tech](https://mplayer.nieratech.com/) — connects directly to the mStream API (not Subsonic).
+
+### Subsonic-compatible clients
+
+The built-in Subsonic REST API also lets you use any Subsonic-compatible app:
+
+- **DSub** (Android)
+- **Substreamer** (iOS)
+- **Symfonium** (Android)
+- **Ultrasonic** (Android)
 
 ---
 
