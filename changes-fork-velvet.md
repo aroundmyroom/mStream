@@ -14,6 +14,28 @@
 ---
 
 
+## v5.16.23-velvet — 2026-03-16
+
+### EQ: new band layout + House/Trance/Disco/Pop presets
+
+**`webapp/app.js`, `webapp/index.html`**
+
+**Band layout changes** — better coverage for dance/electronic genres:
+- Band 2: 170 Hz → **100 Hz** (Q 1.4 → 1.8) — adds dedicated chest-thump zone (house kick punch)
+- Band 3: 310 Hz → **200 Hz** (Q 1.4) — low-mid body; 310 was redundant with 170
+- Band 4: 600 Hz → **500 Hz** (Q 1.4 → 1.8) — muddiness notch; tighter Q for surgical cuts
+- Band 7:  6 kHz → **10 kHz** (Q 1.4) — hi-hat shimmer, synth air; 6k was too low for trance/house top-end
+
+**New presets** — replaces Electronic with genre-specific curves:
+- **House** `[6, 5, 2, -3, -1, 1, 2, 3]` — hard sub, chest thump, mid cut, air push
+- **Trance** `[5, 4, 1, -4, 0, 4, 4, 5]` — sub punch, deep mid notch, sparkly top
+- **Disco** `[4, 3, -1, -2, 1, 3, 3, 4]` — funk bass, mud cut, string presence
+- **Pop** `[2, 1, 0, -1, 2, 3, 2, 3]` — clean, vocal presence, bright
+- Bass Boost updated to `[6, 5, 3, 0, 0, 0, 0, 0]` (stronger low end with new band positions)
+- Classical, Rock, Vocal recalibrated for new bands
+
+---
+
 ## v5.16.22-velvet — 2026-03-17
 
 ### Documentation: new README, per-release notes in releases/
