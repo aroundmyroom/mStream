@@ -296,18 +296,84 @@ export function setup(mstream) {
       ignorePercentage = req.body.ignorePercentage;
     }
 
+    const hasArtistFilter = Array.isArray(req.body.artists) && req.body.artists.length > 0;
+
+    // ── Lean path: no artist filter → COUNT + single-row OFFSET fetch ──────
+    // Avoids loading all 100k+ rows into heap just to pick one.
+    // Falls back to the full-load path if the backend returns 0 (Loki) or if
+    // the ignoreList has grown too large to reason about efficiently.
+    if (!hasArtistFilter) {
+      const opts = {
+        ignoreVPaths:  req.body.ignoreVPaths,
+        minRating:     req.body.minRating,
+        filepathPrefix: req.body.filepathPrefix || null,
+        ignoreArtists: Array.isArray(req.body.ignoreArtists) ? req.body.ignoreArtists : undefined,
+      };
+
+      let count = db.countFilesForRandom(req.user.vpaths, req.user.username, opts);
+
+      // Loki stubs return 0 — fall through to full-load path below
+      if (count > 0) {
+        // Trim ignore list to at most 50% of candidates
+        while (ignoreList.length > count * ignorePercentage) {
+          ignoreList.shift();
+        }
+        if (count === 0) { throw new WebError('No songs that match criteria', 400); }
+
+        // Build a sorted set of ignored positions so we can skip efficiently
+        const ignoredSet = new Set(ignoreList);
+
+        // Pick a random offset among the non-ignored positions
+        const available = count - ignoredSet.size;
+        if (available <= 0) {
+          // Everything is ignored — reset and pick freely
+          ignoreList = [];
+          ignoredSet.clear();
+        }
+
+        // Random pick: generate random offset in [0, count), skip ignored slots
+        let attempts = 0;
+        let offset;
+        do {
+          offset = Math.floor(Math.random() * count);
+          attempts++;
+        } while (ignoredSet.has(offset) && attempts < count);
+
+        const row = db.pickFileAtOffset(req.user.vpaths, req.user.username, opts, offset);
+        if (!row) { throw new WebError('No songs that match criteria', 400); }
+
+        ignoreList.push(offset);
+        return res.json({ songs: [renderMetadataObj(row)], ignoreList });
+      }
+
+      // ignoreArtists eliminated all candidates — retry without it
+      if (count === 0 && Array.isArray(req.body.ignoreArtists) && req.body.ignoreArtists.length > 0) {
+        const optsNoIgnore = { ignoreVPaths: opts.ignoreVPaths, minRating: opts.minRating, filepathPrefix: opts.filepathPrefix };
+        count = db.countFilesForRandom(req.user.vpaths, req.user.username, optsNoIgnore);
+        if (count > 0) {
+          ignoreList = [];
+          const offset = Math.floor(Math.random() * count);
+          const row = db.pickFileAtOffset(req.user.vpaths, req.user.username, optsNoIgnore, offset);
+          if (!row) { throw new WebError('No songs that match criteria', 400); }
+          return res.json({ songs: [renderMetadataObj(row)], ignoreList: [offset] });
+        }
+      }
+      // count still 0 (Loki or truly empty library) → fall through to full-load path
+    }
+
+    // ── Full-load path: artist filter active, or Loki backend ────────────────
     const results = db.getAllFilesWithMetadata(req.user.vpaths, req.user.username, {
       ignoreVPaths: req.body.ignoreVPaths,
       minRating: req.body.minRating,
       filepathPrefix: req.body.filepathPrefix || null,
-      artists: Array.isArray(req.body.artists) ? req.body.artists : undefined,
+      artists: hasArtistFilter ? req.body.artists : undefined,
       ignoreArtists: Array.isArray(req.body.ignoreArtists) ? req.body.ignoreArtists : undefined,
     });
 
     // If the similar-artists filter returned nothing in the library, retry
     // without it — no 400, no client-side fallback dance, playback never stalls.
     let finalResults = results;
-    if (results.length === 0 && Array.isArray(req.body.artists) && req.body.artists.length > 0) {
+    if (results.length === 0 && hasArtistFilter) {
       finalResults = db.getAllFilesWithMetadata(req.user.vpaths, req.user.username, {
         ignoreVPaths: req.body.ignoreVPaths,
         minRating: req.body.minRating,
@@ -337,7 +403,7 @@ export function setup(mstream) {
     // When an artist filter is active, pick a random *artist* first (equal weight
     // per artist, not per song), then a random song from that artist.
     // This prevents artists with large catalogues from dominating the queue.
-    if (Array.isArray(req.body.artists) && req.body.artists.length > 0) {
+    if (hasArtistFilter) {
       // Collect available (non-ignored) indices
       const available = [];
       for (let i = 0; i < count; i++) {
@@ -359,7 +425,7 @@ export function setup(mstream) {
       returnThis.songs.push(renderMetadataObj(finalResults[pickedIdx]));
       ignoreList.push(pickedIdx);
     } else {
-      // ── Standard single-stage random selection ────────────────────────────
+      // ── Standard single-stage random selection (Loki fallback) ───────────
       let randomNumber = Math.floor(Math.random() * count);
       while (ignoreList.indexOf(randomNumber) > -1) {
         randomNumber = Math.floor(Math.random() * count);
