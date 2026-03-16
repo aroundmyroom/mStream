@@ -51,6 +51,7 @@ const S = {
   gapless:   localStorage.getItem('ms2_gapless_'  + _u) === '1',
   dynColor:  localStorage.getItem('ms2_dyn_color_' + _u) !== '0',  // default ON; stored as '0' when disabled
   barTop:    localStorage.getItem('ms2_bar_top_'   + _u) === '1',
+  autoResume: localStorage.getItem('ms2_auto_resume_' + _u) === '1',  // default OFF — pause on page reload
   // Auto-DJ: similar-artists mode
   djSimilar: localStorage.getItem('ms2_dj_similar_' + _u) === '1',
   djDice:    localStorage.getItem('ms2_dj_dice_'    + _u) === '1',  // default OFF
@@ -284,9 +285,9 @@ function restoreQueue() {
       if (data.time > 1) {
         audioEl.addEventListener('loadedmetadata', () => {
           audioEl.currentTime = data.time;
-          if (data.playing) audioEl.play().catch(() => {});
+          if (data.playing && S.autoResume) audioEl.play().catch(() => {});
         }, { once: true });
-      } else if (data.playing) {
+      } else if (data.playing && S.autoResume) {
         audioEl.play().catch(() => {});
       }
     }
@@ -5314,6 +5315,27 @@ function viewPlayback() {
         </div>
       </div>
 
+      <!-- ── AUTO-RESUME ── -->
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">▶️</div>
+          <div>
+            <div class="playback-section-title">Auto-Resume</div>
+            <div class="playback-section-desc">When you reopen the browser or reload the page, automatically resume playing where you left off. When disabled, music is always paused on start.</div>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Resume playback on reload</div>
+            <div class="playback-row-hint">Stored in this browser — off by default</div>
+          </div>
+          <label class="toggle-sw">
+            <input type="checkbox" id="auto-resume-enable" ${S.autoResume ? 'checked' : ''}>
+            <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
+          </label>
+        </div>
+      </div>
+
       <!-- ── INTERFACE ── -->
       <div class="playback-section">
         <div class="playback-section-hdr">
@@ -5375,6 +5397,13 @@ function viewPlayback() {
     S.gapless = e.target.checked;
     S.gapless ? localStorage.setItem(_uKey('gapless'), '1') : localStorage.removeItem(_uKey('gapless'));
     toast(S.gapless ? 'Gapless playback: On' : 'Gapless playback: Off');
+  });
+
+  // Auto-resume toggle
+  document.getElementById('auto-resume-enable').addEventListener('change', e => {
+    S.autoResume = e.target.checked;
+    S.autoResume ? localStorage.setItem(_uKey('auto_resume'), '1') : localStorage.removeItem(_uKey('auto_resume'));
+    toast(S.autoResume ? 'Auto-resume: On' : 'Auto-resume: Off — music will pause on reload');
   });
 
   // Bar position toggle
@@ -8055,7 +8084,7 @@ document.addEventListener('keydown', e => {
   const KEY = 'ms2_nav_collapsed';
   const stored = new Set(JSON.parse(localStorage.getItem(KEY) || '[]'));
   document.querySelectorAll('.nav-section').forEach(section => {
-    if (stored.has(section.dataset.section)) section.classList.add('collapsed');
+    if (stored.has(section.dataset.section) || section.dataset.section === 'tools') section.classList.add('collapsed');
     section.querySelector('.nav-toggle').addEventListener('click', e => {
       if (e.target.closest('#new-pl-btn')) return;
       section.classList.toggle('collapsed');

@@ -244,8 +244,14 @@ export async function serveIt(configFile) {
       : 500;
 
     if (status === 401 || status === 403) {
-      // Auth failures are normal operational noise – log at warn, not error
-      winston.warn(`Auth failure on route ${req.originalUrl} [${status}]`);
+      // Auth failures on unknown paths are internet scanner noise — log at debug only.
+      // Real mStream routes all start with /api/, /rest/, /media/, /album-art/, /waveform/.
+      const isMstreamPath = /^\/(api|rest|media|album-art|waveform)(\/|$)/i.test(req.originalUrl);
+      if (isMstreamPath) {
+        winston.warn(`Auth failure on route ${req.originalUrl} [${status}]`);
+      } else {
+        winston.debug(`Auth probe (ignored) on ${req.originalUrl} [${status}]`);
+      }
     } else if (status === 416) {
       // Range Not Satisfiable — happens when the client cached a byte-offset
       // from before a file was rewritten. Not a server bug; log at debug level.
