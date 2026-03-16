@@ -16,6 +16,7 @@ function _makeAlbumId(artist, album) {
 }
 
 let db;
+const _s = {}; // cached prepared statements — populated in init(), reused on every call
 
 export function init(dbDirectory) {
   db = new DatabaseSync(path.join(dbDirectory, 'mstream.sqlite'));
@@ -26,6 +27,11 @@ export function init(dbDirectory) {
   // Raise auto-checkpoint threshold so SQLite never triggers a blocking
   // checkpoint while a song is streaming. The WAL is cleaned up on DB close.
   db.exec('PRAGMA wal_autocheckpoint(10000)');
+  // 32 MB page cache — default 2 MB is far too small for a 123K-song library;
+  // keeps frequently-used B-tree pages (indexes, hot rows) in RAM.
+  db.exec('PRAGMA cache_size = -32000');
+  // Keep sort/temp B-trees in memory instead of spilling to disk.
+  db.exec('PRAGMA temp_store = MEMORY');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS files (
@@ -105,6 +111,38 @@ export function init(dbDirectory) {
     for (const r of _bfRows) _bfUpd.run(_makeArtistId(r.artist), _makeAlbumId(r.artist, r.album), r.rowid);
     db.exec('COMMIT');
   }
+
+  // ── Additional migration indexes (idempotent, safe on every startup) ──────
+  // aaFile: used by countArtUsage (per-file during art cleanup) and getLiveArtFilenames
+  db.exec('CREATE INDEX IF NOT EXISTS idx_files_aaFile ON files(aaFile)');
+  // (vpath, sID): used by getStaleFileHashes and removeStaleFiles after every scan pass
+  db.exec('CREATE INDEX IF NOT EXISTS idx_files_vpath_sID ON files(vpath, sID)');
+  // user_metadata sort/filter indexes: Recently Played, Most Played, Rated, Starred
+  db.exec('CREATE INDEX IF NOT EXISTS idx_um_user_lp      ON user_metadata(user, lp)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_um_user_pc      ON user_metadata(user, pc)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_um_user_rating  ON user_metadata(user, rating)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_um_user_starred ON user_metadata(user, starred)');
+
+  // ── Cache hot-path prepared statements ───────────────────────────────────
+  // These functions are called once per file during scans (up to 123K times).
+  // Caching avoids re-running sqlite3_prepare_v2 on every call.
+  Object.assign(_s, {
+    findFile:       db.prepare('SELECT rowid AS id, * FROM files WHERE filepath = ? AND vpath = ?'),
+    updateScanId:   db.prepare('UPDATE files SET sID = ? WHERE filepath = ? AND vpath = ?'),
+    updateArt:      db.prepare('UPDATE files SET aaFile = ?, sID = ?, art_source = ? WHERE filepath = ? AND vpath = ?'),
+    countArtUsage:  db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE aaFile = ?'),
+    updateCue:      db.prepare('UPDATE files SET cuepoints = ? WHERE filepath = ? AND vpath = ?'),
+    updateDuration: db.prepare('UPDATE files SET duration = ? WHERE filepath = ? AND vpath = ?'),
+    liveArt:        db.prepare('SELECT DISTINCT aaFile FROM files WHERE aaFile IS NOT NULL'),
+    liveHashes:     db.prepare('SELECT DISTINCT hash FROM files WHERE hash IS NOT NULL'),
+    staleHashes:    db.prepare('SELECT hash FROM files WHERE vpath = ? AND sID != ? AND hash IS NOT NULL'),
+    removeStale:    db.prepare('DELETE FROM files WHERE vpath = ? AND sID != ?'),
+    removeByPath:   db.prepare('DELETE FROM files WHERE filepath = ? AND vpath = ?'),
+    insertFileTs:   db.prepare('SELECT ts FROM files WHERE hash = ? AND ts IS NOT NULL LIMIT 1'),
+    insertFileRow:  db.prepare(
+      'INSERT INTO files (title, artist, year, album, filepath, format, track, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration, artist_id, album_id) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  });
 }
 
 export function close() {
@@ -144,29 +182,29 @@ function prefixClause(prefix, col = 'filepath') {
 
 // File Operations
 export function findFileByPath(filepath, vpath) {
-  const row = db.prepare('SELECT rowid AS id, * FROM files WHERE filepath = ? AND vpath = ?').get(filepath, vpath);
+  const row = _s.findFile.get(filepath, vpath);
   return row || null;
 }
 
 export function updateFileScanId(file, scanId) {
-  db.prepare('UPDATE files SET sID = ? WHERE filepath = ? AND vpath = ?').run(scanId, file.filepath, file.vpath);
+  _s.updateScanId.run(scanId, file.filepath, file.vpath);
 }
 
 export function updateFileArt(filepath, vpath, aaFile, scanId, artSource = null) {
-  db.prepare('UPDATE files SET aaFile = ?, sID = ?, art_source = ? WHERE filepath = ? AND vpath = ?').run(aaFile, scanId, artSource, filepath, vpath);
+  _s.updateArt.run(aaFile, scanId, artSource, filepath, vpath);
 }
 
 export function countArtUsage(aaFile) {
-  return db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE aaFile = ?').get(aaFile).cnt;
+  return _s.countArtUsage.get(aaFile).cnt;
 }
 
 export function updateFileCue(filepath, vpath, cuepoints) {
   // cuepoints is either a JSON string or '[]' (sentinel = checked, no cue)
-  db.prepare('UPDATE files SET cuepoints = ? WHERE filepath = ? AND vpath = ?').run(cuepoints, filepath, vpath);
+  _s.updateCue.run(cuepoints, filepath, vpath);
 }
 
 export function updateFileDuration(filepath, vpath, duration) {
-  db.prepare('UPDATE files SET duration = ? WHERE filepath = ? AND vpath = ?').run(duration, filepath, vpath);
+  _s.updateDuration.run(duration, filepath, vpath);
 }
 
 export function updateFileTags(filepath, vpath, tags) {
@@ -195,12 +233,10 @@ export function insertFile(fileData) {
   // file doesn't appear as "newly added" just because a new vpath was created.
   let ts = fileData.ts ?? null;
   if (fileData.hash) {
-    const existing = db.prepare('SELECT ts FROM files WHERE hash = ? AND ts IS NOT NULL LIMIT 1').get(fileData.hash);
+    const existing = _s.insertFileTs.get(fileData.hash);
     if (existing) { ts = existing.ts; }
   }
-  const stmt = db.prepare(`INSERT INTO files (title, artist, year, album, filepath, format, track, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration, artist_id, album_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  const result = stmt.run(
+  const result = _s.insertFileRow.run(
     fileData.title ?? null, fileData.artist ?? null, fileData.year ?? null, fileData.album ?? null,
     fileData.filepath, fileData.format ?? null, fileData.track ?? null, fileData.disk ?? null,
     fileData.modified ?? null, fileData.hash ?? null, fileData.aaFile ?? null, fileData.vpath,
@@ -212,27 +248,23 @@ export function insertFile(fileData) {
 }
 
 export function removeFileByPath(filepath, vpath) {
-  db.prepare('DELETE FROM files WHERE filepath = ? AND vpath = ?').run(filepath, vpath);
+  _s.removeByPath.run(filepath, vpath);
 }
 
 export function getLiveArtFilenames() {
-  return db.prepare('SELECT DISTINCT aaFile FROM files WHERE aaFile IS NOT NULL')
-    .all().map(r => r.aaFile);
+  return _s.liveArt.all().map(r => r.aaFile);
 }
 
 export function getLiveHashes() {
-  return db.prepare('SELECT DISTINCT hash FROM files WHERE hash IS NOT NULL')
-    .all().map(r => r.hash);
+  return _s.liveHashes.all().map(r => r.hash);
 }
 
 export function getStaleFileHashes(vpath, scanId) {
-  return db.prepare('SELECT hash FROM files WHERE vpath = ? AND sID != ? AND hash IS NOT NULL')
-    .all(vpath, scanId)
-    .map(r => r.hash);
+  return _s.staleHashes.all(vpath, scanId).map(r => r.hash);
 }
 
 export function removeStaleFiles(vpath, scanId) {
-  db.prepare('DELETE FROM files WHERE vpath = ? AND sID != ?').run(vpath, scanId);
+  _s.removeStale.run(vpath, scanId);
 }
 
 export function removeFilesByVpath(vpath) {
@@ -959,32 +991,50 @@ export function getRandomSongs(vpaths, username, opts) {
   const pf = prefixClause(opts.filepathPrefix, 'f.filepath');
   const limit = Math.min(Number(opts.size) || 10, 500);
 
-  let sql = `
-    SELECT f.rowid AS id, f.*, um.rating, um.starred, um.lp AS lastPlayed, um.pc AS playCount
-    FROM files f
-    LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
-    WHERE ${vIn.sql}${pf.sql}
-  `;
+  // Build the FROM + WHERE clause shared by COUNT and row-fetch queries.
+  const joinSql = `FROM files f LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?`;
+  let whereSql = `WHERE ${vIn.sql}${pf.sql}`;
   const params = [username, ...vIn.params, ...pf.params];
 
   if (opts.genre) {
-    sql += ' AND f.genre = ?';
+    whereSql += ' AND f.genre = ?';
     params.push(opts.genre);
   }
   if (opts.fromYear) {
-    sql += ' AND f.year >= ?';
+    whereSql += ' AND f.year >= ?';
     params.push(Number(opts.fromYear));
   }
   if (opts.toYear) {
-    sql += ' AND f.year <= ?';
+    whereSql += ' AND f.year <= ?';
     params.push(Number(opts.toYear));
   }
 
-  sql += ' ORDER BY RANDOM() LIMIT ?';
-  params.push(limit);
+  // COUNT first — avoids loading all matching rows into heap.
+  const count = db.prepare(`SELECT COUNT(*) AS n ${joinSql} ${whereSql}`).get(...params).n;
+  if (count === 0) return [];
 
-  const rows = db.prepare(sql).all(...params);
-  return rows.map(mapFileRow);
+  // Prepare the single-row OFFSET fetch once, reuse for each pick.
+  const rowStmt = db.prepare(
+    `SELECT f.rowid AS id, f.*, um.rating, um.starred, um.lp AS lastPlayed, um.pc AS playCount ` +
+    `${joinSql} ${whereSql} ORDER BY f.rowid LIMIT 1 OFFSET ?`
+  );
+
+  const results = [];
+  const pickedOffsets = new Set();
+  for (let i = 0; i < limit && pickedOffsets.size < count; i++) {
+    let offset = Math.floor(Math.random() * count);
+    // Collision avoidance — practically never triggers at library scale
+    let attempts = 0;
+    while (pickedOffsets.has(offset) && attempts < count) {
+      offset = Math.floor(Math.random() * count);
+      attempts++;
+    }
+    if (pickedOffsets.has(offset)) break;
+    pickedOffsets.add(offset);
+    const row = rowStmt.get(...params, offset);
+    if (row) results.push(mapFileRow(row));
+  }
+  return results;
 }
 
 export function getAlbumsByArtistId(artistId, vpaths, opts = {}) {

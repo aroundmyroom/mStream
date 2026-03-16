@@ -5,6 +5,45 @@
 
 ---
 
+## v5.16.21-velvet — 2026-03-16
+
+### SQLite: prepared-statement cache, 6 new indexes, PRAGMA tuning, no ORDER BY RANDOM()
+
+**`src/db/sqlite-backend.js`**
+
+**PRAGMA improvements (init)**
+- `PRAGMA cache_size = -32000` — raises SQLite page cache from default 2 MB to 32 MB; keeps hot B-tree pages (indexes, recently-read rows) in RAM instead of re-reading from disk
+- `PRAGMA temp_store = MEMORY` — sort/temp B-trees stay in RAM; previously could spill to disk during large ORDER BY passes
+
+**New migration indexes (idempotent `CREATE INDEX IF NOT EXISTS` on every startup)**
+- `idx_files_aaFile ON files(aaFile)` — `countArtUsage()` was doing a full 123K-row table scan per file during art cleanup; now an index seek
+- `idx_files_vpath_sID ON files(vpath, sID)` — `getStaleFileHashes()` + `removeStaleFiles()` post-scan were scanning the full vpath subset unsorted; now a composite index scan
+- `idx_um_user_lp ON user_metadata(user, lp)` — Recently Played query was scanning all user rows then sorting; now index-range walk + no sort pass
+- `idx_um_user_pc ON user_metadata(user, pc)` — same for Most Played
+- `idx_um_user_rating ON user_metadata(user, rating)` — same for Rated Songs
+- `idx_um_user_starred ON user_metadata(user, starred)` — same for Starred Songs / Starred Albums (Subsonic)
+
+**Prepared-statement cache (`_s` object, populated at end of `init()`)**
+The following functions previously called `db.prepare()` (= `sqlite3_prepare_v2`) on every invocation. During a scan of 123K files this amounted to ~1 million unnecessary SQL compilations. All now use a pre-compiled statement stored in `_s.*`:
+- `findFileByPath` → `_s.findFile`
+- `updateFileScanId` → `_s.updateScanId`
+- `updateFileArt` → `_s.updateArt`
+- `countArtUsage` → `_s.countArtUsage`
+- `updateFileCue` → `_s.updateCue`
+- `updateFileDuration` → `_s.updateDuration`
+- `insertFile` (both the ts-inheritance SELECT and the INSERT) → `_s.insertFileTs` / `_s.insertFileRow`
+- `removeFileByPath` → `_s.removeByPath`
+- `getLiveArtFilenames` → `_s.liveArt`
+- `getLiveHashes` → `_s.liveHashes`
+- `getStaleFileHashes` → `_s.staleHashes`
+- `removeStaleFiles` → `_s.removeStale`
+
+**Subsonic `getRandomSongs` — replace `ORDER BY RANDOM()` with COUNT + OFFSET**
+`ORDER BY RANDOM()` assigns a random value to every candidate row then sorts them all — a full-table sort of all matching rows regardless of `LIMIT`. For 123K songs returning 10, this was sorting 123K rows to produce 10.
+New approach: `SELECT COUNT(*)` (index-only) → loop `size` times picking `Math.random() * count` offsets → `LIMIT 1 OFFSET n` per pick using a single pre-prepared statement. `ORDER BY f.rowid` walks the implicit B-tree (free sort). Collision-avoidance Set prevents picking the same offset twice.
+
+---
+
 ## v5.16.20-velvet — 2026-03-16
 
 ### Auto-DJ: fix heap spike — COUNT+OFFSET instead of full table load
