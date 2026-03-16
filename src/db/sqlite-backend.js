@@ -547,6 +547,55 @@ export function getAllFilesWithMetadata(vpaths, username, opts) {
   return rows.map(mapFileRow);
 }
 
+// ── Lightweight random-pick helpers (used by Auto-DJ no-filter path) ──────────
+// Avoid loading all 100k+ rows into heap just to pick one index.
+// Strategy: COUNT(*) to get candidate size → caller picks a random offset →
+// fetch LIMIT 1 OFFSET n.  The ignore list is a small array of previously-picked
+// offsets; we skip any that map onto ignored offsets by advancing the offset by
+// the number of ignored positions below it.
+//
+// Shared WHERE-clause builder (same filters as getAllFilesWithMetadata minus artists).
+function _buildRandomWhere(opts, filtered) {
+  const vIn = inClause('f.vpath', filtered);
+  let sql = `FROM files f LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ? WHERE ${vIn.sql}`;
+  const params = [...vIn.params];
+
+  if (opts.filepathPrefix && typeof opts.filepathPrefix === 'string') {
+    sql += ' AND f.filepath LIKE ? ESCAPE \'\\\'';
+    params.push(opts.filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
+  }
+  const minRating = Number(opts.minRating);
+  if (minRating && minRating <= 10 && minRating >= 1) {
+    sql += ' AND um.rating >= ?';
+    params.push(minRating);
+  }
+  if (opts.ignoreArtists && Array.isArray(opts.ignoreArtists) && opts.ignoreArtists.length > 0) {
+    const placeholders = opts.ignoreArtists.map(() => '?').join(',');
+    sql += ` AND (f.artist IS NULL OR f.artist NOT IN (${placeholders}))`;
+    params.push(...opts.ignoreArtists);
+  }
+  return { sql, params };
+}
+
+export function countFilesForRandom(vpaths, username, opts) {
+  const filtered = vpathFilter(vpaths, opts.ignoreVPaths);
+  if (filtered.length === 0) return 0;
+  const { sql, params } = _buildRandomWhere(opts, filtered);
+  const row = db.prepare(`SELECT COUNT(*) AS n ${sql}`).get(username, ...params);
+  return row ? row.n : 0;
+}
+
+// Returns the single row at the given 0-based offset within the same candidate set.
+export function pickFileAtOffset(vpaths, username, opts, offset) {
+  const filtered = vpathFilter(vpaths, opts.ignoreVPaths);
+  if (filtered.length === 0) return null;
+  const { sql, params } = _buildRandomWhere(opts, filtered);
+  const row = db.prepare(
+    `SELECT f.rowid AS id, f.*, um.rating ${sql} ORDER BY f.rowid LIMIT 1 OFFSET ?`
+  ).get(username, ...params, offset);
+  return row ? mapFileRow(row) : null;
+}
+
 export function getGenres(vpaths, ignoreVPaths, opts = {}) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) return [];

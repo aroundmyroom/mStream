@@ -668,6 +668,12 @@ export function getAllFilesWithMetadata(vpaths, username, opts) {
     });
 }
 
+// Loki is already an in-memory store — there is no point in a separate COUNT/OFFSET
+// path.  These stubs return values that cause api/db.js to fall through to the
+// full getAllFilesWithMetadata path, which is correct for Loki.
+export function countFilesForRandom() { return 0; }
+export function pickFileAtOffset() { return null; }
+
 // User Metadata
 export function findUserMetadata(hash, username) {
   if (!userMetadataCollection) { return null; }
