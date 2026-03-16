@@ -1426,21 +1426,24 @@ async function _npId3ApplyTags(song) {
 // ── EQUALIZER CONFIG ──────────────────────────────────────────
 const EQ_BANDS = [
   { freq:    60, type: 'lowshelf',  label: '60',   q: 1.0 },
-  { freq:   170, type: 'peaking',   label: '170',  q: 1.4 },
-  { freq:   310, type: 'peaking',   label: '310',  q: 1.4 },
-  { freq:   600, type: 'peaking',   label: '600',  q: 1.4 },
+  { freq:   100, type: 'peaking',   label: '100',  q: 1.8 },
+  { freq:   200, type: 'peaking',   label: '200',  q: 1.4 },
+  { freq:   500, type: 'peaking',   label: '500',  q: 1.8 },
   { freq:  1000, type: 'peaking',   label: '1k',   q: 1.4 },
   { freq:  3000, type: 'peaking',   label: '3k',   q: 1.4 },
-  { freq:  6000, type: 'peaking',   label: '6k',   q: 1.4 },
+  { freq: 10000, type: 'peaking',   label: '10k',  q: 1.4 },
   { freq: 14000, type: 'highshelf', label: '14k',  q: 1.0 },
 ];
 const EQ_PRESETS = {
   'Flat':       [  0,  0,  0,  0,  0,  0,  0,  0],
-  'Bass Boost': [  6,  4,  2,  0,  0,  0,  0,  0],
-  'Classical':  [  0,  0,  0,  0,  0,  0, -2, -4],
+  'Bass Boost': [  6,  5,  3,  0,  0,  0,  0,  0],
+  'House':      [  6,  5,  2, -3, -1,  1,  2,  3],
+  'Trance':     [  5,  4,  1, -4,  0,  4,  4,  5],
+  'Disco':      [  4,  3, -1, -2,  1,  3,  3,  4],
+  'Pop':        [  2,  1,  0, -1,  2,  3,  2,  3],
+  'Classical':  [  0,  0,  0,  0,  0,  0, -1, -3],
+  'Rock':       [  3,  3,  1, -2,  0,  1,  3,  2],
   'Vocal':      [ -2, -2,  0,  2,  4,  2,  0, -2],
-  'Electronic': [  4,  2,  0, -2,  0,  2,  4,  2],
-  'Rock':       [  2,  2,  0, -1,  0,  1,  3,  2],
 };
 
 // ── MINI SPECTRUM (player bar) ──────────────────────────────
