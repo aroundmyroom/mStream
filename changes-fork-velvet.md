@@ -14,6 +14,17 @@
 ---
 
 
+## v5.16.22-velvet — 2026-03-17
+
+### Documentation: new README, per-release notes in releases/
+
+- `README.md` fully rewritten — introduces mStream Velvet as a distinct fork; adds feature comparison table vs classic mStream, full feature overview by area, install/update instructions, Subsonic mobile app info, technical details
+- `releases/` folder created — 25 per-version `.md` files (v5.15.1-velvet through v5.16.21-velvet) extracted from `changes-fork-velvet.md` Part 1; README links to the current version file
+- GitHub release `v5.16.21-velvet` tagged from current HEAD
+
+---
+
+
 ## v5.16.21-velvet — 2026-03-16
 
 ### SQLite: prepared-statement cache, 6 new indexes, PRAGMA tuning, no ORDER BY RANDOM()
