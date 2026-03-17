@@ -74,6 +74,8 @@ export function getSongsByGenre(genre, vpaths, username, ignoreVPaths, opts) { r
 export function getSongsByGenreRaw(rawGenres, vpaths, username, ignoreVPaths) { return backend.getSongsByGenreRaw(rawGenres, vpaths, username, ignoreVPaths); }
 export function getDecades(vpaths, ignoreVPaths) { return backend.getDecades(vpaths, ignoreVPaths); }
 export function getAlbumsByDecade(decade, vpaths, ignoreVPaths) { return backend.getAlbumsByDecade(decade, vpaths, ignoreVPaths); }
+export function getSongsByDecade(decade, vpaths, username, ignoreVPaths) { return backend.getSongsByDecade(decade, vpaths, username, ignoreVPaths); }
+export function getAlbumsByGenre(rawGenres, vpaths, ignoreVPaths) { return backend.getAlbumsByGenre(rawGenres, vpaths, ignoreVPaths); }
 
 // User Metadata
 export function findUserMetadata(hash, username) { return backend.findUserMetadata(hash, username); }

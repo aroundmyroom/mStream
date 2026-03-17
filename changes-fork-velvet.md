@@ -14,6 +14,52 @@
 ---
 
 
+## v5.16.25-velvet — 2026-03-16
+
+### Decades & Genres: browse filter + track virtual-scroll
+
+**`webapp/app.js`**:
+- `_mountSongVScroll(allSongs, container)` — virtual scroller for song rows; renders only the visible window plus an 8-row buffer, so 5 000+ track lists are smooth. Uses a single delegated click handler on the scroll wrapper (no per-row listeners). `highlightRow()` called after each render so the currently-playing row is always highlighted.
+- Sort bar inside the Tracks tab: **Artist / Title / Album / Year** pill buttons. Clicking the active pill toggles ascending ↑ / descending ↓. Client-side sort — instant, no extra API call. `S.curSongs` and play-all/add-all buttons stay in sync with the current sort order.
+- `_showSongsIn` reduced to a thin wrapper over `_mountSongVScroll`.
+- **Browse filter input** added to the tab bar in both `viewGenreDetail` and `viewDecadeDetail`. Filter value is preserved when switching between Albums and Tracks tabs. Albums tab: matches album name or artist. Tracks tab: matches title, artist, or album. No-match message includes the query string. Clear (×) button appears only when the field is non-empty.
+
+**`webapp/style.css`**:
+- Added `.tracks-mode`, `.sort-bar`, `.sort-bar-label`, `.sort-pill`, `.sort-dir`, `.vslist-wrap` — layout and pill styles for the virtual track scroller and sort bar.
+- Added `.browse-filter-wrap`, `.browse-filter-input`, `.browse-filter-clear` — filter input right-aligned in the tab bar.
+- Filter input colours corrected: `background: var(--surface)` (not `--raised`), `border: var(--border2)`, `placeholder: var(--t2)` — legible across all three themes (default blue, amoled, light).
+- Tab-group wrapped in `.browse-tab-group` so the filter can be pushed to the far right with `margin-left:auto` on `.browse-filter-wrap`.
+
+---
+
+## v5.16.24-velvet — 2026-03-16
+
+### Decades & Genres: Albums/Tracks toggle tabs
+
+**`src/db/sqlite-backend.js`** — two new DB functions:
+- `getSongsByDecade(decade, vpaths, username, ignoreVPaths)` — all tracks for a decade (by year range)
+- `getAlbumsByGenre(rawGenres, vpaths, ignoreVPaths)` — distinct albums for a genre
+
+**`src/db/manager.js`** — delegating exports for both new functions
+
+**`src/api/db.js`** — two new endpoints:
+- `POST /api/v1/db/decade/songs` — track list for a decade
+- `POST /api/v1/db/genre/albums` — album list for a genre
+
+**`webapp/app.js`**:
+- `viewDecadeAlbums` replaced by `viewDecadeDetail(decade, label, defaultTab)` — fetches both albums and songs in parallel, renders Albums/Tracks tab bar; defaults to Albums if any exist, else Tracks
+- `viewGenreSongs` replaced by `viewGenreDetail(genre, defaultTab)` — same pattern; Albums tab + Tracks tab
+- `viewDecades` click handler updated to call `viewDecadeDetail`
+- `viewGenres` click handler updated to call `viewGenreDetail`
+- Added `_mountSongVScroll(allSongs, container)` — virtual scroller for song rows (renders only visible rows + buffer, handles 5000+ tracks smoothly) with delegated click events
+- Sort bar in Tracks tab: Artist / Title / Album / Year pills, toggling ↑↓ direction; client-side sort with instant re-render
+- `_showSongsIn` is now a thin wrapper over `_mountSongVScroll`
+- `_mountAlbumVScroll` accepts optional `containerEl` 4th param (defaults to `content-body`)
+
+**`webapp/style.css`** — new `.browse-mode`, `.browse-tabs`, `.browse-tab`, `.browse-cnt`, `#browse-content` styles — pill tabs consistent with EQ preset buttons; added `.tracks-mode`, `.sort-bar`, `.sort-pill`, `.vslist-wrap` for virtual track list; fixed broken `.settings-input` selector
+
+---
+
 ## v5.16.23-velvet — 2026-03-16
 
 ### EQ: new band layout + House/Trance/Disco/Pop presets

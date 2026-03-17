@@ -4486,11 +4486,11 @@ ${_webAnimSupported ? `
  * @param {Function} buildCard - (album) => HTML string for one card
  * @param {Function} onClick   - (album, cardEl) => called on card click
  */
-function _mountAlbumVScroll(albums, buildCard, onClick) {
+function _mountAlbumVScroll(albums, buildCard, onClick, containerEl) {
   const GAP = 20, BUFS = 3;
   let cols = 0, rowH = 0, fRow = -1, lRow = -1;
 
-  const body = document.getElementById('content-body');
+  const body = containerEl || document.getElementById('content-body');
   body.innerHTML = '<div class="album-grid" id="vgrid"></div>';
   const grid = document.getElementById('vgrid');
 
@@ -4559,18 +4559,9 @@ async function viewGenres() {
     ).join('');
     setBody(`<div class="genre-grid">${items}</div>`);
     document.querySelectorAll('.genre-chip').forEach(el =>
-      el.addEventListener('click', () => viewGenreSongs(el.dataset.genre))
+      el.addEventListener('click', () => viewGenreDetail(el.dataset.genre))
     );
   } catch(e) { setBody('<div class="info-panel"><p class="info-hint">Failed to load genres.</p></div>'); }
-}
-
-async function viewGenreSongs(genre) {
-  setTitle(genre); setBack(viewGenres); setNavActive('genres'); S.view = 'genres';
-  setBody('<div class="loading-state"></div>');
-  try {
-    const songs = await api('POST', 'api/v1/db/genre/songs', { genre });
-    showSongs(songs.map(norm));
-  } catch(e) { setBody('<div class="info-panel"><p class="info-hint">Failed to load songs.</p></div>'); }
 }
 
 // ── DECADE VIEW ────────────────────────────────────────────────
@@ -4594,34 +4585,314 @@ async function viewDecades() {
     document.querySelectorAll('.decade-card').forEach(el => {
       const dec = el.dataset.decade;
       const lbl = dec ? `${dec}s` : 'Unknown';
-      el.addEventListener('click', () => viewDecadeAlbums(parseInt(dec), lbl));
+      el.addEventListener('click', () => viewDecadeDetail(parseInt(dec), lbl));
     });
   } catch(e) { setBody('<div class="info-panel"><p class="info-hint">Failed to load decades.</p></div>'); }
 }
 
-async function viewDecadeAlbums(decade, label) {
-  setTitle(label || `${decade}s`); setBack(viewDecades); setNavActive('decades'); S.view = 'decades';
-  setBody('<div class="loading-state"></div>');
-  try {
-    const d = await api('POST', 'api/v1/db/decade/albums', { decade });
-    if (!d.albums || d.albums.length === 0) { setBody('<div class="info-panel"><p class="info-hint">No albums found.</p></div>'); return; }
-    document.getElementById('play-all-btn').onclick = null;
-    document.getElementById('add-all-btn').onclick  = null;
+// ── SHARED: virtual song list with sort bar ─────────────────────────────────
+function _mountSongVScroll(allSongs, container) {
+  const BUFS = 8;
+  let rowH = 0, fRow = -1, lRow = -1;
+  let _sortKey = 'artist', _sortAsc = true;
+  let _songs = allSongs.slice();
 
-    _mountAlbumVScroll(
-      d.albums,
-      (a, i) => {
-        const u   = artUrl(a.album_art_file, 's');
-        const art = u ? `<img src="${u}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">` : noArtHtml();
-        return `<div class="album-card" data-i="${i}">
-          <div class="album-art">${art}<div class="play-ov"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg></div></div>
-          <div class="album-info"><div class="album-name">${esc(a.name)}</div><div class="album-meta">${esc(a.artist||'')}${a.year ? ' · ' + a.year : ''}</div></div>
-        </div>`;
-      },
-      (a) => viewAlbumSongs(a.name, a.artist || undefined, () => viewDecadeAlbums(decade, label))
-    );
-  } catch(e) { setBody('<div class="info-panel"><p class="info-hint">Failed to load albums.</p></div>'); }
+  container.classList.add('tracks-mode');
+  container.innerHTML = `
+    <div class="sort-bar">
+      <span class="sort-bar-label">Sort</span>
+      <button class="sort-pill active" data-key="artist">Artist <span class="sort-dir">↑</span></button>
+      <button class="sort-pill" data-key="title">Title</button>
+      <button class="sort-pill" data-key="album">Album</button>
+      <button class="sort-pill" data-key="year">Year</button>
+    </div>
+    <div class="vslist-wrap"><div class="song-list"></div></div>`;
+
+  const wrap    = container.querySelector('.vslist-wrap');
+  const list    = wrap.querySelector('.song-list');
+  const sortBar = container.querySelector('.sort-bar');
+
+  function rowHtml(s, i) {
+    const title  = s.title  || s.filepath?.split('/').pop() || 'Unknown';
+    const artist = s.artist || '';
+    const album  = s.album  ? ` · ${s.album}` : '';
+    const stars  = starsHtml(s.rating || 0);
+    const art    = artUrl(s['album-art'], 's');
+    return `<div class="song-row" data-ci="${i}">
+      <div class="row-num">
+        <span class="num-val">${i + 1}</span>
+        <svg class="row-play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+      </div>
+      <div class="row-art">${art ? `<img src="${art}" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml(' no-art-sm')">` : noArtHtml(' no-art-sm')}</div>
+      <div class="song-info">
+        <div class="song-title">${esc(title)}</div>
+        <div class="song-sub">${esc(artist)}${esc(album)}</div>
+      </div>
+      <div class="row-stars" data-ci="${i}">${stars}</div>
+      <div class="row-actions">
+        <button class="row-act-btn add-btn" data-ci="${i}" title="Add to queue">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button class="row-act-btn ctx-btn" data-ci="${i}" title="More options">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+        </button>
+      </div>
+    </div>`;
+  }
+
+  function measure() {
+    if (rowH) return;
+    const probe = document.createElement('div');
+    probe.className = 'song-row';
+    probe.style.cssText = 'visibility:hidden;pointer-events:none';
+    probe.innerHTML = '<div class="row-num"></div><div class="row-art"></div><div class="song-info"><div class="song-title">X</div><div class="song-sub">Y</div></div><div class="row-stars"></div><div class="row-actions"></div>';
+    list.appendChild(probe);
+    rowH = probe.offsetHeight || 68;
+    list.removeChild(probe);
+  }
+
+  function render(force) {
+    if (!rowH) measure();
+    if (!rowH) return;
+    const n = _songs.length;
+    const sTop = wrap.scrollTop;
+    const vH   = wrap.clientHeight || 500;
+    const nF   = Math.max(0, Math.floor(sTop / rowH) - BUFS);
+    const nL   = Math.min(n - 1, Math.ceil((sTop + vH) / rowH) + BUFS);
+    if (!force && nF === fRow && nL === lRow) return;
+    fRow = nF; lRow = nL;
+    list.style.paddingTop    = `${fRow * rowH}px`;
+    list.style.paddingBottom = `${Math.max(0, n - nL - 1) * rowH}px`;
+    const html = [];
+    for (let i = fRow; i <= nL; i++) html.push(rowHtml(_songs[i], i));
+    list.innerHTML = html.join('');
+    highlightRow();
+  }
+
+  // Event delegation — one listener handles all rows
+  wrap.addEventListener('click', e => {
+    const row = e.target.closest('.song-row');
+    if (!row) return;
+    const i = parseInt(row.dataset.ci);
+    const s = _songs[i];
+    if (!s) return;
+    if      (e.target.closest('.add-btn'))      { e.stopPropagation(); Player.addSong(s); }
+    else if (e.target.closest('.ctx-btn'))      { e.stopPropagation(); S.ctxSong = s; showCtxMenu(e.clientX, e.clientY); }
+    else if (e.target.closest('.row-stars'))    { e.stopPropagation(); showRatePanel(e.clientX, e.clientY, s); }
+    else                                          Player.queueAndPlay(s);
+  });
+
+  // Sort bar
+  sortBar.addEventListener('click', e => {
+    const pill = e.target.closest('.sort-pill');
+    if (!pill) return;
+    const key = pill.dataset.key;
+    if (_sortKey === key) { _sortAsc = !_sortAsc; } else { _sortKey = key; _sortAsc = true; }
+    _songs = allSongs.slice().sort((a, b) => {
+      if (key === 'year') { const va = +a.year||0, vb = +b.year||0; return _sortAsc ? va - vb : vb - va; }
+      const va = (a[key]||'').toString().toLowerCase();
+      const vb = (b[key]||'').toString().toLowerCase();
+      return _sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
+    sortBar.querySelectorAll('.sort-pill').forEach(p => {
+      const active = p.dataset.key === _sortKey;
+      p.classList.toggle('active', active);
+      const lbl = p.dataset.key.charAt(0).toUpperCase() + p.dataset.key.slice(1);
+      p.innerHTML = active ? `${lbl} <span class="sort-dir">${_sortAsc ? '↑' : '↓'}</span>` : lbl;
+    });
+    S.curSongs = _songs;
+    const playBtn = document.getElementById('play-all-btn');
+    const addBtn  = document.getElementById('add-all-btn');
+    if (playBtn) playBtn.onclick = () => { if (_songs.length) { Player.setQueue(_songs, 0); toast(`Playing ${_songs.length} songs`); } };
+    if (addBtn)  addBtn.onclick  = () => { if (_songs.length) { Player.addAll(_songs); } };
+    fRow = -1; lRow = -1;
+    wrap.scrollTop = 0;
+    render(true);
+  });
+
+  wrap.addEventListener('scroll', () => { if (list.isConnected) render(false); });
+  const ro = new ResizeObserver(() => requestAnimationFrame(() => {
+    if (!list.isConnected) { ro.disconnect(); return; }
+    rowH = 0; fRow = -1; lRow = -1; render(true);
+  }));
+  ro.observe(wrap);
+
+  S.curSongs = _songs;
+  const playBtn = document.getElementById('play-all-btn');
+  const addBtn  = document.getElementById('add-all-btn');
+  if (playBtn) playBtn.onclick = () => { if (_songs.length) { Player.setQueue(_songs, 0); toast(`Playing ${_songs.length} songs`); } };
+  if (addBtn)  addBtn.onclick  = () => { if (_songs.length) { Player.addAll(_songs); } };
+  requestAnimationFrame(() => render(true));
 }
+
+function _showSongsIn(songs, container) {
+  _mountSongVScroll(songs, container);
+}
+
+// ── GENRE DETAIL VIEW (Albums + Tracks tabs) ─────────────────
+async function viewGenreDetail(genre, defaultTab) {
+  setTitle(genre); setBack(viewGenres); setNavActive('genres'); S.view = 'genres';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+  setBody('<div class="loading-state"></div>');
+  let albums = [], songs = [];
+  try {
+    const [ar, sr] = await Promise.all([
+      api('POST', 'api/v1/db/genre/albums', { genre }),
+      api('POST', 'api/v1/db/genre/songs',  { genre })
+    ]);
+    albums = (ar && ar.albums) ? ar.albums : [];
+    songs  = (sr || []).map(norm);
+  } catch(e) {
+    setBody('<div class="info-panel"><p class="info-hint">Failed to load.</p></div>'); return;
+  }
+
+  const tab = defaultTab || (albums.length > 0 ? 'albums' : 'tracks');
+
+  function renderBrowse(activeTab, _fv) {
+    _fv = _fv || '';
+    const tA = activeTab === 'albums';
+    const body = document.getElementById('content-body');
+    body.classList.add('browse-mode');
+    body.innerHTML = `
+      <div class="browse-tabs">
+        <div class="browse-tab-group">
+          <button class="browse-tab${tA ? ' active' : ''}" data-tab="albums">Albums<span class="browse-cnt">${albums.length}</span></button>
+          <button class="browse-tab${!tA ? ' active' : ''}" data-tab="tracks">Tracks<span class="browse-cnt">${songs.length}</span></button>
+        </div>
+        <div class="browse-filter-wrap">
+          <input id="browse-filter" class="browse-filter-input" placeholder="Filter…" autocomplete="off" spellcheck="false">
+          <button class="browse-filter-clear${_fv ? '' : ' hidden'}" id="browse-filter-clear" title="Clear">×</button>
+        </div>
+      </div>
+      <div id="browse-content"></div>`;
+    const bc   = document.getElementById('browse-content');
+    const fInp = document.getElementById('browse-filter');
+    const fClr = document.getElementById('browse-filter-clear');
+    fInp.value = _fv;
+    function applyContent() {
+      const q = fInp.value.trim().toLowerCase();
+      fClr.classList.toggle('hidden', !q);
+      bc.innerHTML = '';
+      bc.classList.remove('tracks-mode');
+      if (tA) {
+        const fa = q ? albums.filter(a => [(a.name||''),(a.artist||'')].some(v => v.toLowerCase().includes(q))) : albums;
+        if (!fa.length) { bc.innerHTML = `<div class="info-panel"><p class="info-hint">${q ? `No albums match "${esc(q)}".` : 'No albums found — try Tracks.'}</p></div>`; return; }
+        _mountAlbumVScroll(fa,
+          (a, i) => {
+            const u   = artUrl(a.album_art_file, 's');
+            const art = u ? `<img src="${u}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">` : noArtHtml();
+            return `<div class="album-card" data-i="${i}">
+              <div class="album-art">${art}<div class="play-ov"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg></div></div>
+              <div class="album-info"><div class="album-name">${esc(a.name)}</div><div class="album-meta">${esc(a.artist||'')}${a.year ? ' · ' + a.year : ''}</div></div>
+            </div>`;
+          },
+          (a) => viewAlbumSongs(a.name, a.artist || undefined, () => viewGenreDetail(genre, 'albums')),
+          bc
+        );
+      } else {
+        const fs = q ? songs.filter(s => [(s.title||''),(s.artist||''),(s.album||'')].some(v => v.toLowerCase().includes(q))) : songs;
+        if (!fs.length) { bc.innerHTML = `<div class="info-panel"><p class="info-hint">${q ? `No tracks match "${esc(q)}".` : 'No tracks found.'}</p></div>`; return; }
+        _showSongsIn(fs, bc);
+      }
+    }
+    body.querySelectorAll('.browse-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.classList.contains('active')) return;
+        renderBrowse(btn.dataset.tab, fInp.value);
+      });
+    });
+    fInp.addEventListener('input', applyContent);
+    fClr.addEventListener('click', () => { fInp.value = ''; fInp.dispatchEvent(new Event('input')); fInp.focus(); });
+    applyContent();
+  }
+
+  renderBrowse(tab);
+}
+
+// ── DECADE DETAIL VIEW (Albums + Tracks tabs) ─────────────────
+async function viewDecadeDetail(decade, label, defaultTab) {
+  setTitle(label || `${decade}s`); setBack(viewDecades); setNavActive('decades'); S.view = 'decades';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+  setBody('<div class="loading-state"></div>');
+  let albums = [], songs = [];
+  try {
+    const [ar, sr] = await Promise.all([
+      api('POST', 'api/v1/db/decade/albums', { decade }),
+      api('POST', 'api/v1/db/decade/songs',  { decade })
+    ]);
+    albums = (ar && ar.albums) ? ar.albums : [];
+    songs  = (sr || []).map(norm);
+  } catch(e) {
+    setBody('<div class="info-panel"><p class="info-hint">Failed to load.</p></div>'); return;
+  }
+
+  const tab = defaultTab || (albums.length > 0 ? 'albums' : 'tracks');
+
+  function renderBrowse(activeTab, _fv) {
+    _fv = _fv || '';
+    const tA = activeTab === 'albums';
+    const body = document.getElementById('content-body');
+    body.classList.add('browse-mode');
+    body.innerHTML = `
+      <div class="browse-tabs">
+        <div class="browse-tab-group">
+          <button class="browse-tab${tA ? ' active' : ''}" data-tab="albums">Albums<span class="browse-cnt">${albums.length}</span></button>
+          <button class="browse-tab${!tA ? ' active' : ''}" data-tab="tracks">Tracks<span class="browse-cnt">${songs.length}</span></button>
+        </div>
+        <div class="browse-filter-wrap">
+          <input id="browse-filter" class="browse-filter-input" placeholder="Filter…" autocomplete="off" spellcheck="false">
+          <button class="browse-filter-clear${_fv ? '' : ' hidden'}" id="browse-filter-clear" title="Clear">×</button>
+        </div>
+      </div>
+      <div id="browse-content"></div>`;
+    const bc   = document.getElementById('browse-content');
+    const fInp = document.getElementById('browse-filter');
+    const fClr = document.getElementById('browse-filter-clear');
+    fInp.value = _fv;
+    function applyContent() {
+      const q = fInp.value.trim().toLowerCase();
+      fClr.classList.toggle('hidden', !q);
+      bc.innerHTML = '';
+      bc.classList.remove('tracks-mode');
+      if (tA) {
+        const fa = q ? albums.filter(a => [(a.name||''),(a.artist||'')].some(v => v.toLowerCase().includes(q))) : albums;
+        if (!fa.length) { bc.innerHTML = `<div class="info-panel"><p class="info-hint">${q ? `No albums match "${esc(q)}".` : 'No albums found — try Tracks.'}</p></div>`; return; }
+        _mountAlbumVScroll(fa,
+          (a, i) => {
+            const u   = artUrl(a.album_art_file, 's');
+            const art = u ? `<img src="${u}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">` : noArtHtml();
+            return `<div class="album-card" data-i="${i}">
+              <div class="album-art">${art}<div class="play-ov"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg></div></div>
+              <div class="album-info"><div class="album-name">${esc(a.name)}</div><div class="album-meta">${esc(a.artist||'')}${a.year ? ' · ' + a.year : ''}</div></div>
+            </div>`;
+          },
+          (a) => viewAlbumSongs(a.name, a.artist || undefined, () => viewDecadeDetail(decade, label, 'albums')),
+          bc
+        );
+      } else {
+        const fs = q ? songs.filter(s => [(s.title||''),(s.artist||''),(s.album||'')].some(v => v.toLowerCase().includes(q))) : songs;
+        if (!fs.length) { bc.innerHTML = `<div class="info-panel"><p class="info-hint">${q ? `No tracks match "${esc(q)}".` : 'No tracks found.'}</p></div>`; return; }
+        _showSongsIn(fs, bc);
+      }
+    }
+    body.querySelectorAll('.browse-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.classList.contains('active')) return;
+        renderBrowse(btn.dataset.tab, fInp.value);
+      });
+    });
+    fInp.addEventListener('input', applyContent);
+    fClr.addEventListener('click', () => { fInp.value = ''; fInp.dispatchEvent(new Event('input')); fInp.focus(); });
+    applyContent();
+  }
+
+  renderBrowse(tab);
+}
+
 
 // ── SMART PLAYLIST ─────────────────────────────────────────────
 

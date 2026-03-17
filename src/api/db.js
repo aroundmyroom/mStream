@@ -516,4 +516,33 @@ export function setup(mstream) {
     const albums = db.getAlbumsByDecade(Number(req.body.decade), req.user.vpaths, req.body.ignoreVPaths);
     res.json({ albums });
   });
+
+  mstream.post('/api/v1/db/decade/songs', (req, res) => {
+    const schema = Joi.object({
+      decade: Joi.number().integer().required(),
+      ignoreVPaths: Joi.array().items(Joi.string()).optional()
+    });
+    joiValidate(schema, req.body);
+    const songs = db.getSongsByDecade(Number(req.body.decade), req.user.vpaths, req.user.username, req.body.ignoreVPaths);
+    res.json(songs.map(renderMetadataObj));
+  });
+
+  mstream.post('/api/v1/db/genre/albums', (req, res) => {
+    const schema = Joi.object({
+      genre: Joi.string().required(),
+      ignoreVPaths: Joi.array().items(Joi.string()).optional()
+    });
+    joiValidate(schema, req.body);
+    const { rawMap } = mergeGenreRows(db.getGenres(req.user.vpaths, req.body.ignoreVPaths));
+    let rawSet = rawMap.get(req.body.genre);
+    if (!rawSet) {
+      const needle = req.body.genre.toLowerCase();
+      for (const [k, v] of rawMap) {
+        if (k.toLowerCase() === needle) { rawSet = v; break; }
+      }
+    }
+    if (!rawSet || rawSet.size === 0) return res.json({ albums: [] });
+    const albums = db.getAlbumsByGenre(rawSet, req.user.vpaths, req.body.ignoreVPaths);
+    res.json({ albums });
+  });
 }
