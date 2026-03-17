@@ -114,8 +114,11 @@ Client-side gapless is complete. Scan-time silence detection moved to FUTURE.
 - [x] Server: `GET /api/v1/db/genres` returns distinct genres with track counts; `genre-merge.js` normalises multi-value fields, merges near-duplicates, folds genres with < 10 songs into nearest larger genre
 - [x] Server: `GET /api/v1/db/decades` returns albums grouped by decade; `GET /api/v1/db/decade/albums` drills into a decade
 - [x] **Genres** and **Decades** nav entries in the sidebar
-- [x] Genre list → drill into genre → song list (reuses existing song-list renderer)
-- [x] Decade timeline → album grid (virtual-scroll, same grid as Albums view)
+- [x] Genre list → drill into genre → Albums/Tracks tabs (`viewGenreDetail`)
+- [x] Decade list → drill into decade → Albums/Tracks tabs (`viewDecadeDetail`); defaults to Tracks when no albums exist (e.g. 1900s with 1 track)
+- [x] New API: `POST /api/v1/db/decade/songs` and `POST /api/v1/db/genre/albums`; DB functions `getSongsByDecade`, `getAlbumsByGenre`
+- [x] Tracks tab: virtual scroll (`_mountSongVScroll`) handles 5 000+ rows; sort bar (Artist / Title / Album / Year, toggle ↑↓)
+- [x] Browse filter input in tab bar — live client-side filter for albums and tracks; value preserved across tab switches; × clear button
 
 ### Similar Artists Auto-DJ ✅
 - [x] When Auto-DJ starts, call `artist.getSimilar` via `GET /api/v1/lastfm/similar-artists`; built-in API key — no user account required

@@ -703,6 +703,39 @@ export function getAlbumsByDecade(decade, vpaths, ignoreVPaths) {
   `).all(...vIn.params, decade, decade + 9);
 }
 
+export function getSongsByDecade(decade, vpaths, username, ignoreVPaths) {
+  const filtered = vpathFilter(vpaths, ignoreVPaths);
+  if (filtered.length === 0) return [];
+  const vIn = inClause('f.vpath', filtered);
+  const rows = db.prepare(`
+    SELECT f.rowid AS id, f.*, um.rating
+    FROM files f
+    LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
+    WHERE ${vIn.sql} AND f.year >= ? AND f.year <= ?
+    ORDER BY f.artist COLLATE NOCASE, f.album COLLATE NOCASE, f.disk, f.track
+  `).all(username, ...vIn.params, decade, decade + 9);
+  return rows.map(mapFileRow);
+}
+
+export function getAlbumsByGenre(rawGenres, vpaths, ignoreVPaths) {
+  const filtered = vpathFilter(vpaths, ignoreVPaths);
+  if (filtered.length === 0) return [];
+  const genreList = [...rawGenres];
+  if (genreList.length === 0) return [];
+  const vIn = inClause('vpath', filtered);
+  const gIn = inClause('genre', genreList);
+  return db.prepare(`
+    SELECT album AS name,
+           MAX(aaFile) AS album_art_file,
+           MIN(year)   AS year,
+           artist
+    FROM files
+    WHERE ${vIn.sql} AND ${gIn.sql} AND album IS NOT NULL
+    GROUP BY album, artist
+    ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE
+  `).all(...vIn.params, ...gIn.params);
+}
+
 
 // User Metadata
 export function findUserMetadata(hash, username) {
