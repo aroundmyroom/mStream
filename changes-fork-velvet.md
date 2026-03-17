@@ -14,6 +14,16 @@
 ---
 
 
+## v5.16.27-velvet — 2026-03-17
+
+### Fix: rating and last-played fail for songs browsed via child vpath
+- `rate-song` and `scrobble-by-filepath` endpoints did a direct DB lookup using the child vpath name (e.g. `Disco`) and stripped relative path — but all files are stored under the root vpath (`Music`), so the lookup always returned null → 500 error.
+- Added `resolveFile()` helper in `src/api/db.js` that mirrors the existing `pullMetaData` fallback: tries the direct lookup first, then walks config folders to detect parent vpaths and retries with the correct prefix.
+- Same inline fallback added to `src/api/scrobbler.js` so last-played and play-count are recorded correctly for child-vpath files.
+- All files under child vpaths (Disco, etc.) scanned via `Music` root are now rateable and scrobble correctly regardless of which vpath the file explorer was browsed through.
+
+---
+
 ## v5.16.26-velvet — 2026-03-17
 
 ### A-Z strip: full-width layout
