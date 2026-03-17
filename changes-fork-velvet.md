@@ -14,6 +14,18 @@
 ---
 
 
+## v5.16.26-velvet — 2026-03-17
+
+### A-Z strip: full-width layout
+
+**`webapp/style.css`**:
+- `.az-strip` changed from `flex-wrap:wrap` to `flex-wrap:nowrap` so all 27 buttons (`#` + A–Z) fill the full available width in one row
+- `.az-btn` now uses `flex:1 1 0; min-width:0` — each button stretches proportionally to the container width, adapting automatically to any screen size
+- Added `white-space:nowrap; overflow:hidden` to prevent label overflow
+- Mobile breakpoint `≤480px`: falls back to wrapped layout (~7 buttons per row) so buttons stay readable on small phones
+
+---
+
 ## v5.16.25-velvet — 2026-03-16
 
 ### Decades & Genres: browse filter + track virtual-scroll

@@ -512,14 +512,15 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .artist-var{font-size:11px;font-weight:500;color:var(--t3);margin-left:3px;}
 
 /* A-Z index strip */
-.az-strip{display:flex;flex-wrap:wrap;gap:3px;padding:4px 0 12px;}
+.az-strip{display:flex;flex-wrap:nowrap;gap:3px;padding:4px 0 12px;}
 .az-strip.az-hidden{display:none;}
-.az-btn{min-width:26px;height:26px;padding:0 3px;border-radius:6px;font-size:11px;font-weight:700;
+.az-btn{flex:1 1 0;min-width:0;height:28px;padding:0 2px;border-radius:6px;font-size:11px;font-weight:700;
   background:var(--raised);border:1px solid var(--border);color:var(--t2);
-  cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .13s,color .13s;}
+  cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .13s,color .13s;white-space:nowrap;overflow:hidden;}
 .az-btn:hover:not(:disabled){background:var(--hover);color:var(--t1);}
 .az-btn.active{background:var(--primary);color:#fff;border-color:var(--primary);}
 .az-btn:disabled{opacity:.22;cursor:default;}
+@media(max-width:480px){.az-strip{flex-wrap:wrap;}.az-btn{flex:0 1 calc(14.28% - 3px);min-width:24px;}}
 
 /* ── SEARCH ────────────────────────────────────────────────── */
 .search-wrap{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:20px;}
