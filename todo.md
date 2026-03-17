@@ -304,6 +304,48 @@ This is a first-class concern and must be designed clearly up front.
 
 ---
 
+## FUTURE — Home, Analytics & Discovery
+
+> Roadmap items from 2026-03-17 strategic review. Priority order: play_events table first — every other item in this section depends on it.
+
+### Home Screen
+- [ ] Add **Home** nav entry — first view on load instead of blank state
+- [ ] Time-aware greeting ("Good morning / evening") with contextual suggested playlist based on listening history
+- [ ] **Continue Listening** strip — last 3 albums/playlists with resume position
+- [ ] **Recently Added** strip — tracks sorted by file mtime since last scan
+- [ ] **Mood quick-picks** — one button per bucket (Energy / Chill / Nostalgia) generated from own play history, no external API
+
+### Listening Analytics — Play Events
+- [ ] `play_events` table: `timestamp`, `filepath`, `duration_played`, `song_duration`, `source` (`manual|autoDJ|queue-add|shuffle`)
+- [ ] Insert row on every song completion or skip (>5 s played counts as a play event)
+- [ ] Server: `GET /api/v1/stats/playstats` — listening volume (minutes/day), time-of-day histogram per genre, skip rate per song, completion rate
+- [ ] Client: **Analytics view** — plays-per-day sparkline, time-of-day heatmap, top genres by hour bucket (morning / afternoon / late-afternoon / evening / night)
+- [ ] **Manual vs Auto-DJ ratio** chart — shows how much is curated vs auto-generated
+- [ ] **"Unplayed gems"** view — tracks with 0 play events, filterable by decade/genre; great for 123K libraries where discovery is hard
+
+### Smart Auto-DJ — Personal Weights
+- [ ] Re-rank Auto-DJ candidates by `completion_rate × recency_decay` (recently completed = stronger weight)
+- [ ] Penalise songs skipped >2× in the last 30 days — push them to bottom of candidate pool
+- [ ] Keep Last.fm similar-artist seed but re-sort its results using personal weights
+- [ ] BPM-continuity rule: avoid jumps >40 BPM between consecutive auto-queued tracks (requires BPM tag)
+
+### Smart Playlist Builder
+- [ ] Filter builder UI: genre, decade, BPM range, energy level, never-played toggle, min-rating, max-duration
+- [ ] `POST /api/v1/db/smart-playlist` — server-side filter execution, returns matching tracks
+- [ ] Save as named playlist; auto-refreshes on rescan
+
+### Tag & Library Health (especially for unmixed / filename-only tracks)
+- [ ] Background tag-enricher job: parse `Artist - Title` pattern from filename for tracks with no ID3 title/artist
+- [ ] AcoustID audio fingerprint lookup for completely untagged files → MusicBrainz metadata auto-fill
+- [ ] Duplicate detector: flag same AcoustID fingerprint on multiple files, show in admin UI
+
+### External Service Integrations
+- [ ] **Last.fm scrobbling** — POST to `track.scrobble` on song completion (>50% played); user API key in settings
+- [ ] **ListenBrainz scrobbling** — open-source alternative, no rate limits, good for privacy-conscious users
+- [ ] **Spotify audio features import** — fetch BPM, energy, danceability, valence per tagged track via Web API (OAuth); store locally — no ongoing dependency once fetched
+
+---
+
 ## FUTURE — Social / Multi-user
 
 ### Collaborative Queue (Jukebox)
@@ -333,16 +375,11 @@ before the clean branch becomes `main`. Check each item off when confirmed safe 
 
 - [x] ~~**`webapp/admin-v2/`**~~ — renamed to `webapp/admin/`; server mount updated to `admin-v2` → `admin`.
 
-- [ ] **`webapp/v2/`** — the main UI directory, still named `v2` from the old routing era.
-  Should be renamed to something neutral (e.g. `webapp/player/` or `webapp/app/`) when convenient.
-  _After renaming: update the `res.sendFile(...)` call at `GET /` in `src/server.js` and the absolute asset paths
-  in `webapp/v2/index.html` (`/v2/style.css`, `/v2/app.js`)._
+- [x] ~~**`webapp/v2/`**~~ — never existed as a separate directory; main UI was always served directly from `webapp/`. No rename needed.
 
-- [ ] **`webapp/alpha/`** — an unmaintained Vue.js prototype player. No route serves it.
-  **Safe to delete immediately.**
+- [x] ~~**`webapp/alpha/`**~~ — deleted 2026-03-17. Unmaintained Vue.js prototype, no route served it.
 
-- [ ] **`webapp/old.html`** — a standalone HTML file at the webapp root. Likely an old index backup.
-  Verify no route or link references it, then delete.
+- [x] ~~**`webapp/old.html`**~~ — deleted 2026-03-17. No route or link referenced it.
 
 - [x] ~~**`webapp/index.html`** (classic UI)~~ — `/classic` route removed (returns 410). Directory still on disk;
   delete `webapp/index.html` and all classic-specific assets when ready.
