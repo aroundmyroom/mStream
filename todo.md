@@ -159,6 +159,26 @@ Client-side gapless is complete. Scan-time silence detection moved to FUTURE.
 
 ## FUTURE — Library Management
 
+### Tag Workshop — Phase 1: Filename Heuristics
+> ~55K untagged files. Phase 1 is zero-dependency, offline, runs in milliseconds. Resolves structured collections (DJ sets, 12-inches with `Artist - Title.mp3` naming) without touching audio.
+- [ ] DB: `tag_proposals` table — `filepath, source (heuristic|acoustid|manual), proposed_title, proposed_artist, proposed_album, proposed_year, proposed_genre, proposed_track, confidence (0-1), status (pending|accepted|rejected|edited)`
+- [ ] Server: background scan job — parse filepath patterns (`Artist/Album/NN Title`, `Artist - Title`, `NN. Artist - Title`, `Title (Year) [Label]`, etc.) → INSERT into `tag_proposals` with confidence score
+- [ ] Admin UI: **"Tag Workshop"** card — table of pending proposals (filepath, source, proposed fields, confidence); actions: Accept / Edit / Skip
+- [ ] Bulk-accept button: "Accept all confidence ≥ 0.85"
+- [ ] On accept: write tags via `node-id3` / `music-metadata`, mark `status=accepted`, queue re-index for that file
+
+### Tag Workshop — Phase 2: AcoustID Fingerprinting
+> Identifies songs by audio content even with completely wrong or missing filenames. ~3 req/s rate limit → 55K files ≈ 5 hours as background job.
+- [ ] Add `fpcalc` (Chromaprint) binary to `bin/` alongside ffmpeg
+- [ ] Server: fingerprint job — run `fpcalc` on unresolved files, POST to `api.acoustid.org/v2/lookup`, store MusicBrainz Recording ID in `tag_proposals`
+- [ ] Enrich proposals with full MusicBrainz metadata (title, artist, album, year, genre) via second API call
+- [ ] Surface AcoustID confidence score in Tag Workshop admin table; distinguish heuristic vs fingerprint rows visually
+
+### Tag Workshop — Phase 3: Manual Fallback
+- [ ] Inline edit row in Tag Workshop — override any proposed field before accepting
+- [ ] "Use filename as title" quick-fill button for completely unidentifiable files
+- [ ] "Apply to similar filenames" — propagate artist/album guess to other files in the same folder
+
 ### Discogs URL: Direct Release Lookup (art + tags from a single URL)
 
 Instead of searching Discogs by metadata, let the user paste a Discogs release or master URL and have mStream fetch the cover art and all tag fields in one shot — no searching, no ambiguity.
