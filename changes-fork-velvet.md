@@ -13,6 +13,27 @@
 
 ---
 
+## Scan Error Fix: parse/duration + unrecoverable detection — 2026-03-18
+
+### Fix button now repairs FLAC/WAV/MP3 parse and duration errors
+- Added `remuxAudio()` server function: uses bundled ffmpeg to stream-copy the audio with `-vn -c:a copy -map_metadata 0`, which rebuilds the container and drops corrupt tag blocks
+- FLAC with prepended ID3v2 header: uses `-f flac` to force the input parser past the ID3v2 block so ffmpeg finds the `fLaC` marker and reads STREAMINFO correctly
+- MP3: also passes `-write_apetag 0 -id3v2_version 3` to strip the corrupt APEv2 footer that causes `RangeError [ERR_OUT_OF_RANGE]` in music-metadata's APEv2Parser
+- WAV: passes `-write_id3v2 0` to avoid re-embedding a broken ID3 chunk
+- The in-place rewrite changes the file's mtime → the next library scan automatically re-parses it
+- Fix endpoint (`POST /api/v1/admin/db/scan-errors/fix`) handles `error_type === 'parse'` and `error_type === 'duration'`
+
+### Unrecoverable file detection
+- Added `probeHasAudio()`: runs ffprobe before remux to check that the file has at least one audio stream with `channels > 0` and `sample_rate > 0`
+- Completely zeroed-out or truncated files (no valid audio data at all) return `action: 'unrecoverable'` instead of attempting remux
+- Admin UI: shows a prominent **red banner** in the expanded detail panel — "File is corrupt and unrecoverable — No valid audio stream was found. Delete it from disk."
+- Sticky red toast on detection: "⚠ File Unrecoverable — This file cannot be played or repaired. Delete it."
+- Error text in expanded detail panel is now selectable (added `user-select: text` to `.se-detail` and `.se-stack`)
+- Fix-failed toast is now sticky (`timeout: 0`) so the error message isn't missed
+- Hint text under the Fix button updated to describe what each fix type actually does
+
+---
+
 ## README — 2026-03-18
 
 ### Add GUI screenshots to README
