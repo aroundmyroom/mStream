@@ -13,6 +13,14 @@
 
 ---
 
+## README — 2026-03-18
+
+### Add GUI screenshots to README
+- Embedded `docs/front.jpg` and `docs/admin.jpg` in `README.md` directly below the intro paragraph
+- Thumbnails displayed at 480 px wide, side by side; clicking opens full-size image on GitHub
+
+---
+
 
 ## v5.16.27-velvet — 2026-03-17
 
