@@ -8,11 +8,9 @@
 
 mStream Velvet is a personal music streaming server with a dramatically expanded feature set compared to classic mStream. It is built on mStream 5.14.3 (sqlite branch) and adds a new player UI, Subsonic API compatibility, advanced audio tools, and many more features.
 
-<p align="center">
-  <a href="docs/front.png"><img src="docs/front.png" alt="Player UI" width="480" /></a>
-  &nbsp;&nbsp;
-  <a href="docs/admin.png"><img src="docs/admin.png" alt="Admin UI" width="480" /></a>
-</p>
+| Player UI | Admin UI |
+|:---------:|:--------:|
+| [![Player UI](docs/front.png)](docs/front.png) | [![Admin UI](docs/admin.png)](docs/admin.png) |
 
 ---
 
