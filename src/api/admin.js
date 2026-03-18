@@ -382,8 +382,47 @@ export function setup(mstream) {
         db.markScanErrorFixed(guid);
         return res.json({ ok: true, action: 'cue_dismissed' });
 
+      } else if (err.error_type === 'parse' || err.error_type === 'duration') {
+        // Corrupt tag block (e.g. APEv2 RangeError, unreadable FLAC/WAV header).
+        // Re-mux the file with ffmpeg — strips APEv2 on MP3, rebuilds the clean
+        // container on FLAC/WAV/OGG/etc.  The in-place rewrite changes the file's
+        // mtime, so the next library scan automatically re-processes it.
+        const vpathFolder2 = config.program.folders[err.vpath];
+        if (!vpathFolder2) return res.status(400).json({ error: `Unknown vpath: ${err.vpath}` });
+        const absPath2 = path.join(vpathFolder2.root, err.filepath);
+
+        if (!fs.existsSync(absPath2)) {
+          return res.status(400).json({ error: `File not found on disk: ${absPath2}` });
+        }
+
+        const ext2 = path.extname(absPath2).toLowerCase();
+        const remuxable = ['.mp3', '.flac', '.wav', '.ogg', '.opus', '.m4a', '.aac', '.wma', '.ape'];
+        if (!remuxable.includes(ext2)) {
+          db.markScanErrorFixed(guid);
+          return res.json({ ok: true, action: 'dismissed' });
+        }
+
+        // Pre-check with ffprobe: if the file has no valid audio stream at all
+        // (e.g. completely zeroed-out file, truncated beyond recovery) then
+        // remuxing is pointless — tell the client it is unrecoverable.
+        const probeOk = await probeHasAudio(absPath2);
+        if (!probeOk) {
+          console.error(`[scan-error-fix] file is unrecoverable (no valid audio stream): ${absPath2}`);
+          db.markScanErrorFixed(guid);
+          return res.json({ ok: true, action: 'unrecoverable' });
+        }
+
+        const result2 = await remuxAudio(absPath2);
+        if (!result2.ok) {
+          console.error(`[scan-error-fix] fix failed for ${absPath2}: ${result2.reason}`);
+          return res.status(500).json({ error: result2.reason });
+        }
+
+        db.markScanErrorFixed(guid);
+        return res.json({ ok: true, action: 'remuxed', note: 'File rewritten — trigger a rescan to update the library.' });
+
       } else {
-        // parse / insert / other — no file action possible
+        // insert / other — no file action possible
         db.markScanErrorFixed(guid);
         return res.json({ ok: true, action: 'dismissed' });
       }
@@ -859,6 +898,120 @@ export function setup(mstream) {
       res.status(500).json({ error: e.message });
     }
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// probeHasAudio(absFilepath)
+// Returns true when ffprobe finds at least one audio stream with a non-zero
+// sample rate and channel count.  Used to detect completely zeroed / truncated
+// files before wasting a remux attempt.
+// ─────────────────────────────────────────────────────────────────────────────
+async function probeHasAudio(absFilepath) {
+  const ffmpegDir = config.program.transcode?.ffmpegDirectory;
+  const binExt    = process.platform === 'win32' ? '.exe' : '';
+  const ffprobeBin = ffmpegDir ? path.join(ffmpegDir, `ffprobe${binExt}`) : null;
+  if (!ffprobeBin || !fs.existsSync(ffprobeBin)) return true; // can't probe — optimistically try remux
+
+  try {
+    const stdout = await new Promise((resolve, reject) => {
+      const args = [
+        '-v', 'error',
+        '-select_streams', 'a:0',
+        '-show_entries', 'stream=codec_type,channels,sample_rate',
+        '-of', 'csv=p=0',
+        absFilepath
+      ];
+      const proc = child.spawn(ffprobeBin, args);
+      let out = '';
+      proc.stdout.on('data', d => { out += d.toString(); });
+      proc.on('close', code => resolve(out.trim()));
+      proc.on('error', reject);
+    });
+    // stdout looks like "audio,2,44100" — valid if we have channels > 0 and sample_rate > 0
+    if (!stdout) return false;
+    const parts = stdout.split(',');
+    const channels   = parseInt(parts[1], 10) || 0;
+    const sampleRate = parseInt(parts[2], 10) || 0;
+    return channels > 0 && sampleRate > 0;
+  } catch (_) {
+    return true; // probe failed for unexpected reason — let remux try anyway
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// remuxAudio(absFilepath)
+// Re-muxes an audio file with ffmpeg to fix corrupt tag blocks that prevent
+// music-metadata from reading it (e.g. APEv2 RangeError on MP3, invalid FLAC
+// headers, broken WAV RIFF chunks).  For MP3 the APEv2 tag block is stripped
+// and a clean ID3v2.3 header is written.  For all formats the audio stream is
+// stream-copied (lossless, no re-encode) and all text metadata is preserved.
+// The in-place rewrite also bumps mtime so the next scan re-processes the file.
+// Caller must verify the file exists before calling this function.
+// ─────────────────────────────────────────────────────────────────────────────
+async function remuxAudio(absFilepath) {
+  const ffmpegDir = config.program.transcode?.ffmpegDirectory;
+  const binExt    = process.platform === 'win32' ? '.exe' : '';
+  const ffmpegBin = ffmpegDir ? path.join(ffmpegDir, `ffmpeg${binExt}`) : null;
+
+  if (!ffmpegBin || !fs.existsSync(ffmpegBin)) {
+    return { ok: false, reason: 'ffmpeg binary not found' };
+  }
+
+  const dir  = path.dirname(absFilepath);
+  const base = path.basename(absFilepath, path.extname(absFilepath));
+  const ext  = path.extname(absFilepath);
+  const tmp  = path.join(dir, `.__mstream_fix_${base}${ext}`);
+
+  const extLc = ext.toLowerCase();
+  const isFlac = extLc === '.flac';
+  const isMp3  = extLc === '.mp3';
+  const isWav  = extLc === '.wav';
+
+  try {
+    await new Promise((resolve, reject) => {
+      // For FLAC files that have an ID3v2 header prepended (which causes
+      // music-metadata's "Invalid FLAC preamble" error): force the input
+      // parser to FLAC with -f flac.  Without this ffmpeg operates in
+      // "ID3v2-prefixed-FLAC" hybrid mode and cannot determine codec
+      // parameters (sample rate, channels), causing "Could not write header"
+      // errors even with stream-copy.  Forcing -f flac makes ffmpeg seek
+      // past the ID3v2 block to the fLaC marker and read STREAMINFO correctly.
+      //
+      // -vn             : exclude video/image streams
+      // -c:a copy       : stream-copy — lossless, no re-encode
+      // -map_metadata 0 : preserve all text tags (title, artist, album, …)
+      const args = ['-y'];
+      if (isFlac) args.push('-f', 'flac');
+      args.push('-i', absFilepath, '-vn', '-c:a', 'copy', '-map_metadata', '0');
+      if (isMp3) {
+        // Strip APEv2 tag block (its corrupt footer causes RangeError in music-metadata)
+        // and write a clean ID3v2.3 header instead.
+        args.push('-write_apetag', '0', '-id3v2_version', '3');
+      }
+      if (isWav) {
+        // Do not write an ID3v2 block into the RIFF container.
+        args.push('-write_id3v2', '0');
+      }
+      args.push(tmp);
+
+      const proc = child.spawn(ffmpegBin, args);
+      let stderr = '';
+      proc.stderr.on('data', d => { stderr += d.toString(); });
+      proc.on('close', code => {
+        if (code === 0) return resolve();
+        const msg = `ffmpeg exited ${code}: ${stderr.slice(-600)}`;
+        reject(new Error(msg));
+      });
+      proc.on('error', reject);
+    });
+
+    fs.renameSync(tmp, absFilepath);
+    return { ok: true };
+  } catch (e) {
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_) {}
+    console.error(`[scan-error-fix] remuxAudio failed for ${absFilepath}: ${e.message}`);
+    return { ok: false, reason: e.message };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -411,17 +411,21 @@ const scanErrorsView = Vue.component('scan-errors-view', {
           badge.textContent = cnt > 99 ? '99+' : cnt;
           badge.style.display = cnt === 0 ? 'none' : 'inline-flex';
         }
-        const labels = { art_fixed: 'Embedded image stripped from file', cue_dismissed: 'Cue error dismissed', dismissed: 'Dismissed' };
-        iziToast.success({ title: 'Fixed', message: labels[r.data.action] || 'Done', position: 'topCenter', timeout: 2500 });
-        if (r.data.note) iziToast.warning({ title: 'Note', message: r.data.note, position: 'topCenter', timeout: 5000 });
+        const labels = { art_fixed: 'Embedded image stripped from file', remuxed: 'File rewritten — trigger a rescan to update the library', cue_dismissed: 'Cue error dismissed', dismissed: 'Dismissed', unrecoverable: 'File is corrupt and unrecoverable — delete it' };
+        if (r.data.action === 'unrecoverable') {
+          iziToast.error({ title: '\u26A0 File Unrecoverable', message: 'No valid audio stream found. This file is completely corrupt and cannot be played or repaired. Delete it.', position: 'topCenter', timeout: 0, close: true });
+        } else {
+          iziToast.success({ title: 'Fixed', message: labels[r.data.action] || 'Done', position: 'topCenter', timeout: 2500 });
+          if (r.data.note) iziToast.warning({ title: 'Note', message: r.data.note, position: 'topCenter', timeout: 5000 });
+        }
       } catch (e) {
-        iziToast.error({ title: 'Fix failed', message: e?.response?.data?.error || 'Unknown error', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: 'Fix failed', message: e?.response?.data?.error || 'Unknown error', position: 'topCenter', timeout: 0, close: true });
       } finally {
         Vue.delete(this.fixing, err.guid);
       }
     },
     fixActionLabel(action) {
-      return { art_fixed: 'Embedded image stripped', cue_dismissed: 'Cue error dismissed', dismissed: 'Dismissed' }[action] || 'Fixed';
+      return { art_fixed: 'Embedded image stripped', remuxed: 'File rewritten, rescan needed', cue_dismissed: 'Cue error dismissed', dismissed: 'Dismissed', unrecoverable: '\u26A0 Unrecoverable — delete this file' }[action] || 'Fixed';
     }
   },
   template: `
@@ -647,7 +651,14 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                         </div>
 
                         <!-- ── Fix action row ── -->
-                        <div class="se-detail-fix-row" v-if="err.fixed_at">
+                        <div class="se-unrecoverable-banner" v-if="err.fixed_at && err._fixAction === 'unrecoverable'">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                          <div>
+                            <div class="se-unrecoverable-title">File is corrupt and unrecoverable</div>
+                            <div class="se-unrecoverable-body">No valid audio stream was found. This file cannot be played or repaired &mdash; it contains no audio data. <strong>Delete it from disk.</strong></div>
+                          </div>
+                        </div>
+                        <div class="se-detail-fix-row" v-else-if="err.fixed_at">
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--se-green,#4caf50)" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                           <span class="se-fix-done-txt">
                             Fixed {{relTime(err.fixed_at)}} — auto-removed from log after 48 h
@@ -660,8 +671,9 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                             <svg v-else class="se-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
                             {{fixing[err.guid] ? 'Fixing\u2026' : 'Fix this error'}}
                           </button>
-                          <span class="se-fix-hint" v-if="err.error_type === 'art'">Marks file as &ldquo;art checked&rdquo; so the scanner stops retrying</span>
-                          <span class="se-fix-hint" v-else-if="err.error_type === 'cue'">Marks file as &ldquo;cue checked&rdquo; so the scanner stops retrying</span>
+                          <span class="se-fix-hint" v-if="err.error_type === 'art'">Strips embedded images with ffmpeg &mdash; then rescan to update the library</span>
+                          <span class="se-fix-hint" v-else-if="err.error_type === 'cue'">Marks cue error as dismissed &mdash; auto-expires in 48 h</span>
+                          <span class="se-fix-hint" v-else-if="err.error_type === 'parse' || err.error_type === 'duration'">Rewrites file with ffmpeg (lossless, no re-encode) &mdash; then rescan to update the library</span>
                           <span class="se-fix-hint" v-else>Dismisses this error &mdash; auto-expires in 48 h</span>
                         </div>
 

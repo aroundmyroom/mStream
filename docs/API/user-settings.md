@@ -106,4 +106,4 @@ Both `prefs` and `queue` are optional. `prefs` is merged at the key level (only 
 3. POST /api/v1/user/settings       → save on song change, setting change, app background
 ```
 
-Always include `savedAt: Date.now()` in the queue object so that multi-device conflict resolution can determine which session wrote last.
+Always include `savedAt: Date.now()` in the queue object. It is stored as metadata and visible in the response so clients can show when the queue was last saved.
