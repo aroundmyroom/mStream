@@ -489,6 +489,7 @@ async function getAlbumArt(songInfo) {
 
 async function compressAlbumArt(buff, imgName) {
   if (loadJson.compressImage === false) { return; }
+  if (buff.length < 100) { return; } // guard against malformed micro-buffers (file-type CVE workaround)
 
   const img = await Jimp.fromBuffer(buff);
   await img.scaleToFit({w:256, h:256}).write(path.join(loadJson.albumArtDirectory, 'zl-' + imgName));

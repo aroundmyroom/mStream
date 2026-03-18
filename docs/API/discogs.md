@@ -65,7 +65,7 @@ Saves Discogs configuration.
 
 ### `GET /api/v1/discogs/coverart`
 
-Searches Discogs for up to 3 release covers matching the given metadata. Returns base64-encoded thumbnails ready for display — no extra requests from the browser, avoiding CORS issues.
+Searches Discogs for up to 8 release covers matching the given metadata. Returns base64-encoded thumbnails ready for display — no extra requests from the browser, avoiding CORS issues.
 
 **Auth**: admin token required. Discogs must be enabled.
 
@@ -107,7 +107,7 @@ Hash/ID suffix segments (e.g. `.G12U`, `.3FAB8`) and audio extensions are automa
 }
 ```
 
-Up to 3 choices are returned. `thumbB64` is a JPEG data URI (fetched from `uri150`, ~150×150 px).
+Up to 8 choices are returned. `thumbB64` is a JPEG data URI (fetched from `uri150`, ~150×150 px).
 
 **Error responses**
 

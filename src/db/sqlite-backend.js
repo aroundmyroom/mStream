@@ -83,6 +83,12 @@ export function init(dbDirectory) {
     );
     CREATE INDEX IF NOT EXISTS idx_se_last_seen ON scan_errors(last_seen);
     CREATE INDEX IF NOT EXISTS idx_se_vpath    ON scan_errors(vpath);
+
+    CREATE TABLE IF NOT EXISTS user_settings (
+      username TEXT NOT NULL PRIMARY KEY,
+      prefs    TEXT NOT NULL DEFAULT '{}',
+      queue    TEXT NOT NULL DEFAULT 'null'
+    );
   `);
   // Migration: add cuepoints column for databases created before this feature
   try { db.exec('ALTER TABLE files ADD COLUMN cuepoints TEXT'); } catch (_e) {}
@@ -470,6 +476,44 @@ export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths) {
   const sql = `SELECT rowid AS id, * FROM files WHERE ${vIn.sql} AND ${searchCol} LIKE '%' || ? || '%' COLLATE NOCASE`;
   const rows = db.prepare(sql).all(...vIn.params, String(searchTerm));
   return rows.map(mapFileRow);
+}
+
+// Multi-word cross-field search: every token must appear in at least one of
+// title, artist, album, or filepath. Enables queries like "chaka khan fate"
+// where the artist and track title words are spread across separate columns.
+export function searchFilesAllWords(tokens, vpaths, ignoreVPaths) {
+  const filtered = vpathFilter(vpaths, ignoreVPaths);
+  if (filtered.length === 0 || tokens.length === 0) { return []; }
+
+  const vIn = inClause('vpath', filtered);
+  const params = [...vIn.params];
+
+  const tokenClauses = tokens.map(token => {
+    params.push(token, token, token, token);
+    return `(title LIKE '%' || ? || '%' COLLATE NOCASE OR artist LIKE '%' || ? || '%' COLLATE NOCASE OR album LIKE '%' || ? || '%' COLLATE NOCASE OR filepath LIKE '%' || ? || '%' COLLATE NOCASE)`;
+  });
+
+  const sql = `SELECT rowid AS id, * FROM files WHERE ${vIn.sql} AND ${tokenClauses.join(' AND ')}`;
+  const rows = db.prepare(sql).all(...params);
+  return rows.map(mapFileRow);
+}
+
+export function getUserSettings(username) {
+  const row = db.prepare('SELECT prefs, queue FROM user_settings WHERE username = ?').get(username);
+  if (!row) return { prefs: {}, queue: null };
+  return {
+    prefs: JSON.parse(row.prefs || '{}'),
+    queue: JSON.parse(row.queue || 'null'),
+  };
+}
+
+export function saveUserSettings(username, patch) {
+  const existing = getUserSettings(username);
+  if (patch.prefs !== undefined) existing.prefs = Object.assign(existing.prefs, patch.prefs);
+  if (patch.queue !== undefined) existing.queue = patch.queue;
+  db.prepare(
+    'INSERT INTO user_settings (username, prefs, queue) VALUES (?, ?, ?) ON CONFLICT(username) DO UPDATE SET prefs = excluded.prefs, queue = excluded.queue'
+  ).run(username, JSON.stringify(existing.prefs), JSON.stringify(existing.queue));
 }
 
 export function getRatedSongs(vpaths, username, ignoreVPaths) {

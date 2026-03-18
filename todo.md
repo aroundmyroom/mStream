@@ -227,19 +227,35 @@ The 80 ms timer-based gapless works well for most content. This would improve al
 - [ ] Server: detect `silence_end_ms` / `silence_start_ms` per track via `ffmpeg silencedetect` at scan time; store in DB (schema change required)
 - [ ] Client: use DB silence offsets instead of fixed 80 ms window when available
 
-### User Settings in DB instead of localStorage
-Currently all user preferences (ReplayGain, Gapless, Dynamic Colours, crossfade, shuffle, etc.) are stored in `localStorage` with a username-scoped key. This means settings are **per-browser** — a user loses their preferences on a new device or different browser.
-- [ ] Add a `user_settings` table to the DB (key/value per username)
-- [ ] Add `GET /api/v1/settings` and `PUT /api/v1/settings` endpoints
-- [ ] On login: fetch settings from server and hydrate `S` state + `localStorage` as a local cache
-- [ ] On change: write to `localStorage` immediately (fast), debounce a PUT to the server (sync in background)
-- [ ] Covers: `rg`, `gapless`, `dyn_color`, `crossfade`, `shuffle`, `repeat`, `vol`, `balance`, `djSimilar`, `trans_*`, `smart_pl_filter`, and future settings
-- [ ] **Playlist resume / position sync**: also persist the active queue (ordered list of filepaths) + current index + seek position in `user_settings` — on login, restore queue and seek to saved position. This solves the iOS/Android "restarts from first song" problem: the app reads the server state on launch, and `localStorage` acts as a fast local cache between sessions. Cross-device resume becomes possible for free once the server is the source of truth.
-  - **Storage pattern**: write to `localStorage` immediately on every change (zero latency, works offline); debounce a PUT to server DB every ~10–15 sec and on pause/close. On login/launch: fetch from server and hydrate `localStorage`. If server unreachable: fall back to `localStorage`. Same debounce pattern applies to all other user settings above.
+### ~~User Settings in DB instead of localStorage~~ ✅ DONE — 2026-03-18
+All user preferences and queue/position now persist in the server DB (`user_settings` table).
+- [x] `user_settings` table in SQLite + Loki backends
+- [x] `GET /api/v1/user/settings` and `POST /api/v1/user/settings` endpoints
+- [x] On login: fetch from server, apply to `S` state + `localStorage`
+- [x] On every pref change: debounced 1.5 s write to DB
+- [x] On structural queue change (add/remove/reorder/song change): debounced 2 s write
+- [x] On seeked: debounced 1 s position write
+- [x] Every 15 s during playback: direct position write (cross-device F5 accuracy)
+- [x] On `beforeunload`: `navigator.sendBeacon` flushes exact position (own-browser F5 accuracy)
+- [x] DB is always source of truth on page load; covers all 34 pref keys + queue + seek position
+- [x] Documented in `docs/API/user-settings.md`
 
 ---
 
 ## FUTURE — Accessibility & Appearance
+
+### Audio Output Device Selector
+Allow users to choose which audio output device the player streams to.
+
+**How it works:**
+- Use `navigator.mediaDevices.enumerateDevices()` (filtered to `audiooutput`) to populate a dropdown in Playback Settings
+- On selection call `audioEl.setSinkId(deviceId)` — takes effect immediately
+- Persist chosen `deviceId` in `localStorage`; re-apply on startup with silent fallback to default if device is gone
+- Listen for `navigator.mediaDevices.devicechange` to refresh the list when headphones are plugged/unplugged
+
+**Browser support:** Chrome/Edge/Firefox ✅ — Safari ❌ (no `setSinkId`)
+
+---
 
 ### Customizable Themes
 Two complementary approaches, both buildable on the same CSS-variable foundation:

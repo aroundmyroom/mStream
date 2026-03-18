@@ -56,6 +56,9 @@ const S = {
   djSimilar: localStorage.getItem('ms2_dj_similar_' + _u) === '1',
   djDice:    localStorage.getItem('ms2_dj_dice_'    + _u) === '1',  // default OFF
   djArtistHistory: JSON.parse(localStorage.getItem('ms2_dj_artist_history_' + _u) || 'null') || [],  // rolling list of last N distinct artists
+  // Auto-DJ keyword filter — default OFF; words stored as JSON array
+  djFilterEnabled: localStorage.getItem('ms2_dj_filter_on_' + _u) === '1',
+  djFilterWords:   JSON.parse(localStorage.getItem('ms2_dj_filter_words_' + _u) || 'null') || [],
   // Time display mode: false = elapsed|total (default), true = total|countdown
   timeFlipped: localStorage.getItem('ms2_time_flipped_' + _u) === '1',
 };
@@ -144,6 +147,7 @@ function _toggleTimeFlipped(e) {
   e.stopPropagation();   // prevent click bubbling to the seek bar container
   S.timeFlipped = !S.timeFlipped;
   localStorage.setItem('ms2_time_flipped_' + S.username, S.timeFlipped ? '1' : '');
+  _syncPrefs();
   _renderTimes();
 }
 function artUrl(f, size) {
@@ -208,6 +212,10 @@ function _showInfoStrip(badge, contentHtml, ms = 30000, center = false) {
   strip.classList.toggle('dj-strip-center', !!center);
   clearTimeout(_similarStripT);
   strip.classList.remove('dj-strip-out');
+  // Reset and restart progress bar animation
+  strip.style.setProperty('--strip-dur', ms > 0 ? `${ms}ms` : '0ms');
+  strip.classList.remove('dj-strip-in');
+  void strip.offsetWidth; // force reflow so animation restarts
   strip.classList.add('dj-strip-in');
   if (ms > 0) _similarStripT = setTimeout(() => _dismissInfoStrip(), ms);
 }
@@ -249,8 +257,28 @@ function persistQueue() {
       idx:     S.idx,
       time:    audioEl.currentTime || 0,
       playing: !audioEl.paused,
+      savedAt: Date.now(),
     }));
   } catch(_) {}
+  // DB sync is intentionally NOT called here — this runs every 5 s from the
+  // timeupdate timer. Use _syncQueueToDb() for structural changes only.
+}
+// Sync queue to DB: call only on meaningful structural changes (song change,
+// add/remove/reorder, shuffle). NOT called from the 5-second position tick.
+function _syncQueueToDb() {
+  if (!S.token || !S.username) return;
+  clearTimeout(_syncQueueTimer);
+  _syncQueueTimer = setTimeout(() => {
+    api('POST', 'api/v1/user/settings', { queue: {
+      queue:   S.queue,
+      idx:     S.idx,
+      time:    audioEl.currentTime || 0,
+      playing: !audioEl.paused,
+      savedAt: Date.now(),
+    }})
+      .then(() => localStorage.setItem('ms2_settings_pushed_' + S.username, new Date().toISOString()))
+      .catch(() => {});
+  }, 2000);
 }
 function restoreQueue() {
   const key = _queueKey();
@@ -286,6 +314,14 @@ function restoreQueue() {
         audioEl.addEventListener('loadedmetadata', () => {
           audioEl.currentTime = data.time;
           if (data.playing && S.autoResume) audioEl.play().catch(() => {});
+        }, { once: true });
+        // Update scrubber + time display once the seek lands
+        audioEl.addEventListener('seeked', () => {
+          _renderTimes();
+          const pct = audioEl.duration > 0 ? (audioEl.currentTime / audioEl.duration) * 100 : 0;
+          const fill = document.getElementById('np-prog-fill');
+          if (fill) fill.style.width = pct + '%';
+          _drawWaveform();
         }, { once: true });
       } else if (data.playing && S.autoResume) {
         audioEl.play().catch(() => {});
@@ -399,6 +435,7 @@ const Player = {
     S.djIgnore = [];
     S.djArtistHistory = [];
     localStorage.removeItem(_djKey('artist_history'));
+    _syncPrefs();
     this.playAt(start ?? 0);
   },
   playSingle(song) {
@@ -406,6 +443,7 @@ const Player = {
     S.djIgnore = [];
     S.djArtistHistory = [];
     localStorage.removeItem(_djKey('artist_history'));
+    _syncPrefs();
     this.playAt(0);
   },
   // Add to queue; if nothing is playing yet, start immediately
@@ -421,12 +459,14 @@ const Player = {
     toast('Added: ' + (song.title || song.filepath.split('/').pop()));
     refreshQueueUI();
     persistQueue();
+    _syncQueueToDb();
   },
   addAll(songs) {
     S.queue.push(...songs);
     toast(`Added ${songs.length} songs to queue`);
     refreshQueueUI();
     persistQueue();
+    _syncQueueToDb();
   },
   playNext(song) {
     const insertAt = S.idx + 1;
@@ -434,6 +474,7 @@ const Player = {
     toast('Playing next: ' + (song.title || song.filepath.split('/').pop()));
     refreshQueueUI();
     persistQueue();
+    _syncQueueToDb();
   },
   playAt(idx) {
     if (idx < 0 || idx >= S.queue.length) return;
@@ -465,6 +506,7 @@ const Player = {
       }, 30000);
     }
     persistQueue();
+    _syncQueueToDb();
   },
   toggle() {
     // If nothing is loaded and nothing is queued — truly nothing to do
@@ -554,6 +596,18 @@ const Player = {
 };
 
 // ── AUTO-DJ ──────────────────────────────────────────────────
+// Returns true if a song should be EXCLUDED by the active keyword filter.
+function _djSongBlocked(song) {
+  if (!S.djFilterEnabled || !S.djFilterWords.length) return false;
+  const haystack = [
+    song.title    || '',
+    song.artist   || '',
+    song.album    || '',
+    song.filepath || '',
+  ].join(' ').toLowerCase();
+  return S.djFilterWords.some(w => w && haystack.includes(w.toLowerCase()));
+}
+
 // Shared helper — returns {ignoreList, songs} from the random-songs API
 async function _djApiCall() {
   const selected = S.djVpaths.length > 0 ? S.djVpaths : S.vpaths;
@@ -658,6 +712,7 @@ function _djPushArtistHistory(artist) {
   S.djArtistHistory.push(artist.trim());
   if (S.djArtistHistory.length > DJ_ARTIST_COOLDOWN) S.djArtistHistory.shift();
   localStorage.setItem(_djKey('artist_history'), JSON.stringify(S.djArtistHistory));
+  _syncPrefs();
 }
 
 // Rolling queue cap — prune tracks that are already behind the cursor so the
@@ -679,10 +734,14 @@ async function autoDJPrefetch() {
   if (S.queue.length > S.idx + 1) return; // already pre-queued
   S._djPrefetching = true;
   try {
-    const d = await _djApiCall();
-    S.djIgnore = d.ignoreList;
-    localStorage.setItem(_djKey('ignore'), JSON.stringify(S.djIgnore));
-    const song = norm(d.songs[0]);
+    let d, song, attempts = 0;
+    do {
+      d    = await _djApiCall();
+      S.djIgnore = d.ignoreList;
+      localStorage.setItem(_djKey('ignore'), JSON.stringify(S.djIgnore));
+      song = norm(d.songs[0]);
+      attempts++;
+    } while (_djSongBlocked(song) && attempts < 10);
     _djPushArtistHistory(song.artist);
     // Only push if nothing was added while we were waiting (autoDJFetch race guard)
     if (S.queue.length <= S.idx + 1) {
@@ -714,10 +773,14 @@ async function autoDJFetch() {
   }
   S._djPrefetching = true;
   try {
-    const d = await _djApiCall();
-    S.djIgnore = d.ignoreList;
-    localStorage.setItem(_djKey('ignore'), JSON.stringify(S.djIgnore));
-    const song = norm(d.songs[0]);
+    let d, song, attempts = 0;
+    do {
+      d    = await _djApiCall();
+      S.djIgnore = d.ignoreList;
+      localStorage.setItem(_djKey('ignore'), JSON.stringify(S.djIgnore));
+      song = norm(d.songs[0]);
+      attempts++;
+    } while (_djSongBlocked(song) && attempts < 10);
     _djPushArtistHistory(song.artist);
     _pruneQueue();
     S.queue.push(song);
@@ -734,6 +797,7 @@ function setAutoDJ(on, skipAutoStart) {
   S.autoDJ = on;
   localStorage.setItem(_uKey('autodj'), on ? '1' : '');
   document.getElementById('dj-light').classList.toggle('dj-inactive', !on);
+  _syncPrefs();
   _syncQueueLabel();
   // update autodj page if visible
   const btn = document.querySelector('.autodj-toggle');
@@ -877,6 +941,7 @@ function refreshQueueUI() {
       else if (from > S.idx && to <= S.idx)          S.idx++;
 
       persistQueue();
+      _syncQueueToDb();
       refreshQueueUI();
     });
   });
@@ -888,6 +953,7 @@ function refreshQueueUI() {
       S.queue.splice(i, 1);
       if (S.idx >= i && S.idx > 0) S.idx--;
       persistQueue();
+      _syncQueueToDb();
       refreshQueueUI();
     });
   });
@@ -2295,6 +2361,7 @@ const VU_NEEDLE = (() => {
       const normX = ((clientX - rect.left) / rect.width * 200 - BAR_X_F) / BAR_W_F;
       ppmBrightness = Math.max(0.0, Math.min(1.0, normX));
       localStorage.setItem(_uKey('ppm_bright'), ppmBrightness.toFixed(3));
+      _syncPrefs();
       if (!rafId) _drawIdle();
     }
 
@@ -2411,6 +2478,7 @@ const VU_NEEDLE = (() => {
       REF_LEVEL = Math.min(-10, Math.max(-20, Math.round((startVal - delta) * 2) / 2));
       knob.title = `Drag left/right · peak ref: ${REF_LEVEL} dBFS`;
       localStorage.setItem(_uKey('ref'), REF_LEVEL);
+      _syncPrefs();
       drawKnob(knob);
     });
     window.addEventListener('mouseup', () => { dragging = false; });
@@ -2425,6 +2493,7 @@ const VU_NEEDLE = (() => {
       REF_LEVEL = Math.min(-10, Math.max(-20, Math.round((startVal - delta) * 2) / 2));
       knob.title = `Drag left/right · peak ref: ${REF_LEVEL} dBFS`;
       localStorage.setItem(_uKey('ref'), REF_LEVEL);
+      _syncPrefs();
       drawKnob(knob);
     }, {passive:false});
     window.addEventListener('touchend', () => { dragging = false; });
@@ -2553,6 +2622,7 @@ const VU_NEEDLE = (() => {
     if (_mode === 'spec') { _stop(); if (startIfPlaying) MINI_SPEC.start(); }
     else                  { MINI_SPEC.stop(); if (startIfPlaying) _start(); else _drawIdle(); }
     localStorage.setItem(_uKey('vu_mode'), _mode);
+    _syncPrefs();
   }
 
   return {
@@ -3115,6 +3185,7 @@ const VIZ = (() => {
     canvas._specClick = () => {
       specStyleIdx = (specStyleIdx + 1) % SPEC_MODES.length;
       localStorage.setItem(_uKey('spec_style'), specStyleIdx);
+      _syncPrefs();
       specLabelAlpha = 1.0;
       peakL.fill(0); peakVelL.fill(0);
       peakR.fill(0); peakVelR.fill(0);
@@ -4413,6 +4484,22 @@ ${_webAnimSupported ? `
             <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
           </label>
         </div>` : ''}
+        <div class="autodj-opt-row autodj-opt-col">
+          <div class="autodj-filter-header">
+            <div>
+              <div class="autodj-opt-label">Keyword Filter</div>
+              <div class="autodj-opt-hint">Skip songs whose title, artist, album or filename contains any of these words</div>
+            </div>
+            <label class="toggle-sw">
+              <input type="checkbox" id="dj-filter-toggle" ${S.djFilterEnabled ? 'checked' : ''}>
+              <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
+            </label>
+          </div>
+          <div class="dj-filter-tags" id="dj-filter-tags">
+            ${S.djFilterWords.map(w => `<span class="dj-filter-tag">${esc(w)}<button class="dj-filter-tag-rm" data-word="${esc(w)}" title="Remove">×</button></span>`).join('')}
+            <input class="dj-filter-input" id="dj-filter-input" type="text" placeholder="Type word + Enter…" ${S.djFilterEnabled ? '' : 'disabled'}>
+          </div>
+        </div>
       </div>
     </div>`;
 
@@ -4420,12 +4507,14 @@ ${_webAnimSupported ? `
   document.getElementById('dj-min-rating').onchange = e => {
     S.djMinRating = parseInt(e.target.value);
     localStorage.setItem(_djKey('min_rating'), S.djMinRating);
+    _syncPrefs();
   };
   document.getElementById('dj-similar').addEventListener('change', e => {
     S.djSimilar = e.target.checked;
     S.djSimilar
       ? localStorage.setItem(_uKey('dj_similar'), '1')
       : localStorage.removeItem(_uKey('dj_similar'));
+    _syncPrefs();
     _syncQueueLabel();
     toast(S.djSimilar ? 'Similar Artists: On' : 'Similar Artists: Off');
   });
@@ -4439,6 +4528,7 @@ ${_webAnimSupported ? `
     const ps = document.getElementById('xf-slider');
     const pv = document.getElementById('xf-val');
     if (ps) { ps.value = v; pv.textContent = v === 0 ? 'Off' : v + 's'; }
+    _syncPrefs();
     _syncQueueLabel();
   });
   if (_webAnimSupported) {
@@ -4447,9 +4537,54 @@ ${_webAnimSupported ? `
       S.djDice
         ? localStorage.setItem(_uKey('dj_dice'), '1')
         : localStorage.removeItem(_uKey('dj_dice'));
+      _syncPrefs();
       toast(S.djDice ? 'Dice Roll: On' : 'Dice Roll: Off');
     });
   }
+
+  // ── Keyword Filter handlers ────────────────────────────────
+  function _saveFilterWords() {
+    localStorage.setItem('ms2_dj_filter_words_' + (S.username || ''), JSON.stringify(S.djFilterWords));
+    _syncPrefs();
+  }
+  function _renderFilterTag(word) {
+    const span = document.createElement('span');
+    span.className = 'dj-filter-tag';
+    span.innerHTML = `${esc(word)}<button class="dj-filter-tag-rm" data-word="${esc(word)}" title="Remove">×</button>`;
+    return span;
+  }
+  document.getElementById('dj-filter-toggle').addEventListener('change', e => {
+    S.djFilterEnabled = e.target.checked;
+    S.djFilterEnabled
+      ? localStorage.setItem('ms2_dj_filter_on_' + (S.username || ''), '1')
+      : localStorage.removeItem('ms2_dj_filter_on_' + (S.username || ''));
+    const inp = document.getElementById('dj-filter-input');
+    if (inp) inp.disabled = !S.djFilterEnabled;
+    _syncPrefs();
+    toast(S.djFilterEnabled ? 'Keyword Filter: On' : 'Keyword Filter: Off');
+  });
+  const filterInp = document.getElementById('dj-filter-input');
+  if (filterInp) {
+    filterInp.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ',') return;
+      e.preventDefault();
+      const word = filterInp.value.trim().toLowerCase();
+      if (!word || S.djFilterWords.includes(word)) { filterInp.value = ''; return; }
+      S.djFilterWords.push(word);
+      _saveFilterWords();
+      const container = document.getElementById('dj-filter-tags');
+      container.insertBefore(_renderFilterTag(word), filterInp);
+      filterInp.value = '';
+    });
+  }
+  document.getElementById('dj-filter-tags').addEventListener('click', e => {
+    const btn = e.target.closest('.dj-filter-tag-rm');
+    if (!btn) return;
+    const word = btn.dataset.word;
+    S.djFilterWords = S.djFilterWords.filter(w => w !== word);
+    _saveFilterWords();
+    btn.closest('.dj-filter-tag').remove();
+  });
 
   const pillsEl = document.getElementById('dj-vpaths');
   if (pillsEl) {
@@ -4473,6 +4608,7 @@ ${_webAnimSupported ? `
       S.djArtistHistory = [];
       localStorage.removeItem(_djKey('ignore'));
       localStorage.removeItem(_djKey('artist_history'));
+      _syncPrefs();
     });
   }
 }
@@ -4963,6 +5099,7 @@ function viewTranscode() {
   document.getElementById('tc-enable').onchange = e => {
     S.transEnabled = e.target.checked;
     S.transEnabled ? localStorage.setItem(_uKey('trans'), '1') : localStorage.removeItem(_uKey('trans'));
+    _syncPrefs();
     optsEl.classList.toggle('dimmed', !S.transEnabled);
     // Reload current song with new URL scheme
     if (S.queue[S.idx]) {
@@ -4976,14 +5113,17 @@ function viewTranscode() {
   document.getElementById('tc-codec').onchange = e => {
     S.transCodec = e.target.value;
     e.target.value ? localStorage.setItem(_uKey('trans_codec'), e.target.value) : localStorage.removeItem(_uKey('trans_codec'));
+    _syncPrefs();
   };
   document.getElementById('tc-bitrate').onchange = e => {
     S.transBitrate = e.target.value;
     e.target.value ? localStorage.setItem(_uKey('trans_bitrate'), e.target.value) : localStorage.removeItem(_uKey('trans_bitrate'));
+    _syncPrefs();
   };
   document.getElementById('tc-algo').onchange = e => {
     S.transAlgo = e.target.value;
     e.target.value ? localStorage.setItem(_uKey('trans_algo'), e.target.value) : localStorage.removeItem(_uKey('trans_algo'));
+    _syncPrefs();
   };
 }
 
@@ -5237,8 +5377,7 @@ async function viewLastFM() {
         <div id="lfm-connected" class="${linkedUser ? '' : 'hidden'}">
           <div class="playback-row">
             <div class="playback-row-label">
-              <div class="playback-row-name">Connected as</div>
-              <div class="playback-row-hint" id="lfm-current-user">${esc(linkedUser || '')}</div>
+              <div class="playback-row-name">Connected as: <span id="lfm-current-user">${esc(linkedUser || '')}</span></div>
             </div>
             <button class="btn-danger" id="lfm-disconnect-btn">Disconnect</button>
           </div>
@@ -5405,7 +5544,7 @@ async function viewDiscogs() {
           </div>
           <div>
             <div class="playback-section-title">Discogs Album Art</div>
-            <div class="playback-section-desc">When enabled, the Now Playing modal shows a <b>Fix Art</b> button for songs with missing or broken album art. It searches Discogs and offers up to <b>3 front-cover proposals</b> — picking one embeds the image permanently into the audio file (mp3, flac, ogg, m4a&hellip;). Only visible to admins. Enter your own key+secret from <strong>discogs.com/settings/developers</strong>, or leave blank to use the built-in keys.</div>
+            <div class="playback-section-desc">When enabled, the Now Playing modal shows a <b>Fix Art</b> button for songs with missing or broken album art. It searches Discogs and offers up to <b>8 front-cover proposals</b> — picking one embeds the image permanently into the audio file (mp3, flac, ogg, m4a&hellip;). Only visible to admins. Enter your own key+secret from <strong>discogs.com/settings/developers</strong>, or leave blank to use the built-in keys.</div>
           </div>
         </div>
 
@@ -5644,6 +5783,7 @@ function viewPlayback() {
     const dj = document.getElementById('xf-slider-dj');
     const djv = document.getElementById('xf-val-dj');
     if (dj) { dj.value = v; djv.textContent = v === 0 ? 'Off' : v + 's'; }
+    _syncPrefs();
     _syncQueueLabel();
   });
 
@@ -5662,6 +5802,7 @@ function viewPlayback() {
   document.getElementById('rg-enable').addEventListener('change', e => {
     S.rgEnabled = e.target.checked;
     S.rgEnabled ? localStorage.setItem(_uKey('rg'), '1') : localStorage.removeItem(_uKey('rg'));
+    _syncPrefs();
     if (S.queue[S.idx]) _applyRGGain(S.queue[S.idx]);
     toast(S.rgEnabled ? 'Loudness normalisation: On' : 'Loudness normalisation: Off');
   });
@@ -5670,6 +5811,7 @@ function viewPlayback() {
   document.getElementById('gapless-enable').addEventListener('change', e => {
     S.gapless = e.target.checked;
     S.gapless ? localStorage.setItem(_uKey('gapless'), '1') : localStorage.removeItem(_uKey('gapless'));
+    _syncPrefs();
     toast(S.gapless ? 'Gapless playback: On' : 'Gapless playback: Off');
   });
 
@@ -5677,6 +5819,7 @@ function viewPlayback() {
   document.getElementById('auto-resume-enable').addEventListener('change', e => {
     S.autoResume = e.target.checked;
     S.autoResume ? localStorage.setItem(_uKey('auto_resume'), '1') : localStorage.removeItem(_uKey('auto_resume'));
+    _syncPrefs();
     toast(S.autoResume ? 'Auto-resume: On' : 'Auto-resume: Off — music will pause on reload');
   });
 
@@ -5686,6 +5829,7 @@ function viewPlayback() {
     if (!btn) return;
     S.barTop = btn.dataset.pos === 'top';
     S.barTop ? localStorage.setItem(_uKey('bar_top'), '1') : localStorage.removeItem(_uKey('bar_top'));
+    _syncPrefs();
     applyBarPos(S.barTop);
     document.querySelectorAll('#bar-pos-seg .playback-seg-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.pos === (S.barTop ? 'top' : 'bottom')));
@@ -5696,6 +5840,7 @@ function viewPlayback() {
     S.dynColor = e.target.checked;
     // Store '0' when OFF (default is ON — key absent means enabled)
     S.dynColor ? localStorage.removeItem(_uKey('dyn_color')) : localStorage.setItem(_uKey('dyn_color'), '0');
+    _syncPrefs();
     if (S.dynColor) {
       _lastThemeUrl = null;  // force re-sample
       _applyAlbumArtTheme(S.queue[S.idx] ? artUrl(S.queue[S.idx]['album-art'], 'l') : null);
@@ -6557,6 +6702,7 @@ function _doXfadeHandoff(nextIdx) {
     }, 30000);
   }
   persistQueue();
+  _syncQueueToDb();
 }
 
 function _resetXfade() {
@@ -6639,6 +6785,151 @@ async function pollScan() {
   } catch(_) {}
 }
 
+// ── SERVER SETTINGS SYNC ─────────────────────────────────────
+// Collects all user prefs currently in localStorage into one plain object.
+// Values are the raw localStorage strings (null = key absent).
+function _collectPrefs() {
+  const u = S.username || '';
+  return {
+    theme:             localStorage.getItem('ms2_theme_'          + u),
+    bar_top:           localStorage.getItem('ms2_bar_top_'        + u),
+    auto_resume:       localStorage.getItem('ms2_auto_resume_'    + u),
+    dyn_color:         localStorage.getItem('ms2_dyn_color_'      + u),
+    time_flipped:      localStorage.getItem('ms2_time_flipped_'   + u),
+    vol:               localStorage.getItem('ms2_vol_'            + u),
+    balance:           localStorage.getItem('ms2_balance_'        + u),
+    crossfade:         localStorage.getItem('ms2_crossfade_'      + u),
+    gapless:           localStorage.getItem('ms2_gapless_'        + u),
+    rg:                localStorage.getItem('ms2_rg_'             + u),
+    eq:                localStorage.getItem('ms2_eq_'             + u),
+    eq_on:             localStorage.getItem('ms2_eq_on_'          + u),
+    trans:             localStorage.getItem('ms2_trans_'          + u),
+    trans_algo:        localStorage.getItem('ms2_trans_algo_'     + u),
+    trans_bitrate:     localStorage.getItem('ms2_trans_bitrate_'  + u),
+    trans_codec:       localStorage.getItem('ms2_trans_codec_'    + u),
+    vu_mode:           localStorage.getItem('ms2_vu_mode_'        + u),
+    ppm_bright:        localStorage.getItem('ms2_ppm_bright_'     + u),
+    ref:               localStorage.getItem('ms2_ref_'            + u),
+    spec_style:        localStorage.getItem('ms2_spec_style_'     + u),
+    repeat:            localStorage.getItem('ms2_repeat_'         + u),
+    autodj:            localStorage.getItem('ms2_autodj_'         + u),
+    dj_similar:        localStorage.getItem('ms2_dj_similar_'     + u),
+    dj_dice:           localStorage.getItem('ms2_dj_dice_'        + u),
+    dj_min_rating:     localStorage.getItem('ms2_dj_min_rating_'  + u),
+    dj_vpaths:         localStorage.getItem('ms2_dj_vpaths_'      + u),
+    dj_filter_on:      localStorage.getItem('ms2_dj_filter_on_'   + u),
+    dj_filter_words:   localStorage.getItem('ms2_dj_filter_words_'+ u),
+    dj_ignore:         localStorage.getItem('ms2_dj_ignore_'      + u),
+    dj_artist_history: localStorage.getItem('ms2_dj_artist_history_' + u),
+  };
+}
+
+let _syncPrefsTimer = null;
+function _syncPrefs() {
+  if (!S.token || !S.username) return;
+  clearTimeout(_syncPrefsTimer);
+  _syncPrefsTimer = setTimeout(() => {
+    api('POST', 'api/v1/user/settings', { prefs: _collectPrefs() })
+      .then(() => localStorage.setItem('ms2_settings_pushed_' + S.username, new Date().toISOString()))
+      .catch(() => {});
+  }, 1500);
+}
+
+let _syncQueueTimer = null;
+function _syncQueue() {
+  // Kept for backwards-compat call sites; delegates to _syncQueueToDb.
+  _syncQueueToDb();
+}
+
+async function _loadServerSettings() {
+  if (!S.token) return;
+  try {
+    const data = await api('GET', 'api/v1/user/settings');
+    localStorage.setItem('ms2_settings_pulled_' + S.username, new Date().toISOString());
+    _applyServerSettings(data);
+    // Push the full merged localStorage back to the DB so any prefs set in
+    // previous sessions (before server sync was active) are not lost.
+    api('POST', 'api/v1/user/settings', { prefs: _collectPrefs() })
+      .then(() => localStorage.setItem('ms2_settings_pushed_' + S.username, new Date().toISOString()))
+      .catch(() => {});
+  } catch(_) {}
+}
+
+function _applyServerSettings(data) {
+  const prefs = data?.prefs || {};
+  const u     = S.username || '';
+  const ls    = (k, v) => (v == null || v === '') ? localStorage.removeItem(k) : localStorage.setItem(k, v);
+
+  if (prefs.theme         != null) { ls('ms2_theme_' + u, prefs.theme); applyTheme(prefs.theme, false); }
+  if (prefs.bar_top       != null) { ls('ms2_bar_top_' + u, prefs.bar_top); S.barTop = prefs.bar_top === '1'; applyBarPos(S.barTop); }
+  if (prefs.auto_resume   != null) { ls('ms2_auto_resume_' + u, prefs.auto_resume); S.autoResume = prefs.auto_resume === '1'; }
+  if (prefs.dyn_color     != null) { ls('ms2_dyn_color_' + u, prefs.dyn_color); S.dynColor = prefs.dyn_color !== '0'; }
+  if (prefs.time_flipped  != null) { ls('ms2_time_flipped_' + u, prefs.time_flipped); S.timeFlipped = prefs.time_flipped === '1'; }
+  if (prefs.vol != null) {
+    ls('ms2_vol_' + u, prefs.vol);
+    // initVolume() is an IIFE that ran before login — apply directly
+    const vv = parseInt(prefs.vol || '80', 10);
+    audioEl.volume = vv / 100;
+    const volEl = document.getElementById('volume');
+    if (volEl) { volEl.value = vv; _setVolPct(vv); }
+  }
+  if (prefs.balance != null) {
+    ls('ms2_balance_' + u, prefs.balance);
+    // initBalance() is an IIFE that ran before login — apply directly
+    const bv = parseFloat(prefs.balance || '0');
+    if (_pannerNode) _pannerNode.pan.value = bv;
+    const balEl = document.getElementById('balance');
+    if (balEl) balEl.value = Math.round(bv * 100);
+  }
+  if (prefs.crossfade     != null) { ls('ms2_crossfade_' + u, prefs.crossfade); S.crossfade = parseInt(prefs.crossfade || '0'); }
+  if (prefs.gapless       != null) { ls('ms2_gapless_' + u, prefs.gapless); S.gapless = prefs.gapless === '1'; }
+  if (prefs.rg            != null) { ls('ms2_rg_' + u, prefs.rg); S.rgEnabled = prefs.rg === '1'; }
+  if (prefs.eq            != null) ls('ms2_eq_' + u, prefs.eq);
+  if (prefs.eq_on         != null) ls('ms2_eq_on_' + u, prefs.eq_on);
+  if (prefs.trans         != null) { ls('ms2_trans_' + u, prefs.trans); S.transEnabled = !!prefs.trans; }
+  if (prefs.trans_algo    != null) { ls('ms2_trans_algo_' + u, prefs.trans_algo); S.transAlgo = prefs.trans_algo || ''; }
+  if (prefs.trans_bitrate != null) { ls('ms2_trans_bitrate_' + u, prefs.trans_bitrate); S.transBitrate = prefs.trans_bitrate || ''; }
+  if (prefs.trans_codec   != null) { ls('ms2_trans_codec_' + u, prefs.trans_codec); S.transCodec = prefs.trans_codec || ''; }
+  if (prefs.vu_mode       != null) ls('ms2_vu_mode_' + u, prefs.vu_mode);
+  if (prefs.ppm_bright    != null) ls('ms2_ppm_bright_' + u, prefs.ppm_bright);
+  if (prefs.ref           != null) ls('ms2_ref_' + u, prefs.ref);
+  if (prefs.spec_style    != null) ls('ms2_spec_style_' + u, prefs.spec_style);
+  if (prefs.repeat != null) { ls('ms2_repeat_' + u, prefs.repeat); S.repeat = prefs.repeat || 'off'; _syncRepeatIcon(); }
+  if (prefs.autodj        != null) ls('ms2_autodj_' + u, prefs.autodj);
+  if (prefs.dj_similar    != null) { ls('ms2_dj_similar_' + u, prefs.dj_similar); S.djSimilar = prefs.dj_similar === '1'; }
+  if (prefs.dj_dice       != null) { ls('ms2_dj_dice_' + u, prefs.dj_dice); S.djDice = prefs.dj_dice === '1'; }
+  if (prefs.dj_min_rating != null) { ls('ms2_dj_min_rating_' + u, prefs.dj_min_rating); S.djMinRating = parseInt(prefs.dj_min_rating || '0'); }
+  if (prefs.dj_vpaths     != null) {
+    ls('ms2_dj_vpaths_' + u, prefs.dj_vpaths);
+    try { const v = JSON.parse(prefs.dj_vpaths); if (Array.isArray(v) && v.length) S.djVpaths = v.filter(x => S.vpaths.includes(x)); } catch(_) {}
+    if (!S.djVpaths.length) S.djVpaths = [...S.vpaths];
+  }
+  if (prefs.dj_filter_on  != null) { ls('ms2_dj_filter_on_' + u, prefs.dj_filter_on); S.djFilterEnabled = prefs.dj_filter_on === '1'; }
+  if (prefs.dj_filter_words != null) {
+    ls('ms2_dj_filter_words_' + u, prefs.dj_filter_words);
+    try { S.djFilterWords = JSON.parse(prefs.dj_filter_words) || []; } catch(_) {}
+  }
+  if (prefs.dj_ignore     != null) {
+    ls('ms2_dj_ignore_' + u, prefs.dj_ignore);
+    try { S.djIgnore = JSON.parse(prefs.dj_ignore) || []; } catch(_) {}
+  }
+  if (prefs.dj_artist_history != null) {
+    ls('ms2_dj_artist_history_' + u, prefs.dj_artist_history);
+    try { S.djArtistHistory = JSON.parse(prefs.dj_artist_history) || []; } catch(_) {}
+  }
+  // Queue: the DB is the source of truth — always restore from it on load.
+  // This ensures any browser/device always picks up whatever was last playing.
+  const queueKey = _queueKey();
+  if (data?.queue && Array.isArray(data.queue.queue) && data.queue.queue.length && queueKey) {
+    try { localStorage.setItem(queueKey, JSON.stringify(data.queue)); } catch(_) {}
+    // If showApp() has already run (cookie-auth path), restoreQueue must be
+    // called again now that localStorage has the correct data.
+    if (document.getElementById('app') && !document.getElementById('app').classList.contains('hidden')) {
+      restoreQueue();
+    }
+  }
+}
+
 // ── AUTH ──────────────────────────────────────────────────────
 async function tryLogin(username, password) {
   const d = await api('POST', 'api/v1/auth/login', { username, password });
@@ -6660,6 +6951,7 @@ async function tryLogin(username, password) {
     try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
   } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
   try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
+  await _loadServerSettings();
 }
 
 async function checkSession() {
@@ -6684,6 +6976,7 @@ async function checkSession() {
         try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
       } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
       try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
+      await _loadServerSettings();
       return true;
     } catch(e) {
       if (e.status === 401) { S.token = ''; localStorage.removeItem('ms2_token'); }
@@ -6722,6 +7015,7 @@ async function checkSession() {
           localStorage.setItem('token', S.token);   // mirror for admin panel compatibility
         }
       }
+      await _loadServerSettings();
       return true;
     }
   } catch(_) {}
@@ -6758,7 +7052,22 @@ function showApp() {
   // Restore auto-DJ state from previous session
   if (localStorage.getItem(_uKey('autodj'))) { setAutoDJ(true, /*skipAutoStart=*/true); }
   // Guarantee a save on F5 / tab close
-  window.addEventListener('beforeunload', persistQueue);
+  window.addEventListener('beforeunload', () => {
+    persistQueue(); // always update localStorage
+    // Flush exact current position to DB synchronously via sendBeacon so an
+    // immediate F5 restores to the right spot (not up to 15 s behind).
+    if (S.token && S.username) {
+      const payload = JSON.stringify({ queue: {
+        queue:   S.queue,
+        idx:     S.idx,
+        time:    audioEl.currentTime || 0,
+        playing: !audioEl.paused,
+        savedAt: Date.now(),
+      }});
+      navigator.sendBeacon('/api/v1/user/settings?token=' + encodeURIComponent(S.token),
+        new Blob([payload], { type: 'application/json' }));
+    }
+  });
   // Restore sleep timer if still running from a previous session
   const _savedSleepEnds = parseInt(localStorage.getItem(_uKey('sleep_ends')) || '0');
   if (_savedSleepEnds === -1) { setSleepTimer(-1); }
@@ -6920,6 +7229,7 @@ document.getElementById('repeat-btn').addEventListener('click', () => {
   S.repeat = modes[(modes.indexOf(S.repeat) + 1) % modes.length];
   _syncRepeatIcon();
   localStorage.setItem(_uKey('repeat'), S.repeat);
+  _syncPrefs();
   _showInfoStrip('', `<span class="dj-strip-label">Repeat: <strong>${S.repeat === 'one' ? 'One Song' : S.repeat === 'all' ? 'All' : 'Off'}</strong></span>`, 3000, true);
 });
 
@@ -6948,12 +7258,14 @@ document.getElementById('qp-shuffle-btn').addEventListener('click', () => {
   refreshQueueUI();
   toast('Queue shuffled');
   persistQueue();
+  _syncQueueToDb();
 });
 document.getElementById('qp-clear-btn').addEventListener('click', () => {
   S.queue = []; S.idx = -1;
   refreshQueueUI();
   toast('Queue cleared');
   persistQueue();
+  _syncQueueToDb();
 });
 
 // Logout
@@ -7124,6 +7436,7 @@ const EQ = (() => {
   function save() {
     localStorage.setItem(_uKey('eq'), JSON.stringify(gains));
     localStorage.setItem(_uKey('eq_on'), enabled ? 'true' : 'false');
+    _syncPrefs();
   }
 
   function applyToFilters() {
@@ -7338,8 +7651,8 @@ const _TabFav = (() => {
 })();
 
 // ── AUDIO EVENT HANDLERS (named so they can be moved to a swapped element) ──
-function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); _startWaveformRaf(); document.body.classList.add('audio-playing'); _TabFav.play();  if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'playing'; } catch(_e) {} }
-function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  _stopWaveformRaf(); document.body.classList.remove('audio-playing'); _TabFav.pause(); if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'paused';  } catch(_e) {} }
+function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); _startWaveformRaf(); document.body.classList.add('audio-playing'); _TabFav.play(); _startPositionSync(); if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'playing'; } catch(_e) {} }
+function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  _stopWaveformRaf(); document.body.classList.remove('audio-playing'); _TabFav.pause(); _stopPositionSync(); if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'paused';  } catch(_e) {} }
 function _onAudioEnded() {
   if (S.sleepMins === -1) {
     S.sleepMins = 0;
@@ -7537,6 +7850,7 @@ function _attachAudioListeners(el) {
   el.addEventListener('canplay',     _onAudioCanPlay);
   el.addEventListener('timeupdate',  _onAudioTimeupdatePersist);
   el.addEventListener('timeupdate',  _onAudioTimeupdateUI);
+  el.addEventListener('seeked',      _onAudioSeeked);
 }
 function _detachAudioListeners(el) {
   el.removeEventListener('play',        _onAudioPlay);
@@ -7548,6 +7862,41 @@ function _detachAudioListeners(el) {
   el.removeEventListener('canplay',     _onAudioCanPlay);
   el.removeEventListener('timeupdate',  _onAudioTimeupdatePersist);
   el.removeEventListener('timeupdate',  _onAudioTimeupdateUI);
+  el.removeEventListener('seeked',      _onAudioSeeked);
+}
+
+// Sync queue position to DB on user-initiated seek (debounced 1s)
+let _seekSyncTimer = null;
+function _onAudioSeeked() {
+  persistQueue(); // update localStorage immediately
+  clearTimeout(_seekSyncTimer);
+  _seekSyncTimer = setTimeout(() => _syncQueueToDb(), 1000);
+}
+
+// Periodic position-only DB sync every 60 s during playback — keeps the
+// position reasonably fresh for cross-device resume without hammering the DB.
+let _positionSyncInterval = null;
+function _startPositionSync() {
+  if (_positionSyncInterval) return;
+  _positionSyncInterval = setInterval(() => {
+    if (!audioEl.paused && S.token && S.username) {
+      persistQueue();
+      // Write position directly — skip the debounce so DB is always current
+      api('POST', 'api/v1/user/settings', { queue: {
+        queue:   S.queue,
+        idx:     S.idx,
+        time:    audioEl.currentTime || 0,
+        playing: true,
+        savedAt: Date.now(),
+      }})
+        .then(() => localStorage.setItem('ms2_settings_pushed_' + S.username, new Date().toISOString()))
+        .catch(() => {});
+    }
+  }, 15000);
+}
+function _stopPositionSync() {
+  clearInterval(_positionSyncInterval);
+  _positionSyncInterval = null;
 }
 
 // Attach all permanent listeners to the initial audioEl
@@ -7653,7 +8002,7 @@ document.getElementById('volume').addEventListener('input', e => {
   audioEl.volume = e.target.value / 100;
   _setVolPct(e.target.value);
   clearTimeout(_volSaveTimer);
-  _volSaveTimer = setTimeout(() => localStorage.setItem(_uKey('vol'), e.target.value), 300);
+  _volSaveTimer = setTimeout(() => { localStorage.setItem(_uKey('vol'), e.target.value); _syncPrefs(); }, 300);
 });
 (function initVolume() {
   const saved = parseInt(localStorage.getItem(_uKey('vol')) || '80', 10);
@@ -7682,18 +8031,21 @@ document.getElementById('balance').addEventListener('input', e => {
   const v = parseInt(e.target.value, 10);
   if (_pannerNode) _pannerNode.pan.value = v / 100;
   localStorage.setItem(_uKey('balance'), v / 100);
+  _syncPrefs();
 });
 document.getElementById('balance').addEventListener('dblclick', () => {
   const el = document.getElementById('balance');
   el.value = 0;
   if (_pannerNode) _pannerNode.pan.value = 0;
   localStorage.removeItem(_uKey('balance'));
+  _syncPrefs();
 });
 document.getElementById('bal-center-btn').addEventListener('click', () => {
   const el = document.getElementById('balance');
   el.value = 0;
   if (_pannerNode) _pannerNode.pan.value = 0;
   localStorage.removeItem(_uKey('balance'));
+  _syncPrefs();
 });
 
 let _preMuteVol = parseFloat(localStorage.getItem(_uKey('vol')) || '80') / 100;
@@ -8005,7 +8357,7 @@ function applyTheme(theme, persist = true) {
   document.querySelectorAll('.theme-seg-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.theme === theme);
   });
-  if (persist) localStorage.setItem(_uKey('theme'), theme);
+  if (persist) { localStorage.setItem(_uKey('theme'), theme); _syncPrefs(); }
   requestAnimationFrame(() => requestAnimationFrame(_updateBadgeFg));
   // Redraw waveform so unplayed-bar colour matches new theme immediately
   requestAnimationFrame(_drawWaveform);

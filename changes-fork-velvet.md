@@ -21,6 +21,79 @@
 
 ---
 
+## Server-synced user settings & queue — 2026-03-18
+
+### All user preferences and queue state now persist in the database
+
+Previously every setting (theme, EQ, crossfade, Auto-DJ config, keyword filter, etc.) and the current queue lived only in the browser's `localStorage`, meaning a user on a second browser or device started with defaults.
+
+**`src/db/sqlite-backend.js`** + **`src/db/loki-backend.js`**:
+- New `user_settings` table (`username TEXT PRIMARY KEY, prefs TEXT, queue TEXT`) added via `CREATE TABLE IF NOT EXISTS` — migration-safe, zero downtime.
+- `getUserSettings(username)` — returns `{prefs, queue}` JSON blob for the user.
+- `saveUserSettings(username, patch)` — merges a partial `{prefs?, queue?}` update into the stored record.
+
+**`src/db/manager.js`**: exports `getUserSettings` and `saveUserSettings`.
+
+**`src/api/user-settings.js`** *(new file)*:
+- `GET /api/v1/user/settings` — returns the user's saved prefs + queue.
+- `POST /api/v1/user/settings` — accepts `{prefs?, queue?}`, merges and saves.
+
+**`src/server.js`**: registers the new API module.
+
+**`webapp/app.js`**:
+- `_collectPrefs()` — snapshots all 34 user-pref localStorage keys into one plain object.
+- `_syncPrefs()` — debounced 1.5 s POST of prefs; fires after every pref change (theme, EQ, DJ settings, etc.).
+- `_syncQueueToDb()` — debounced 2 s POST of the current queue + position; called only on structural changes (add/remove/reorder/song change) to avoid DB writes every 5 s from the timeupdate tick.
+- `_loadServerSettings()` — fetches settings from server after login; called by both `tryLogin()` and `checkSession()`.
+- `_applyServerSettings(data)` — writes each pref into localStorage AND updates `S` state live; DB queue always wins on page load (source of truth).
+- `localStorage` debug keys: `ms2_settings_pulled_<user>` and `ms2_settings_pushed_<user>` record ISO timestamps for each DB sync direction.
+- `_syncPrefs()` wired to all ~40 pref-write sites.
+
+**Cross-device position accuracy:**
+- `seeked` audio event triggers a debounced 1 s DB write after any scrubber seek.
+- `_startPositionSync()` / `_stopPositionSync()` write position to DB every 15 s while playing, stopped on pause — keeps position at most 15 s stale for cross-device F5.
+- `beforeunload` uses `navigator.sendBeacon` to flush the exact position to DB on page close/F5 — guarantees frame-accurate restore on own-browser refresh.
+
+**`docs/API/user-settings.md`** *(new file)*: full API reference including both endpoints, all pref keys, response shapes, and iOS usage pattern.
+**`docs/API.md`**: new **User Settings** section.
+
+---
+
+## Auto-DJ UI contrast fixes — 2026-03-18
+
+### Low-contrast text in dark/velvet themes corrected
+
+**`webapp/style.css`**:
+- `.autodj-toggle` (off state): text `--primary` → `--t1` (purple-on-navy was illegible)
+- `.autodj-opts h4` ("Settings" header): `--t2` → `--t1`
+- `.autodj-status` both states: `--t2` / `--primary` → `--t1`
+- `.dj-vpath-pill` (unselected): `--t2` → `--t1`
+- `.dj-vpath-pill.on` (selected): `--primary` → `--t1` (border + background retain purple accent)
+- `.dj-filter-tag` text: `--primary` → `--t1`
+- `.dj-strip-pills` container: added `padding:2px 1px` so pill border-radius is no longer clipped by `overflow:hidden`
+- `.dj-similar-strip::before` progress line: added `border-radius:0 2px 2px 0` for a rounded leading edge
+
+---
+
+## Queue restore — scrubber position — 2026-03-18
+
+### Waveform playhead and time counters now reflect restored position on login/F5
+
+**`webapp/app.js`** — `restoreQueue()`:
+- After `audioEl.currentTime = data.time` in the `loadedmetadata` handler, a one-shot `seeked` listener now calls `_renderTimes()`, updates `np-prog-fill` width, and redraws the waveform so the scrubber lands at the correct position immediately without waiting for the next `timeupdate`.
+
+---
+
+## Search — 2026-03-18
+
+### Multi-word cross-field search
+- Previously, searching "chaka khan fate" returned nothing because each word group was matched against a single column (title OR artist) as a single string.
+- Added `searchFilesAllWords()` in `sqlite-backend.js`: splits the query into tokens and requires **every token** to appear in **any** of title / artist / album / filepath.
+- The search endpoint now runs the cross-field query automatically whenever the input contains more than one word, merging unique results into the songs list.
+- Single-word searches remain unchanged.
+
+---
+
 
 ## v5.16.27-velvet — 2026-03-17
 

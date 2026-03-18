@@ -141,7 +141,7 @@ function artistMatchScore(requestedArtist, discogsTitle) {
 export function setup(mstream) {
 
   // ── GET /api/v1/discogs/coverart?artist=X&title=Y&album=Z&year=N ──────────
-  // Admin only. Returns up to 3 Discogs release cover thumbs (base64).
+  // Admin only. Returns up to 8 Discogs release cover thumbs (base64).
   mstream.get('/api/v1/discogs/coverart', async (req, res) => {
     if (!config.program.discogs?.enabled) return res.status(404).json({ error: 'Discogs not enabled' });
     if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
@@ -493,6 +493,7 @@ export function setup(mstream) {
 
       // Write compressed variants used by the player UI
       try {
+        if (imgBuf.length < 100) throw new Error('image buffer too small');
         const { Jimp } = await import('jimp');
         const jimg = await Jimp.fromBuffer(imgBuf);
         const jl   = jimg.clone();

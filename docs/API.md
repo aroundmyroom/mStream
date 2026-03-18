@@ -104,9 +104,11 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [ID3 tag write — enable setting, write tags to file](API/admin_id3-tags.md) *(GitHub Copilot, 2026-03-09)*
 
-## JukeBox
+## User Settings *(GitHub Copilot, 2026-03-18)*
 
-[/jukebox/push-to-client](API/jukebox_push-to-client.md)
+[/user/settings — persist and restore prefs + queue across devices](API/user-settings.md)
+
+## JukeBox
 
 [/jukebox/sessions](API/jukebox_sessions.md) *(admin)*
 

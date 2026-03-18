@@ -168,6 +168,27 @@ export function setup(mstream) {
     const albums = req.body.noAlbums === true ? [] : searchByX(req, 'album');
     const files = req.body.noFiles === true ? [] : searchByX(req, 'filepath');
     const title = req.body.noTitles === true ? [] : searchByX(req, 'title', 'filepath');
+
+    // Multi-word smart search: if the query has >1 word, also search across all
+    // fields simultaneously so "chaka khan fate" finds songs where the artist
+    // matches some tokens and the title matches others.
+    const tokens = req.body.search.trim().split(/\s+/).filter(t => t.length > 0);
+    if (tokens.length > 1) {
+      const seenPaths = new Set(title.map(t => t.filepath));
+      const crossRows = db.searchFilesAllWords(tokens, req.user.vpaths, req.body.ignoreVPaths);
+      for (const row of crossRows) {
+        const fp = path.join(row.vpath, row.filepath).replace(/\\/g, '/');
+        if (!seenPaths.has(fp)) {
+          seenPaths.add(fp);
+          title.push({
+            name: `${row.artist} - ${row.title}`,
+            album_art_file: row.aaFile ? row.aaFile : null,
+            filepath: fp
+          });
+        }
+      }
+    }
+
     res.json({artists, albums, files, title });
   });
 
