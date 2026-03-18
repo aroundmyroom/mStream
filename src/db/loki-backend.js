@@ -496,6 +496,21 @@ export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths) {
   return fileCollection.find(findThis);
 }
 
+export function searchFilesAllWords(tokens, vpaths, ignoreVPaths) {
+  if (!fileCollection || tokens.length === 0) { return []; }
+
+  const tokenRegexes = tokens.map(t => new RegExp(escapeStringRegexp(t), 'i'));
+
+  return fileCollection.find(renderOrClause(vpaths, ignoreVPaths)).filter(row => {
+    return tokenRegexes.every(re =>
+      re.test(row.title || '') ||
+      re.test(row.artist || '') ||
+      re.test(row.album || '') ||
+      re.test(row.filepath || '')
+    );
+  });
+}
+
 export function getRatedSongs(vpaths, username, ignoreVPaths) {
   if (!fileCollection) { return []; }
 
@@ -1082,4 +1097,18 @@ export function getDirectoryContents(vpath, dirRelPath, username) {
       .sort((a, b) => a.name.localeCompare(b.name)),
     files: files.sort((a, b) => (a.track || 0) - (b.track || 0) || (a.title || '').localeCompare(b.title || '')),
   };
+}
+
+// ── User settings (in-memory for loki backend) ───────────────
+const _userSettings = {};
+
+export function getUserSettings(username) {
+  const s = _userSettings[username];
+  return s ? { prefs: s.prefs || {}, queue: s.queue || null } : { prefs: {}, queue: null };
+}
+
+export function saveUserSettings(username, patch) {
+  if (!_userSettings[username]) _userSettings[username] = { prefs: {}, queue: null };
+  if (patch.prefs !== undefined) Object.assign(_userSettings[username].prefs, patch.prefs);
+  if (patch.queue !== undefined) _userSettings[username].queue = patch.queue;
 }

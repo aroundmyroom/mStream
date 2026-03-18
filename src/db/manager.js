@@ -62,6 +62,7 @@ export function getArtistAlbums(artist, vpaths, ignoreVPaths) { return backend.g
 export function getAlbums(vpaths, ignoreVPaths) { return backend.getAlbums(vpaths, ignoreVPaths); }
 export function getAlbumSongs(album, vpaths, username, opts) { return backend.getAlbumSongs(album, vpaths, username, opts); }
 export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths) { return backend.searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths); }
+export function searchFilesAllWords(tokens, vpaths, ignoreVPaths) { return backend.searchFilesAllWords(tokens, vpaths, ignoreVPaths); }
 export function getRatedSongs(vpaths, username, ignoreVPaths) { return backend.getRatedSongs(vpaths, username, ignoreVPaths); }
 export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts); }
 export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts); }
@@ -128,3 +129,6 @@ export function getAlbumsByArtistId(artistId, vpaths, opts) { return backend.get
 export function getAllAlbumIds(vpaths, opts) { return backend.getAllAlbumIds(vpaths, opts); }
 export function getAllArtistIds(vpaths, opts) { return backend.getAllArtistIds(vpaths, opts); }
 export function getDirectoryContents(vpath, dirRelPath, username) { return backend.getDirectoryContents(vpath, dirRelPath, username); }
+// User settings sync
+export function getUserSettings(username) { return backend.getUserSettings(username); }
+export function saveUserSettings(username, patch) { return backend.saveUserSettings(username, patch); }

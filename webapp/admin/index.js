@@ -2781,7 +2781,7 @@ const discogsView = Vue.component('discogs-view', {
                 When a song is missing album art &#8212; or has art that looks wrong &#8212; the Now Playing modal
                 shows a <b>"Fix Art"</b> button. Clicking it searches the
                 <a href="https://www.discogs.com/developers/" target="_blank" rel="noopener">Discogs API</a>
-                and presents up to <b>3 front-cover proposals</b> to choose from.
+                and presents up to <b>8 front-cover proposals</b> to choose from.
                 Selecting one permanently embeds the image into the audio file (mp3, flac, ogg, m4a&hellip;),
                 so every client sees the correct art from that point on.
                 This picker is only visible to admins.
