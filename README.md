@@ -10,7 +10,7 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 
 | Player UI | Admin UI |
 |:---------:|:--------:|
-| [![Player UI](docs/front.png)](docs/front.png) | [![Admin UI](docs/admin.png)](docs/admin.png) |
+| [![Player UI](docs/designs/front.png)](docs/designs/front.png) | [![Admin UI](docs/designs/admin.png)](docs/designs/admin.png) |
 
 ---
 
