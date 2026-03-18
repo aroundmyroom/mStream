@@ -18,7 +18,7 @@ A heavily edited config would look like:
 
 ```json
 {
-  "port": 3030,
+  "port": 3000,
   "webAppDirectory": "public",
   "secret": "b6j7j5e6u5g36ubn536uyn536unm5m67u5365vby435y54ymn",
   "writeLogs": true,
