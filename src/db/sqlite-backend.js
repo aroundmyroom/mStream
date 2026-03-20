@@ -89,6 +89,20 @@ export function init(dbDirectory) {
       prefs    TEXT NOT NULL DEFAULT '{}',
       queue    TEXT NOT NULL DEFAULT 'null'
     );
+
+    CREATE TABLE IF NOT EXISTS radio_stations (
+      id      INTEGER PRIMARY KEY AUTOINCREMENT,
+      user    TEXT NOT NULL,
+      name    TEXT NOT NULL,
+      genre   TEXT,
+      country TEXT,
+      link_a  TEXT,
+      link_b  TEXT,
+      link_c  TEXT,
+      img     TEXT,
+      sort_order INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_rs_user ON radio_stations(user);
   `);
   // Migration: add cuepoints column for databases created before this feature
   try { db.exec('ALTER TABLE files ADD COLUMN cuepoints TEXT'); } catch (_e) {}
@@ -267,7 +281,12 @@ export function removeFileByPath(filepath, vpath) {
 }
 
 export function getLiveArtFilenames() {
-  return _s.liveArt.all().map(r => r.aaFile);
+  const musicArt = _s.liveArt.all().map(r => r.aaFile);
+  // Also protect locally-cached radio station logos from post-scan orphan cleanup
+  const radioArt = db.prepare(
+    "SELECT DISTINCT img FROM radio_stations WHERE img IS NOT NULL AND img NOT LIKE 'http%'"
+  ).all().map(r => r.img);
+  return musicArt.concat(radioArt);
 }
 
 export function getLiveHashes() {
@@ -1270,4 +1289,39 @@ export function getDirectoryContents(vpath, dirRelPath, username) {
     dirs: dirRows.map(r => r.subdir ? { name: r.subdir, aaFile: r.aaFile || null } : null).filter(Boolean),
     files: fileRows,
   };
+}
+
+// ── Radio Stations ────────────────────────────────────────────
+export function getRadioStations(username) {
+  return db.prepare('SELECT * FROM radio_stations WHERE user = ? ORDER BY sort_order, id').all(username);
+}
+export function createRadioStation(username, data) {
+  const r = db.prepare(
+    'INSERT INTO radio_stations (user, name, genre, country, link_a, link_b, link_c, img) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(username, data.name, data.genre || null, data.country || null, data.link_a || null, data.link_b || null, data.link_c || null, data.img || null);
+  return r.lastInsertRowid;
+}
+export function updateRadioStation(id, username, data) {
+  const r = db.prepare(
+    'UPDATE radio_stations SET name=?, genre=?, country=?, link_a=?, link_b=?, link_c=?, img=? WHERE id=? AND user=?'
+  ).run(data.name, data.genre || null, data.country || null, data.link_a || null, data.link_b || null, data.link_c || null, data.img || null, id, username);
+  return r.changes > 0;
+}
+export function deleteRadioStation(id, username) {
+  const r = db.prepare('DELETE FROM radio_stations WHERE id=? AND user=?').run(id, username);
+  return r.changes > 0;
+}
+export function getRadioStationImgUsageCount(imgFilename) {
+  return db.prepare('SELECT COUNT(*) AS cnt FROM radio_stations WHERE img=?').get(imgFilename)?.cnt ?? 0;
+}
+export function reorderRadioStations(username, orderedIds) {
+  const update = db.prepare('UPDATE radio_stations SET sort_order=? WHERE id=? AND user=?');
+  db.exec('BEGIN');
+  try {
+    orderedIds.forEach((id, idx) => update.run(idx, id, username));
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
 }

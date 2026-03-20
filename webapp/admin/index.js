@@ -1280,13 +1280,13 @@ const advancedView = Vue.component('advanced-view', {
                     <tr>
                       <td><b>File Uploading:</b> {{params.noUpload === false ? 'Enabled' : 'Disabled'}}</td>
                       <td>
-                        [<a v-on:click="toggleFileUpload()">edit</a>]
+                        <a v-on:click="toggleFileUpload()" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
                       <td><b>Auth Key:</b> ****************{{params.secret}}</td>
                       <td>
-                        [<a v-on:click="generateNewKey()">edit</a>]
+                        <a v-on:click="generateNewKey()" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                   </tbody>
@@ -1303,19 +1303,19 @@ const advancedView = Vue.component('advanced-view', {
                     <tr>
                       <td><b>Port:</b> {{params.port}}</td>
                       <td>
-                        [<a v-on:click="openModal('edit-port-modal')">edit</a>]
+                        <a v-on:click="openModal('edit-port-modal')" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
                       <td><b>Max Request Size:</b> {{params.maxRequestSize}}</td>
                       <td>
-                        [<a v-on:click="openModal('edit-request-size-modal')">edit</a>]
+                        <a v-on:click="openModal('edit-request-size-modal')" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
                       <td><b>Address:</b> {{params.address}}</td>
                       <td>
-                        [<a v-on:click="openModal('edit-address-modal')">edit</a>]
+                        <a v-on:click="openModal('edit-address-modal')" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                   </tbody>
@@ -1465,56 +1465,56 @@ const dbView = Vue.component('db-view', {
                     <tr>
                       <td><b>Scan Interval:</b> {{dbParams.scanInterval}} hours</td>
                       <td>
-                        [<a v-on:click="openModal('edit-scan-interval-modal')">edit</a>]
+                        <a v-on:click="openModal('edit-scan-interval-modal')" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
                     <td><b>Save Interval:</b> {{dbParams.saveInterval}} files</td>
                       <td>
-                        [<a v-on:click="openModal('edit-save-interval-modal')">edit</a>]
+                        <a v-on:click="openModal('edit-save-interval-modal')" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
                       <td><b>Boot Scan Delay:</b> {{dbParams.bootScanDelay}} seconds</td>
                       <td>
-                        [<a v-on:click="openModal('edit-boot-scan-delay-modal')">edit</a>]
+                        <a v-on:click="openModal('edit-boot-scan-delay-modal')" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
                       <td><b>Pause Between Files:</b> {{dbParams.pause}} milliseconds</td>
                       <td>
-                        [<a v-on:click="openModal('edit-pause-modal')">edit</a>]
+                        <a v-on:click="openModal('edit-pause-modal')" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
                       <td><b>Skip Image Metadata:</b> {{dbParams.skipImg}}</td>
                       <td>
-                        [<a v-on:click="toggleSkipImg()">edit</a>]
+                        <a v-on:click="toggleSkipImg()" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
                       <td><b>Compress Images:</b> {{dbParams.compressImage}}</td>
                       <td>
-                        [<a v-on:click="recompressImages()">re-compress</a>]
-                        [<a v-on:click="toggleCompressImage()">edit</a>]
+                        <a v-on:click="recompressImages()" class="btn-sm">re-compress</a>
+                        <a v-on:click="toggleCompressImage()" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
                       <td><b>Max Concurrent Scans:</b> {{dbParams.maxConcurrentTasks}}</td>
                       <td>
-                        [<a v-on:click="openModal('edit-max-scan-modal')">edit</a>]
+                        <a v-on:click="openModal('edit-max-scan-modal')" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
                       <td><b>DB Engine:</b> {{dbParams.engine}}</td>
                       <td>
-                        [<a v-on:click="openModal('edit-db-engine-modal')">edit</a>]
+                        <a v-on:click="openModal('edit-db-engine-modal')" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
                       <td><b>Allow ID3 Tag Editing:</b> {{dbParams.allowId3Edit || false}}</td>
                       <td>
-                        [<a v-on:click="toggleAllowId3Edit()">edit</a>]
+                        <a v-on:click="toggleAllowId3Edit()" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                   </tbody>
@@ -1697,9 +1697,9 @@ const dbView = Vue.component('db-view', {
                   <svg class="spinner" width="65px" height="65px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
                 </div>
                 <div v-else-if="sharedPlaylistsTS.ts !== 0 && sharedPlaylists.length > 0">
-                  [<a v-on:click="deleteUnxpShared">Delete Playlists with no Expiration</a>]
+                  <a v-on:click="deleteUnxpShared" class="btn-sm">Delete Playlists with no Expiration</a>
                   <br>
-                  [<a v-on:click="deleteExpiredShared">Delete Expired Playlists</a>]
+                  <a v-on:click="deleteExpiredShared" class="btn-sm">Delete Expired Playlists</a>
                   <br>
                   <table>
                     <thead>
@@ -1715,7 +1715,7 @@ const dbView = Vue.component('db-view', {
                         <th><a target="_blank" v-bind:href="'/shared/'+ v.playlistId">{{v.playlistId}}</a></th>
                         <th>{{v.user}}</th>
                         <th>{{new Date(v.expires * 1000).toLocaleString()}}</th>
-                        <th>[<a v-on:click="deletePlaylist(v)">delete</a>]</th>
+                        <th><a v-on:click="deletePlaylist(v)" class="btn-sm btn-sm-delete">delete</a></th>
                       </tr>
                     </tbody>
                   </table>
@@ -2210,7 +2210,7 @@ const transcodeView = Vue.component('transcode-view', {
                   <tr>
                     <td><b>Transcoding:</b> {{params.enabled === true ? 'Enabled' : 'Disabled'}}</td>
                     <td>
-                      [<a v-on:click="toggleEnabled()">edit</a>]
+                      <a v-on:click="toggleEnabled()" class="btn-sm btn-sm-edit">edit</a>
                     </td>
                   </tr>
                   <tr>
@@ -2220,25 +2220,25 @@ const transcodeView = Vue.component('transcode-view', {
                   <tr>
                     <td><b>FFmpeg Downloaded:</b> {{downloadPending.val === true ? 'pending...' : params.downloaded}}</td>
                     <td>
-                      [<a v-on:click="downloadFFMpeg()">download</a>]
+                      <a v-on:click="downloadFFMpeg()" class="btn-sm">download</a>
                     </td>
                   </tr>
                   <tr>
                     <td><b>Default Codec:</b> {{params.defaultCodec}}</td>
                     <td>
-                      [<a v-on:click="changeCodec()">edit</a>]
+                      <a v-on:click="changeCodec()" class="btn-sm btn-sm-edit">edit</a>
                     </td>
                   </tr>
                   <tr>
                     <td><b>Default Bitrate:</b> {{params.defaultBitrate}}</td>
                     <td>
-                      [<a v-on:click="changeBitrate()">edit</a>]
+                      <a v-on:click="changeBitrate()" class="btn-sm btn-sm-edit">edit</a>
                     </td>
                   </tr>
                   <tr>
                   <td><b>Default Algorithm:</b> {{params.algorithm}}</td>
                   <td>
-                    [<a v-on:click="changeAlgorithm()">edit</a>]
+                    <a v-on:click="changeAlgorithm()" class="btn-sm btn-sm-edit">edit</a>
                   </td>
                 </tr>
                 </tbody>
@@ -2602,7 +2602,7 @@ const logsView = Vue.component('logs-view', {
                     <tr>
                       <td><b>Write Logs:</b> {{params.writeLogs === true ? 'Enabled' : 'Disabled'}}</td>
                       <td>
-                        [<a v-on:click="toggleWriteLogs">edit</a>]
+                        <a v-on:click="toggleWriteLogs" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
@@ -2959,6 +2959,72 @@ const discogsView = Vue.component('discogs-view', {
   }
 });
 
+const radioView = Vue.component('radio-view', {
+  data() {
+    return {
+      enabled: false,
+      pending: false,
+    };
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">Radio Streams</span>
+              <p style="margin-bottom:0.5rem;">
+                When enabled, users see a <b>Radio Streams</b> section under Library in the player.
+                Each user manages their own personal list of internet radio channels — channels are <em>not</em> shared between users.
+              </p>
+              <p style="margin-bottom:1rem;font-size:0.85rem;color:#999;">
+                Only direct HTTP/HTTPS audio stream URLs are supported.
+                M3U/M3U8 playlist URLs are intentionally not accepted.
+                Each channel can have up to 3 fallback stream links.
+              </p>
+              <table>
+                <tbody>
+                  <tr>
+                    <td style="width:140px"><b>Enable</b></td>
+                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> Allow users to add and play internet radio stations</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-action">
+              <button class="btn" v-on:click="save()" :disabled="pending">
+                {{ pending ? 'Saving...' : 'Save' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  async mounted() {
+    try {
+      const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/radio/config` });
+      this.enabled = res.data.enabled === true;
+    } catch(e) { /* ignore */ }
+  },
+  methods: {
+    save: async function() {
+      this.pending = true;
+      try {
+        await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/admin/radio/config`,
+          data: { enabled: this.enabled }
+        });
+        iziToast.success({ title: 'Radio settings saved', position: 'topCenter', timeout: 3000 });
+      } catch(err) {
+        iziToast.error({ title: 'Failed to save Radio settings', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.pending = false;
+      }
+    }
+  }
+});
+
 const vm = new Vue({
   el: '#content',
   components: {
@@ -2976,6 +3042,7 @@ const vm = new Vue({
     'lastfm-view': lastFMView,
     'discogs-view': discogsView,
     'lyrics-view': lyricsView,
+    'radio-view': radioView,
   },
   data: {
     currentViewMain: 'folders-view',

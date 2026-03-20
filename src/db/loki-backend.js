@@ -1141,3 +1141,31 @@ export function saveUserSettings(username, patch) {
   if (patch.prefs !== undefined) Object.assign(_userSettings[username].prefs, patch.prefs);
   if (patch.queue !== undefined) _userSettings[username].queue = patch.queue;
 }
+
+// ── Radio Stations (in-memory for loki backend) ──────────────
+const _radioStations = {};   // { username: Array<station> }
+let _radioStationNextId = 1;
+
+export function getRadioStations(username) {
+  return (_radioStations[username] || []).slice();
+}
+export function createRadioStation(username, data) {
+  if (!_radioStations[username]) _radioStations[username] = [];
+  const id = _radioStationNextId++;
+  _radioStations[username].push({ id, user: username, name: data.name, genre: data.genre || null, country: data.country || null, link_a: data.link_a || null, link_b: data.link_b || null, link_c: data.link_c || null, img: data.img || null, sort_order: 0 });
+  return id;
+}
+export function updateRadioStation(id, username, data) {
+  const arr = _radioStations[username] || [];
+  const idx = arr.findIndex(s => s.id === id);
+  if (idx === -1) return false;
+  Object.assign(arr[idx], { name: data.name, genre: data.genre || null, country: data.country || null, link_a: data.link_a || null, link_b: data.link_b || null, link_c: data.link_c || null, img: data.img || null });
+  return true;
+}
+export function deleteRadioStation(id, username) {
+  const arr = _radioStations[username] || [];
+  const idx = arr.findIndex(s => s.id === id);
+  if (idx === -1) return false;
+  arr.splice(idx, 1);
+  return true;
+}

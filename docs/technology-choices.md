@@ -46,13 +46,9 @@ The binary is bundled in `bin/ffmpeg/` so users do not need to install it separa
 
 LRCLIB is the only service that is completely free, requires no API key or account, and provides synced LRC lyrics for western music. It is also open-source — anyone can run their own instance or contribute lyrics.
 
-**How the matching works:** The server runs a three-step chain to maximise accuracy:
+**How the matching works:** A single exact-match call is made to lrclib's `/api/get` endpoint with artist, title, and the track's duration (in seconds). The duration comes from the database (populated at scan time), not the audio element, which may report an imprecise or zero value for freshly-loaded tracks. If the API returns no match, the lookup is simply skipped — no fallback, no fuzzy search. A wrong version of the lyrics (e.g. the 12-inch remix timestamps applied to the radio edit) plays out of sync and is actively misleading, so no result is always preferred over a wrong result.
 
-1. Exact match using artist + title + duration (lrclib's `/api/get`) — this is the most precise call and returns the specific version at that exact length.
-2. Exact match without duration — catches cases where the track duration in your file metadata is slightly off.
-3. Fuzzy search (`/api/search`) — used as a last resort. Results are sorted by duration difference so that the correct radio edit or single version ranks above a 12-inch remix.
-
-Results are cached in `save/lyrics/` so each track is only fetched once. The duration stored in the database (populated at scan time) is used for matching — not the audio element's reported duration — which gives more reliable version disambiguation.
+Results are cached in `save/lyrics/` so each track is only fetched once. Tracks with no duration in the database return `notFound` immediately without making a network request.
 
 ---
 
@@ -222,7 +218,7 @@ The Open Subsonic extension layer (`openSubsonic: true`) allows newer clients to
 | Technology | Category | Why chosen |
 |---|---|---|
 | FFmpeg | Audio processing | Only tool covering all formats; transcoding + waveform + repair + tag writing in one binary |
-| LRCLIB | Lyrics | Free, no API key, synced LRC timestamps, open-source, duration-aware matching |
+| LRCLIB | Lyrics | Free, no API key, synced LRC timestamps, open-source, exact-match-only (no wrong versions) |
 | Discogs | Album art | Best catalogue depth for physical/vinyl releases; free personal-use API; cacheable images |
 | Last.fm | Scrobbling + AutoDJ | De facto scrobbling standard; free similar-artist data; no OAuth for lookups |
 | Syncthing | Library sync | Self-hosted, peer-to-peer, encrypted, bundleable as one binary, no cloud required |

@@ -55,9 +55,82 @@
 
 ---
 
+### 🎵 Acoustic Similarity & Audio Analysis — PLANNED (not started)
+
+> Full design document: [`docs/audio-analysis.md`](docs/audio-analysis.md)
+
+Analyse every track's actual audio content (BPM, key, timbre, energy) and use those features to:
+1. Build "acoustically similar" smart playlists of up to 200 songs from a seed track
+2. Add a new "Acoustic" Auto-DJ mode that always picks the next track based on sound-match
+3. Improve Subsonic `getSimilarSongs` (currently returns empty)
+
+**Technology decision:** Use [Essentia.js](https://github.com/MTG/essentia.js) (WebAssembly port of the MTG Essentia C++ library) running server-side in Node.js. Falls back to pure-JS MIR algorithms if WASM is incompatible with Node v22.
+
+**Key design principles:**
+- Optional feature — completely off by default; opt-in from admin panel
+- Fully incremental — tracks already analysed are never re-processed (keyed by hash)
+- Resumable — can be interrupted and restarted; continues from where it left off
+- Library of 130,000 songs taking a week to analyse is acceptable
+- Analysis runs in a background process; server remains fully usable
+- Only deleted/added tracks need re-analysis; modified tags do not
+
+**Extracted features per track:**
+- BPM + confidence (from `RhythmExtractor2013`)
+- Musical key + scale + strength (from `KeyExtractor`)
+- Danceability score (from `Danceability`)
+- EBU R128 integrated loudness (from `LoudnessEBUR128`)
+- 13-coefficient MFCC mean (timbre fingerprint, from `MFCC`)
+- 12-value HPCP mean (harmonic fingerprint, from `HPCP`)
+
+**Similarity scoring:** Weighted cosine similarity across MFCC + HPCP vectors, plus BPM (half/double tempo counted as compatible), Camelot-wheel key distance, danceability, and loudness.
+
+**Phase 1 — Backend core:**
+- [ ] `audio_features` table (SQLite + Loki, migration-safe)
+- [ ] `src/db/audio-analyzer.mjs` — FFmpeg PCM pipe → Essentia WASM → DB write
+- [ ] `getSimilarSongs(hash, limit)` in both backends (in-process cosine scoring)
+- [ ] API: `GET /api/v1/db/similar`, `GET /api/v1/db/audio-features/:hash`
+- [ ] API: `POST|GET /api/v1/admin/audio-analysis/start|status|stop`
+
+**Phase 2 — Admin UI:**
+- [ ] "Audio Analysis" card in admin panel — progress bar, start/stop buttons, throttle setting
+
+**Phase 3 — Player UI:**
+- [ ] "≈ Build Similar Playlist" button in Now Playing modal (seed strength + length)
+- [ ] BPM / key / danceability shown in Now Playing modal when features exist
+- [ ] Auto-DJ: "Acoustic" mode
+
+**Phase 4 — Optional polish:**
+- [ ] Similarity weighting sliders in Settings
+- [ ] Wire Subsonic `getSimilarSongs` to this
+
+---
+
 ## DONE — Completed features
 
-### Search vpath filter pills ✅
+### Radio channels ✅
+- [x] Per-user station CRUD (`POST/PUT/DELETE /api/v1/radio/stations`)
+- [x] `sort_order` column + `PUT /api/v1/radio/stations/reorder` — drag-to-reorder in the UI
+- [x] Responsive card grid layout (`auto-fill, minmax(155px,1fr)`)
+- [x] Logo caching: remote URL → local `radio-{md5}.{ext}` in album-art directory; served via `/album-art/`
+- [x] Orphan cleanup protection: `getLiveArtFilenames()` includes radio logos so they are never deleted
+- [x] Delete cleans up cached art when no other station references it
+- [x] Stream proxy (`/api/v1/radio/stream`) for same-origin Web Audio API compatibility
+- [x] ICY now-playing metadata parser (`/api/v1/radio/nowplaying`) — HTTP/1.1 byte-level reader
+- [x] Art proxy (`/api/v1/radio/art`) — fetches remote images server-side for CORS-free preview in edit form
+- [x] Player bar title/artist updates correctly on channel switch (`Player.playSingle`)
+- [x] Notice below channel grid: "Playing a radio stream clears the play queue"
+- [x] Filter pills by Genre and Country; reorder handle hidden when filter active
+- [x] `docs/API/radio.md` — full API reference
+
+### Lyrics improvements ✅
+- [x] Removed `.none` cache mechanism — "not found" never cached, always re-queried
+- [x] Removed `duration <= 0` bail-out (was blocking all lookups for un-scanned tracks)
+- [x] Two-pass lrclib lookup: with duration first, then without as fallback
+- [x] Active lyric line: 36 px → 72 px font size
+- [x] Smooth brightness gradient via rAF (upcoming ramp 0.35→1.0, past falloff, floor 0.28)
+- [x] No flash on line change (inline reset removed)
+
+
 - [x] Pill row below search input shows all vpaths (only rendered when > 1 vpath exists)
 - [x] All on by default; toggling off excludes that library from results; at least 1 always stays on
 - [x] Selection persists in `S.searchVpaths` across back-navigations
