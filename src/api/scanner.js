@@ -71,6 +71,15 @@ export function setup(mstream) {
     res.json({});
   });
 
+  // After a file is successfully parsed/inserted, confirm any fixed scan errors
+  // for it are now resolved.  Only rows where fixed_at IS NOT NULL are touched.
+  mstream.post('/api/v1/scanner/confirm-ok', (req, res) => {
+    const { filepath, vpath } = req.body;
+    if (!filepath || !vpath) return res.json({});
+    db.confirmScanErrorOk(filepath, vpath);
+    res.json({});
+  });
+
   // Prune old scan errors before each scan run.
   mstream.post('/api/v1/scanner/prune-errors', (req, res) => {
     const retentionHours = config.program.scanOptions.scanErrorRetentionHours || 48;

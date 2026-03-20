@@ -55,14 +55,15 @@ export function updateFileArt(filepath, vpath, aaFile, scanId, artSource) { retu
 export function countArtUsage(aaFile) { return backend.countArtUsage(aaFile); }
 export function updateFileCue(filepath, vpath, cuepoints) { return backend.updateFileCue(filepath, vpath, cuepoints); }
 export function updateFileDuration(filepath, vpath, duration) { return backend.updateFileDuration(filepath, vpath, duration); }
+export function getFileDuration(filepath) { return backend.getFileDuration(filepath); }
 export function updateFileTags(filepath, vpath, tags) { return backend.updateFileTags(filepath, vpath, tags); }
 export function getFileWithMetadata(filepath, vpath, username) { return backend.getFileWithMetadata(filepath, vpath, username); }
 export function getArtists(vpaths, ignoreVPaths) { return backend.getArtists(vpaths, ignoreVPaths); }
 export function getArtistAlbums(artist, vpaths, ignoreVPaths) { return backend.getArtistAlbums(artist, vpaths, ignoreVPaths); }
 export function getAlbums(vpaths, ignoreVPaths) { return backend.getAlbums(vpaths, ignoreVPaths); }
 export function getAlbumSongs(album, vpaths, username, opts) { return backend.getAlbumSongs(album, vpaths, username, opts); }
-export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths) { return backend.searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths); }
-export function searchFilesAllWords(tokens, vpaths, ignoreVPaths) { return backend.searchFilesAllWords(tokens, vpaths, ignoreVPaths); }
+export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix) { return backend.searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix); }
+export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix) { return backend.searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix); }
 export function getRatedSongs(vpaths, username, ignoreVPaths) { return backend.getRatedSongs(vpaths, username, ignoreVPaths); }
 export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts); }
 export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts); }
@@ -110,7 +111,8 @@ export function getScanErrors() { return backend.getScanErrors(); }
 export function clearScanErrors() { return backend.clearScanErrors(); }
 export function pruneScanErrors(retentionHours) { return backend.pruneScanErrors(retentionHours); }
 export function getScanErrorCount() { return backend.getScanErrorCount(); }
-export function markScanErrorFixed(guid) { return backend.markScanErrorFixed(guid); }
+export function markScanErrorFixed(guid, fixAction) { return backend.markScanErrorFixed(guid, fixAction); }
+export function confirmScanErrorOk(filepath, vpath) { return backend.confirmScanErrorOk(filepath, vpath); }
 export function markFileArtChecked(filepath, vpath) { return backend.markFileArtChecked(filepath, vpath); }
 export function markFileCueChecked(filepath, vpath) { return backend.markFileCueChecked(filepath, vpath); }
 

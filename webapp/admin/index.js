@@ -277,7 +277,7 @@ const scanErrorsView = Vue.component('scan-errors-view', {
       return [...new Set(this.errors.map(e => e.error_type))];
     },
     unfixedCount() {
-      return this.errors.filter(e => !e.fixed_at).length;
+      return this.errors.filter(e => !e.fixed_at && e.file_in_db).length;
     }
   },
   mounted() { this.load(); },
@@ -296,12 +296,9 @@ const scanErrorsView = Vue.component('scan-errors-view', {
         }
         const badge = document.getElementById('scan-errors-badge');
         if (badge) {
-          if (errRes.data.length > 0) {
-            badge.textContent = errRes.data.length > 99 ? '99+' : errRes.data.length;
-            badge.style.display = 'inline-flex';
-          } else {
-            badge.style.display = 'none';
-          }
+          const cnt = this.unfixedCount;
+          badge.textContent = cnt > 99 ? '99+' : cnt;
+          badge.style.display = cnt === 0 ? 'none' : 'inline-flex';
         }
       } catch (err) {
         iziToast.error({ title: 'Failed to load scan errors', position: 'topCenter', timeout: 3000 });
@@ -415,9 +412,12 @@ const scanErrorsView = Vue.component('scan-errors-view', {
         if (r.data.action === 'unrecoverable') {
           iziToast.error({ title: '\u26A0 File Unrecoverable', message: 'No valid audio stream found. This file is completely corrupt and cannot be played or repaired. Delete it.', position: 'topCenter', timeout: 0, close: true });
         } else {
-          iziToast.success({ title: 'Fixed', message: labels[r.data.action] || 'Done', position: 'topCenter', timeout: 2500 });
-          if (r.data.note) iziToast.warning({ title: 'Note', message: r.data.note, position: 'topCenter', timeout: 5000 });
+          const msg = (labels[r.data.action] || 'Done') + (r.data.note ? ' — ' + r.data.note : '');
+          iziToast.success({ title: 'Fixed', message: msg, position: 'topCenter', timeout: 4000 });
         }
+        // Sync fix_action from server response into the local row so the badge
+        // reflects the correct state immediately (before page reload).
+        if (idx >= 0) this.errors[idx].fix_action = r.data.action;
       } catch (e) {
         iziToast.error({ title: 'Fix failed', message: e?.response?.data?.error || 'Unknown error', position: 'topCenter', timeout: 0, close: true });
       } finally {
@@ -425,7 +425,7 @@ const scanErrorsView = Vue.component('scan-errors-view', {
       }
     },
     fixActionLabel(action) {
-      return { art_fixed: 'Embedded image stripped', remuxed: 'File rewritten, rescan needed', cue_dismissed: 'Cue error dismissed', dismissed: 'Dismissed', unrecoverable: '\u26A0 Unrecoverable — delete this file' }[action] || 'Fixed';
+      return { art_fixed: 'Embedded image stripped', remuxed: 'File rewritten, rescan needed', reencoded: 'File re-encoded, rescan needed', cue_dismissed: 'Cue error dismissed', dismissed: 'Dismissed', unrecoverable: '\u26A0 Unrecoverable — delete this file' }[action] || 'Fixed';
     }
   },
   template: `
@@ -446,11 +446,14 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                       <div class="se-main-title">Scan Error Audit</div>
                       <div class="se-sub">Persistent log of every file that failed during a library scan — deduplicated by file &amp; error type so recurring problems show a count, not duplicate rows.</div>
                     </div>
-                    <span class="se-total-pill" v-if="loaded && errors.length > 0">
-                      {{errors.length}} issue{{errors.length === 1 ? '' : 's'}}
+                    <span class="se-total-pill" v-if="loaded && unfixedCount > 0">
+                      {{unfixedCount}} issue{{unfixedCount === 1 ? '' : 's'}}
                     </span>
                     <span class="se-total-pill se-total-ok" v-else-if="loaded && errors.length === 0">
                       ✓ Clean
+                    </span>
+                    <span class="se-total-pill se-total-ok" v-else-if="loaded && unfixedCount === 0">
+                      ✓ No actionable issues
                     </span>
                   </div>
                   <div class="se-controls-row">
@@ -557,7 +560,7 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                     <!-- Main row -->
                     <div
                       class="se-row"
-                      :class="{expanded: expandedRow === err.guid, 'se-row--fixed': err.fixed_at}"
+                      :class="{expanded: expandedRow === err.guid, 'se-row--fixed': err.fixed_at && err.fix_action !== 'unrecoverable', 'se-row--unrecoverable': err.fix_action === 'unrecoverable'}"
                       @click="toggleRow(err.guid)"
                     >
                       <!-- Type badge -->
@@ -568,7 +571,9 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                           <span v-html="typeIcon(err.error_type)"></span>
                           {{typeLabel(err.error_type)}}
                         </span>
-                        <span class="se-fixed-badge" v-if="err.fixed_at">&#x2713; Fixed</span>
+                        <span class="se-fixed-badge" v-if="err.fixed_at && err.fix_action !== 'unrecoverable'">&#x2713; Fixed</span>
+                        <span class="se-unrecoverable-badge" v-if="err.fix_action === 'unrecoverable'">&#x26A0; Unrecoverable</span>
+                        <span class="se-deleted-badge" v-if="!err.file_in_db">&#x1F5D1; Gone from library</span>
                       </div>
 
                       <!-- File path -->
@@ -650,20 +655,34 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                           </div>
                         </div>
 
+                        <!-- ── Deleted-from-library banner ── -->
+                        <div class="se-deleted-banner" v-if="!err.file_in_db">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                          <div>
+                            <div class="se-deleted-title">File no longer in library</div>
+                            <div class="se-deleted-body">This file was removed from the library database (most likely deleted from disk). No action needed &mdash; this error record will expire automatically after 48 h.</div>
+                          </div>
+                        </div>
+
                         <!-- ── Fix action row ── -->
-                        <div class="se-unrecoverable-banner" v-if="err.fixed_at && err._fixAction === 'unrecoverable'">
+                        <div class="se-unrecoverable-banner" v-if="err.fix_action === 'unrecoverable'">
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                           <div>
                             <div class="se-unrecoverable-title">File is corrupt and unrecoverable</div>
                             <div class="se-unrecoverable-body">No valid audio stream was found. This file cannot be played or repaired &mdash; it contains no audio data. <strong>Delete it from disk.</strong></div>
                           </div>
                         </div>
-                        <div class="se-detail-fix-row" v-else-if="err.fixed_at">
+                        <div class="se-detail-fix-row" v-else-if="err.fixed_at && err.fix_action !== 'unrecoverable'">
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--se-green,#4caf50)" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
                           <span class="se-fix-done-txt">
-                            Fixed {{relTime(err.fixed_at)}} — auto-removed from log after 48 h
-                            <span v-if="err._fixAction" style="opacity:.65;margin-left:.35rem">({{fixActionLabel(err._fixAction)}})</span>
+                            Fixed {{relTime(err.fixed_at)}}
+                            <span v-if="err.fix_action" style="opacity:.65;margin-left:.35rem">({{fixActionLabel(err.fix_action)}})</span>
+                            <span v-if="err.confirmed_at" class="se-confirmed-chip">&#10003; Rescan confirmed OK {{relTime(err.confirmed_at)}}</span>
+                            <span v-else style="opacity:.5;margin-left:.5rem;font-size:.8em">— rescan to confirm, auto-removed after 48 h</span>
                           </span>
+                        </div>
+                        <div class="se-detail-fix-row" v-else-if="!err.file_in_db">
+                          <span style="opacity:.5;font-size:.85em">No fix needed — file has been removed from the library.</span>
                         </div>
                         <div class="se-detail-fix-row" v-else>
                           <button class="se-fix-btn" @click.stop="fixError(err)" :disabled="fixing[err.guid]">
@@ -2696,6 +2715,69 @@ const lockView = Vue.component('lock-view', {
     }
 });
 
+const lyricsView = Vue.component('lyrics-view', {
+  data() {
+    return {
+      enabled: true,
+      pending: false,
+    };
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">Synced Lyrics</span>
+              <p style="margin-bottom:0.5rem;">
+                When enabled, the visualizer&#x2019;s <b>Lyrics mode</b> fetches time-synced LRC lyrics from
+                <a href="https://lrclib.net" target="_blank" rel="noopener">lrclib.net</a> and displays them in sync with playback.
+                Lyrics are cached locally after the first fetch so repeated plays work offline.
+              </p>
+              <p style="margin-bottom:1rem;font-size:0.85rem;color:#999;">Disable this if the server has no internet access, to avoid timeout delays when the player opens the Lyrics view.</p>
+              <table>
+                <tbody>
+                  <tr>
+                    <td style="width:140px"><b>Enable</b></td>
+                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> Fetch synced lyrics from lrclib.net</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-action">
+              <button class="btn" v-on:click="save()" :disabled="pending">
+                {{ pending ? &#x27;Saving...&#x27; : &#x27;Save&#x27; }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  async mounted() {
+    try {
+      const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/lyrics/config` });
+      this.enabled = res.data.enabled !== false;
+    } catch(e) { /* ignore */ }
+  },
+  methods: {
+    save: async function() {
+      this.pending = true;
+      try {
+        await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/admin/lyrics/config`,
+          data: { enabled: this.enabled }
+        });
+        iziToast.success({ title: 'Lyrics settings saved', position: 'topCenter', timeout: 3000 });
+      } catch(err) {
+        iziToast.error({ title: 'Failed to save Lyrics settings', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.pending = false;
+      }
+    }
+  }
+});
+
 const lastFMView = Vue.component('lastfm-view', {
   data() {
     return {
@@ -2893,6 +2975,7 @@ const vm = new Vue({
     'scan-errors-view': scanErrorsView,
     'lastfm-view': lastFMView,
     'discogs-view': discogsView,
+    'lyrics-view': lyricsView,
   },
   data: {
     currentViewMain: 'folders-view',

@@ -57,6 +57,14 @@
 
 ## DONE — Completed features
 
+### Search vpath filter pills ✅
+- [x] Pill row below search input shows all vpaths (only rendered when > 1 vpath exists)
+- [x] All on by default; toggling off excludes that library from results; at least 1 always stays on
+- [x] Selection persists in `S.searchVpaths` across back-navigations
+- [x] Child-vpath aware: uses `filepathPrefix` (not `ignoreVPaths`) when selected vpaths are sub-folders of the same parent — same logic as Auto-DJ
+- [x] Backend: `filepathPrefix` added to `/api/v1/db/search`, `searchFiles`, `searchFilesAllWords` (SQLite + Loki)
+- [x] `save/lyrics/` added to `.gitignore`; `README.md` anchor committed
+
 ### Subsonic REST API 1.16.1 + Open Subsonic ✅ (v5.16.17)
 - [x] Full `/rest/*` endpoint suite: ping, getLicense, getMusicFolders, getIndexes, getArtists, getArtist, getAlbum, getSong, getMusicDirectory, search2/3, getAlbumList/2, getRandomSongs, getSongsByGenre, getGenres, getNowPlaying, getStarred/2, star, unstar, setRating, scrobble, stream, download, getCoverArt, getLyrics, getUser, getUsers, getPlaylists + CRUD, getBookmarks + CRUD, getScanStatus, getOpenSubsonicExtensions, createUser, updateUser, deleteUser, changePassword
 - [x] MD5 token auth (`?t=&s=`) + plaintext auth (`?p=`); separate `subsonic-password` field per user
@@ -202,6 +210,17 @@ Instead of searching Discogs by metadata, let the user paste a Discogs release o
 - [ ] Pre-fill all ID3 tag form fields from the response; show cover thumbnail preview
 - [ ] Apply buttons: "Art + Tags", "Art Only", "Tags Only" — art path reuses existing `POST /api/v1/discogs/embed`, tag path reuses `POST /api/v1/admin/tags/write`
 - [ ] Graceful fallback: if API key is missing, grey out the "Art" buttons with tooltip "Discogs API key required for image download" but still allow tag fill
+
+---
+
+### Synced Lyrics (LRC / LRCLIB)
+> Especially useful for Top 40 / pop libraries. No lyrics support exists at all today.
+
+- [ ] Server: `GET /api/v1/lyrics?artist=&title=&duration=` — query [lrclib.net](https://lrclib.net) API (no auth required) by artist + title + duration; return `{ synced: true, lines: [{time, text}] }` or `{ synced: false, plain: "..." }` for plain-text fallback
+- [ ] Cache the raw `.lrc` file alongside the audio (e.g. `<hash>.lrc` in `save/lyrics/`) to avoid repeat network calls after first fetch
+- [ ] Client: in the Now Playing modal, show a scrolling lyric panel; active line highlighted and auto-scrolled to match `audioEl.currentTime`
+- [ ] Graceful degradation: plain-text lyrics shown statically when only unsynced text is available; panel hidden when no result found
+- [ ] "No lyrics" state cached (e.g. `<hash>.lrc.none` sentinel file) so the API is not re-queried on every open
 
 ---
 
@@ -364,6 +383,7 @@ This is a first-class concern and must be designed clearly up front.
 - [ ] Penalise songs skipped >2× in the last 30 days — push them to bottom of candidate pool
 - [ ] Keep Last.fm similar-artist seed but re-sort its results using personal weights
 - [ ] BPM-continuity rule: avoid jumps >40 BPM between consecutive auto-queued tracks (requires BPM tag)
+- [ ] **Harmonic mixing / Camelot wheel filter** — once musical key is stored (e.g. via essentia.js), apply a Camelot wheel lookup to chain tracks that mix harmonically; small open-source `camelot-key` npm packages reduce this to a simple lookup table. Combined with BPM continuity and the existing Last.fm artist graph this would make Auto-DJ genuinely DJ-quality.
 
 ### Smart Playlist Builder
 - [ ] Filter builder UI: genre, decade, BPM range, energy level, never-played toggle, min-rating, max-duration
@@ -390,7 +410,22 @@ This is a first-class concern and must be designed clearly up front.
 - [ ] Show connected-user avatars/initials in the Jukebox view
 - [ ] Add per-track "added by" attribution in the queue panel
 
-### Listening Stats Dashboard
+### Multi-room / Snapcast / Chromecast
+> No synchronized multi-room capability today. The Jukebox feature is the closest thing — it's collaborative queue, not audio sync.
+
+**Snapcast sidecar (preferred open-source path):**
+- [ ] Run [snapcast](https://github.com/badaix/snapcast) as a sidecar process; Velvet writes PCM audio to the snapfifo pipe while playing
+- [ ] Control snapcast server (client mute, volume, group assignment) via its JSON-RPC API over TCP — Node.js-controllable with a plain `net.Socket`
+- [ ] Admin UI: "Multi-room" panel showing snapcast clients (name, latency, volume, muted); allow renaming and grouping rooms
+- [ ] Player UI: room selector — choose which snapcast client(s) follow the current queue
+- [ ] Latency compensation: read per-client latency from snapcast JSON-RPC and display it as an indicator in admin (Snapcast handles sync automatically)
+
+**Chromecast (Cast Web SDK — browser-side):**
+- [ ] Load Cast Web SDK in the player; add a Cast button to the Now Playing bar
+- [ ] Implement a Cast receiver app URL that proxies the mStream `/api/v1/music/` stream endpoint
+- [ ] Sync play/pause/seek state between the Cast session and the local player
+
+
 - [ ] Server: add `GET /api/v1/stats/summary?range=7d|30d|all` — return top artists, top albums, top tracks, plays-per-day array, current streak
 - [ ] Client: add a **Stats** view in the sidebar
 - [ ] Render a plays-per-day sparkline chart (pure canvas, no library dependency)

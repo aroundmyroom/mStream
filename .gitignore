@@ -7,6 +7,9 @@ image-cache/*
 waveform-cache/*
 !waveform-cache/README.md
 
+save/lyrics/*
+!save/lyrics/README.md
+
 save/sync/*
 !save/sync/README.md
 

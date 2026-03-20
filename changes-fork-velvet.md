@@ -13,7 +13,256 @@
 
 ---
 
-## Scan Error Fix: parse/duration + unrecoverable detection — 2026-03-18
+## Lyrics: duration-accurate version matching — 2026-03-20
+
+### Lyrics now match the correct version (single vs 12-inch vs album) using the authoritative track duration from the database
+
+**Problem:** Lyrics were being fetched for the wrong version of a track (e.g. a 7-minute 12-inch remix matched instead of the 3-minute single) because the fuzzy search fallback picked the first result with any lyrics, ignoring track length entirely.
+
+**`src/db/sqlite-backend.js`**:
+- Added `getFileDuration(filepath)` — `SELECT duration FROM files WHERE filepath = ? LIMIT 1`; returns the stored duration (in seconds) or `null`.
+
+**`src/db/loki-backend.js`**:
+- Added matching `getFileDuration(filepath)` using LokiJS `findOne`.
+
+**`src/db/manager.js`**:
+- Exports `getFileDuration` as a thin proxy to the active backend.
+
+**`src/api/lyrics.js`**:
+- Imports `db` manager.
+- New `filepath` query parameter accepted on `GET /api/v1/lyrics`.
+- When `filepath` is provided, the server looks up the track's duration from the database and uses it as the authoritative value (overriding the client-supplied `duration` param, which comes from the audio element and may be imprecise or zero for freshly-loaded tracks).
+- `lrclibSearch(artist, title, duration)` — the fuzzy-search fallback now accepts a `duration` argument. When duration is known, all results with lyrics are sorted by `|result.duration − trackDuration|` ascending. A synced-lyrics preference is applied as a tiebreaker for equal duration deltas. This means shorter single versions and longer 12-inch mixes are ranked correctly.
+
+**`webapp/app.js`**:
+- Lyrics fetch now includes `&filepath=…` (URI-encoded) alongside the existing `artist`, `title`, and `duration` params.
+
+---
+
+## Technology choices document — 2026-03-20
+
+### New reference document explaining every external service and library choice
+
+**`docs/technology-choices.md`** *(new)*:
+- Covers FFmpeg, LRCLIB, Discogs, Last.fm, Syncthing, Butterchurn, audioMotion-analyzer, SQLite, Web Audio API, Subsonic protocol, and music-metadata.
+- For each: what it does in mStream, a comparison table of alternatives, and the concrete reason it was chosen over them (e.g. LRCLIB vs Musixmatch — free vs paid; Syncthing vs Dropbox — self-hosted vs cloud; Discogs vs Spotify — cacheable images vs ToS restriction).
+- Includes a summary table at the end for quick reference.
+
+**`README.md`**:
+- Added link to `docs/technology-choices.md` in the installation section alongside the existing `docs/install.md` and `docs/deploy.md` links.
+
+---
+
+## Admin External Services panel — 2026-03-19
+
+### Lyrics, Discogs, and Last.fm grouped under a dedicated "External Services" section in the admin sidebar
+
+**`src/api/admin.js`**:
+- New `GET /api/v1/admin/lyrics/config` — returns `{ enabled: bool }`.
+- New `POST /api/v1/admin/lyrics/config` — accepts `{ enabled: bool }`, persists to config file, updates `config.program.lyrics.enabled` in memory.
+
+**`src/api/lyrics.js`**:
+- Guard at handler entry: `if (config.program.lyrics?.enabled === false) return res.json({ notFound: true })` — disabling lyrics in admin immediately stops all lyric fetches without a server restart.
+
+**`src/api/discogs.js`**:
+- Fixed `enabled` default: changed `!config.program.discogs?.enabled` guard to `config.program.discogs?.enabled === false`. Previously an absent `enabled` key (i.e. existing configs that pre-date the toggle) was treated as disabled; now it defaults to enabled.
+
+**`webapp/admin/index.js`**:
+- New `lyricsView` Vue component — single enable/disable checkbox; reads from `GET /api/v1/admin/lyrics/config`, writes via `POST`.
+- Registered as `lyrics-view`.
+
+**`webapp/admin/index.html`**:
+- Moved Last.fm and Discogs nav items out of the "Server" section.
+- New **"External Services"** section label containing: Last.fm, Discogs, Lyrics (in that order).
+- Lyrics nav item uses a speech-bubble SVG icon.
+
+---
+
+## Visualizer: mode label and tooltip fix — 2026-03-19
+
+### Mode button now shows the active mode name, not the next one; tooltip correctly names the next mode
+
+**`webapp/app.js`** — `VIZ.applyMode()`:
+- `#viz-mode-label` text set to `MODE_NAMES[vizTopMode]` (the current mode) — previously it was offset by one, showing the *next* mode's name instead.
+- Tooltip (`modeBtn.dataset.tip`) set to `'Switch to ' + MODE_NAMES[nextMode]` — writes directly to `data-tip` rather than `element.title`, because the custom `#tip-box` tooltip system strips all `title` attributes to `data-tip` at page load via `convertTitles()`. Writing to `element.title` after load had no effect.
+
+---
+
+## Player bar visualizer button: focus/size bug fix — 2026-03-19
+
+### The eye icon button in the player bar no longer appears enlarged after returning from the full-screen visualizer
+
+**Root cause:** The button retained browser `:focus` state after the overlay closed. On touch-screen devices (CleverTouch) this caused the browser to apply a focus ring / zoom that made the button visually large until the user tapped elsewhere.
+
+**`webapp/app.js`** — `VIZ.close()`:
+- Added `document.getElementById('viz-open-btn').blur()` immediately after removing the `.active` class from the button.
+
+**`webapp/style.css`**:
+- Added `outline:none` to the `.ctrl-btn` rule.
+- Added `.ctrl-btn:focus { outline: none; }` rule to suppress browser focus rings on all player bar control buttons.
+
+---
+
+
+
+### Vpath filter pills in the search view
+
+Allows scoping a search to one or more specific vpaths/child-vpaths, mirroring the same filtering available in Auto-DJ.
+
+**`webapp/app.js`**:
+- `viewSearch()` renders a pill row below the search input when more than one vpath exists (`S.vpaths.length > 1`). Reuses the existing `.dj-vpath-pill` / `.dj-vpath-pill.on` styles.
+- All vpaths start selected (ON); toggling a pill OFF excludes that library from results. At least one pill must remain selected (the last one cannot be deselected).
+- Selection is stored in `S.searchVpaths` and persists across back-navigations within the session.
+- `doSearch()` uses the same child-vpath detection logic as Auto-DJ: when all selected vpaths are children of the same parent vpath, it sends `filepathPrefix` instead of `ignoreVPaths`, which correctly scopes results to files stored under the parent vpath with the matching folder prefix.
+
+**`webapp/style.css`**:
+- Added `.search-vpath-pills` — flex-wrap container (`gap:6px`, `padding:4px 2px 16px`) placed between the search input and the results.
+- `.search-wrap` bottom margin reduced from `20px` to `8px` when pills are present.
+
+**`src/api/db.js`**:
+- Added `filepathPrefix` (optional string) to the Joi schema for `POST /api/v1/db/search`.
+- Passes `filepathPrefix` through to `db.searchFiles()` and `db.searchFilesAllWords()`.
+
+**`src/db/sqlite-backend.js`**:
+- `searchFiles()` and `searchFilesAllWords()` now accept an optional `filepathPrefix` parameter and append `AND filepath LIKE ? ESCAPE '\'` when set.
+
+**`src/db/loki-backend.js`**:
+- Same: `searchFiles()` and `searchFilesAllWords()` filter by `row.filepath.startsWith(filepathPrefix)` when set.
+
+**`src/db/manager.js`**:
+- Proxy functions for `searchFiles` and `searchFilesAllWords` updated with the new `filepathPrefix` parameter.
+
+**`.gitignore`** + **`save/lyrics/README.md`** *(new)*:
+- `save/lyrics/*` added to `.gitignore` (same pattern as `waveform-cache/*`) so lyrics cache files are never committed.
+- `!save/lyrics/README.md` exception keeps the directory anchor file tracked.
+- `save/lyrics/README.md` created describing the cache format.
+
+---
+
+## AudioMotion-analyzer visualizer — 2026-03-19
+
+### Third visualizer mode added alongside Milkdrop and Custom Spectrum
+
+**`webapp/assets/js/lib/audiomotion-analyzer.js`** *(new file)*:
+- audioMotion-analyzer 4.5.4 (87 KB) bundled as a local global script — ESM `export` replaced with `window.AudioMotionAnalyzer = AudioMotionAnalyzer`.
+- Self-hosted so no CDN dependency; versioned with the app.
+
+**`webapp/index.html`**:
+- `<script defer src="../assets/js/lib/audiomotion-analyzer.js"></script>` added.
+- `<div id="am-container" class="am-container hidden"></div>` added inside the viz overlay for the canvas mount point.
+
+**`webapp/style.css`**:
+- `.am-container { position:absolute; inset:0; width:100%; height:100%; z-index:1; background:#000; cursor:pointer; }`
+- `.am-container canvas { width:100%!important; height:100%!important; }` — forces canvas to fill the overlay regardless of device pixel ratio.
+
+**`webapp/app.js`** — VIZ module extended:
+- `vizTopMode` (0/1/2) replaces the old `specMode` boolean: **0** = Milkdrop, **1** = Custom Spectrum (7 modes), **2** = AudioMotion.
+- `AM_PRESETS` array — 6 curated presets: *Mirror Peaks*, *LED Dual*, *Radial*, *Octave Reflex*, *Velvet*, *Line Stereo*.
+- `_applyAMPreset(i)` — sets `mode`, `gradient`, `channelLayout`, `reflexRatio`, `radialInvert`, `showScaleX` etc. on the live analyzer instance.
+- `startAudioMotion(container)` — creates `AudioMotionAnalyzer` with `connectSpeakers: false` (avoids double audio routing), connects to the shared `analyserNode`, registers the custom *velvet* gradient.
+- `stopAudioMotion()` — destroys the analyzer, hides the container.
+- `toggleMode()` cycles `(vizTopMode + 1) % 3`.
+- `next()` / `prev()` advance through AM presets when `vizTopMode === 2`.
+- `open()` / `close()` updated to start/stop all three modes correctly.
+
+---
+
+## Scan error count accuracy — 2026-03-19
+
+### Sidebar badge and header pill now count only actionable (unfixed + in-library) errors
+
+**`src/db/sqlite-backend.js`** — `getScanErrorCount()`:
+- Changed from `SELECT COUNT(*) WHERE fixed_at IS NULL` to an **INNER JOIN files** query — deleted files are no longer counted.
+
+**`src/db/loki-backend.js`** — `getScanErrorCount()`:
+- Added `.filter(r => !!fileCollection.findOne({filepath, vpath}))` before the `fixed_at === null` count.
+
+**`webapp/admin/index.js`**:
+- `unfixedCount` computed: `this.errors.filter(e => !e.fixed_at && e.file_in_db).length` (was `errors.length`).
+- Header pill uses `unfixedCount` instead of `errors.length`.
+- `load()` badge update uses `this.unfixedCount` (was `errRes.data.length`) — prevents the badge from being overwritten with the raw row count on panel load.
+
+---
+
+## Scan errors: "Gone from library" indicator — 2026-03-19
+
+### Errors for files removed from the library are visually distinguished and non-actionable
+
+**`src/db/sqlite-backend.js`** — `getScanErrors()`:
+- Added `LEFT JOIN files f ON e.filepath = f.filepath AND e.vpath = f.vpath` to the query.
+- Each row now carries `file_in_db` (1 if still in library, 0 if removed).
+
+**`src/db/loki-backend.js`** — `getScanErrors()`:
+- Each result row gets `file_in_db: fileCollection.findOne({filepath, vpath}) ? 1 : 0`.
+
+**`webapp/admin/index.js`**:
+- Compact row: brown `🗑 Gone from library` pill badge shown when `file_in_db === 0`.
+- Expanded detail: brown bordered banner — "File no longer in library. This error will be auto-removed after 48 h."
+- **Fix button suppressed** when `file_in_db === 0` (replaced with plain informational text); prevents attempting a fix on a file that no longer exists.
+
+**`webapp/admin/index.css`**:
+- `.se-deleted-badge` — brown/tan pill badge.
+- `.se-deleted-banner`, `.se-deleted-title`, `.se-deleted-body` — brown bordered detail panel.
+
+---
+
+## Settings panel: Genres & Decades visibility toggles — 2026-03-19
+
+### Per-user toggle to show/hide Genres and Decades navigation buttons
+
+**`webapp/index.html`**:
+- Nav button label changed from "Playback Settings" → "**Settings**".
+
+**`webapp/app.js`**:
+- `S.showGenres` — reads `ms2_show_genres_<user>` from localStorage (default `true`; `'0'` = hidden).
+- `S.showDecades` — reads `ms2_show_decades_<user>` (same pattern).
+- `_applyNavVisibility()` — adds/removes `.hidden` on the Genres and Decades nav buttons; if the active view becomes hidden, redirects to Recent.
+- Called at startup (before `checkSession()`) and from `_applyServerSettings()` on every cross-device sync.
+- Settings panel page title: `setTitle('Settings')`.
+- New **Navigation** section in the Settings panel: two checkbox toggles ("Show Genres in navigation", "Show Decades in navigation") wired to `show-genres-enable` / `show-decades-enable` IDs.
+- `_collectPrefs()` includes `show_genres` / `show_decades` keys.
+- `_applyServerSettings()` applies both and calls `_applyNavVisibility()`.
+
+---
+
+## Scan error confirmed_at — 2026-03-19
+
+### "Rescan confirmed OK" chip: scanner marks errors verified after a successful rescan
+
+**`src/db/sqlite-backend.js`**:
+- Migration-safe `ALTER TABLE scan_errors ADD COLUMN confirmed_at INTEGER` (no-op if column exists).
+- `confirmScanErrorOk(filepath, vpath)` — sets `confirmed_at = now` where `fixed_at IS NOT NULL AND confirmed_at IS NULL`.
+- `markScanErrorFixed()` resets `confirmed_at = NULL` (re-fixing clears any previous confirmation).
+
+**`src/db/loki-backend.js`**: same `confirmScanErrorOk()` and `markScanErrorFixed()` logic.
+
+**`src/db/manager.js`**: exports `confirmScanErrorOk`.
+
+**`src/api/scanner.js`**:
+- New endpoint `POST /api/v1/scanner/confirm-ok` — reads `{filepath, vpath}`, calls `db.confirmScanErrorOk()`.
+
+**`src/db/scanner.mjs`**:
+- `confirmOk(absoluteFilepath)` helper — mirrors `reportError()`; posts to the confirm-ok endpoint; errors are swallowed so a confirm failure never crashes the scanner.
+- Called after a successful `insertEntries()` (new/updated file branch).
+- Called at the end of the targeted-updates else block (after `_needsDuration` check).
+
+**`webapp/admin/index.js`**:
+- Confirmed chip in the fix row: `✓ Rescan confirmed OK X ago` (green pill, shown when `confirmed_at` is set).
+- Before confirmation: faded italic hint — "rescan to confirm, auto-removed after 48 h".
+
+**`webapp/admin/index.css`**: `.se-confirmed-chip` — green pill badge (dark/velvet theme variant).
+
+---
+
+## Scan Error Fix: corrupt FLAC frame fallback — 2026-03-19
+
+### FLAC files with corrupt frame data now handled gracefully
+- Added two-pass strategy to `remuxAudio()`:
+  1. **Pass 1** — stream-copy (lossless, fast) — works for tag/container corruption
+  2. **Pass 2 (FLAC only)** — re-encode with `-err_detect ignore_err -fflags +discardcorrupt`: ffmpeg decodes frame-by-frame, discards unreadable packets, re-encodes surviving audio to a clean FLAC — produces a playable file with silence gaps where frames were lost
+  3. **If Pass 2 also fails or output < 1 KB** → returns `unrecoverable: true` → shows the red "unrecoverable" banner (same as zeroed-out files)
+- Fix endpoint now distinguishes `{ ok: false, unrecoverable: true }` from a plain error — former shows the red banner instead of a raw 500 toast
+- Fixed double popup on successful fix: the `note` message is now folded into the single success toast instead of firing a second separate warning toast
 
 ### Fix button now repairs FLAC/WAV/MP3 parse and duration errors
 - Added `remuxAudio()` server function: uses bundled ffmpeg to stream-copy the audio with `-vn -c:a copy -map_metadata 0`, which rebuilds the container and drops corrupt tag blocks

@@ -21,6 +21,7 @@
   <script defer src="../assets/js/lib/butterchurn.min.js"></script>
   <script defer src="../assets/js/lib/butterchurn-presets.min.js"></script>
   <script defer src="../assets/js/lib/butterchurn-presets-extra.js"></script>
+  <script defer src="../assets/js/lib/audiomotion-analyzer.js"></script>
   <script src="../assets/js/lib/qr.js"></script>
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -340,7 +341,7 @@
         </button>
         <button class="nav-btn" data-view="playback">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          Playback Settings
+          Settings
         </button>
       </nav>
       </div>
@@ -740,6 +741,15 @@
 <div id="viz-overlay" class="viz-overlay hidden">
   <canvas id="viz-canvas" class="viz-canvas"></canvas>
   <canvas id="spec-canvas" class="spec-canvas hidden"></canvas>
+  <div id="am-container" class="am-container hidden"></div>
+  <!-- Lyric mode: art left, scrolling lyrics right -->
+  <div id="viz-lyric-mode" class="viz-lyric-mode hidden">
+    <div class="vlm-art-wrap">
+      <div id="vlm-art-blur" class="vlm-art-blur"></div>
+      <div id="vlm-art" class="vlm-art"></div>
+    </div>
+    <div id="vlm-lines" class="vlm-lines"></div>
+  </div>
   <div class="viz-bar">
     <button class="viz-btn" id="viz-prev-btn" title="Previous preset">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="19,20 9,12 19,4"/><line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2.5"/></svg>
@@ -748,7 +758,7 @@
     <button class="viz-btn" id="viz-next-btn" title="Next preset">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,4 15,12 5,20"/><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2.5"/></svg>
     </button>
-    <button class="viz-btn viz-mode-btn" id="viz-mode-btn" title="Switch to Spectrum Analyzer" style="margin-left:8px;gap:5px">
+    <button class="viz-btn viz-mode-btn" id="viz-mode-btn" title="Switch to Spectrum" style="margin-left:8px;gap:5px">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="14" width="3" height="8"/><rect x="7" y="9" width="3" height="13"/><rect x="12" y="5" width="3" height="17"/><rect x="17" y="11" width="3" height="11"/></svg>
       <span id="viz-mode-label">Spectrum</span>
     </button>

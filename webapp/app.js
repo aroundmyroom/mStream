@@ -52,6 +52,8 @@ const S = {
   dynColor:  localStorage.getItem('ms2_dyn_color_' + _u) !== '0',  // default ON; stored as '0' when disabled
   barTop:    localStorage.getItem('ms2_bar_top_'   + _u) === '1',
   autoResume: localStorage.getItem('ms2_auto_resume_' + _u) === '1',  // default OFF — pause on page reload
+  showGenres:  localStorage.getItem('ms2_show_genres_'  + _u) !== '0', // default ON
+  showDecades: localStorage.getItem('ms2_show_decades_' + _u) !== '0', // default ON
   // Auto-DJ: similar-artists mode
   djSimilar: localStorage.getItem('ms2_dj_similar_' + _u) === '1',
   djDice:    localStorage.getItem('ms2_dj_dice_'    + _u) === '1',  // default OFF
@@ -2686,11 +2688,32 @@ const VIZ = (() => {
   let cycleTimer = null, frameId = null;
   const CYCLE_MS = 15000;
 
+  // Top-level mode: 0 = Milkdrop/butterchurn, 1 = custom spectrum, 2 = AudioMotion
+  let vizTopMode = 0;
+
   // Spectrum state
-  let specMode = false;           // false = butterchurn, true = spectrum
   let specFrameId = null;
   let peakL = [], peakVelL = [];  // peak state — left channel
   let peakR = [], peakVelR = [];  // peak state — right channel
+
+  // AudioMotion state
+  let amAnalyzer  = null;
+
+  // Lyric mode state
+  let lyricLines     = [];   // [{time, text}] parsed from server
+  let lyricSynced    = false;
+  let lyricActiveIdx = -1;
+  let lyricActiveDiv = null; // DOM ref to currently active line
+  let lyricRafId     = null; // rAF for 60fps fill sweep
+  let amPresetIdx = 0;
+  const AM_PRESETS = [
+    { name: 'Mirror Peaks',  mode: 8,  gradient: 'prism',      reflexRatio: 0.35, mirror: 0,  channelLayout: 'dual-combined',  ledBars: false },
+    { name: 'LED Dual',      mode: 3,  gradient: 'rainbow',    reflexRatio: 0,    mirror: 0,  channelLayout: 'dual-horizontal', ledBars: true  },
+    { name: 'Radial',        mode: 5,  gradient: 'orangered',  reflexRatio: 0,    mirror: 0,  channelLayout: 'single',          ledBars: false, radial: true, spinSpeed: 1 },
+    { name: 'Octave Reflex', mode: 1,  gradient: 'steelblue',  reflexRatio: 0.4,  mirror: 0,  channelLayout: 'single',          ledBars: false },
+    { name: 'Velvet',        mode: 2,  gradient: 'velvet',     reflexRatio: 0.3,  mirror: -1, channelLayout: 'single',          ledBars: false },
+    { name: 'Line Stereo',   mode: 10, gradient: 'prism',      reflexRatio: 0,    mirror: 0,  channelLayout: 'dual-vertical' },
+  ];
 
   function ensureAudio() {
     if (!_webAudioSupported) return;
@@ -3201,32 +3224,256 @@ const VIZ = (() => {
     if (specFrameId) { cancelAnimationFrame(specFrameId); specFrameId = null; }
   }
 
+  // ── AUDIOMOTION RENDERER ──────────────────────────────────
+  function _applyAMPreset() {
+    if (!amAnalyzer) return;
+    const p = AM_PRESETS[amPresetIdx];
+    amAnalyzer.mode          = p.mode;
+    amAnalyzer.gradient      = p.gradient;
+    amAnalyzer.reflexRatio   = p.reflexRatio ?? 0;
+    amAnalyzer.mirror        = p.mirror ?? 0;
+    amAnalyzer.channelLayout = p.channelLayout ?? 'single';
+    amAnalyzer.radial        = p.radial   ?? false;
+    amAnalyzer.spinSpeed     = p.spinSpeed ?? 0;
+    amAnalyzer.ledBars       = p.ledBars  ?? false;
+    amAnalyzer.lumiBars      = p.lumiBars ?? false;
+    amAnalyzer.showScaleX    = false;
+    amAnalyzer.showScaleY    = false;
+    amAnalyzer.showPeaks     = true;
+    amAnalyzer.showBgColor   = true;
+    amAnalyzer.bgAlpha       = 0.7;
+    // Update label
+    const presetName = document.getElementById('viz-preset-name');
+    if (presetName) presetName.textContent = 'AudioMotion: ' + p.name + ' \u00b7 click to cycle';
+  }
+
+  function startAudioMotion(container) {
+    if (!window.AudioMotionAnalyzer) { toast('audioMotion not loaded yet'); return; }
+    if (!audioCtx) { toast('Play a song first to initialise audio'); return; }
+    if (!amAnalyzer) {
+      amAnalyzer = new AudioMotionAnalyzer(container, {
+        audioCtx,
+        connectSpeakers: false,  // IMPORTANT: we already have our own audio routing
+        fftSize:    8192,
+        smoothing:  0.7,
+        start:      false,
+      });
+      // Register a custom velvet-theme gradient
+      amAnalyzer.registerGradient('velvet', {
+        bgColor:    '#080810',
+        colorStops: ['#9b59b6', '#6d3ce6', '#3498db', '#1abc9c', '#7bed9f'],
+      });
+      // Tap our existing main analyser node (same pre-panner tap as butterchurn)
+      amAnalyzer.connectInput(analyserNode);
+      // Click the container to cycle through AM presets
+      container._amClick = () => {
+        amPresetIdx = (amPresetIdx + 1) % AM_PRESETS.length;
+        _applyAMPreset();
+      };
+      container.addEventListener('click', container._amClick);
+    }
+    _applyAMPreset();
+    amAnalyzer.toggleAnalyzer(true);
+  }
+
+  function stopAudioMotion() {
+    if (amAnalyzer) amAnalyzer.toggleAnalyzer(false);
+  }
+
+  // ── Lyric helpers ────────────────────────────────────────────
+  async function fetchAndRenderLyrics() {
+    const s = S.queue[S.idx];
+    const linesEl = document.getElementById('vlm-lines');
+    if (!linesEl) return;
+    linesEl.innerHTML = '<div class="vlm-no-lyrics">Loading lyrics…</div>';
+    lyricLines = []; lyricSynced = false; lyricActiveIdx = -1;
+
+    // Update art panel
+    const artEl     = document.getElementById('vlm-art');
+    const artBlurEl = document.getElementById('vlm-art-blur');
+    if (artEl && s) {
+      const u = artUrl(s['album-art'], 'l');
+      artEl.innerHTML = u
+        ? `<img src="${u}" alt="" onerror="this.parentNode.innerHTML=''">` : '';
+      if (artBlurEl) artBlurEl.style.backgroundImage = u ? `url('${u}')` : 'none';
+    }
+
+    if (!s) {
+      linesEl.innerHTML = '<div class="vlm-no-lyrics">No track playing</div>';
+      return;
+    }
+
+    const artist   = encodeURIComponent(s.artist  || '');
+    const title    = encodeURIComponent(s.title   || s.filepath?.split('/').pop() || '');
+    const duration = encodeURIComponent(Math.round(s.duration || 0));
+    const filepath = encodeURIComponent(s.filepath || '');
+
+    try {
+      const r = await fetch(`/api/v1/lyrics?artist=${artist}&title=${title}&duration=${duration}&filepath=${filepath}`,
+        { headers: { 'x-access-token': S.token } });
+      const data = await r.json();
+
+      if (data.notFound || !data.lines || !data.lines.length) {
+        linesEl.innerHTML = '<div class="vlm-no-lyrics">No lyrics found</div>';
+        return;
+      }
+
+      lyricLines  = data.lines;
+      lyricSynced = !!data.synced;
+
+      // Render all lines
+      linesEl.innerHTML = '';
+      lyricLines.forEach((ln, i) => {
+        const div = document.createElement('div');
+        div.className = 'vlm-line';
+        div.dataset.i = i;
+        div.textContent = ln.text || '';
+        linesEl.appendChild(div);
+      });
+
+      // Reset scroll to top then immediately jump to current position
+      // Capture start offset so crossfade mid-song loads start at the right position
+      lyricActiveDiv = null;
+      linesEl.scrollTop = 0;
+      lyricActiveIdx = -1;
+      lyricTick(audioEl.currentTime);
+    } catch (_e) {
+      linesEl.innerHTML = '<div class="vlm-no-lyrics">No lyrics found</div>';
+    }
+  }
+
+  function lyricFillTick() {
+    lyricRafId = requestAnimationFrame(lyricFillTick);
+    if (!lyricSynced || !lyricLines.length) return;
+    const linesEl = document.getElementById('vlm-lines');
+    if (!linesEl) return;
+    const divs = linesEl.querySelectorAll('.vlm-line');
+    const now = audioEl.currentTime;
+    // Pre-brighten the next upcoming line: ramp from dim to near-white over 2.5s before its timestamp
+    const nextIdx = lyricActiveIdx + 1;
+    if (nextIdx > 0 && nextIdx < lyricLines.length && divs[nextIdx]) {
+      const timeUntil = lyricLines[nextIdx].time - now;
+      if (timeUntil > 0 && timeUntil < 2.5) {
+        const alpha = 0.28 + (1 - timeUntil / 2.5) * 0.60; // 0.28 → 0.88
+        divs[nextIdx].style.color = `rgba(255,255,255,${alpha.toFixed(2)})`;
+      } else if (timeUntil >= 2.5) {
+        divs[nextIdx].style.color = '';
+      }
+    }
+  }
+
+  function startLyricRaf() { if (!lyricRafId) lyricFillTick(); }
+  function stopLyricRaf() {
+    if (lyricRafId) { cancelAnimationFrame(lyricRafId); lyricRafId = null; }
+    lyricActiveDiv = null;
+  }
+
+  function lyricTick(currentTime) {
+    if (vizTopMode !== 3 || !lyricSynced || !lyricLines.length) return;
+    const linesEl = document.getElementById('vlm-lines');
+    if (!linesEl) return;
+
+    // -0.2 s: slightly early is better than late
+    const t = currentTime - 0.2;
+
+    // Find the last line whose time <= t
+    let newIdx = -1;
+    for (let i = 0; i < lyricLines.length; i++) {
+      if (lyricLines[i].time <= t) newIdx = i;
+      else break;
+    }
+    if (newIdx === lyricActiveIdx) return;
+    // Reset inline colour on outgoing line cleanly
+    if (lyricActiveDiv) lyricActiveDiv.style.color = '';
+    // Also reset the pre-brightened next line colour so CSS class takes over
+    const linesElForReset = document.getElementById('vlm-lines');
+    if (linesElForReset) {
+      const allDivs = linesElForReset.querySelectorAll('.vlm-line');
+      allDivs.forEach(d => { d.style.color = ''; });
+    }
+    lyricActiveIdx = newIdx;
+
+    const divs = linesEl.querySelectorAll('.vlm-line');
+    divs.forEach((d, i) => {
+      const diff = Math.abs(i - newIdx);
+      d.classList.toggle('vlm-active', i === newIdx);
+      d.classList.toggle('vlm-near',   diff === 1 || diff === 2);
+    });
+
+    // Cache active div for rAF fill updates
+    lyricActiveDiv = (newIdx >= 0 && divs[newIdx]) ? divs[newIdx] : null;
+
+    if (newIdx < 0) {
+      // Before first lyric line — scroll to top so first lines are visible
+      linesEl.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (divs[newIdx]) {
+      // Scroll active line to vertical centre of the container
+      const top = divs[newIdx].offsetTop - (linesEl.clientHeight / 2) + (divs[newIdx].offsetHeight / 2);
+      linesEl.scrollTo({ top, behavior: 'smooth' });
+    }
+  }
+
   function applyMode() {
     const bcCanvas   = document.getElementById('viz-canvas');
     const spCanvas   = document.getElementById('spec-canvas');
+    const amCont     = document.getElementById('am-container');
     const label      = document.getElementById('viz-mode-label');
+    const modeBtn    = document.getElementById('viz-mode-btn');
     const prevBtn    = document.getElementById('viz-prev-btn');
     const nextBtn    = document.getElementById('viz-next-btn');
     const presetName = document.getElementById('viz-preset-name');
-    if (specMode) {
-      bcCanvas.classList.add('hidden');
-      spCanvas.classList.remove('hidden');
-      if (label) label.textContent = 'Milkdrop';
-      if (prevBtn)    prevBtn.style.visibility    = 'hidden';
-      if (nextBtn)    nextBtn.style.visibility    = 'hidden';
-      if (presetName) presetName.style.visibility = 'hidden';
-      // stop butterchurn render loop (it will be resumed on mode switch back)
-      if (frameId) { cancelAnimationFrame(frameId); frameId = null; }
-      startSpectrum(spCanvas);
-    } else {
-      spCanvas.classList.add('hidden');
+
+    const MODE_NAMES = ['Milkdrop', 'Spectrum', 'AudioMotion', 'Lyrics'];
+    const nextMode   = (vizTopMode + 1) % MODE_NAMES.length;
+    if (label)   label.textContent          = MODE_NAMES[vizTopMode];
+    if (modeBtn) modeBtn.dataset.tip        = 'Switch to ' + MODE_NAMES[nextMode];
+
+    // Stop all active renderers
+    stopSpectrum();
+    stopAudioMotion();
+    stopLyricRaf();
+    if (frameId) { cancelAnimationFrame(frameId); frameId = null; }
+
+    // Hide all surfaces
+    bcCanvas.classList.add('hidden');
+    spCanvas.classList.add('hidden');
+    if (amCont) amCont.classList.add('hidden');
+    const lyricMode = document.getElementById('viz-lyric-mode');
+    if (lyricMode) lyricMode.classList.add('hidden');
+
+    if (vizTopMode === 0) {
+      // ── Milkdrop / Butterchurn ──────────────────────
       bcCanvas.classList.remove('hidden');
-      if (label) label.textContent = 'Spectrum';
-      if (prevBtn)    prevBtn.style.visibility    = '';
-      if (nextBtn)    nextBtn.style.visibility    = '';
+      if (prevBtn)    prevBtn.style.visibility = '';
+      if (nextBtn)    nextBtn.style.visibility = '';
+      if (presetName) { presetName.style.visibility = ''; setPresetLabel(); }
+      if (!visualizer) initViz(bcCanvas);
+      else if (!frameId) startRender();
+
+    } else if (vizTopMode === 1) {
+      // ── Custom Spectrum (7 modes, click canvas to cycle) ──
+      spCanvas.classList.remove('hidden');
+      if (prevBtn)    prevBtn.style.visibility = 'hidden';
+      if (nextBtn)    nextBtn.style.visibility = 'hidden';
+      if (presetName) presetName.style.visibility = 'hidden';
+      startSpectrum(spCanvas);
+
+    } else if (vizTopMode === 2) {
+      // ── AudioMotion Analyzer ─────────────────────────
+      if (amCont) amCont.classList.remove('hidden');
+      if (prevBtn)    prevBtn.style.visibility = 'hidden';
+      if (nextBtn)    nextBtn.style.visibility = 'hidden';
       if (presetName) presetName.style.visibility = '';
-      stopSpectrum();
-      if (visualizer && !frameId) startRender();
+      if (amCont) startAudioMotion(amCont);
+
+    } else {
+      // ── Lyric mode ────────────────────────────────────
+      if (lyricMode) lyricMode.classList.remove('hidden');
+      if (prevBtn)    prevBtn.style.visibility = 'hidden';
+      if (nextBtn)    nextBtn.style.visibility = 'hidden';
+      if (presetName) presetName.style.visibility = 'hidden';
+      fetchAndRenderLyrics();
+      startLyricRaf();
     }
   }
 
@@ -3245,10 +3492,8 @@ const VIZ = (() => {
       overlay.classList.remove('hidden');
       document.getElementById('viz-open-btn').classList.add('active');
       updateSongInfo();
-      const canvas  = document.getElementById('viz-canvas');
-      if (specMode) {
-        applyMode();
-      } else {
+      if (vizTopMode === 0) {
+        const canvas = document.getElementById('viz-canvas');
         if (!visualizer) {
           initViz(canvas);
         } else {
@@ -3257,31 +3502,44 @@ const VIZ = (() => {
           visualizer.setRendererSize(canvas.width, canvas.height);
           if (!frameId) startRender();
         }
+        applyMode();
+      } else {
+        applyMode();
       }
     },
     close() {
       document.getElementById('viz-overlay').classList.add('hidden');
       document.getElementById('viz-open-btn').classList.remove('active');
+      document.getElementById('viz-open-btn').blur();
       if (frameId)    { cancelAnimationFrame(frameId);    frameId    = null; }
       if (specFrameId){ cancelAnimationFrame(specFrameId); specFrameId = null; }
+      stopAudioMotion();
+      stopLyricRaf();
+      lyricLines = []; lyricActiveIdx = -1;
     },
     next()  {
-      if (specMode) return;
+      if (vizTopMode !== 0) return;
       presetHistory.push(presetIndex);
       presetIndex = Math.floor(Math.random() * presetKeys.length);
       loadPreset(2.7);
     },
     prev()  {
-      if (specMode) return;
+      if (vizTopMode !== 0) return;
       if (presetHistory.length) presetIndex = presetHistory.pop();
       else presetIndex = ((presetIndex - 1) + presetKeys.length) % presetKeys.length;
       loadPreset(2.7);
     },
     toggleMode() {
-      specMode = !specMode;
+      vizTopMode = (vizTopMode + 1) % 4;
       applyMode();
     },
-    songChanged() { updateSongInfo(); },
+    lyricTick(t) { lyricTick(t); },
+    songChanged() {
+      updateSongInfo();
+      if (vizTopMode === 3 && !document.getElementById('viz-overlay').classList.contains('hidden')) {
+        fetchAndRenderLyrics();
+      }
+    },
     initAudio()   { ensureAudio(); },
   };
 })();
@@ -4083,14 +4341,41 @@ function viewSearch() {
   setTitle('Search'); setBack(null); setNavActive('search'); S.view = 'search';
   document.getElementById('play-all-btn').onclick = null;
   document.getElementById('add-all-btn').onclick  = null;
+  // Initialise vpath selection — all on by default, preserved across navigations.
+  if (!S.searchVpaths) S.searchVpaths = [...S.vpaths];
   const body = document.getElementById('content-body');
+  const pillsHtml = S.vpaths.length > 1
+    ? `<div class="search-vpath-pills" id="search-vpaths">${
+        S.vpaths.map(v => `<button class="dj-vpath-pill${S.searchVpaths.includes(v) ? ' on' : ''}" data-vpath="${esc(v)}">${esc(v)}</button>`).join('')
+      }</div>`
+    : '';
   body.innerHTML = `
     <div class="search-wrap">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--t3);flex-shrink:0"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       <input class="search-input" id="search-input" type="text" placeholder="Search artists, albums, songs…" autocomplete="off">
     </div>
+    ${pillsHtml}
     <div id="search-results"></div>`;
   const input = document.getElementById('search-input');
+  // Vpath pill toggles — only wired when there are multiple vpaths.
+  if (S.vpaths.length > 1) {
+    document.getElementById('search-vpaths').addEventListener('click', e => {
+      const pill = e.target.closest('.dj-vpath-pill');
+      if (!pill) return;
+      const v = pill.dataset.vpath;
+      if (S.searchVpaths.includes(v)) {
+        // Keep at least one selected.
+        if (S.searchVpaths.length > 1) S.searchVpaths = S.searchVpaths.filter(x => x !== v);
+      } else {
+        S.searchVpaths = [...S.searchVpaths, v];
+      }
+      document.getElementById('search-vpaths').querySelectorAll('.dj-vpath-pill').forEach(p => {
+        p.classList.toggle('on', S.searchVpaths.includes(p.dataset.vpath));
+      });
+      const q = input.value.trim();
+      if (q && q.length >= 2) doSearch(q);
+    });
+  }
   // Restore previous query if returning from a drill-down (artist → back).
   // Do NOT auto-focus in this case — keyboard would cover the results and the
   // first touch to dismiss it would be "eaten", making the screen feel frozen.
@@ -4130,7 +4415,32 @@ async function doSearch(q) {
   const gen = ++_searchGen;
   res.innerHTML = '<div class="loading-state"></div>';
   try {
-    const d = await api('POST', 'api/v1/db/search', { search: q }, signal);
+    const meta = S.vpathMeta || {};
+    const selectedVpaths = (S.searchVpaths && S.searchVpaths.length > 0) ? S.searchVpaths : S.vpaths;
+
+    // Child-vpath optimisation: same logic as AutoDJ.
+    // If the selected vpaths are all children of the same parent, use filepathPrefix
+    // to filter within that parent's DB vpath instead of ignoreVPaths.
+    const allChildSameParent =
+      selectedVpaths.length > 0 &&
+      selectedVpaths.every(v => meta[v]?.parentVpath) &&
+      new Set(selectedVpaths.map(v => meta[v].parentVpath)).size === 1;
+
+    let ignoreVPaths, filepathPrefix;
+    if (allChildSameParent) {
+      const parentVpath = meta[selectedVpaths[0]].parentVpath;
+      ignoreVPaths = S.vpaths.filter(v => v !== parentVpath && !meta[v]?.parentVpath);
+      filepathPrefix = selectedVpaths.length === 1 ? meta[selectedVpaths[0]].filepathPrefix : null;
+    } else {
+      ignoreVPaths = S.vpaths.filter(v => !selectedVpaths.includes(v));
+      filepathPrefix = null;
+    }
+
+    const d = await api('POST', 'api/v1/db/search', {
+      search: q,
+      ...(ignoreVPaths && ignoreVPaths.length > 0 ? { ignoreVPaths } : {}),
+      ...(filepathPrefix ? { filepathPrefix } : {}),
+    }, signal);
     // A newer search has already taken over — discard this stale response.
     if (gen !== _searchGen) return;
     let html = '';
@@ -5606,7 +5916,7 @@ async function viewDiscogs() {
 
 // ── SLEEP TIMER LOGIC ───────────────────────────────
 function viewPlayback() {
-  setTitle('Playback Settings'); setBack(null); setNavActive('playback'); S.view = 'playback';
+  setTitle('Settings'); setBack(null); setNavActive('playback'); S.view = 'playback';
   S.curSongs = [];
   document.getElementById('play-all-btn').onclick = null;
   document.getElementById('add-all-btn').onclick  = null;
@@ -5770,6 +6080,37 @@ function viewPlayback() {
         </div>
       </div>
 
+      <!-- ── NAVIGATION ── -->
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">🗂️</div>
+          <div>
+            <div class="playback-section-title">Navigation</div>
+            <div class="playback-section-desc">Show or hide sections in the sidebar. Settings are synced across devices.</div>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Genres</div>
+            <div class="playback-row-hint">Browse your library by genre tag</div>
+          </div>
+          <label class="toggle-sw">
+            <input type="checkbox" id="show-genres-enable" ${S.showGenres ? 'checked' : ''}>
+            <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
+          </label>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Decades</div>
+            <div class="playback-row-hint">Browse your library by release decade</div>
+          </div>
+          <label class="toggle-sw">
+            <input type="checkbox" id="show-decades-enable" ${S.showDecades ? 'checked' : ''}>
+            <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
+          </label>
+        </div>
+      </div>
+
     </div>`)
 
   // Crossfade slider
@@ -5848,6 +6189,24 @@ function viewPlayback() {
       _resetAlbumArtTheme();
     }
     toast(S.dynColor ? 'Dynamic colours: On' : 'Dynamic colours: Off');
+  });
+
+  // Genres visibility
+  document.getElementById('show-genres-enable').addEventListener('change', e => {
+    S.showGenres = e.target.checked;
+    S.showGenres ? localStorage.removeItem(_uKey('show_genres')) : localStorage.setItem(_uKey('show_genres'), '0');
+    _applyNavVisibility();
+    _syncPrefs();
+    toast(S.showGenres ? 'Genres: visible' : 'Genres: hidden');
+  });
+
+  // Decades visibility
+  document.getElementById('show-decades-enable').addEventListener('change', e => {
+    S.showDecades = e.target.checked;
+    S.showDecades ? localStorage.removeItem(_uKey('show_decades')) : localStorage.setItem(_uKey('show_decades'), '0');
+    _applyNavVisibility();
+    _syncPrefs();
+    toast(S.showDecades ? 'Decades: visible' : 'Decades: hidden');
   });
 }
 
@@ -6821,6 +7180,8 @@ function _collectPrefs() {
     dj_filter_words:   localStorage.getItem('ms2_dj_filter_words_'+ u),
     dj_ignore:         localStorage.getItem('ms2_dj_ignore_'      + u),
     dj_artist_history: localStorage.getItem('ms2_dj_artist_history_' + u),
+    show_genres:  localStorage.getItem('ms2_show_genres_'  + u),
+    show_decades: localStorage.getItem('ms2_show_decades_' + u),
   };
 }
 
@@ -6917,6 +7278,9 @@ function _applyServerSettings(data) {
     ls('ms2_dj_artist_history_' + u, prefs.dj_artist_history);
     try { S.djArtistHistory = JSON.parse(prefs.dj_artist_history) || []; } catch(_) {}
   }
+  if (prefs.show_genres  != null) { ls('ms2_show_genres_'  + u, prefs.show_genres);  S.showGenres  = prefs.show_genres  !== '0'; }
+  if (prefs.show_decades != null) { ls('ms2_show_decades_' + u, prefs.show_decades); S.showDecades = prefs.show_decades !== '0'; }
+  _applyNavVisibility();
   // Queue: the DB is the source of truth — always restore from it on load.
   // This ensures any browser/device always picks up whatever was last playing.
   const queueKey = _queueKey();
@@ -7800,6 +8164,7 @@ function _onAudioTimeupdateUI() {
     document.getElementById('np-prog-fill').style.width  = pct + '%';
     _renderTimes();
   }
+  VIZ.lyricTick(audioEl.currentTime);
   if (S.crossfade > 0 && !_xfadeFired) {
     const remaining = audioEl.duration - audioEl.currentTime;
     if (remaining > 0 && remaining <= S.crossfade) {
@@ -8346,6 +8711,15 @@ function applyBarPos(top) {
   document.documentElement.classList.toggle('bar-top', top);
 }
 
+function _applyNavVisibility() {
+  const gBtn = document.querySelector('.nav-btn[data-view="genres"]');
+  const dBtn = document.querySelector('.nav-btn[data-view="decades"]');
+  if (gBtn) gBtn.classList.toggle('hidden', !S.showGenres);
+  if (dBtn) dBtn.classList.toggle('hidden', !S.showDecades);
+  if (!S.showGenres  && S.view === 'genres')  viewRecent();
+  if (!S.showDecades && S.view === 'decades') viewRecent();
+}
+
 // ── THEME ─────────────────────────────────────────────────────
 // theme: 'velvet' | 'dark' | 'light'
 // persist=true  → user chose explicitly, save to localStorage
@@ -8746,6 +9120,7 @@ try {
     !!_savedTheme   // only persist if the user had already made an explicit choice
   );
   applyBarPos(S.barTop);
+  _applyNavVisibility();
 
   const ok = await checkSession();
   ok ? showApp() : showLogin();

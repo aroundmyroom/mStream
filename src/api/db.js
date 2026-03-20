@@ -160,7 +160,8 @@ export function setup(mstream) {
       noAlbums: Joi.boolean().optional(),
       noTitles: Joi.boolean().optional(),
       noFiles: Joi.boolean().optional(),
-      ignoreVPaths: Joi.array().items(Joi.string()).optional()
+      ignoreVPaths: Joi.array().items(Joi.string()).optional(),
+      filepathPrefix: Joi.string().optional()
     });
     joiValidate(schema, req.body);
 
@@ -175,7 +176,7 @@ export function setup(mstream) {
     const tokens = req.body.search.trim().split(/\s+/).filter(t => t.length > 0);
     if (tokens.length > 1) {
       const seenPaths = new Set(title.map(t => t.filepath));
-      const crossRows = db.searchFilesAllWords(tokens, req.user.vpaths, req.body.ignoreVPaths);
+      const crossRows = db.searchFilesAllWords(tokens, req.user.vpaths, req.body.ignoreVPaths, req.body.filepathPrefix || null);
       for (const row of crossRows) {
         const fp = path.join(row.vpath, row.filepath).replace(/\\/g, '/');
         if (!seenPaths.has(fp)) {
@@ -197,7 +198,7 @@ export function setup(mstream) {
       resCol = searchCol;
     }
 
-    const results = db.searchFiles(searchCol, req.body.search, req.user.vpaths, req.body.ignoreVPaths);
+    const results = db.searchFiles(searchCol, req.body.search, req.user.vpaths, req.body.ignoreVPaths, req.body.filepathPrefix || null);
 
     const returnThis = [];
     const store = {};

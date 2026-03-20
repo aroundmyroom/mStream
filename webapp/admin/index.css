@@ -583,6 +583,27 @@ tr:hover td { background: var(--raised); }
 
 .se-row--fixed { opacity: .6; }
 .se-row--fixed:hover { opacity: .85; }
+.se-row--unrecoverable { opacity: .75; border-left: 3px solid rgba(211,47,47,.7); }
+.se-row--unrecoverable:hover { opacity: 1; }
+.se-unrecoverable-badge {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: .15rem .5rem; font-size: .68rem; font-weight: 700;
+  letter-spacing: .04em; color: #d32f2f;
+  background: rgba(211,47,47,.12); border: 1px solid rgba(211,47,47,.35);
+  border-radius: 999px; vertical-align: middle; white-space: nowrap;
+}
+[data-theme="dark"] .se-unrecoverable-badge,
+[data-theme="velvet"] .se-unrecoverable-badge { color: #ef5350; background: rgba(239,83,80,.15); border-color: rgba(239,83,80,.4); }
+
+.se-confirmed-chip {
+  display: inline-flex; align-items: center; gap: .25rem;
+  margin-left: .5rem; padding: .15rem .5rem; font-size: .7rem; font-weight: 700;
+  letter-spacing: .04em; color: #2e7d32;
+  background: rgba(76,175,80,.12); border: 1px solid rgba(76,175,80,.35);
+  border-radius: 999px; vertical-align: middle; white-space: nowrap;
+}
+[data-theme="dark"] .se-confirmed-chip,
+[data-theme="velvet"] .se-confirmed-chip { color: #66bb6a; background: rgba(76,175,80,.15); border-color: rgba(76,175,80,.4); }
 
 .se-fixed-badge {
   display: inline-flex; align-items: center;
@@ -630,6 +651,31 @@ tr:hover td { background: var(--raised); }
   font-size: .88rem; font-weight: 700; margin-bottom: .2rem;
 }
 .se-unrecoverable-body {
+  font-size: .81rem; line-height: 1.5; opacity: .9;
+}
+
+.se-deleted-badge {
+  display: inline-flex; align-items: center; gap: .25rem;
+  margin-left: .45rem; padding: .15rem .5rem; font-size: .68rem; font-weight: 700;
+  letter-spacing: .04em; color: #795548;
+  background: rgba(121,85,72,.12); border: 1px solid rgba(121,85,72,.35);
+  border-radius: 999px; vertical-align: middle; white-space: nowrap;
+}
+[data-theme="dark"] .se-deleted-badge,
+[data-theme="velvet"] .se-deleted-badge { color: #bcaaa4; background: rgba(188,170,164,.12); border-color: rgba(188,170,164,.35); }
+
+.se-deleted-banner {
+  display: flex; align-items: flex-start; gap: .75rem;
+  padding: .9rem 1.1rem; margin-top: .25rem;
+  background: rgba(121,85,72,.1); border: 2px solid rgba(121,85,72,.4);
+  border-radius: 8px; color: #5d4037;
+}
+[data-theme="dark"] .se-deleted-banner,
+[data-theme="velvet"] .se-deleted-banner { background: rgba(188,170,164,.1); border-color: rgba(188,170,164,.4); color: #bcaaa4; }
+.se-deleted-title {
+  font-size: .88rem; font-weight: 700; margin-bottom: .2rem;
+}
+.se-deleted-body {
   font-size: .81rem; line-height: 1.5; opacity: .9;
 }
 

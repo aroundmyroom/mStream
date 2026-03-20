@@ -178,6 +178,11 @@ export function updateFileDuration(filepath, vpath, duration) {
   }
 }
 
+export function getFileDuration(filepath) {
+  const doc = fileCollection.findOne({ filepath: { '$eq': filepath } });
+  return doc?.duration ?? null;
+}
+
 export function updateFileTags(filepath, vpath, tags) {
   const dbFile = fileCollection.findOne({ '$and': [{ 'filepath': { '$eq': filepath } }, { 'vpath': { '$eq': vpath } }] });
   if (!dbFile) return;
@@ -483,7 +488,7 @@ export function getAlbumSongs(album, vpaths, username, opts) {
     .data();
 }
 
-export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths) {
+export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix) {
   if (!fileCollection) { return []; }
 
   const findThis = {
@@ -493,15 +498,22 @@ export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths) {
     ]
   };
 
-  return fileCollection.find(findThis);
+  let results = fileCollection.find(findThis);
+  if (filepathPrefix && typeof filepathPrefix === 'string') {
+    results = results.filter(row => row.filepath && row.filepath.startsWith(filepathPrefix));
+  }
+  return results;
 }
 
-export function searchFilesAllWords(tokens, vpaths, ignoreVPaths) {
+export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix) {
   if (!fileCollection || tokens.length === 0) { return []; }
 
   const tokenRegexes = tokens.map(t => new RegExp(escapeStringRegexp(t), 'i'));
 
   return fileCollection.find(renderOrClause(vpaths, ignoreVPaths)).filter(row => {
+    if (filepathPrefix && typeof filepathPrefix === 'string') {
+      if (!row.filepath || !row.filepath.startsWith(filepathPrefix)) return false;
+    }
     return tokenRegexes.every(re =>
       re.test(row.title || '') ||
       re.test(row.artist || '') ||
@@ -819,7 +831,10 @@ export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stac
   if (existing) {
     existing.last_seen = now;
     existing.count = (existing.count || 1) + 1;
-    existing.fixed_at = null; // re-occurrence resets fix state
+    existing.fixed_at = null;   // re-occurrence resets fix state
+    existing.fix_action = null; // stale action no longer valid
+    existing.error_msg = errorMsg || '';
+    existing.stack = stack || '';
     scanErrorCollection.update(existing);
   } else {
     scanErrorCollection.insert({
@@ -842,7 +857,8 @@ export function getScanErrors() {
       guid: r.guid, filepath: r.filepath, vpath: r.vpath,
       error_type: r.error_type, error_msg: r.error_msg, stack: r.stack,
       first_seen: r.first_seen, last_seen: r.last_seen, count: r.count,
-      fixed_at: r.fixed_at || null
+      fixed_at: r.fixed_at || null,
+      file_in_db: fileCollection.findOne({ filepath: r.filepath, vpath: r.vpath }) ? 1 : 0
     }))
     .sort((a, b) => {
       // fixed items last, then newest first
@@ -862,10 +878,21 @@ export function pruneScanErrors(retentionHours) {
   scanErrorCollection.findAndRemove({ fixed_at: { '$ne': null, '$lt': fixedCutoff } });
 }
 
-export function markScanErrorFixed(guid) {
+export function markScanErrorFixed(guid, fixAction) {
   const now = Math.floor(Date.now() / 1000);
   const row = scanErrorCollection.findOne({ guid: { '$eq': guid } });
-  if (row) { row.fixed_at = now; scanErrorCollection.update(row); }
+  if (row) { row.fixed_at = now; row.fix_action = fixAction || null; row.confirmed_at = null; scanErrorCollection.update(row); }
+}
+
+export function confirmScanErrorOk(filepath, vpath) {
+  const now = Math.floor(Date.now() / 1000);
+  const rows = scanErrorCollection.find({
+    filepath:     { '$eq': filepath },
+    vpath:        { '$eq': vpath },
+    fixed_at:     { '$ne': null },
+    confirmed_at: { '$eq': null }
+  });
+  for (const row of rows) { row.confirmed_at = now; scanErrorCollection.update(row); }
 }
 
 export function markFileArtChecked(filepath, vpath) {
@@ -879,7 +906,9 @@ export function markFileCueChecked(filepath, vpath) {
 }
 
 export function getScanErrorCount() {
-  return scanErrorCollection.count({ fixed_at: { '$eq': null } });
+  return scanErrorCollection.find({ fixed_at: { '$eq': null } })
+    .filter(r => !!fileCollection.findOne({ filepath: r.filepath, vpath: r.vpath }))
+    .length;
 }
 
 // ── Subsonic-specific queries ────────────────────────────────────────────────
