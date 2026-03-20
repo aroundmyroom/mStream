@@ -98,6 +98,10 @@ export function init(dbDirectory) {
   try { db.exec('ALTER TABLE files ADD COLUMN art_source TEXT'); } catch (_e) {}
   // Migration: add duration column (track length in seconds)
   try { db.exec('ALTER TABLE files ADD COLUMN duration REAL'); } catch (_e) {}
+  // Migration: add fix_action column to record what the fix button actually did
+  try { db.exec('ALTER TABLE scan_errors ADD COLUMN fix_action TEXT'); } catch (_e) {}
+  // Migration: add confirmed_at column to record when a rescan confirmed the file is OK
+  try { db.exec('ALTER TABLE scan_errors ADD COLUMN confirmed_at INTEGER'); } catch (_e) {}
   // Migration: add artist_id / album_id columns for indexed Subsonic-style lookups
   try { db.exec('ALTER TABLE files ADD COLUMN artist_id TEXT'); } catch (_e) {}
   try { db.exec('ALTER TABLE files ADD COLUMN album_id TEXT'); } catch (_e) {}
@@ -211,6 +215,11 @@ export function updateFileCue(filepath, vpath, cuepoints) {
 
 export function updateFileDuration(filepath, vpath, duration) {
   _s.updateDuration.run(duration, filepath, vpath);
+}
+
+export function getFileDuration(filepath) {
+  const row = db.prepare('SELECT duration FROM files WHERE filepath = ? LIMIT 1').get(filepath);
+  return row?.duration ?? null;
 }
 
 export function updateFileTags(filepath, vpath, tags) {
@@ -465,7 +474,7 @@ export function getAlbumSongs(album, vpaths, username, opts) {
   return rows.map(mapFileRow);
 }
 
-export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths) {
+export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
 
@@ -473,15 +482,20 @@ export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths) {
   if (!validCols.includes(searchCol)) { return []; }
 
   const vIn = inClause('vpath', filtered);
-  const sql = `SELECT rowid AS id, * FROM files WHERE ${vIn.sql} AND ${searchCol} LIKE '%' || ? || '%' COLLATE NOCASE`;
-  const rows = db.prepare(sql).all(...vIn.params, String(searchTerm));
+  const params = [...vIn.params, String(searchTerm)];
+  let sql = `SELECT rowid AS id, * FROM files WHERE ${vIn.sql} AND ${searchCol} LIKE '%' || ? || '%' COLLATE NOCASE`;
+  if (filepathPrefix && typeof filepathPrefix === 'string') {
+    sql += " AND filepath LIKE ? ESCAPE '\\'";
+    params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
+  }
+  const rows = db.prepare(sql).all(...params);
   return rows.map(mapFileRow);
 }
 
 // Multi-word cross-field search: every token must appear in at least one of
 // title, artist, album, or filepath. Enables queries like "chaka khan fate"
 // where the artist and track title words are spread across separate columns.
-export function searchFilesAllWords(tokens, vpaths, ignoreVPaths) {
+export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0 || tokens.length === 0) { return []; }
 
@@ -493,7 +507,11 @@ export function searchFilesAllWords(tokens, vpaths, ignoreVPaths) {
     return `(title LIKE '%' || ? || '%' COLLATE NOCASE OR artist LIKE '%' || ? || '%' COLLATE NOCASE OR album LIKE '%' || ? || '%' COLLATE NOCASE OR filepath LIKE '%' || ? || '%' COLLATE NOCASE)`;
   });
 
-  const sql = `SELECT rowid AS id, * FROM files WHERE ${vIn.sql} AND ${tokenClauses.join(' AND ')}`;
+  let sql = `SELECT rowid AS id, * FROM files WHERE ${vIn.sql} AND ${tokenClauses.join(' AND ')}`;
+  if (filepathPrefix && typeof filepathPrefix === 'string') {
+    sql += " AND filepath LIKE ? ESCAPE '\\'";
+    params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
+  }
   const rows = db.prepare(sql).all(...params);
   return rows.map(mapFileRow);
 }
@@ -895,8 +913,9 @@ export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stac
   const now = Math.floor(Date.now() / 1000);
   const existing = db.prepare('SELECT count FROM scan_errors WHERE guid = ?').get(guid);
   if (existing) {
-    // Re-occurrence resets fixed_at so a re-broken file becomes unfixed again
-    db.prepare('UPDATE scan_errors SET last_seen = ?, count = count + 1, fixed_at = NULL WHERE guid = ?').run(now, guid);
+    // Re-occurrence resets fixed_at and fix_action so a re-broken file becomes
+    // unfixed again; also refresh error_msg/stack in case the message changed.
+    db.prepare('UPDATE scan_errors SET last_seen = ?, count = count + 1, fixed_at = NULL, fix_action = NULL, error_msg = ?, stack = ? WHERE guid = ?').run(now, errorMsg || '', stack || '', guid);
   } else {
     db.prepare(
       'INSERT INTO scan_errors (guid, filepath, vpath, error_type, error_msg, stack, first_seen, last_seen, count) VALUES (?,?,?,?,?,?,?,?,1)'
@@ -905,7 +924,13 @@ export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stac
 }
 
 export function getScanErrors() {
-  return db.prepare('SELECT * FROM scan_errors ORDER BY fixed_at DESC NULLS LAST, last_seen DESC').all();
+  return db.prepare(`
+    SELECT se.*,
+      CASE WHEN f.filepath IS NOT NULL THEN 1 ELSE 0 END AS file_in_db
+    FROM scan_errors se
+    LEFT JOIN files f ON f.filepath = se.filepath AND f.vpath = se.vpath
+    ORDER BY se.fixed_at DESC NULLS LAST, se.last_seen DESC
+  `).all();
 }
 
 export function clearScanErrors() {
@@ -920,10 +945,22 @@ export function pruneScanErrors(retentionHours) {
   db.prepare('DELETE FROM scan_errors WHERE fixed_at IS NOT NULL AND fixed_at < ?').run(fixedCutoff);
 }
 
-/** Mark a single error as fixed. */
-export function markScanErrorFixed(guid) {
+/** Mark a single error as fixed, storing what action was taken. */
+export function markScanErrorFixed(guid, fixAction) {
   const now = Math.floor(Date.now() / 1000);
-  db.prepare('UPDATE scan_errors SET fixed_at = ? WHERE guid = ?').run(now, guid);
+  db.prepare('UPDATE scan_errors SET fixed_at = ?, fix_action = ?, confirmed_at = NULL WHERE guid = ?').run(now, fixAction || null, guid);
+}
+
+/**
+ * After a successful rescan of a previously-errored file, mark all fixed errors
+ * for that filepath+vpath as confirmed OK.  Only touches rows where fixed_at IS
+ * NOT NULL (i.e. someone already clicked Fix) — unfixed errors are untouched.
+ */
+export function confirmScanErrorOk(filepath, vpath) {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(
+    'UPDATE scan_errors SET confirmed_at = ? WHERE filepath = ? AND vpath = ? AND fixed_at IS NOT NULL AND confirmed_at IS NULL'
+  ).run(now, filepath, vpath);
 }
 
 /**
@@ -939,9 +976,13 @@ export function markFileCueChecked(filepath, vpath) {
   db.prepare("UPDATE files SET cuepoints = '[]' WHERE (cuepoints IS NULL) AND filepath = ? AND vpath = ?").run(filepath, vpath);
 }
 
-/** Count only unfixed errors (used for the sidebar badge). */
+/** Count only actionable errors (unfixed AND file still in library) — used for the sidebar badge. */
 export function getScanErrorCount() {
-  return db.prepare('SELECT COUNT(*) AS cnt FROM scan_errors WHERE fixed_at IS NULL').get().cnt;
+  return db.prepare(`
+    SELECT COUNT(*) AS cnt FROM scan_errors se
+    INNER JOIN files f ON f.filepath = se.filepath AND f.vpath = se.vpath
+    WHERE se.fixed_at IS NULL
+  `).get().cnt;
 }
 
 // ── Subsonic-specific queries ────────────────────────────────────────────────

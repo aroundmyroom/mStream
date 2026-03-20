@@ -143,7 +143,7 @@ export function setup(mstream) {
   // ── GET /api/v1/discogs/coverart?artist=X&title=Y&album=Z&year=N ──────────
   // Admin only. Returns up to 8 Discogs release cover thumbs (base64).
   mstream.get('/api/v1/discogs/coverart', async (req, res) => {
-    if (!config.program.discogs?.enabled) return res.status(404).json({ error: 'Discogs not enabled' });
+    if (config.program.discogs?.enabled === false) return res.status(404).json({ error: 'Discogs not enabled' });
     if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
 
     let artist = String(req.query.artist || '').trim();
@@ -400,7 +400,7 @@ export function setup(mstream) {
   // Admin only. Downloads full-res cover from Discogs and embeds
   // it into the audio file using ffmpeg (no cover.jpg written to disk).
   mstream.post('/api/v1/discogs/embed', async (req, res) => {
-    if (!config.program.discogs?.enabled) return res.status(404).json({ error: 'Discogs not enabled' });
+    if (config.program.discogs?.enabled === false) return res.status(404).json({ error: 'Discogs not enabled' });
     if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
 
     const schema = Joi.object({

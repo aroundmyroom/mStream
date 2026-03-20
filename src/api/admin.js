@@ -373,13 +373,13 @@ export function setup(mstream) {
           return res.status(500).json({ error: result.reason });
         }
 
-        db.markScanErrorFixed(guid);
+        db.markScanErrorFixed(guid, 'art_fixed');
         return res.json({ ok: true, action: 'art_fixed' });
 
       } else if (err.error_type === 'cue') {
         // Cue data comes from text sidecar files or text tags—nothing to strip
         // from the audio binary. Just mark fixed so the error clears.
-        db.markScanErrorFixed(guid);
+        db.markScanErrorFixed(guid, 'cue_dismissed');
         return res.json({ ok: true, action: 'cue_dismissed' });
 
       } else if (err.error_type === 'parse' || err.error_type === 'duration') {
@@ -408,22 +408,31 @@ export function setup(mstream) {
         const probeOk = await probeHasAudio(absPath2);
         if (!probeOk) {
           console.error(`[scan-error-fix] file is unrecoverable (no valid audio stream): ${absPath2}`);
-          db.markScanErrorFixed(guid);
+          db.markScanErrorFixed(guid, 'unrecoverable');
           return res.json({ ok: true, action: 'unrecoverable' });
         }
 
         const result2 = await remuxAudio(absPath2);
         if (!result2.ok) {
+          if (result2.unrecoverable) {
+            console.error(`[scan-error-fix] file is unrecoverable (corrupt frames): ${absPath2}`);
+            db.markScanErrorFixed(guid, 'unrecoverable');
+            return res.json({ ok: true, action: 'unrecoverable' });
+          }
           console.error(`[scan-error-fix] fix failed for ${absPath2}: ${result2.reason}`);
           return res.status(500).json({ error: result2.reason });
         }
 
-        db.markScanErrorFixed(guid);
-        return res.json({ ok: true, action: 'remuxed', note: 'File rewritten — trigger a rescan to update the library.' });
+        const action3 = result2.reencoded ? 'reencoded' : 'remuxed';
+        const reencMsg = result2.reencoded
+          ? 'File re-encoded (some corrupt frames discarded) — trigger a rescan to update the library.'
+          : 'File rewritten — trigger a rescan to update the library.';
+        db.markScanErrorFixed(guid, action3);
+        return res.json({ ok: true, action: action3, note: reencMsg });
 
       } else {
         // insert / other — no file action possible
-        db.markScanErrorFixed(guid);
+        db.markScanErrorFixed(guid, 'dismissed');
         return res.json({ ok: true, action: 'dismissed' });
       }
     } catch (e) {
@@ -743,7 +752,7 @@ export function setup(mstream) {
   mstream.get("/api/v1/admin/discogs/config", (req, res) => {
     if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
     res.json({
-      enabled:        config.program.discogs?.enabled        || false,
+      enabled:        config.program.discogs?.enabled !== false,
       allowArtUpdate: config.program.discogs?.allowArtUpdate || false,
       allowId3Edit:   config.program.scanOptions?.allowId3Edit || false,
       apiKey:         config.program.discogs?.apiKey         || '',
@@ -777,6 +786,30 @@ export function setup(mstream) {
     config.program.discogs.apiKey         = req.body.apiKey;
     config.program.discogs.apiSecret      = req.body.apiSecret;
     config.program.discogs.userAgentTag   = req.body.userAgentTag;
+
+    res.json({});
+  });
+
+  // ── Lyrics config ────────────────────────────────────────────
+  mstream.get("/api/v1/admin/lyrics/config", (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    res.json({
+      enabled: config.program.lyrics?.enabled !== false,
+    });
+  });
+
+  mstream.post("/api/v1/admin/lyrics/config", async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const schema = Joi.object({ enabled: Joi.boolean().required() });
+    joiValidate(schema, req.body);
+
+    const loadConfig = await admin.loadFile(config.configFile);
+    if (!loadConfig.lyrics) loadConfig.lyrics = {};
+    loadConfig.lyrics.enabled = req.body.enabled;
+    await admin.saveFile(loadConfig, config.configFile);
+
+    if (!config.program.lyrics) config.program.lyrics = {};
+    config.program.lyrics.enabled = req.body.enabled;
 
     res.json({});
   });
@@ -1007,10 +1040,50 @@ async function remuxAudio(absFilepath) {
 
     fs.renameSync(tmp, absFilepath);
     return { ok: true };
-  } catch (e) {
+  } catch (streamCopyErr) {
     try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_) {}
-    console.error(`[scan-error-fix] remuxAudio failed for ${absFilepath}: ${e.message}`);
-    return { ok: false, reason: e.message };
+
+    // Stream-copy failed (e.g. corrupt FLAC frames — valid STREAMINFO but bad
+    // frame data causes "Could not write header" even though probeHasAudio
+    // passed).  For FLAC, try a re-encode with error tolerance: ffmpeg will
+    // decode frame-by-frame, discard corrupt packets, and re-encode the
+    // surviving audio.  The result is playable with silence gaps where frames
+    // were unreadable — far better than an unplayable file.
+    if (isFlac) {
+      try {
+        await new Promise((resolve, reject) => {
+          const args2 = [
+            '-y',
+            '-err_detect', 'ignore_err',
+            '-i', absFilepath,
+            '-fflags', '+discardcorrupt',
+            '-vn', '-c:a', 'flac', '-map_metadata', '0',
+            tmp
+          ];
+          const proc2 = child.spawn(ffmpegBin, args2);
+          let stderr2 = '';
+          proc2.stderr.on('data', d => { stderr2 += d.toString(); });
+          proc2.on('close', code => {
+            if (code !== 0) return reject(new Error(`ffmpeg re-encode exited ${code}: ${stderr2.slice(-600)}`));
+            // Sanity-check: output must be at least 1 KB
+            const outSize = fs.existsSync(tmp) ? fs.statSync(tmp).size : 0;
+            if (outSize < 1024) return reject(new Error(`re-encode produced empty output (${outSize} bytes)`));
+            resolve();
+          });
+          proc2.on('error', reject);
+        });
+        fs.renameSync(tmp, absFilepath);
+        return { ok: true, reencoded: true };
+      } catch (reEncodeErr) {
+        try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (_) {}
+        console.error(`[scan-error-fix] FLAC re-encode also failed for ${absFilepath}: ${reEncodeErr.message}`);
+        return { ok: false, unrecoverable: true, reason: reEncodeErr.message };
+      }
+    }
+
+    // Non-FLAC stream-copy failure — unrecoverable
+    console.error(`[scan-error-fix] remuxAudio failed for ${absFilepath}: ${streamCopyErr.message}`);
+    return { ok: false, unrecoverable: true, reason: streamCopyErr.message };
   }
 }
 

@@ -122,6 +122,23 @@ async function reportError(absoluteFilepath, errorType, errorMsg, stack) {
   }
 }
 
+async function confirmOk(absoluteFilepath) {
+  try {
+    const rel = absoluteFilepath
+      ? path.relative(loadJson.directory, absoluteFilepath)
+      : '';
+    await ax({
+      method: 'POST',
+      url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/confirm-ok`,
+      headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+      responseType: 'json',
+      data: { filepath: rel, vpath: loadJson.vpath }
+    });
+  } catch (_err) {
+    // confirm-ok must never crash the scanner
+  }
+}
+
 run();
 async function run() {
   try {
@@ -212,6 +229,8 @@ async function recursiveScan(dir) {
             songInfo._preserveTs = dbFileInfo.data._preserveTs;
           }
           await insertEntries(songInfo);
+          // File parsed and inserted successfully — confirm any fixed scan errors for it.
+          await confirmOk(filepath);
         } else {
           // File already in DB — run targeted updates for anything still missing
 
@@ -309,6 +328,8 @@ async function recursiveScan(dir) {
               await reportError(filepath, 'duration', `Duration update failed: ${_durErr.message}`, _durErr.stack);
             }
           }
+          // All targeted updates done without a fatal error — confirm any fixed errors for this file.
+          await confirmOk(filepath);
         }
       } catch (err) {
         // console.log(err)
