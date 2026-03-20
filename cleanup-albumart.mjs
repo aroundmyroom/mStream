@@ -30,12 +30,15 @@ console.log('Reading database…');
 const db = new DatabaseSync(DB_PATH, { open: true });
 db.exec('PRAGMA journal_mode=WAL');
 
-const artRows  = db.prepare('SELECT DISTINCT aaFile FROM files WHERE aaFile IS NOT NULL').all();
-const hashRows = db.prepare('SELECT DISTINCT hash  FROM files WHERE hash   IS NOT NULL').all();
+const artRows    = db.prepare('SELECT DISTINCT aaFile FROM files WHERE aaFile IS NOT NULL').all();
+const hashRows   = db.prepare('SELECT DISTINCT hash  FROM files WHERE hash   IS NOT NULL').all();
+const radioRows  = db.prepare('SELECT DISTINCT img   FROM radio_stations WHERE img IS NOT NULL AND img NOT LIKE "http%" AND img NOT LIKE "https%"').all();
 db.close();
 
 const referenced = new Set(artRows.map(r => r.aaFile));
 const liveHashes = new Set(hashRows.map(r => r.hash));
+// Also protect locally-cached radio station logos (radio-*.ext)
+radioRows.map(r => r.img).forEach(f => referenced.add(f));
 console.log(`  ${referenced.size.toLocaleString()} unique album-art filenames referenced in DB`);
 console.log(`  ${liveHashes.size.toLocaleString()} unique file hashes in DB (for waveform cache)`);
 

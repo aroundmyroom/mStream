@@ -108,6 +108,10 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [/user/settings — persist and restore prefs + queue across devices](API/user-settings.md)
 
+## Radio *(GitHub Copilot, 2026-03-20)*
+
+[/radio — stations CRUD, reorder, stream proxy, ICY now-playing, logo caching, admin config](API/radio.md)
+
 ## JukeBox
 
 [/jukebox/sessions](API/jukebox_sessions.md) *(admin)*

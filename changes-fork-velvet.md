@@ -13,9 +13,100 @@
 
 ---
 
+## Radio: UI polish, card grid, drag-reorder, logo system, queue behaviour — 2026-03-20
+
+### Full radio feature overhaul: visual design, station ordering, logo caching, and player bar fixes
+
+**`webapp/app.js`**:
+- `_playRadio()` uses `Player.playSingle()` — clears the queue and plays the station directly; fixes player bar not updating title/artist on channel switch.
+- Added informational notice below the channel grid: "Playing a radio stream clears the play queue".
+- Radio view rebuilt as a responsive card grid (`auto-fill, minmax(155px,1fr)`) — each station is a vertical card with logo, name, genre/country tags, and action buttons.
+- Drag-to-reorder: cards are draggable when no filter is active; a six-dot handle appears top-right; horizontal drop indicator (left/right box-shadow) shows the insertion point; on drop the new order is persisted via `PUT /api/v1/radio/stations/reorder`.
+- Filter pills for Genre and Country above the grid; reorder handle hidden when a filter is active.
+- `.rs-meta` colour changed from `var(--t3)` to `var(--t2)` for readability.
+- Placeholder logo (no image set) uses the Lucide radio SVG icon, matching the nav icon.
+- Nav icon updated to the Lucide radio icon (`<circle cx="12" cy="12" r="2"/>` + four arc paths).
+- Form layout: separate "Link B" / "Link C" fields shown only on demand; multi-genre hint text added; section title changed from "Radio" to "Channels".
+
+**`webapp/style.css`**:
+- New card-grid styles: `.rs-list`, `.rs-row`, `.rs-card-art`, `.rs-drag-handle`, `.rs-drag-over-left`, `.rs-drag-over-right`.
+- `.rs-queue-notice` — subtle bordered notice below the grid (`color: var(--t1)`).
+- `.spc-count` (scan progress song counter) changed from `var(--t3)` to `var(--t1)` — numbers were unreadable.
+
+**`src/api/radio.js`**:
+- `getLiveArtFilenames()` now includes radio logo filenames (`radio-*.{ext}`) so orphan-cleanup never deletes active station logos.
+- Delete endpoint cleans up the cached art file when no other station references it (checks `getRadioStationImgUsageCount`).
+- `PUT /api/v1/radio/stations/reorder` — accepts `{ ids: [...] }`, validates ownership, delegates to `db.reorderRadioStations`.
+- Art proxy (`GET /api/v1/radio/art`) — fetches remote images server-side to bypass browser CORS in the edit form.
+- Stream proxy (`GET /api/v1/radio/stream`) — pipes live stream through the server for same-origin Web Audio API compatibility; normalises AAC+/HE-AAC content-type to `audio/aac`.
+- ICY now-playing (`GET /api/v1/radio/nowplaying`) — HTTP/1.1 byte-level parser reads the first `StreamTitle` block; falls back gracefully when no ICY metadata present.
+
+**`src/db/sqlite-backend.js`**:
+- `sort_order` column added to `radio_stations` table (migration-safe `ALTER TABLE … ADD COLUMN`).
+- `getRadioStations()` orders by `sort_order ASC, id ASC`.
+- `reorderRadioStations(username, orderedIds)` — updates `sort_order` for each ID using `BEGIN` / `COMMIT` (no `.transaction()` — `node:sqlite` `DatabaseSync` does not expose that method).
+- `getRadioStationImgUsageCount(img)` — counts how many stations reference a given local logo filename.
+
+**`docs/API/radio.md`** *(new)*:
+- Full reference for all radio endpoints: admin config, station CRUD, reorder, stream proxy, ICY now-playing, art proxy.
+- Documents the `img` field convention (local filename → served via `/album-art/`), SSRF protection, and ICY HTTP/1.1 requirement.
+
+---
+
+## Lyrics: two-pass lrclib lookup + stale-cache removal — 2026-03-20
+
+### Removed .none cache mechanism; added duration-fallback second pass
+
+**`src/api/lyrics.js`**:
+- Removed `.none` cache files entirely — "not found" results are never written to disk; every lookup re-queries lrclib on next request.
+- Removed `duration <= 0` bail-out that was blocking all lookups for tracks whose duration wasn't yet in the DB.
+- Two-pass fetch: first attempt with duration (exact match), second attempt without duration (fuzzy fallback) if first returns nothing.
+- Only successful hits are cached as `.json`.
+
+**`save/lyrics/`**:
+- Cleared all stale `.none` cache files that were blocking re-fetches.
+
+---
+
+## Lyric display improvements — 2026-03-20
+
+### Larger active line, smooth brightness gradient, no flash on line change
+
+**`webapp/app.js`** — `lyricFillTick` / `lyricTick`:
+- Active lyric font: 36 px → 72 px (CSS only via `.vlm-active`).
+- Brightness gradient managed entirely by `requestAnimationFrame`; inline colour reset removed to eliminate flash on line change.
+- Upcoming line within 2.5 s: real-time ramp from 0.35 → 1.0 opacity for seamless transition into active.
+- Upcoming dist ≥ 2: `max(0.28, 0.65 − (dist−1)×0.12)`.
+- Past lines: `max(0.28, 0.65 + (dist+1)×0.10)` — slower falloff, floor 0.28 so distant lines remain readable.
+
+**`webapp/style.css`**:
+- `.vlm-line` base opacity floor: 0.28.
+- `.vlm-line.vlm-active`: `font-size:72px; color:#fff; text-shadow:0 0 24px var(--primary); transform:translateX(6px)`.
+- `.vlm-near` class removed — all brightness handled by rAF.
+
+---
+
+## Lyrics: exact-match-only (no fallbacks) — 2026-03-20
+
+
+### Wrong lyrics are now impossible — only an exact artist + title + duration hit is accepted
+
+**Problem:** The previous three-step fetch chain (exact+duration → exact-no-duration → fuzzy search) produced false positives. Steps 2 and 3 could return lyrics for a completely different version of the track — a 12-inch remix timed to 7 minutes synced to a 3-minute radio edit plays badly out of sync. No lyrics at all is strictly better than wrong lyrics.
+
+**`src/api/lyrics.js`**:
+- Removed `lrclibSearch` function entirely — the fuzzy `/api/search` fallback is gone.
+- Removed the "retry without duration" step — the exact `/api/get` call is no longer retried without duration.
+- If `duration ≤ 0` (track not yet in DB or scan pending), the request writes a `.none` cache entry and returns `notFound` immediately without making a network call.
+- Single attempt: `lrclibFetch(artist, title, duration)`. If the API returns nothing, `notFound` is cached and returned. No second guesses.
+
+**`docs/technology-choices.md`**:
+- Rewrote the LRCLIB matching section to document the exact-match-only policy and the rationale (wrong version = off-time = worse than nothing).
+
+---
+
 ## Lyrics: duration-accurate version matching — 2026-03-20
 
-### Lyrics now match the correct version (single vs 12-inch vs album) using the authoritative track duration from the database
+### Lyrics now use the authoritative track duration from the database
 
 **Problem:** Lyrics were being fetched for the wrong version of a track (e.g. a 7-minute 12-inch remix matched instead of the 3-minute single) because the fuzzy search fallback picked the first result with any lyrics, ignoring track length entirely.
 

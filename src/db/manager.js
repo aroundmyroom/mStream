@@ -134,3 +134,10 @@ export function getDirectoryContents(vpath, dirRelPath, username) { return backe
 // User settings sync
 export function getUserSettings(username) { return backend.getUserSettings(username); }
 export function saveUserSettings(username, patch) { return backend.saveUserSettings(username, patch); }
+// Radio stations
+export function getRadioStations(username) { return backend.getRadioStations(username); }
+export function createRadioStation(username, data) { return backend.createRadioStation(username, data); }
+export function updateRadioStation(id, username, data) { return backend.updateRadioStation(id, username, data); }
+export function deleteRadioStation(id, username) { return backend.deleteRadioStation(id, username); }
+export function getRadioStationImgUsageCount(img) { return backend.getRadioStationImgUsageCount(img); }
+export function reorderRadioStations(username, orderedIds) { return backend.reorderRadioStations(username, orderedIds); }
