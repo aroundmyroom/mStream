@@ -133,6 +133,15 @@ function renderOrClause(vpaths, ignoreVPaths) {
   return returnThis;
 }
 
+// Filters out rows matching any of the excluded filepath prefixes.
+// Used to exclude 'audio-books' child folders from music queries.
+function _applyExcludePrefixes(results, excludeFilepathPrefixes) {
+  if (!Array.isArray(excludeFilepathPrefixes) || excludeFilepathPrefixes.length === 0) return results;
+  return results.filter(row => !excludeFilepathPrefixes.some(ep =>
+    row.vpath === ep.vpath && row.filepath && row.filepath.startsWith(ep.prefix)
+  ));
+}
+
 // File Operations
 export function findFileByPath(filepath, vpath) {
   if (!fileCollection) { return null; }
@@ -394,10 +403,11 @@ export function getFileWithMetadata(filepath, vpath, username) {
   return result[0];
 }
 
-export function getArtists(vpaths, ignoreVPaths) {
+export function getArtists(vpaths, ignoreVPaths, excludeFilepathPrefixes) {
   if (!fileCollection) { return []; }
 
-  const results = fileCollection.find(renderOrClause(vpaths, ignoreVPaths));
+  const rawResults = fileCollection.find(renderOrClause(vpaths, ignoreVPaths));
+  const results = _applyExcludePrefixes(rawResults, excludeFilepathPrefixes);
   const store = {};
   for (const row of results) {
     if (!store[row.artist] && !(row.artist === undefined || row.artist === null)) {
@@ -408,15 +418,16 @@ export function getArtists(vpaths, ignoreVPaths) {
   return Object.keys(store).sort((a, b) => a.localeCompare(b));
 }
 
-export function getArtistAlbums(artist, vpaths, ignoreVPaths) {
+export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPrefixes) {
   if (!fileCollection) { return []; }
 
-  const results = fileCollection.chain().find({
+  const rawResults = fileCollection.chain().find({
     '$and': [
       renderOrClause(vpaths, ignoreVPaths),
       { 'artist': { '$eq': String(artist) } }
     ]
   }).simplesort('year', true).data();
+  const results = _applyExcludePrefixes(rawResults, excludeFilepathPrefixes);
 
   const albums = [];
   const store = {};
@@ -443,10 +454,11 @@ export function getArtistAlbums(artist, vpaths, ignoreVPaths) {
   return albums;
 }
 
-export function getAlbums(vpaths, ignoreVPaths) {
+export function getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes) {
   if (!fileCollection) { return []; }
 
-  const results = fileCollection.find(renderOrClause(vpaths, ignoreVPaths));
+  const rawResults = fileCollection.find(renderOrClause(vpaths, ignoreVPaths));
+  const results = _applyExcludePrefixes(rawResults, excludeFilepathPrefixes);
   const albums = [];
   const store = {};
   for (const row of results) {
@@ -488,7 +500,7 @@ export function getAlbumSongs(album, vpaths, username, opts) {
     .data();
 }
 
-export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix) {
+export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes) {
   if (!fileCollection) { return []; }
 
   const findThis = {
@@ -502,15 +514,15 @@ export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepat
   if (filepathPrefix && typeof filepathPrefix === 'string') {
     results = results.filter(row => row.filepath && row.filepath.startsWith(filepathPrefix));
   }
-  return results;
+  return _applyExcludePrefixes(results, excludeFilepathPrefixes);
 }
 
-export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix) {
+export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes) {
   if (!fileCollection || tokens.length === 0) { return []; }
 
   const tokenRegexes = tokens.map(t => new RegExp(escapeStringRegexp(t), 'i'));
 
-  return fileCollection.find(renderOrClause(vpaths, ignoreVPaths)).filter(row => {
+  const raw = fileCollection.find(renderOrClause(vpaths, ignoreVPaths)).filter(row => {
     if (filepathPrefix && typeof filepathPrefix === 'string') {
       if (!row.filepath || !row.filepath.startsWith(filepathPrefix)) return false;
     }
@@ -521,9 +533,10 @@ export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix
       re.test(row.filepath || '')
     );
   });
+  return _applyExcludePrefixes(raw, excludeFilepathPrefixes);
 }
 
-export function getRatedSongs(vpaths, username, ignoreVPaths) {
+export function getRatedSongs(vpaths, username, ignoreVPaths, excludeFilepathPrefixes) {
   if (!fileCollection) { return []; }
 
   const mapFun = (left, right) => {
@@ -550,14 +563,17 @@ export function getRatedSongs(vpaths, username, ignoreVPaths) {
     return rightData.hash + '-' + username;
   };
 
-  return userMetadataCollection.chain()
-    .eqJoin(fileCollection.chain(), leftFun, rightFun, mapFun)
-    .find({
-      '$and': [
-        renderOrClause(vpaths, ignoreVPaths),
-        { 'rating': { '$gt': 0 } }
-      ]
-    }).simplesort('rating', true).data();
+  return _applyExcludePrefixes(
+    userMetadataCollection.chain()
+      .eqJoin(fileCollection.chain(), leftFun, rightFun, mapFun)
+      .find({
+        '$and': [
+          renderOrClause(vpaths, ignoreVPaths),
+          { 'rating': { '$gt': 0 } }
+        ]
+      }).simplesort('rating', true).data(),
+    excludeFilepathPrefixes
+  );
 }
 
 export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts = {}) {
@@ -572,9 +588,10 @@ export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts = {
     const esc = opts.filepathPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     fCond.push({ filepath: { '$regex': new RegExp('^' + esc) } });
   }
-  return fileCollection.chain().find({ '$and': fCond }).simplesort('ts', true).limit(limit)
+  const raw = fileCollection.chain().find({ '$and': fCond }).simplesort('ts', true).limit(limit)
     .eqJoin(userMetadataCollection.chain(), leftFun, rightFunDefault, mapFunDefault)
     .data();
+  return _applyExcludePrefixes(raw, opts.excludeFilepathPrefixes);
 }
 
 export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts = {}) {
@@ -611,9 +628,10 @@ export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts = 
     const esc = opts.filepathPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     fCond.push({ filepath: { '$regex': new RegExp('^' + esc) } });
   }
-  return userMetadataCollection.chain()
+  const _rpRaw = userMetadataCollection.chain()
     .eqJoin(fileCollection.chain(), leftFun, rightFun, mapFun)
     .find({ '$and': fCond }).simplesort('lastPlayed', true).limit(limit).data();
+  return _applyExcludePrefixes(_rpRaw, opts.excludeFilepathPrefixes);
 }
 
 export function getMostPlayed(vpaths, username, limit, ignoreVPaths, opts = {}) {
@@ -650,9 +668,10 @@ export function getMostPlayed(vpaths, username, limit, ignoreVPaths, opts = {}) 
     const esc = opts.filepathPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     fCond.push({ filepath: { '$regex': new RegExp('^' + esc) } });
   }
-  return userMetadataCollection.chain()
+  const _mpRaw = userMetadataCollection.chain()
     .eqJoin(fileCollection.chain(), leftFun, rightFun, mapFun)
     .find({ '$and': fCond }).simplesort('playCount', true).limit(limit).data();
+  return _applyExcludePrefixes(_mpRaw, opts.excludeFilepathPrefixes);
 }
 
 export function getAllFilesWithMetadata(vpaths, username, opts) {
@@ -678,21 +697,24 @@ export function getAllFilesWithMetadata(vpaths, username, opts) {
     return leftData.hash + '-' + username;
   };
 
-  return fileCollection.chain()
-    .eqJoin(userMetadataCollection.chain(), leftFun, rightFunDefault, mapFunDefault)
-    .find(orClause)
-    .data()
-    .filter(doc => {
-      if (opts.artists && Array.isArray(opts.artists) && opts.artists.length > 0) {
-        const normed = opts.artists.map(a => a.toLowerCase());
-        if (!doc.artist || !normed.includes(doc.artist.toLowerCase())) return false;
-      }
-      if (opts.ignoreArtists && Array.isArray(opts.ignoreArtists) && opts.ignoreArtists.length > 0) {
-        const normed = opts.ignoreArtists.map(a => a.toLowerCase());
-        if (doc.artist && normed.includes(doc.artist.toLowerCase())) return false;
-      }
-      return true;
-    });
+  return _applyExcludePrefixes(
+    fileCollection.chain()
+      .eqJoin(userMetadataCollection.chain(), leftFun, rightFunDefault, mapFunDefault)
+      .find(orClause)
+      .data()
+      .filter(doc => {
+        if (opts.artists && Array.isArray(opts.artists) && opts.artists.length > 0) {
+          const normed = opts.artists.map(a => a.toLowerCase());
+          if (!doc.artist || !normed.includes(doc.artist.toLowerCase())) return false;
+        }
+        if (opts.ignoreArtists && Array.isArray(opts.ignoreArtists) && opts.ignoreArtists.length > 0) {
+          const normed = opts.ignoreArtists.map(a => a.toLowerCase());
+          if (doc.artist && normed.includes(doc.artist.toLowerCase())) return false;
+        }
+        return true;
+      }),
+    opts.excludeFilepathPrefixes
+  );
 }
 
 // Loki is already an in-memory store — there is no point in a separate COUNT/OFFSET
@@ -1168,4 +1190,81 @@ export function deleteRadioStation(id, username) {
   if (idx === -1) return false;
   arr.splice(idx, 1);
   return true;
+}
+
+// ── Podcast Feeds (in-memory for loki backend) ───────────────
+const _podcastFeeds = {};     // { username: Array<feed> }
+const _podcastEpisodes = {};  // { feedId: Array<episode> }
+let _podcastFeedNextId = 1;
+let _podcastEpisodeNextId = 1;
+
+export function getPodcastFeeds(username) {
+  return (_podcastFeeds[username] || [])
+    .slice()
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map(f => ({ ...f, episode_count: (_podcastEpisodes[f.id] || []).length }));
+}
+export function reorderPodcastFeeds(username, orderedIds) {
+  const arr = _podcastFeeds[username] || [];
+  orderedIds.forEach((id, idx) => {
+    const f = arr.find(x => x.id === id);
+    if (f) f.sort_order = idx;
+  });
+}
+export function getPodcastFeed(id, username) {
+  const list = _podcastFeeds[username] || [];
+  const f = list.find(x => x.id === id);
+  if (!f) return null;
+  return { ...f, episode_count: (_podcastEpisodes[id] || []).length };
+}
+export function createPodcastFeed(username, data) {
+  if (!_podcastFeeds[username]) _podcastFeeds[username] = [];
+  const now = Math.floor(Date.now() / 1000);
+  const id = _podcastFeedNextId++;
+  _podcastFeeds[username].push({
+    id, user: username, url: data.url, title: data.title || null,
+    description: data.description || null, img: data.img || null,
+    author: data.author || null, language: data.language || null,
+    last_fetched: data.last_fetched || now, created_at: now
+  });
+  return id;
+}
+export function deletePodcastFeed(id, username) {
+  const arr = _podcastFeeds[username] || [];
+  const idx = arr.findIndex(f => f.id === id);
+  if (idx !== -1) arr.splice(idx, 1);
+  delete _podcastEpisodes[id];
+}
+export function updatePodcastFeedFetched(id, username, ts) {
+  const arr = _podcastFeeds[username] || [];
+  const f = arr.find(x => x.id === id);
+  if (f) f.last_fetched = ts;
+}
+export function updatePodcastFeedTitle(id, username, title) {
+  const arr = _podcastFeeds[username] || [];
+  const f = arr.find(x => x.id === id);
+  if (f) f.title = title;
+}
+export function getPodcastFeedImgUsageCount(img) {
+  return Object.values(_podcastFeeds).flat().filter(f => f.img === img).length;
+}
+export function getPodcastEpisodes(feedId) {
+  return (_podcastEpisodes[feedId] || []).slice().sort((a, b) => (b.pub_date || 0) - (a.pub_date || 0));
+}
+export function upsertPodcastEpisodes(feedId, episodes) {
+  if (!_podcastEpisodes[feedId]) _podcastEpisodes[feedId] = [];
+  const now = Math.floor(Date.now() / 1000);
+  for (const ep of episodes) {
+    const idx = _podcastEpisodes[feedId].findIndex(e => e.guid === ep.guid);
+    if (idx !== -1) {
+      Object.assign(_podcastEpisodes[feedId][idx], { title: ep.title, description: ep.description, audio_url: ep.audio_url, pub_date: ep.pub_date, duration_secs: ep.duration_secs, img: ep.img });
+    } else {
+      _podcastEpisodes[feedId].push({ id: _podcastEpisodeNextId++, feed_id: feedId, guid: ep.guid, title: ep.title || null, description: ep.description || null, audio_url: ep.audio_url, pub_date: ep.pub_date || null, duration_secs: ep.duration_secs || 0, img: ep.img || null, played: 0, play_position: 0, created_at: now });
+    }
+  }
+}
+export function saveEpisodeProgress(episodeId, feedId, position, played) {
+  const arr = _podcastEpisodes[feedId] || [];
+  const ep = arr.find(e => e.id === episodeId);
+  if (ep) { ep.play_position = position; ep.played = played ? 1 : 0; }
 }

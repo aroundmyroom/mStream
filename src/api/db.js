@@ -122,11 +122,11 @@ export function setup(mstream) {
   });
 
   mstream.post('/api/v1/db/artists', (req, res) => {
-    res.json({ artists: db.getArtists(req.user.vpaths, req.body.ignoreVPaths) });
+    res.json({ artists: db.getArtists(req.user.vpaths, req.body.ignoreVPaths, req.body.excludeFilepathPrefixes) });
   });
 
   mstream.post('/api/v1/db/artists-albums', (req, res) => {
-    const albums = db.getArtistAlbums(req.body.artist, req.user.vpaths, req.body.ignoreVPaths);
+    const albums = db.getArtistAlbums(req.body.artist, req.user.vpaths, req.body.ignoreVPaths, req.body.excludeFilepathPrefixes);
     res.json({ albums });
   });
 
@@ -135,7 +135,7 @@ export function setup(mstream) {
   });
 
   mstream.post('/api/v1/db/albums', (req, res) => {
-    res.json({ albums: db.getAlbums(req.user.vpaths, req.body.ignoreVPaths) });
+    res.json({ albums: db.getAlbums(req.user.vpaths, req.body.ignoreVPaths, req.body.excludeFilepathPrefixes) });
   });
 
   mstream.post('/api/v1/db/album-songs', (req, res) => {
@@ -143,7 +143,7 @@ export function setup(mstream) {
       req.body.album ? String(req.body.album) : null,
       req.user.vpaths,
       req.user.username,
-      { ignoreVPaths: req.body.ignoreVPaths, artist: req.body.artist, year: req.body.year }
+      { ignoreVPaths: req.body.ignoreVPaths, artist: req.body.artist, year: req.body.year, excludeFilepathPrefixes: req.body.excludeFilepathPrefixes }
     );
 
     const songs = [];
@@ -161,7 +161,8 @@ export function setup(mstream) {
       noTitles: Joi.boolean().optional(),
       noFiles: Joi.boolean().optional(),
       ignoreVPaths: Joi.array().items(Joi.string()).optional(),
-      filepathPrefix: Joi.string().optional()
+      filepathPrefix: Joi.string().optional(),
+      excludeFilepathPrefixes: Joi.array().items(Joi.object({ vpath: Joi.string().required(), prefix: Joi.string().required() })).optional()
     });
     joiValidate(schema, req.body);
 
@@ -176,7 +177,7 @@ export function setup(mstream) {
     const tokens = req.body.search.trim().split(/\s+/).filter(t => t.length > 0);
     if (tokens.length > 1) {
       const seenPaths = new Set(title.map(t => t.filepath));
-      const crossRows = db.searchFilesAllWords(tokens, req.user.vpaths, req.body.ignoreVPaths, req.body.filepathPrefix || null);
+    const crossRows = db.searchFilesAllWords(tokens, req.user.vpaths, req.body.ignoreVPaths, req.body.filepathPrefix || null, req.body.excludeFilepathPrefixes);
       for (const row of crossRows) {
         const fp = path.join(row.vpath, row.filepath).replace(/\\/g, '/');
         if (!seenPaths.has(fp)) {
@@ -198,7 +199,7 @@ export function setup(mstream) {
       resCol = searchCol;
     }
 
-    const results = db.searchFiles(searchCol, req.body.search, req.user.vpaths, req.body.ignoreVPaths, req.body.filepathPrefix || null);
+    const results = db.searchFiles(searchCol, req.body.search, req.user.vpaths, req.body.ignoreVPaths, req.body.filepathPrefix || null, req.body.excludeFilepathPrefixes);
 
     const returnThis = [];
     const store = {};
@@ -238,7 +239,7 @@ export function setup(mstream) {
   });
 
   mstream.post('/api/v1/db/rated', (req, res) => {
-    const results = db.getRatedSongs(req.user.vpaths, req.user.username, req.body.ignoreVPaths);
+    const results = db.getRatedSongs(req.user.vpaths, req.user.username, req.body.ignoreVPaths, req.body.excludeFilepathPrefixes);
     const songs = [];
     for (const row of results) {
       songs.push(renderMetadataObj(row));
@@ -253,6 +254,7 @@ export function setup(mstream) {
     });
     joiValidate(schema, req.body);
 
+    if (/^https?:\/\//i.test(req.body.filepath)) { return res.status(400).json({ error: 'Cannot rate external URLs' }); }
     const pathInfo = vpath.getVPathInfo(req.body.filepath);
     const result = resolveFile(pathInfo, req.user);
     if (!result) { throw new Error('File Not Found'); }
@@ -276,11 +278,12 @@ export function setup(mstream) {
   mstream.post('/api/v1/db/recent/added', (req, res) => {
     const schema = Joi.object({
       limit: Joi.number().integer().min(1).required(),
-      ignoreVPaths: Joi.array().items(Joi.string()).optional()
+      ignoreVPaths: Joi.array().items(Joi.string()).optional(),
+      excludeFilepathPrefixes: Joi.array().items(Joi.object({ vpath: Joi.string().required(), prefix: Joi.string().required() })).optional()
     });
     joiValidate(schema, req.body);
 
-    const results = db.getRecentlyAdded(req.user.vpaths, req.user.username, req.body.limit, req.body.ignoreVPaths);
+    const results = db.getRecentlyAdded(req.user.vpaths, req.user.username, req.body.limit, req.body.ignoreVPaths, { excludeFilepathPrefixes: req.body.excludeFilepathPrefixes });
     const songs = [];
     for (const row of results) {
       songs.push(renderMetadataObj(row));
@@ -291,11 +294,12 @@ export function setup(mstream) {
   mstream.post('/api/v1/db/stats/recently-played', (req, res) => {
     const schema = Joi.object({
       limit: Joi.number().integer().min(1).required(),
-      ignoreVPaths: Joi.array().items(Joi.string()).optional()
+      ignoreVPaths: Joi.array().items(Joi.string()).optional(),
+      excludeFilepathPrefixes: Joi.array().items(Joi.object({ vpath: Joi.string().required(), prefix: Joi.string().required() })).optional()
     });
     joiValidate(schema, req.body);
 
-    const results = db.getRecentlyPlayed(req.user.vpaths, req.user.username, req.body.limit, req.body.ignoreVPaths);
+    const results = db.getRecentlyPlayed(req.user.vpaths, req.user.username, req.body.limit, req.body.ignoreVPaths, { excludeFilepathPrefixes: req.body.excludeFilepathPrefixes });
     const songs = [];
     for (const row of results) {
       songs.push(renderMetadataObj(row));
@@ -306,11 +310,12 @@ export function setup(mstream) {
   mstream.post('/api/v1/db/stats/most-played', (req, res) => {
     const schema = Joi.object({
       limit: Joi.number().integer().min(1).required(),
-      ignoreVPaths: Joi.array().items(Joi.string()).optional()
+      ignoreVPaths: Joi.array().items(Joi.string()).optional(),
+      excludeFilepathPrefixes: Joi.array().items(Joi.object({ vpath: Joi.string().required(), prefix: Joi.string().required() })).optional()
     });
     joiValidate(schema, req.body);
 
-    const results = db.getMostPlayed(req.user.vpaths, req.user.username, req.body.limit, req.body.ignoreVPaths);
+    const results = db.getMostPlayed(req.user.vpaths, req.user.username, req.body.limit, req.body.ignoreVPaths, { excludeFilepathPrefixes: req.body.excludeFilepathPrefixes });
     const songs = [];
     for (const row of results) {
       songs.push(renderMetadataObj(row));
@@ -354,6 +359,7 @@ export function setup(mstream) {
         minRating:     req.body.minRating,
         filepathPrefix: req.body.filepathPrefix || null,
         ignoreArtists: Array.isArray(req.body.ignoreArtists) ? req.body.ignoreArtists : undefined,
+        excludeFilepathPrefixes: req.body.excludeFilepathPrefixes,
       };
 
       let count = db.countFilesForRandom(req.user.vpaths, req.user.username, opts);
@@ -394,7 +400,7 @@ export function setup(mstream) {
 
       // ignoreArtists eliminated all candidates — retry without it
       if (count === 0 && Array.isArray(req.body.ignoreArtists) && req.body.ignoreArtists.length > 0) {
-        const optsNoIgnore = { ignoreVPaths: opts.ignoreVPaths, minRating: opts.minRating, filepathPrefix: opts.filepathPrefix };
+        const optsNoIgnore = { ignoreVPaths: opts.ignoreVPaths, minRating: opts.minRating, filepathPrefix: opts.filepathPrefix, excludeFilepathPrefixes: opts.excludeFilepathPrefixes };
         count = db.countFilesForRandom(req.user.vpaths, req.user.username, optsNoIgnore);
         if (count > 0) {
           ignoreList = [];
@@ -414,6 +420,7 @@ export function setup(mstream) {
       filepathPrefix: req.body.filepathPrefix || null,
       artists: hasArtistFilter ? req.body.artists : undefined,
       ignoreArtists: Array.isArray(req.body.ignoreArtists) ? req.body.ignoreArtists : undefined,
+      excludeFilepathPrefixes: req.body.excludeFilepathPrefixes,
     });
 
     // If the similar-artists filter returned nothing in the library, retry
@@ -425,6 +432,7 @@ export function setup(mstream) {
         minRating: req.body.minRating,
         filepathPrefix: req.body.filepathPrefix || null,
         ignoreArtists: Array.isArray(req.body.ignoreArtists) ? req.body.ignoreArtists : undefined,
+        excludeFilepathPrefixes: req.body.excludeFilepathPrefixes,
       });
     }
 

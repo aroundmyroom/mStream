@@ -207,12 +207,16 @@ export function setup(mstream) {
     const ac = new AbortController();
     req.on('close', () => ac.abort());
     try {
+      // Forward Range header so podcast seeks work (static MP3/AAC files).
+      const upstreamHeaders = { 'User-Agent': 'mStream/5 RadioProxy', 'Icy-MetaData': '0' };
+      if (req.headers['range']) upstreamHeaders['Range'] = req.headers['range'];
+
       const r = await fetch(parsed.href, {
         signal: ac.signal,
         redirect: 'follow',
-        headers: { 'User-Agent': 'mStream/5 RadioProxy', 'Icy-MetaData': '0' },
+        headers: upstreamHeaders,
       });
-      if (!r.ok) return res.status(r.status).end();
+      if (!r.ok && r.status !== 206) return res.status(r.status).end();
 
       // Normalise content-type so Chrome recognises AAC/AAC+ streams
       let ct = r.headers.get('content-type') || 'audio/mpeg';
@@ -220,6 +224,16 @@ export function setup(mstream) {
 
       res.setHeader('Content-Type', ct);
       res.setHeader('Cache-Control', 'no-cache, no-store');
+
+      // Forward range-response headers so the browser can seek and show duration
+      const cl = r.headers.get('content-length');
+      if (cl) res.setHeader('Content-Length', cl);
+      const cr = r.headers.get('content-range');
+      if (cr) res.setHeader('Content-Range', cr);
+      const ar = r.headers.get('accept-ranges');
+      if (ar) res.setHeader('Accept-Ranges', ar);
+
+      res.status(r.status); // preserve 206 Partial Content
 
       const nodeStream = Readable.fromWeb(r.body);
       nodeStream.pipe(res);
