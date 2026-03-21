@@ -149,20 +149,24 @@ Multiple users with multiple directories
 
 ## Transcoding
 
-Transcoding is enabled and configured with the following
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Enable on-the-fly transcoding |
+| `ffmpegDirectory` | `bin/ffmpeg/` | Path to the directory containing the ffmpeg binary |
+| `algorithm` | `stream` | Transcoding algorithm. Valid values: `stream` |
+| `defaultCodec` | `opus` | Codec used when the client does not request a specific one. Valid values: `aac`, `mp3`, `opus` |
+| `defaultBitrate` | `96k` | Bitrate used when the client does not request a specific one. Valid values: `192k`, `128k`, `96k`, `64k` |
 
 ```json
+{
   "transcode": {
     "enabled": true,
     "ffmpegDirectory": "/path/to/ffmpeg-dir",
     "defaultCodec": "opus",
     "defaultBitrate": "128k"
-  },
+  }
+}
 ```
-
-The `defaultCodec` accepts the values `aac`, `mp3`, `opus`.
-
-The `defaultBitrate` accepts the values, `192k` `128k`, `96k`, `64k`
 
 ## Secret 
 
@@ -170,21 +174,29 @@ Sets the secret key used for the login system.  If this is not set, mStream will
 
 ## Scan Options
 
-* `skipImg`: (boolean) whether to skip scanning for album art.  Speeds up the scan time and saves disk space
-* `bootScanDelay`: delay between server boot and first file scan (in seconds)
-* `scanInterval`: The interval which controls how often file system will be scanned for changes (in hours). Set to 0 if you want to disable scanning
-* `saveInterval`: interval which to refresh the DB on scan.  Defaults to 250.  Can be set to a higher number for large collections to avoid hogging the CPU thread
-* `pause` (in milliseconds): During the scan, there is an optional pause that is aded between file parsing.   This can prevent mStream from hogging system resources during the initial scan
-* `allowId3Edit`: (boolean) when `true`, admin users see a **✏ Edit Tags** button in the Now Playing modal that lets them rewrite ID3/Vorbis/MP4 tags directly on disk using ffmpeg. See [API/admin_id3-tags.md](API/admin_id3-tags.md). Managed via Admin panel → Database → "Allow ID3 Tag Editing" or via `POST /api/v1/admin/db/params/allow-id3edit`. *(GitHub Copilot, 2026-03-09)*
+| Key | Default | Description |
+|-----|---------|-------------|
+| `skipImg` | `false` | Skip album art during scan — speeds up scanning and saves disk space |
+| `bootScanDelay` | `3` | Seconds to wait after server boot before the first scan begins |
+| `scanInterval` | `24` | Hours between automatic rescans. Set to `0` to disable automatic scanning |
+| `saveInterval` | `250` | How often (in files processed) to flush changes to the database during a scan. Increase for large collections to reduce CPU pressure |
+| `pause` | `0` | Milliseconds of pause injected between each file during scanning. Prevents mStream from monopolising CPU on low-power hardware |
+| `maxConcurrentTasks` | `1` | Number of files processed in parallel during a scan. Increasing this speeds up scanning on multi-core machines but raises CPU usage |
+| `compressImage` | `true` | Compress album art images when caching them. Reduces storage at the cost of a small amount of CPU during initial scan |
+| `scanErrorRetentionHours` | `48` | How long (hours) scan errors are retained in the log. Valid values: `12`, `24`, `48`, `72`, `168`, `336`, `720` |
+| `allowId3Edit` | `false` | When `true`, admin users see a **✏ Edit Tags** button in the Now Playing modal to rewrite ID3/Vorbis/MP4 tags directly on disk. See [API/admin_id3-tags.md](API/admin_id3-tags.md) |
 
 ```json
 {
-  "scanOptions":{
-    "skipImg": true,
-    "scanInterval": 1.5,
-    "pause": 50,
-    "saveInterval": 500,
-    "bootScanDelay": 15,
+  "scanOptions": {
+    "skipImg": false,
+    "scanInterval": 24,
+    "pause": 0,
+    "saveInterval": 250,
+    "bootScanDelay": 3,
+    "maxConcurrentTasks": 1,
+    "compressImage": true,
+    "scanErrorRetentionHours": 48,
     "allowId3Edit": false
   }
 }
@@ -292,3 +304,179 @@ Folder that contains the frontend for mStream.  Defaults to `public` if not set
 The object key is the file extension and the value is true/false.
 
 If true, the file will be scanned and saved the db as an audio file. If false, the file will not be scanned but still be viewable in the file explorer
+
+## Address
+
+The IP address mStream binds to. Defaults to `::` (all interfaces, IPv4 + IPv6). Set to `127.0.0.1` to restrict to localhost only.
+
+```json
+{
+  "address": "127.0.0.1"
+}
+```
+
+## Lock Admin
+
+When `true`, the admin panel is only accessible from `localhost`. Requests from any other IP receive a 403. Defaults to `false`.
+
+```json
+{
+  "lockAdmin": true
+}
+```
+
+## Max Request Size
+
+Maximum body size for upload requests. Defaults to `1MB`. Accepts a string in the format `{number}KB` or `{number}MB`.
+
+```json
+{
+  "maxRequestSize": "10MB"
+}
+```
+
+## Database
+
+Controls the shared-playlist database engine and housekeeping interval.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `engine` | `loki` | Database backend. Valid values: `loki` (in-memory, fast), `sqlite` (persistent, recommended for production) |
+| `clearSharedInterval` | `24` | Hours between automatic purges of expired shared playlist tokens. Set to `0` to disable |
+
+```json
+{
+  "db": {
+    "engine": "sqlite",
+    "clearSharedInterval": 24
+  }
+}
+```
+
+## Last.fm (server-level)
+
+Controls the Last.fm integration for **all users**. This covers both scrobbling and the Similar Artists feature used by Auto-DJ.
+
+> **Opt-out behaviour:** `lastFM.enabled` defaults to `true`. Last.fm is active unless you explicitly set `"enabled": false`. This is different from `radio`, which is opt-in.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `true` | Enable Last.fm for all users (scrobbling + similar artists in Auto-DJ). Set to `false` to disable globally |
+| `apiKey` | *(built-in)* | Override the default Last.fm API key. Only needed if the built-in key reaches rate limits |
+| `apiSecret` | *(built-in)* | Override the default Last.fm API secret |
+
+```json
+{
+  "lastFM": {
+    "enabled": true,
+    "apiKey": "your-api-key",
+    "apiSecret": "your-api-secret"
+  }
+}
+```
+
+The admin API key can also be changed at runtime without a restart via Admin panel → Last.fm or `POST /api/v1/admin/lastfm/config`.
+
+Per-user Last.fm credentials (`lastfm-user`, `lastfm-session`) live inside the `users` object — see the [LastFM Scrobbling](#lastfm-scrobbling) section above.
+
+## Discogs
+
+Controls the Discogs integration used for artist images and metadata enrichment.
+
+> **Opt-in behaviour:** `discogs.enabled` defaults to `false`. You must explicitly enable it and supply API credentials.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Enable Discogs lookups |
+| `allowArtUpdate` | `false` | Allow Discogs to overwrite locally stored artist images |
+| `apiKey` | `""` | Your Discogs OAuth consumer key |
+| `apiSecret` | `""` | Your Discogs OAuth consumer secret |
+| `userAgentTag` | `""` | A short alphanumeric tag (max 4 chars) appended to the User-Agent string sent to Discogs |
+
+```json
+{
+  "discogs": {
+    "enabled": true,
+    "allowArtUpdate": false,
+    "apiKey": "your-consumer-key",
+    "apiSecret": "your-consumer-secret",
+    "userAgentTag": "msv1"
+  }
+}
+```
+
+Credentials and the enable toggle can also be managed at runtime via Admin panel → Discogs or `POST /api/v1/admin/discogs/config`.
+
+## Radio Streams
+
+Enables the internet radio station feature in the player.
+
+> **Opt-in behaviour:** `radio.enabled` must be explicitly `true`. Unlike `lastFM`, radio is **not** part of the Joi validation schema — omitting the `radio` key entirely is treated as disabled. The admin UI sets this key when you toggle the feature on.
+
+```json
+{
+  "radio": {
+    "enabled": true
+  }
+}
+```
+
+Radio station data (URLs, names, logos, sort order) is stored in the database, not in the config file. Use Admin panel → Radio Streams or the [radio API](API/radio.md) to manage stations.
+
+## Opt-in vs Opt-out: How Feature Defaults Work
+
+Some features in mStream are **opt-out** (enabled by default, set to `false` to turn off) while others are **opt-in** (disabled by default, must be explicitly enabled). This is a deliberate design distinction:
+
+| Feature | Default state | Mechanism | Why |
+|---------|--------------|-----------|-----|
+| Last.fm | **On** | `lastFM.enabled` defaults to `true` in schema | Core feature, expected to be available |
+| Discogs | **Off** | `discogs.enabled` defaults to `false` in schema | Requires external API credentials to be useful |
+| Radio | **Off** | Not in schema — checked as `=== true` | Opt-in feature; absent config key = disabled |
+
+This means:
+- You can **disable Last.fm** by adding `"lastFM": { "enabled": false }` to your config.
+- Discogs is **off until you explicitly enable it** with your API credentials.
+- Radio is **off until the admin enables it** via the UI or by setting `"radio": { "enabled": true }` in the config.
+
+## Federation
+
+> **Advanced / experimental.** Allows multiple mStream servers to share libraries.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Enable federation |
+| `folder` | *(none)* | Path to the folder used for federated content |
+| `federateUsersMode` | `false` | When `true`, users are federated across servers |
+
+```json
+{
+  "federation": {
+    "enabled": false,
+    "folder": "/media/federated",
+    "federateUsersMode": false
+  }
+}
+```
+
+## Remote Proxy Network (RPN)
+
+Configures the mStream RPN tunnel service that allows external access without port forwarding. Managed via Admin panel → RPN or `mstream.io`.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `apiUrl` | `https://api.mstream.io` | RPN API endpoint |
+| `iniFile` | `bin/rpn/frps.ini` | Path to the frps config file |
+| `email` | `""` | mstream.io account email |
+| `password` | `""` | mstream.io account password |
+| `token` | *(none)* | Auth token (set automatically after login) |
+| `url` | *(none)* | Assigned tunnel URL (set automatically after connection) |
+
+```json
+{
+  "rpn": {
+    "apiUrl": "https://api.mstream.io",
+    "email": "you@example.com",
+    "password": "your-password"
+  }
+}
+```

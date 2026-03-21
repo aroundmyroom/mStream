@@ -7,6 +7,16 @@
 
 ---
 
+## Docs: full json_config.md rewrite — 2026-03-21
+
+**`docs/json_config.md`**: Rewrote and completed the JSON configuration reference.
+- Replaced bullet-list Scan Options with a full table covering all 9 fields, including the three previously undocumented ones: `maxConcurrentTasks`, `compressImage`, `scanErrorRetentionHours`
+- Updated Transcoding table to include the `algorithm` field
+- Added previously missing sections: `address`, `lockAdmin`, `maxRequestSize`, `db` (engine + clearSharedInterval), `lastFM` (server-level), `discogs`, `radio`, `federation`, `rpn`
+- Added **Opt-in vs Opt-out: How Feature Defaults Work** — explains why Last.fm is on-by-default (`enabled: true` in Joi schema), Discogs is off-by-default (`enabled: false` in schema), and Radio requires an explicit `=== true` check (not in schema at all)
+
+---
+
 ## Part 1 — Versioned Release Log
 
 > *Source: `Changes-Velvet.md` — covers `webapp/`, `webapp/admin/`, `src/`, and all supporting files.*
