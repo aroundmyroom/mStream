@@ -43,6 +43,8 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 | Multi-word search | Single-field only | ✅ Tokens matched across title, artist, album, and filepath simultaneously |
 | Full-screen visualizer | ❌ | ✅ Milkdrop/Butterchurn, Custom Spectrum (7 modes), AudioMotion-analyzer (6 presets) |
 | Scan error repair | ❌ | ✅ Fix button re-muxes corrupt FLAC/MP3/WAV in-place; unrecoverable files flagged |
+| Internet radio | ❌ | ✅ Stream stations via proxy; station logos cached; drag-to-reorder; ICY now-playing metadata |
+| Podcasts | ❌ | ✅ RSS subscribe, episode browse & play, progress tracking, feed refresh, drag-to-reorder, RSS URL editing |
 
 ---
 
@@ -98,6 +100,23 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 - Last.fm: server-side enable/disable toggle
 - ID3 tag editor toggle (per-installation setting)
 - Logout confirmation + BroadcastChannel to stop player in all open tabs
+
+### Internet Radio
+
+- Stream any HTTP/HTTPS radio station through the built-in proxy (required for ICY headers in modern browsers)
+- Station artwork fetched and cached on subscribe; SSRF-protected (no private IPs)
+- ICY `icy-title` now-playing metadata polled and shown in the player bar
+- Admin enable/disable toggle; per-user station list with add/edit/delete/reorder
+- Drag-to-reorder stations
+
+### Podcasts
+
+- Subscribe to any RSS podcast feed — no external account required
+- Episode list with title, date, duration, and play button
+- Per-episode play-position progress saved to DB; resume on next visit
+- One-click feed refresh — re-downloads missing artwork automatically
+- Drag-to-reorder feeds
+- Inline edit panel per feed: rename display name and update the RSS URL
 
 ---
 
