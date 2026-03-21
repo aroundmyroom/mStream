@@ -1,5 +1,21 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Podcast Feeds UI — full rewrite + art cache fix + RSS URL editing — 2026-03-21
+
+**Files:** `webapp/app.js`, `webapp/style.css`, `src/server.js`, `src/api/podcasts.js`, `src/db/sqlite-backend.js`, `src/db/loki-backend.js`, `src/db/manager.js`
+
+### Problems fixed
+
+1. **Layout broken** — Feed list was using `.rs-list` (radio station tile grid: `repeat(auto-fill, minmax(155px,1fr))`). Each feed rendered as a small square card; text wrapped badly; art was clipped at wrong sizes.
+2. **Edit panel overlapped next feed** — `.pf-edit-row` was a bare sibling div inside the grid, so it became a stray grid cell on top of the adjacent card.
+3. **Images empty after page reload** — `sendArtFallback` in `src/server.js` set `Cache-Control: public, max-age=86400`. Before the podcast art file was downloaded, the browser cached the SVG placeholder for 24 h against the same URL. Fixed to `no-store`.
+4. **Images empty after Refresh button** — Cache-busting `_v` was `Date.now()` (session-only, lost on reload). Now derived from `last_fetched` (persists) and stamped fresh after an explicit refresh.
+5. **Episode playback art blank** — Player's `artUrl()` call had no version info. New `album-art-v` field on song objects carries the buster into the player thumbnail and `_applyAlbumArtTheme`.
+6. **Art size 72→88 px** — CSS and inline style updated.
+7. **RSS URL not editable** — `PATCH /api/v1/podcast/feeds/:id` only accepted `title`. Extended to accept `url` as well; `updatePodcastFeedUrl()` added to all three DB layers. Edit panel shows both Display name and RSS URL fields.
+
+---
+
 ## Podcast feed art: orphan-cleanup protection + refresh recovery — 2026-03-21
 
 **Files:** `cleanup-albumart.mjs`, `src/api/podcasts.js`, `src/db/sqlite-backend.js`, `src/db/loki-backend.js`, `src/db/manager.js`

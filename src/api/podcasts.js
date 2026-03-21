@@ -250,12 +250,16 @@ export function setup(mstream) {
   mstream.patch('/api/v1/podcast/feeds/:id', (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
-    const schema = Joi.object({ title: Joi.string().max(200).required() });
+    const schema = Joi.object({
+      title: Joi.string().max(200).optional(),
+      url:   Joi.string().uri({ scheme: ['http', 'https'] }).max(2048).optional(),
+    }).or('title', 'url');
     const { error, value } = schema.validate(req.body);
     if (error) return res.status(400).json({ error: error.message });
     const feed = db.getPodcastFeed(id, req.user.username);
     if (!feed) return res.status(404).json({ error: 'Feed not found' });
-    db.updatePodcastFeedTitle(id, req.user.username, value.title.trim());
+    if (value.title) db.updatePodcastFeedTitle(id, req.user.username, value.title.trim());
+    if (value.url)   db.updatePodcastFeedUrl(id, req.user.username, value.url.trim());
     res.json(db.getPodcastFeed(id, req.user.username));
   });
 

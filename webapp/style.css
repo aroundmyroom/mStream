@@ -1769,5 +1769,26 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .rs-meta span{display:inline;}
 .rs-actions{display:flex;align-items:center;justify-content:center;gap:4px;width:100%;}
 .rs-queue-notice{margin:10px 18px 14px;padding:8px 12px;border-radius:var(--r);background:var(--raised);border:1px solid var(--border);font-size:12px;color:var(--t1);text-align:center;}
+/* ── Podcast Feed List ─────────────────────────────────────────── */
+.pf-list{display:flex;flex-direction:column;gap:8px;}
+.pf-item{border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--raised);}
+.pf-feed-row{display:flex;align-items:center;gap:12px;padding:10px 10px 10px 12px;cursor:pointer;transition:background .12s;}
+.pf-feed-row:hover{background:var(--hover);}
+.pf-art{width:88px;height:88px;border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bg2);display:flex;align-items:center;justify-content:center;}
+.pf-art img{width:88px;height:88px;object-fit:cover;display:block;}
+.pf-art svg{opacity:.35;}
+.pf-info{flex:1;min-width:0;}
+.pf-title{font-size:.92rem;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pf-author{font-size:.78rem;color:var(--t2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pf-stats{font-size:.78rem;color:var(--t3);margin-top:2px;}
+.pf-desc{font-size:.78rem;color:var(--t2);margin-top:3px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+.pf-btns{display:flex;flex-direction:row;gap:3px;flex-shrink:0;align-items:center;}
+.pf-handle{display:none;align-items:center;justify-content:center;width:22px;align-self:stretch;cursor:grab;color:var(--t3);opacity:.4;flex-shrink:0;}
+.pf-handle:hover{opacity:1;}
+.pf-list--sortable .pf-handle{display:flex;}
+.pf-item.pf-dragging{opacity:.35;}
+.pf-item.pf-drag-over-top{border-top:2px solid var(--primary);}
+.pf-item.pf-drag-over-bottom{border-bottom:2px solid var(--primary);}
+.pf-edit-panel{display:none;flex-wrap:wrap;align-items:center;gap:.5rem;padding:.5rem .75rem .75rem;border-top:1px solid var(--border);}
 .ctrl-sm{width:30px;height:30px;font-size:14px;}
 

@@ -593,7 +593,8 @@ const Player = {
       });
     }));
     const thumb = document.getElementById('player-art');
-    const u = artUrl(s['album-art'], 'l');
+    let u = artUrl(s['album-art'], 'l');
+    if (u && s['album-art-v']) u += `&_v=${encodeURIComponent(s['album-art-v'])}`;
     thumb.innerHTML = u
       ? `<img src="${u}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`
       : noArtHtml();
@@ -623,7 +624,7 @@ const Player = {
     _updateMediaSession(s);
     // Dynamic album-art colour theming — for radio use station logo, not track art
     if (s.isRadio) { _applyAlbumArtTheme(s['album-art'] ? artUrl(s['album-art'], 'l') : null); }
-    else _applyAlbumArtTheme(artUrl(s['album-art'], 'l'));
+    else { let _u = artUrl(s['album-art'], 'l'); if (_u && s['album-art-v']) _u += `&_v=${encodeURIComponent(s['album-art-v'])}`; _applyAlbumArtTheme(_u); }
     // Tab favicon + title
     _TabFav.setSong(s, !audioEl.paused);
   },
@@ -6403,35 +6404,38 @@ async function viewPodcastFeeds() {
 function _renderPodcastFeedsView() {
   const body = document.getElementById('content-body');
 
-  const feedCards = _podcastFeeds.map(f => `
-    <div class="rs-row pf-card" data-id="${f.id}" style="cursor:pointer">
-      <div class="rs-drag-handle" title="Drag to reorder"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg></div>
-      <div style="width:88px;height:88px;flex-shrink:0;border-radius:8px;overflow:hidden">
-        ${_pfArtHtml(f.img, 's', '88px', '88px')}
+  const pfPlaceholder = `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>`;
+
+  const feedCards = _podcastFeeds.map(f => {
+    const vParam = f._v || f.last_fetched || '';
+    const imgUrl = f.img ? artUrl(f.img, 's') + (vParam ? `&_v=${encodeURIComponent(vParam)}` : '') : null;
+    const artHtml = imgUrl
+      ? `<img src="${esc(imgUrl)}" alt="" style="width:88px;height:88px;object-fit:cover;display:block" onerror="this.remove()">`
+      : pfPlaceholder;
+    return `<div class="pf-item" data-id="${f.id}">
+      <div class="pf-feed-row">
+        <div class="pf-handle pf-no-open" title="Drag to reorder"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg></div>
+        <div class="pf-art">${artHtml}</div>
+        <div class="pf-info">
+          <div class="pf-title">${esc(f.title || f.url)}</div>
+          ${f.author ? `<div class="pf-author">${esc(f.author)}</div>` : ''}
+          <div class="pf-stats">${f.episode_count ?? 0} episode${(f.episode_count ?? 0) !== 1 ? 's' : ''}${f.last_fetched ? ` · refreshed ${_fmtPubDate(f.last_fetched)}` : ''}</div>
+          ${f.description ? `<div class="pf-desc">${esc(f.description)}</div>` : ''}
+        </div>
+        <div class="pf-btns pf-no-open">
+          <button class="pf-edit-btn ctrl-btn ctrl-sm" data-id="${f.id}" title="Rename"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+          <button class="pf-refresh-btn ctrl-btn ctrl-sm" data-id="${f.id}" title="Refresh feed"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+          <button class="pf-delete-btn ctrl-btn ctrl-sm" data-id="${f.id}" title="Unsubscribe" style="color:var(--err,#f38ba8)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6l-1,14H6L5,6"/><path d="M10,11v6"/><path d="M14,11v6"/><path d="M9,6V4h6v2"/></svg></button>
+        </div>
       </div>
-      <div class="rs-info">
-        <div class="rs-name" style="font-size:.95rem;white-space:normal;overflow:visible;text-overflow:unset">${esc(f.title || f.url)}</div>
-        ${f.author ? `<div class="rs-meta" style="margin-bottom:.2rem"><span>${esc(f.author)}</span></div>` : ''}
-        <div class="rs-meta" style="white-space:normal;overflow:visible">${f.episode_count ?? 0} episode${(f.episode_count ?? 0) !== 1 ? 's' : ''}${f.last_fetched ? ` &nbsp;·&nbsp; refreshed ${_fmtPubDate(f.last_fetched)}` : ''}</div>
-        ${f.description ? `<div class="rs-meta pf-desc" style="margin-top:.25rem;max-height:2.6em;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(f.description)}</div>` : ''}
+      <div class="pf-edit-panel" id="pf-edit-panel-${f.id}">
+        <input type="text" class="settings-input pf-edit-name" data-id="${f.id}" value="${esc(f.title || '')}" style="flex:1;min-width:160px;max-width:320px" placeholder="Display name">
+        <input type="url" class="settings-input pf-edit-url" data-id="${f.id}" value="${esc(f.url || '')}" style="flex:2;min-width:200px;max-width:480px" placeholder="RSS feed URL">
+        <button class="btn-primary pf-edit-save" data-id="${f.id}" style="padding:.3rem .9rem;font-size:.82rem">Save</button>
+        <button class="btn-flat pf-edit-cancel" data-id="${f.id}" style="padding:.3rem .7rem;font-size:.82rem">Cancel</button>
       </div>
-      <div class="rs-actions pf-card-actions" style="align-items:flex-start;padding-top:.1rem">
-        <button class="pf-edit-btn ctrl-btn ctrl-sm pf-no-open" data-id="${f.id}" title="Rename">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        </button>
-        <button class="rs-refresh-btn ctrl-btn ctrl-sm pf-no-open" data-id="${f.id}" title="Refresh feed">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-        </button>
-        <button class="rs-delete-btn ctrl-btn ctrl-sm pf-no-open" data-id="${f.id}" title="Unsubscribe" style="color:var(--err,#f38ba8)">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6l-1,14H6L5,6"/><path d="M10,11v6"/><path d="M14,11v6"/><path d="M9,6V4h6v2"/></svg>
-        </button>
-      </div>
-    </div>
-    <div class="pf-edit-row" id="pf-edit-row-${f.id}" style="display:none;padding:.5rem .75rem .75rem 72px;gap:.5rem;flex-wrap:wrap;align-items:center">
-      <input type="text" class="settings-input pf-edit-name" data-id="${f.id}" value="${esc(f.title || '')}" style="flex:1;min-width:160px;max-width:380px" placeholder="Display name">
-      <button class="btn-primary pf-edit-save pf-no-open" data-id="${f.id}" style="padding:.3rem .9rem;font-size:.82rem">Save</button>
-      <button class="btn-flat pf-edit-cancel pf-no-open" data-id="${f.id}" style="padding:.3rem .7rem;font-size:.82rem">Cancel</button>
-    </div>`).join('') || '<div class="empty-state" style="margin-top:1.5rem">No subscriptions yet — add an RSS feed URL above to get started</div>';
+    </div>`;
+  }).join('') || '<div class="empty-state" style="margin-top:1.5rem">No subscriptions yet — add an RSS feed URL above to get started</div>';
 
   body.innerHTML = `
     <div class="playback-panel">
@@ -6447,7 +6451,6 @@ function _renderPodcastFeedsView() {
           <button class="btn-primary" id="pf-preview-btn">Preview</button>
         </div>
         <div id="pf-subscribe-error" style="color:var(--err,#f38ba8);font-size:.82rem;padding:.25rem .5rem;display:none"></div>
-        <!-- preview panel, hidden until fetched -->
         <div id="pf-preview-panel" style="display:none;margin-top:.75rem;border-top:1px solid var(--border);padding-top:.75rem">
           <div style="display:flex;gap:.75rem;align-items:flex-start;margin-bottom:.75rem">
             <div id="pf-preview-art" style="min-width:64px;width:64px;height:64px;border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bg2)"></div>
@@ -6472,11 +6475,11 @@ function _renderPodcastFeedsView() {
           </div>
           <div class="playback-section-title">My Feeds</div>
         </div>
-        <div class="rs-list rs-list--sortable pf-list">${feedCards}</div>
+        <div class="pf-list${_podcastFeeds.length > 1 ? ' pf-list--sortable' : ''}">${feedCards}</div>
       </div>
     </div>`;
 
-  // Preview button — fetch feed info without subscribing
+  // Preview button
   body.querySelector('#pf-preview-btn').addEventListener('click', async () => {
     const url   = body.querySelector('#pf-url-input').value.trim();
     const errEl = body.querySelector('#pf-subscribe-error');
@@ -6486,10 +6489,9 @@ function _renderPodcastFeedsView() {
     btn.disabled = true; btn.textContent = 'Loading…';
     try {
       const p = await api('GET', `api/v1/podcast/preview?url=${encodeURIComponent(url)}`);
-      // populate preview panel
       const artEl = body.querySelector('#pf-preview-art');
       if (p.imgUrl) {
-        artEl.innerHTML = `<img src="${esc(artUrl(p.imgUrl, 's'))}" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.parentNode.innerHTML=''">`;
+        artEl.innerHTML = `<img src="${esc(artUrl(p.imgUrl, 's'))}" alt="" style="width:100%;height:100%;object-fit:cover" onerror="this.remove()">`;
       }
       body.querySelector('#pf-preview-title').textContent  = p.title || '(Untitled)';
       body.querySelector('#pf-preview-author').textContent = p.author || '';
@@ -6512,7 +6514,7 @@ function _renderPodcastFeedsView() {
     body.querySelector('#pf-subscribe-error').style.display = 'none';
   });
 
-  // Subscribe button (inside preview panel)
+  // Subscribe button
   body.querySelector('#pf-subscribe-btn').addEventListener('click', async () => {
     const url  = body.querySelector('#pf-url-input').value.trim();
     const name = body.querySelector('#pf-name-input').value.trim();
@@ -6534,53 +6536,55 @@ function _renderPodcastFeedsView() {
     }
   });
 
-  // Edit (rename) buttons — toggle inline edit row
+  // Edit buttons — toggle inline edit panel
   body.querySelectorAll('.pf-edit-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const id  = btn.dataset.id;
-      const row = body.querySelector(`#pf-edit-row-${id}`);
-      if (!row) return;
-      const visible = row.style.display !== 'none';
-      // close all open edit rows first
-      body.querySelectorAll('.pf-edit-row').forEach(r => { r.style.display = 'none'; });
-      if (!visible) row.style.display = 'flex';
+      const id = btn.dataset.id;
+      const panel = body.querySelector(`#pf-edit-panel-${id}`);
+      if (!panel) return;
+      const isOpen = panel.style.display === 'flex';
+      body.querySelectorAll('.pf-edit-panel').forEach(p => { p.style.display = 'none'; });
+      if (!isOpen) { panel.style.display = 'flex'; panel.querySelector('.pf-edit-name')?.focus(); }
     });
   });
 
-  // Edit save buttons
+  // Edit save
   body.querySelectorAll('.pf-edit-save').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const id    = parseInt(btn.dataset.id, 10);
-      const input = body.querySelector(`.pf-edit-name[data-id="${id}"]`);
-      const title = input?.value.trim();
+      const nameInput = body.querySelector(`.pf-edit-name[data-id="${id}"]`);
+      const urlInput  = body.querySelector(`.pf-edit-url[data-id="${id}"]`);
+      const title = nameInput?.value.trim();
+      const url   = urlInput?.value.trim();
       if (!title) { toast('Name cannot be empty'); return; }
+      if (!url)   { toast('RSS URL cannot be empty'); return; }
+      try { new URL(url); } catch (_) { toast('Invalid RSS URL'); return; }
       btn.disabled = true;
       try {
-        const updated = await api('PATCH', `api/v1/podcast/feeds/${id}`, { title });
+        const updated = await api('PATCH', `api/v1/podcast/feeds/${id}`, { title, url });
         const idx = _podcastFeeds.findIndex(f => f.id === id);
         if (idx !== -1) _podcastFeeds[idx] = { ..._podcastFeeds[idx], ...updated };
         _renderPodcastFeedsView();
       } catch (err) {
-        toast('Rename failed: ' + (err.message || ''));
+        toast('Save failed: ' + (err.message || ''));
         btn.disabled = false;
       }
     });
   });
 
-  // Edit cancel buttons
+  // Edit cancel
   body.querySelectorAll('.pf-edit-cancel').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const id = btn.dataset.id;
-      const row = body.querySelector(`#pf-edit-row-${id}`);
-      if (row) row.style.display = 'none';
+      const panel = body.querySelector(`#pf-edit-panel-${btn.dataset.id}`);
+      if (panel) panel.style.display = 'none';
     });
   });
 
   // Refresh buttons
-  body.querySelectorAll('.rs-refresh-btn').forEach(btn => {
+  body.querySelectorAll('.pf-refresh-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const id = parseInt(btn.dataset.id, 10);
@@ -6588,7 +6592,7 @@ function _renderPodcastFeedsView() {
       try {
         const updated = await api('POST', `api/v1/podcast/feeds/${id}/refresh`);
         const idx = _podcastFeeds.findIndex(f => f.id === id);
-        if (idx !== -1) _podcastFeeds[idx] = updated;
+        if (idx !== -1) _podcastFeeds[idx] = { ...updated, _v: Date.now(), last_fetched: updated.last_fetched || new Date().toISOString() };
         _renderPodcastFeedsView();
         toast('Feed refreshed');
       } catch (e) {
@@ -6599,7 +6603,7 @@ function _renderPodcastFeedsView() {
   });
 
   // Delete buttons
-  body.querySelectorAll('.rs-delete-btn').forEach(btn => {
+  body.querySelectorAll('.pf-delete-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const id = parseInt(btn.dataset.id, 10);
@@ -6616,52 +6620,55 @@ function _renderPodcastFeedsView() {
     });
   });
 
-  // Click feed card to open episode list
-  body.querySelectorAll('.pf-card').forEach(card => {
-    card.addEventListener('click', (e) => {
+  // Click feed row to open episodes
+  body.querySelectorAll('.pf-item').forEach(item => {
+    item.querySelector('.pf-feed-row').addEventListener('click', (e) => {
       if (e.target.closest('.pf-no-open')) return;
-      const id = parseInt(card.dataset.id, 10);
+      const id = parseInt(item.dataset.id, 10);
       const feed = _podcastFeeds.find(f => f.id === id);
       if (feed) viewPodcastEpisodes(feed);
     });
   });
 
-  // Drag-to-reorder (same as radio)
+  // Drag-to-reorder
   if (_podcastFeeds.length > 1) {
     const pfList = body.querySelector('.pf-list');
     let dragSrcId = null;
-    pfList.querySelectorAll('.pf-card').forEach(row => {
-      row.setAttribute('draggable', 'true');
-      row.addEventListener('dragstart', e => {
-        dragSrcId = row.dataset.id;
-        row.classList.add('rs-dragging');
+    pfList.querySelectorAll('.pf-item').forEach(item => {
+      const handle = item.querySelector('.pf-handle');
+      if (handle) {
+        handle.addEventListener('mousedown', () => { item.setAttribute('draggable', 'true'); });
+        handle.addEventListener('mouseup',   () => { item.setAttribute('draggable', 'false'); });
+      }
+      item.addEventListener('dragstart', e => {
+        dragSrcId = item.dataset.id;
+        item.classList.add('pf-dragging');
         e.dataTransfer.effectAllowed = 'move';
       });
-      row.addEventListener('dragend', () => {
-        row.classList.remove('rs-dragging');
-        pfList.querySelectorAll('.pf-card').forEach(r => r.classList.remove('rs-drag-over-left', 'rs-drag-over-right'));
+      item.addEventListener('dragend', () => {
+        item.classList.remove('pf-dragging');
+        pfList.querySelectorAll('.pf-item').forEach(r => r.classList.remove('pf-drag-over-top', 'pf-drag-over-bottom'));
       });
-      row.addEventListener('dragover', e => {
+      item.addEventListener('dragover', e => {
         e.preventDefault();
-        if (row.dataset.id === dragSrcId) return;
-        const rect = row.getBoundingClientRect();
-        pfList.querySelectorAll('.pf-card').forEach(r => r.classList.remove('rs-drag-over-left', 'rs-drag-over-right'));
-        row.classList.add(e.clientX < rect.left + rect.width / 2 ? 'rs-drag-over-left' : 'rs-drag-over-right');
+        if (item.dataset.id === dragSrcId) return;
+        const rect = item.getBoundingClientRect();
+        pfList.querySelectorAll('.pf-item').forEach(r => r.classList.remove('pf-drag-over-top', 'pf-drag-over-bottom'));
+        item.classList.add(e.clientY < rect.top + rect.height / 2 ? 'pf-drag-over-top' : 'pf-drag-over-bottom');
       });
-      row.addEventListener('dragleave', () => {
-        row.classList.remove('rs-drag-over-left', 'rs-drag-over-right');
+      item.addEventListener('dragleave', () => {
+        item.classList.remove('pf-drag-over-top', 'pf-drag-over-bottom');
       });
-      row.addEventListener('drop', async e => {
+      item.addEventListener('drop', async e => {
         e.preventDefault();
-        pfList.querySelectorAll('.pf-card').forEach(r => r.classList.remove('rs-drag-over-left', 'rs-drag-over-right'));
-        if (row.dataset.id === dragSrcId) return;
-        const srcRow = pfList.querySelector(`.pf-card[data-id="${dragSrcId}"]`);
-        if (!srcRow) return;
-        const rect = row.getBoundingClientRect();
-        const insertBefore = e.clientX < rect.left + rect.width / 2;
-        if (insertBefore) pfList.insertBefore(srcRow, row);
-        else row.after(srcRow);
-        const newIds = [...pfList.querySelectorAll('.pf-card')].map(r => parseInt(r.dataset.id, 10));
+        pfList.querySelectorAll('.pf-item').forEach(r => r.classList.remove('pf-drag-over-top', 'pf-drag-over-bottom'));
+        if (item.dataset.id === dragSrcId) return;
+        const srcItem = pfList.querySelector(`.pf-item[data-id="${dragSrcId}"]`);
+        if (!srcItem) return;
+        const rect = item.getBoundingClientRect();
+        if (e.clientY < rect.top + rect.height / 2) pfList.insertBefore(srcItem, item);
+        else item.after(srcItem);
+        const newIds = [...pfList.querySelectorAll('.pf-item')].map(r => parseInt(r.dataset.id, 10));
         const idToFeed = Object.fromEntries(_podcastFeeds.map(f => [f.id, f]));
         _podcastFeeds = newIds.map(id => idToFeed[id]).filter(Boolean);
         try { await api('PUT', 'api/v1/podcast/feeds/reorder', { ids: newIds }); } catch (_) {}
@@ -6682,7 +6689,11 @@ async function viewPodcastEpisodes(feed) {
   let episodes = [];
   try { episodes = await api('GET', `api/v1/podcast/episodes/${feed.id}`); } catch (_) { episodes = []; }
 
-  const artHtml = _pfArtHtml(feed.img, 'l');
+  const vParam = feed._v || feed.last_fetched || '';
+  const feedImgUrl = feed.img ? artUrl(feed.img, 'l') + (vParam ? `&_v=${encodeURIComponent(vParam)}` : '') : null;
+  const artHtml = feedImgUrl
+    ? `<img src="${esc(feedImgUrl)}" alt="" style="width:96px;height:96px;object-fit:cover;display:block" onerror="this.remove()">`
+    : `<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.35"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>`;
   const epRows = episodes.map((ep, i) => `
     <div class="pf-ep-row" data-id="${ep.id}" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:var(--r);background:var(--raised);transition:background .12s;cursor:default">
       <div style="min-width:1.6rem;font-size:.75rem;color:var(--t2);text-align:right;flex-shrink:0">${i + 1}</div>
@@ -6723,12 +6734,13 @@ async function viewPodcastEpisodes(feed) {
       const ep = episodes.find(e => e.id == btn.dataset.id);
       if (!ep) return;
       Player.playSingle({
-        title:       ep.title,
-        artist:      feed.author || feed.title,
-        album:       feed.title,
-        filepath:    ep.audio_url,
-        'album-art': feed.img || null,
-        isPodcast:   true,
+        title:          ep.title,
+        artist:         feed.author || feed.title,
+        album:          feed.title,
+        filepath:       ep.audio_url,
+        'album-art':    feed.img || null,
+        'album-art-v':  feed.last_fetched || '',
+        isPodcast:      true,
       });
     });
   });
