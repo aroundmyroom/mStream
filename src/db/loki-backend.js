@@ -1250,6 +1250,11 @@ export function updatePodcastFeedImg(id, username, img) {
   const f = arr.find(x => x.id === id);
   if (f) f.img = img;
 }
+export function updatePodcastFeedUrl(id, username, url) {
+  const arr = _podcastFeeds[username] || [];
+  const f = arr.find(x => x.id === id);
+  if (f) f.url = url;
+}
 export function getPodcastFeedImgUsageCount(img) {
   return Object.values(_podcastFeeds).flat().filter(f => f.img === img).length;
 }

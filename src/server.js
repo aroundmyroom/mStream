@@ -209,7 +209,7 @@ export async function serveIt(configFile) {
   );
   function sendArtFallback(res) {
     res.set('Content-Type', 'image/svg+xml');
-    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Cache-Control', 'no-store');
     res.end(ALBUM_ART_FALLBACK_SVG);
   }
 

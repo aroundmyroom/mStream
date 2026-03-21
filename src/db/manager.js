@@ -149,6 +149,7 @@ export function deletePodcastFeed(id, username) { return backend.deletePodcastFe
 export function updatePodcastFeedFetched(id, username, ts) { return backend.updatePodcastFeedFetched(id, username, ts); }
 export function updatePodcastFeedTitle(id, username, title) { return backend.updatePodcastFeedTitle(id, username, title); }
 export function updatePodcastFeedImg(id, username, img) { return backend.updatePodcastFeedImg(id, username, img); }
+export function updatePodcastFeedUrl(id, username, url) { return backend.updatePodcastFeedUrl(id, username, url); }
 export function reorderPodcastFeeds(username, orderedIds) { return backend.reorderPodcastFeeds(username, orderedIds); }
 export function getPodcastFeedImgUsageCount(img) { return backend.getPodcastFeedImgUsageCount(img); }
 // Podcast episodes
