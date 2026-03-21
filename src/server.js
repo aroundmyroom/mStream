@@ -32,6 +32,7 @@ import * as subsonicApi from './api/subsonic.js';
 import * as userSettingsApi from './api/user-settings.js';
 import * as lyricsApi from './api/lyrics.js';
 import * as radioApi from './api/radio.js';
+import * as podcastApi from './api/podcasts.js';
 import WebError from './util/web-error.js';
 import { sanitizeFilename } from './util/validation.js';
 
@@ -186,6 +187,7 @@ export async function serveIt(configFile) {
   userSettingsApi.setup(mstream);
   lyricsApi.setup(mstream);
   radioApi.setup(mstream);
+  podcastApi.setup(mstream);
   remoteApi.setupAfterAuth(mstream, server);
   sharedApi.setupAfterSecurity(mstream);
   syncthing.setup();

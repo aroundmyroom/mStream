@@ -4,123 +4,35 @@
 
 ## NOW — In Progress / Remaining
 
-### 🎙 Podcasts — PLANNED
+### 🎙 Podcasts — ✅ DONE (2026-03-21)
 
-> Users subscribe to RSS feed URLs. The server fetches, parses and stores all episodes in the DB — server-side, SSRF-protected, no external podcast service needed. `fast-xml-parser` (already in `package.json`) handles the XML. Each user has their own independent subscription list when podcasts are enabled in the admin panel.
+> See [`docs/podcasts.md`](docs/podcasts.md) for full documentation.
 
-**Validated test feeds (all three must work):**
-- `https://podcasts.files.bbci.co.uk/p02nq0gn.rss` — BBC, `audio/mpeg`, uses `<ppg:enclosureSecure>` for HTTPS, `<itunes:duration>` as integer seconds (`1690`)
-- `https://www3.nhk.or.jp/rj/podcast/rss/indonesian.xml` — NHK, standard `<enclosure>`, `<itunes:duration>` as integer seconds
-- `https://anchor.fm/s/a2b53d4c/podcast/rss` — Anchor/Spotify, standard `<enclosure>` already HTTPS, **`<itunes:duration>` as `HH:MM:SS` string** (`00:51:54`), `<guid>` is a plain UUID, uses `<dc:creator>` for author, has `<itunes:season>` + `<itunes:episode>` number fields
+**Phase 0 — Hybrid nav UI** ✅
+- [x] Listen sidebar section (`id="podcasts-section"`) — hidden by default
+- [x] Revealed when radio enabled OR podcast feed subscribed OR audio-books vpath exists
+- [x] `_updateListenSection()` — single source of truth for Listen section visibility
+- [x] Nav dispatcher wired (`data-view="podcasts"`, `data-view="podcast-feeds"`)
 
-**Critical parser requirement — `<itunes:duration>` dual format:**
-- BBC/NHK: integer seconds (`1690`)
-- Anchor/Spotify: `HH:MM:SS` or `MM:SS` string (`00:51:54`, `45:18`)
-- Parser must detect format and normalise to integer seconds:
-  ```js
-  function _parseDuration(v) {
-    if (!v) return 0;
-    if (!isNaN(v)) return parseInt(v, 10);
-    const parts = String(v).split(':').map(Number);
-    if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
-    if (parts.length === 2) return parts[0]*60 + parts[1];
-    return 0;
-  }
-  ```
+**Phase 1 — Database** ✅
+- [x] `podcast_feeds` + `podcast_episodes` tables (SQLite + Loki); unique `(feed_id, guid)` constraint
+- [x] `sort_order` via migration-safe `ALTER TABLE … ADD COLUMN`
+- [x] All DB functions: create, get, delete (cascade), upsert episodes, reorder, save progress, art usage count
 
-**Architecture: two-level browse (feed list → episode list → play)**
-```
-Podcasts nav
-  └── Feed card grid  (one card per subscribed RSS feed)
-        └── Episode list  (all episodes from that feed, newest first)
-              └── Player  (plays like a song / radio — uses Player.playSingle)
-```
+**Phase 2 — Backend (`src/api/podcasts.js`)** ✅
+- [x] 9 REST endpoints (preview, list, subscribe, reorder, rename, delete, refresh, episodes, progress)
+- [x] SSRF protection on all outbound fetches
+- [x] RSS parser handles BBC / NHK / Anchor feeds; dual-format `<itunes:duration>`; HTML stripping
+- [x] Cover art downloaded and cached as `podcast-{md5}.{ext}`; orphan-cleanup protected
 
-**Phase 1 — Database (`src/db/sqlite-backend.js`)**
-- [ ] `podcast_feeds` table: `id INTEGER PK, user TEXT, url TEXT, title TEXT, description TEXT, img TEXT (local filename), author TEXT, language TEXT, last_fetched INTEGER (unix ms), sort_order INTEGER, created_at INTEGER`
-- [ ] `podcast_episodes` table: `id INTEGER PK, feed_id INTEGER FK, guid TEXT, title TEXT, description TEXT, audio_url TEXT, pub_date INTEGER (unix ms), duration_secs INTEGER, img TEXT (local filename or remote URL), played INTEGER DEFAULT 0, play_position REAL DEFAULT 0, created_at INTEGER`
-- [ ] Unique constraint: `(feed_id, guid)` on episodes — prevents duplicates on refresh
-- [ ] Migration-safe: check `PRAGMA table_info` before `ALTER TABLE … ADD COLUMN`
-- [ ] DB functions: `createPodcastFeed(user, data)`, `getPodcastFeeds(user)` → array sorted by `sort_order`, `deletePodcastFeed(id, user)` + cascade-delete its episodes, `upsertPodcastEpisodes(feedId, episodes[])` (INSERT OR REPLACE keyed on guid+feed_id), `getPodcastEpisodes(feedId, user)` → sorted `pub_date DESC`, `markEpisodePlayed(episodeId, feedId, user, played)`, `saveEpisodePosition(episodeId, feedId, user, pos)`, `getPodcastFeedImgUsageCount(img)` (same cleanup pattern as radio)
+**Phase 3 — Admin UI** — not needed (no admin toggle; always available per-user)
 
-**Phase 2 — Backend (`src/api/podcasts.js`)**
-- [ ] Admin: `GET/POST /api/v1/admin/podcast/config` — enable/disable globally (same Joi + config pattern as radio/lyrics)
-- [ ] `GET /api/v1/podcast/enabled` — all authenticated users
-- [ ] `GET /api/v1/podcast/feeds` — list user's feeds; each feed includes `episode_count` and `latest_pub_date` (computed from episodes table) so the feed card can show "latest episode: 18 Mar 2026"
-- [ ] `POST /api/v1/podcast/feeds` — subscribe: body `{ url }`, fetch RSS (10 s timeout), parse with `_parseRssFeed()`, validate that ≥1 episode has `<enclosure type="audio/…">`, cache feed art, save feed + all episodes to DB, return `{ id, title, img, episode_count }`
-- [ ] `DELETE /api/v1/podcast/feeds/:id` — unsubscribe, cascade-delete episodes, clean up cached art file if no other feed uses it
-- [ ] `POST /api/v1/podcast/feeds/:id/refresh` — re-fetch RSS, upsert new/updated episodes (keyed on `guid`), update `last_fetched`, return updated feed row
-- [ ] `GET /api/v1/podcast/feeds/:id/episodes` — list all episodes for this feed (must belong to requesting user), each with `{ id, title, pub_date, duration_secs, img, played, play_position, audio_url }`
-- [ ] `PUT /api/v1/podcast/episodes/:episodeId/played` — body `{ played: true/false }`; verify episode belongs to user via feed ownership
-- [ ] `PUT /api/v1/podcast/episodes/:episodeId/position` — body `{ position: 42.5 }` (float seconds)
-- [ ] `_parseRssFeed(xml)` helper using `fast-xml-parser` (`ignoreAttributes: false`, `attributeNamePrefix: '@_'`):
-  - Extract feed: `title`, `description`, `itunes:image['@_href']`, `itunes:author` or `author`, `language`
-  - Extract episodes from `rss.channel.item[]` (always normalise to array); for each item:
-    - Audio URL: prefer `ppg:enclosureSecure['@_url']` (BBC) → `enclosure['@_url']` (NHK, Anchor) — skip items without an audio enclosure (`type` starting with `audio/`)
-    - Duration: `_parseDuration(itunes:duration)` — handles both integer seconds (`1690`) AND `HH:MM:SS`/`MM:SS` strings (`00:51:54`) from Anchor/Spotify feeds
-    - `guid`: use `guid['#text']` if object, else the string value directly (Anchor uses plain UUID strings)
-    - `pubDate` → `new Date(pubDate).getTime()` for unix ms
-    - Optional episode number: `itunes:episode` + `itunes:season` stored for future display
-  - Strip HTML tags from `description` with simple regex `/<[^>]+>/g` for plain-text display
-  - All three test feeds return episodes with audio URLs — validate at least 1 episode has an audio enclosure before saving
-- [ ] SSRF protection: all outbound fetch calls (RSS URL, art download) pass through `_ssrfCheck(hostname)` — reuse from radio
-- [ ] Feed cover art: `<itunes:image href>` downloaded and cached as `podcast-{md5}.{ext}` in album-art directory — same `_cachePodcastArt()` function mirroring `_cacheRadioArt()` from radio
-- [ ] Episode art: stored as original URL in DB; served to client via `/api/v1/radio/art?url=…` proxy (reuses existing CORS-bypass endpoint)
-- [ ] `getLiveArtFilenames()` in `cleanup-albumart.mjs` must include `podcast-*.{ext}` filenames — podcast art must NEVER be deleted by the orphan cleanup scanner
-
-**Phase 3 — Admin UI (`webapp/admin/index.html` + `webapp/admin/index.js`)**
-- [ ] New `podcasts-view` Vue component — single enable/disable checkbox, reads `GET /api/v1/admin/podcast/config`, saves via `POST`
-- [ ] Nav item "Podcasts" in library/streaming section — headphones Lucide SVG icon (same icon as player nav)
-- [ ] After editing: validate with `node --input-type=module < webapp/admin/index.js 2>&1 | grep -v "not defined" | head -5`
-
-**Phase 4 — Player UI (`webapp/app.js`)**
-
-*Feed list view (`viewPodcasts()`):*
-- [ ] Nav item "Podcasts" below Radio — headphones Lucide icon
-- [ ] `S.podcasts` loaded from `GET /api/v1/podcast/feeds` (includes `episode_count` + `latest_pub_date`)
-- [ ] Render: section header with "+ Add Feed" button; card grid (same `auto-fill, minmax(155px,1fr)` as radio)
-- [ ] Each feed card shows: cover art (via `/album-art/{img}`), feed title, latest episode date (`latest_pub_date` formatted as `dd Mon yyyy`), episode count badge; click anywhere on card → `viewPodcastEpisodes(feed.id)`)
-- [ ] Card action buttons: "Refresh" (POST refresh → re-render card), "Delete" (confirm → DELETE → remove card)
-- [ ] Notice below grid: "Playing a podcast episode clears the play queue"
-- [ ] "+ Add Feed" form: text input for RSS URL + "Subscribe" button → POST → success shows new card; error shows inline toast
-
-*Episode list view (`viewPodcastEpisodes(feedId)`):*
-- [ ] Back button → `viewPodcasts()`
-- [ ] Feed header row: art (72×72), feed title (large), author, episode count
-- [ ] Episodes list (table/rows sorted newest first); each row shows:
-  - Unplayed indicator dot (`.pd-unplayed` — coloured, disappears when played)
-  - Episode title
-  - `pubDate` formatted as `dd Mon yyyy`
-  - Duration formatted as `h:mm:ss` or `m:ss`
-  - Play button (▶)
-  - Resume indicator: if `play_position > 5`, show a small progress bar stub so user knows they've partially listened
-- [ ] Played rows dimmed: `.pd-played` → `opacity: 0.55`
-- [ ] "Mark all played" button in header
-
-*Playback (`_playPodcastEpisode(episode, feed)`):*
-- [ ] Builds song object: `{ title: episode.title, artist: feed.title, album: '', filepath: episode.audio_url, 'album-art': episode.img || feed.img || null, isPodcast: true, _episodeId: episode.id, _feedId: feed.id }`
-- [ ] Calls `Player.playSingle(song)` — same as radio; clears queue
-- [ ] Audio URL is direct HTTPS link from `<enclosure>` / `<ppg:enclosureSecure>` — played via the existing stream proxy (`mediaUrl()`) so CORS is handled identically to radio
-- [ ] On `loadedmetadata`: if `episode.play_position > 5` and `< duration - 10`, seek `audioEl.currentTime = episode.play_position`
-- [ ] On `timeupdate` (throttled, every 5 s): `PUT /api/v1/podcast/episodes/:id/position`
-- [ ] On `ended` or progress `> 90 %`: `PUT /api/v1/podcast/episodes/:id/played { played: true }`
-- [ ] Player bar: `isPodcast` → no star rating, no lyrics fetch, `_stopRadioNowPlaying()` (same as music tracks)
-
-**Phase 5 — CSS (`webapp/style.css`)**
-- [ ] `.pd-list` — episode list container (flex-column, gap)
-- [ ] `.pd-row` — single episode row (flex, align-center, gap, padding, border-bottom)
-- [ ] `.pd-unplayed` — small filled circle, `background: var(--primary)`, hidden when `.pd-played`
-- [ ] `.pd-played` — `opacity: 0.55`
-- [ ] `.pd-title` — episode title, `font-weight:600; color:var(--t1)`
-- [ ] `.pd-meta` — date + duration, `font-size:11px; color:var(--t2)` (NOT `var(--t3)`)
-- [ ] `.pd-resume` — thin progress stub, `height:2px; background:var(--primary); border-radius:99px`
-- [ ] Feed card: reuse `.rs-row` / `.rs-card-art` classes from radio where possible; add `.pd-ep-count` badge
-
-**Out of scope (v1):**
-- Download for offline playback
-- Auto-refresh on schedule (user refreshes manually)
-- Chapter markers
-- Podcast search/discovery API
+**Phase 4 — Player UI** ✅
+- [x] Feed card grid with cover art, episode count, last-refreshed; drag-reorder
+- [x] Subscribe form with URL preview before committing
+- [x] Rename / Refresh / Unsubscribe per card
+- [x] Episode list with Play button; `Player.playSingle()` with `isPodcast: true`
+- [x] External URL guards: waveform fetch + song rating silently skip `http(s)://` filepaths
 
 ---
 

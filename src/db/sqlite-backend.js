@@ -103,6 +103,37 @@ export function init(dbDirectory) {
       sort_order INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_rs_user ON radio_stations(user);
+
+    CREATE TABLE IF NOT EXISTS podcast_feeds (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      user         TEXT NOT NULL,
+      url          TEXT NOT NULL,
+      title        TEXT,
+      description  TEXT,
+      img          TEXT,
+      author       TEXT,
+      language     TEXT,
+      last_fetched INTEGER,
+      created_at   INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_pf_user ON podcast_feeds(user);
+
+    CREATE TABLE IF NOT EXISTS podcast_episodes (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      feed_id       INTEGER NOT NULL,
+      guid          TEXT NOT NULL,
+      title         TEXT,
+      description   TEXT,
+      audio_url     TEXT NOT NULL,
+      pub_date      INTEGER,
+      duration_secs INTEGER DEFAULT 0,
+      img           TEXT,
+      played        INTEGER DEFAULT 0,
+      play_position REAL DEFAULT 0,
+      created_at    INTEGER,
+      UNIQUE(feed_id, guid)
+    );
+    CREATE INDEX IF NOT EXISTS idx_pe_feed_id ON podcast_episodes(feed_id);
   `);
   // Migration: add cuepoints column for databases created before this feature
   try { db.exec('ALTER TABLE files ADD COLUMN cuepoints TEXT'); } catch (_e) {}
@@ -121,6 +152,8 @@ export function init(dbDirectory) {
   try { db.exec('ALTER TABLE files ADD COLUMN album_id TEXT'); } catch (_e) {}
   // Migration: add starred column to user_metadata for Subsonic star/unstar
   try { db.exec('ALTER TABLE user_metadata ADD COLUMN starred INTEGER DEFAULT 0'); } catch (_e) {}
+  // Migration: add sort_order to podcast_feeds for drag-to-reorder
+  try { db.exec('ALTER TABLE podcast_feeds ADD COLUMN sort_order INTEGER DEFAULT 0'); } catch (_e) {}
   // Ensure indexes exist (IF NOT EXISTS is idempotent — safe on every startup)
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_artist_id ON files(artist_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_album_id ON files(album_id)');
@@ -202,6 +235,21 @@ function prefixClause(prefix, col = 'filepath') {
   if (!prefix) return { sql: '', params: [] };
   const escaped = prefix.replace(/[%_\\]/g, '\\$&');
   return { sql: ` AND ${col} LIKE ? ESCAPE '\\'`, params: [escaped + '%'] };
+}
+
+// Generates NOT clauses to exclude filepath prefixes under specific vpaths.
+// Used to exclude 'audio-books' child folders from music queries.
+function excludePrefixClauses(excludeFilepathPrefixes, vpathCol = 'vpath', pathCol = 'filepath') {
+  if (!Array.isArray(excludeFilepathPrefixes) || excludeFilepathPrefixes.length === 0) {
+    return { sql: '', params: [] };
+  }
+  const parts = [];
+  const params = [];
+  for (const { vpath, prefix } of excludeFilepathPrefixes) {
+    parts.push(`NOT (${vpathCol} = ? AND ${pathCol} LIKE ? ESCAPE '\\')`);
+    params.push(vpath, prefix.replace(/[%_\\]/g, '\\$&') + '%');
+  }
+  return { sql: ' AND ' + parts.join(' AND '), params };
 }
 
 // File Operations
@@ -399,24 +447,26 @@ function mapFileRow(row) {
   };
 }
 
-export function getArtists(vpaths, ignoreVPaths) {
+export function getArtists(vpaths, ignoreVPaths, excludeFilepathPrefixes) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
   const vIn = inClause('vpath', filtered);
-  const rows = db.prepare(`SELECT DISTINCT artist FROM files WHERE ${vIn.sql} AND artist IS NOT NULL ORDER BY artist COLLATE NOCASE`).all(...vIn.params);
+  const ep = excludePrefixClauses(excludeFilepathPrefixes);
+  const rows = db.prepare(`SELECT DISTINCT artist FROM files WHERE ${vIn.sql}${ep.sql} AND artist IS NOT NULL ORDER BY artist COLLATE NOCASE`).all(...vIn.params, ...ep.params);
   return rows.map(r => r.artist);
 }
 
-export function getArtistAlbums(artist, vpaths, ignoreVPaths) {
+export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPrefixes) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
   const vIn = inClause('vpath', filtered);
+  const ep = excludePrefixClauses(excludeFilepathPrefixes);
   const rows = db.prepare(`
     SELECT DISTINCT album AS name, year, aaFile AS album_art_file
     FROM files
-    WHERE ${vIn.sql} AND artist = ?
+    WHERE ${vIn.sql}${ep.sql} AND artist = ?
     ORDER BY year DESC
-  `).all(...vIn.params, String(artist));
+  `).all(...vIn.params, ...ep.params, String(artist));
 
   // Deduplicate like Loki backend does (by album+year combo)
   const albums = [];
@@ -435,16 +485,17 @@ export function getArtistAlbums(artist, vpaths, ignoreVPaths) {
   return albums;
 }
 
-export function getAlbums(vpaths, ignoreVPaths) {
+export function getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
   const vIn = inClause('vpath', filtered);
+  const ep = excludePrefixClauses(excludeFilepathPrefixes);
   const rows = db.prepare(`
     SELECT DISTINCT album AS name, aaFile AS album_art_file, year
     FROM files
-    WHERE ${vIn.sql} AND album IS NOT NULL
+    WHERE ${vIn.sql}${ep.sql} AND album IS NOT NULL
     ORDER BY album COLLATE NOCASE
-  `).all(...vIn.params);
+  `).all(...vIn.params, ...ep.params);
 
   const albums = [];
   const store = {};
@@ -461,14 +512,15 @@ export function getAlbumSongs(album, vpaths, username, opts) {
   const filtered = vpathFilter(vpaths, opts.ignoreVPaths);
   if (filtered.length === 0) { return []; }
   const vIn = inClause('f.vpath', filtered);
+  const ep = excludePrefixClauses(opts.excludeFilepathPrefixes, 'f.vpath', 'f.filepath');
 
   let sql = `
     SELECT f.rowid AS id, f.*, um.rating
     FROM files f
     LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
-    WHERE ${vIn.sql}
+    WHERE ${vIn.sql}${ep.sql}
   `;
-  const params = [username, ...vIn.params];
+  const params = [username, ...vIn.params, ...ep.params];
 
   if (album === null) {
     sql += ' AND f.album IS NULL';
@@ -493,7 +545,7 @@ export function getAlbumSongs(album, vpaths, username, opts) {
   return rows.map(mapFileRow);
 }
 
-export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix) {
+export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
 
@@ -501,8 +553,9 @@ export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepat
   if (!validCols.includes(searchCol)) { return []; }
 
   const vIn = inClause('vpath', filtered);
-  const params = [...vIn.params, String(searchTerm)];
-  let sql = `SELECT rowid AS id, * FROM files WHERE ${vIn.sql} AND ${searchCol} LIKE '%' || ? || '%' COLLATE NOCASE`;
+  const ep = excludePrefixClauses(excludeFilepathPrefixes);
+  const params = [...vIn.params, ...ep.params, String(searchTerm)];
+  let sql = `SELECT rowid AS id, * FROM files WHERE ${vIn.sql}${ep.sql} AND ${searchCol} LIKE '%' || ? || '%' COLLATE NOCASE`;
   if (filepathPrefix && typeof filepathPrefix === 'string') {
     sql += " AND filepath LIKE ? ESCAPE '\\'";
     params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
@@ -514,19 +567,20 @@ export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepat
 // Multi-word cross-field search: every token must appear in at least one of
 // title, artist, album, or filepath. Enables queries like "chaka khan fate"
 // where the artist and track title words are spread across separate columns.
-export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix) {
+export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0 || tokens.length === 0) { return []; }
 
   const vIn = inClause('vpath', filtered);
-  const params = [...vIn.params];
+  const ep = excludePrefixClauses(excludeFilepathPrefixes);
+  const params = [...vIn.params, ...ep.params];
 
   const tokenClauses = tokens.map(token => {
     params.push(token, token, token, token);
     return `(title LIKE '%' || ? || '%' COLLATE NOCASE OR artist LIKE '%' || ? || '%' COLLATE NOCASE OR album LIKE '%' || ? || '%' COLLATE NOCASE OR filepath LIKE '%' || ? || '%' COLLATE NOCASE)`;
   });
 
-  let sql = `SELECT rowid AS id, * FROM files WHERE ${vIn.sql} AND ${tokenClauses.join(' AND ')}`;
+  let sql = `SELECT rowid AS id, * FROM files WHERE ${vIn.sql}${ep.sql} AND ${tokenClauses.join(' AND ')}`;
   if (filepathPrefix && typeof filepathPrefix === 'string') {
     sql += " AND filepath LIKE ? ESCAPE '\\'";
     params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
@@ -553,17 +607,18 @@ export function saveUserSettings(username, patch) {
   ).run(username, JSON.stringify(existing.prefs), JSON.stringify(existing.queue));
 }
 
-export function getRatedSongs(vpaths, username, ignoreVPaths) {
+export function getRatedSongs(vpaths, username, ignoreVPaths, excludeFilepathPrefixes) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
   const vIn = inClause('f.vpath', filtered);
+  const ep = excludePrefixClauses(excludeFilepathPrefixes, 'f.vpath', 'f.filepath');
   const rows = db.prepare(`
     SELECT f.rowid AS id, f.*, um.rating
     FROM user_metadata um
     INNER JOIN files f ON f.hash = um.hash
-    WHERE um.user = ? AND um.rating > 0 AND ${vIn.sql}
+    WHERE um.user = ? AND um.rating > 0 AND ${vIn.sql}${ep.sql}
     ORDER BY um.rating DESC
-  `).all(username, ...vIn.params);
+  `).all(username, ...vIn.params, ...ep.params);
   return rows.map(mapFileRow);
 }
 
@@ -572,14 +627,15 @@ export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts = {
   if (filtered.length === 0) { return []; }
   const vIn = inClause('f.vpath', filtered);
   const pf = prefixClause(opts.filepathPrefix, 'f.filepath');
+  const ep = excludePrefixClauses(opts.excludeFilepathPrefixes, 'f.vpath', 'f.filepath');
   const rows = db.prepare(`
     SELECT f.rowid AS id, f.*, um.rating
     FROM files f
     LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
-    WHERE ${vIn.sql}${pf.sql} AND f.ts > 0
+    WHERE ${vIn.sql}${pf.sql}${ep.sql} AND f.ts > 0
     ORDER BY f.ts DESC
     LIMIT ?
-  `).all(username, ...vIn.params, ...pf.params, limit);
+  `).all(username, ...vIn.params, ...pf.params, ...ep.params, limit);
   return rows.map(mapFileRow);
 }
 
@@ -588,14 +644,15 @@ export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts = 
   if (filtered.length === 0) { return []; }
   const vIn = inClause('f.vpath', filtered);
   const pf = prefixClause(opts.filepathPrefix, 'f.filepath');
+  const ep = excludePrefixClauses(opts.excludeFilepathPrefixes, 'f.vpath', 'f.filepath');
   const rows = db.prepare(`
     SELECT f.rowid AS id, f.*, um.rating, um.lp AS lastPlayed, um.pc AS playCount
     FROM user_metadata um
     INNER JOIN files f ON f.hash = um.hash
-    WHERE um.user = ? AND um.lp > 0 AND ${vIn.sql}${pf.sql}
+    WHERE um.user = ? AND um.lp > 0 AND ${vIn.sql}${pf.sql}${ep.sql}
     ORDER BY um.lp DESC
     LIMIT ?
-  `).all(username, ...vIn.params, ...pf.params, limit);
+  `).all(username, ...vIn.params, ...pf.params, ...ep.params, limit);
   return rows.map(mapFileRow);
 }
 
@@ -604,14 +661,15 @@ export function getMostPlayed(vpaths, username, limit, ignoreVPaths, opts = {}) 
   if (filtered.length === 0) { return []; }
   const vIn = inClause('f.vpath', filtered);
   const pf = prefixClause(opts.filepathPrefix, 'f.filepath');
+  const ep = excludePrefixClauses(opts.excludeFilepathPrefixes, 'f.vpath', 'f.filepath');
   const rows = db.prepare(`
     SELECT f.rowid AS id, f.*, um.rating, um.lp AS lastPlayed, um.pc AS playCount
     FROM user_metadata um
     INNER JOIN files f ON f.hash = um.hash
-    WHERE um.user = ? AND um.pc > 0 AND ${vIn.sql}${pf.sql}
+    WHERE um.user = ? AND um.pc > 0 AND ${vIn.sql}${pf.sql}${ep.sql}
     ORDER BY um.pc DESC
     LIMIT ?
-  `).all(username, ...vIn.params, ...pf.params, limit);
+  `).all(username, ...vIn.params, ...pf.params, ...ep.params, limit);
   return rows.map(mapFileRow);
 }
 
@@ -619,14 +677,15 @@ export function getAllFilesWithMetadata(vpaths, username, opts) {
   const filtered = vpathFilter(vpaths, opts.ignoreVPaths);
   if (filtered.length === 0) { return []; }
   const vIn = inClause('f.vpath', filtered);
+  const ep = excludePrefixClauses(opts.excludeFilepathPrefixes, 'f.vpath', 'f.filepath');
 
   let sql = `
     SELECT f.rowid AS id, f.*, um.rating
     FROM files f
     LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
-    WHERE ${vIn.sql}
+    WHERE ${vIn.sql}${ep.sql}
   `;
-  const params = [username, ...vIn.params];
+  const params = [username, ...vIn.params, ...ep.params];
 
   // filepathPrefix: restrict to files inside a subdirectory of a vpath
   // (used by Auto-DJ when a child vpath is selected instead of creating
@@ -670,8 +729,9 @@ export function getAllFilesWithMetadata(vpaths, username, opts) {
 // Shared WHERE-clause builder (same filters as getAllFilesWithMetadata minus artists).
 function _buildRandomWhere(opts, filtered) {
   const vIn = inClause('f.vpath', filtered);
-  let sql = `FROM files f LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ? WHERE ${vIn.sql}`;
-  const params = [...vIn.params];
+  const ep = excludePrefixClauses(opts.excludeFilepathPrefixes, 'f.vpath', 'f.filepath');
+  let sql = `FROM files f LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ? WHERE ${vIn.sql}${ep.sql}`;
+  const params = [...vIn.params, ...ep.params];
 
   if (opts.filepathPrefix && typeof opts.filepathPrefix === 'string') {
     sql += ' AND f.filepath LIKE ? ESCAPE \'\\\'';
@@ -1325,3 +1385,89 @@ export function reorderRadioStations(username, orderedIds) {
     throw e;
   }
 }
+
+// ── Podcast Feeds ─────────────────────────────────────────────
+export function getPodcastFeeds(username) {
+  return db.prepare(`
+    SELECT f.*, (SELECT COUNT(*) FROM podcast_episodes e WHERE e.feed_id = f.id) AS episode_count
+    FROM podcast_feeds f WHERE f.user = ? ORDER BY f.sort_order ASC, f.created_at DESC
+  `).all(username);
+}
+
+export function reorderPodcastFeeds(username, orderedIds) {
+  const update = db.prepare('UPDATE podcast_feeds SET sort_order=? WHERE id=? AND user=?');
+  db.exec('BEGIN');
+  try {
+    orderedIds.forEach((id, idx) => update.run(idx, id, username));
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+}
+
+export function getPodcastFeed(id, username) {
+  const row = db.prepare(`
+    SELECT f.*, (SELECT COUNT(*) FROM podcast_episodes e WHERE e.feed_id = f.id) AS episode_count
+    FROM podcast_feeds f WHERE f.id = ? AND f.user = ?
+  `).get(id, username);
+  return row || null;
+}
+
+export function createPodcastFeed(username, data) {
+  const now = Math.floor(Date.now() / 1000);
+  const r = db.prepare(
+    'INSERT INTO podcast_feeds (user, url, title, description, img, author, language, last_fetched, created_at) VALUES (?,?,?,?,?,?,?,?,?)'
+  ).run(username, data.url, data.title || null, data.description || null, data.img || null, data.author || null, data.language || null, data.last_fetched || now, now);
+  return Number(r.lastInsertRowid);
+}
+
+export function deletePodcastFeed(id, username) {
+  db.prepare('DELETE FROM podcast_episodes WHERE feed_id = ?').run(id);
+  db.prepare('DELETE FROM podcast_feeds WHERE id = ? AND user = ?').run(id, username);
+}
+
+export function updatePodcastFeedFetched(id, username, ts) {
+  db.prepare('UPDATE podcast_feeds SET last_fetched = ? WHERE id = ? AND user = ?').run(ts, id, username);
+}
+export function updatePodcastFeedTitle(id, username, title) {
+  db.prepare('UPDATE podcast_feeds SET title = ? WHERE id = ? AND user = ?').run(title, id, username);
+}
+
+export function getPodcastFeedImgUsageCount(img) {
+  return db.prepare('SELECT COUNT(*) AS cnt FROM podcast_feeds WHERE img = ?').get(img)?.cnt ?? 0;
+}
+
+// ── Podcast Episodes ──────────────────────────────────────────
+export function getPodcastEpisodes(feedId) {
+  return db.prepare(
+    'SELECT * FROM podcast_episodes WHERE feed_id = ? ORDER BY pub_date DESC, id DESC'
+  ).all(feedId);
+}
+
+export function upsertPodcastEpisodes(feedId, episodes) {
+  const now = Math.floor(Date.now() / 1000);
+  const stmt = db.prepare(`
+    INSERT INTO podcast_episodes (feed_id, guid, title, description, audio_url, pub_date, duration_secs, img, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(feed_id, guid) DO UPDATE SET
+      title=excluded.title, description=excluded.description,
+      audio_url=excluded.audio_url, pub_date=excluded.pub_date,
+      duration_secs=excluded.duration_secs, img=excluded.img
+  `);
+  db.exec('BEGIN');
+  try {
+    for (const ep of episodes) {
+      stmt.run(feedId, ep.guid, ep.title || null, ep.description || null, ep.audio_url,
+        ep.pub_date || null, ep.duration_secs || 0, ep.img || null, now);
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+export function saveEpisodeProgress(episodeId, feedId, position, played) {
+  db.prepare(
+    'UPDATE podcast_episodes SET play_position = ?, played = ? WHERE id = ? AND feed_id = ?'
+  ).run(position, played ? 1 : 0, episodeId, feedId);
+}
+

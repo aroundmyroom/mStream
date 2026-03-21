@@ -1,9 +1,157 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Podcast Feeds — complete feature: RSS subscribe, episode browse, play, progress, drag-reorder — 2026-03-21
+
+**Files:** `src/api/podcasts.js` *(new)*, `src/server.js`, `src/db/sqlite-backend.js`, `src/db/loki-backend.js`, `src/db/manager.js`, `webapp/app.js`, `webapp/index.html`, `docs/podcasts.md` *(new)*
+
+Full server-side podcast feature. No external service or account required.
+
+### Database
+
+Two new tables in both SQLite and Loki backends:
+
+- **`podcast_feeds`**: `id, user, url, title, description, img, author, language, last_fetched, sort_order, created_at`
+- **`podcast_episodes`**: `id, feed_id, guid, title, description, audio_url, pub_date, duration_secs, img, played, play_position, created_at`
+
+Unique constraint `(feed_id, guid)` on episodes. `INSERT OR IGNORE` on upsert preserves existing `played`/`play_position` on re-fetch.
+
+`sort_order` column on feeds added via migration-safe `ALTER TABLE … ADD COLUMN`.
+
+### RSS Parsing (`src/api/podcasts.js`)
+
+- Uses `fast-xml-parser` v5 (`processEntities: false` — required for feeds with large HTML entity counts like Anchor/Spotify).
+- Resolves audio URL from `<enclosure>`, `<ppg:enclosureSecure>` (BBC feeds), or `<media:content>`.
+- `_parseDuration()` normalises both integer-seconds (`1690`) and `HH:MM:SS` / `MM:SS` strings (`00:51:54`).
+- `_cleanHtml()` strips real HTML tags, entity-encoded tags (`&lt;p&gt;`), and decodes standard XML character entities.
+- SSRF protection via `_ssrfCheck()` blocks localhost, `127.x`, RFC-1918 ranges on all outbound fetches.
+- Cover art downloaded and cached as `podcast-{md5}.{ext}` in the album-art directory; shared across feeds with the same image URL; deleted only when the last referencing feed is unsubscribed.
+- `getLiveArtFilenames()` in `cleanup-albumart.mjs` includes `podcast-*` filenames to prevent orphan cleanup from deleting active art.
+
+Validated against: BBC Global News Podcast, NHK World Radio Japan, Anchor/Spotify feeds.
+
+### API Endpoints (9 total, all auth-required)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/podcast/preview` | Fetch + parse RSS without saving; returns feed metadata + episode count |
+| `GET` | `/api/v1/podcast/feeds` | List user's subscribed feeds (ordered by `sort_order`) |
+| `POST` | `/api/v1/podcast/feeds` | Subscribe: fetch RSS, cache art, insert feed + all episodes |
+| `PUT` | `/api/v1/podcast/feeds/reorder` | Persist drag-reorder; body `{ids: number[]}` |
+| `PATCH` | `/api/v1/podcast/feeds/:id` | Rename feed |
+| `DELETE` | `/api/v1/podcast/feeds/:id` | Unsubscribe; cascade-deletes episodes + cleans art |
+| `POST` | `/api/v1/podcast/feeds/:id/refresh` | Re-fetch RSS; upserts new episodes; updates `last_fetched` |
+| `GET` | `/api/v1/podcast/episodes/:feedId` | List episodes for a feed, newest first |
+| `POST` | `/api/v1/podcast/episode/progress` | Save resume position + played flag |
+
+All endpoints check feed ownership via `req.user.username`. Mounted after `authApi.setup()` in `server.js`.
+
+### UI (`webapp/app.js`, `webapp/index.html`)
+
+- **Feeds view** (`viewPodcastFeeds`): card grid showing cover art, title, author, episode count, last-refreshed timestamp. Cards drag-reorderable via `.rs-drag-handle` (same DOM pattern as radio stations). Reorder persisted via `PUT /api/v1/podcast/feeds/reorder`.
+- **Subscribe form**: paste RSS URL → preview (title, author, episode count shown) → confirm to subscribe.
+- **Rename / Refresh / Unsubscribe** buttons on each card.
+- **Episode list** (`viewPodcastEpisodes`): sorted newest first; title, pub date, duration, Play button.
+- **Playback**: `Player.playSingle()` with `isPodcast: true`. Audio streams via existing radio stream proxy for same-origin Web Audio API compatibility.
+- **External URL guards**: `_fetchWaveform()` and `rateSong()` silently skip `http(s)://` filepaths; `POST /api/v1/db/rate-song` returns `400` for external URLs.
+
+### Listen section visibility (`webapp/app.js`)
+
+`_updateListenSection()` shows the Listen nav section when any of:
+- `S.radioEnabled` — at least one radio station configured
+- `S.feedsEnabled` — at least one podcast feed subscribed (checked at login/session via `GET /api/v1/podcast/feeds`)
+- `S.audiobooksEnabled` — user has at least one `audio-books` vpath
+
+### Navigation restructure (`webapp/index.html`)
+
+Final sidebar structure:
+- **Music Library**: Search, File Explorer, Recently Added, Artists, Albums, Genres, Decades, Auto-DJ
+- **Listen** (conditional): Radio Streams, Podcasts, Feeds
+- **Stats**: Starred, Most Played, Recently Played
+- **Playlists**
+- **Connectors**: Last.fm, Discogs, Subsonic API
+- **Tools**: Settings, Shared Links, Transcode, Jukebox, Mobile Apps, Play History
+
+### Documentation
+
+`docs/podcasts.md` *(new)*: complete reference covering UI, feed card grid, episode playback, RSS parsing support matrix, SSRF protection, database schema, and all 9 REST API endpoints with request/response examples.
+
+---
+
+## Podcast Feeds — RSS subscribe, browse, play — 2026-03-21
+
+**Files:** `src/api/podcasts.js` *(new)*, `src/server.js`, `src/db/sqlite-backend.js`, `src/db/loki-backend.js`, `src/db/manager.js`, `webapp/app.js`
+
+Full podcast feed subscription system, accessible from the **Podcast Feeds** button in the Podcasts & Audiobooks sidebar section:
+
+- **Subscribe by URL**: paste any RSS 2.0 podcast feed URL; the server fetches and parses the feed (title, author, description, cover art, episode list) automatically. SSRF protection rejects private/loopback addresses. Cover art is downloaded and cached locally under the album-art directory with a `podcast-` prefix.
+
+- **Feed list**: cards showing cover art, podcast title, author, episode count, and description snippet. Two action buttons per card — **Refresh** (re-fetches RSS and upserts new episodes) and **Unsubscribe** (deletes feed + cached art when no longer referenced).
+
+- **Episode list**: click any feed card to open its episode list showing title, publish date, and duration. Each episode has a **Play** button.
+
+- **Playback**: podcast episodes stream directly through the existing radio stream proxy (`/api/v1/radio/stream`) — no new server-side proxy needed. The episode plays in the standard player bar with seek, volume, and all existing controls working normally.
+
+- **DB schema**: two new tables `podcast_feeds` and `podcast_episodes` (both SQLite and in-memory Loki backends); per-user isolation; `UNIQUE(feed_id, guid)` constraint ensures refresh is idempotent. Episode progress (`play_position`, `played`) columns reserved for future use.
+
+- **API endpoints**: `GET/POST /api/v1/podcast/feeds`, `DELETE /api/v1/podcast/feeds/:id`, `POST /api/v1/podcast/feeds/:id/refresh`, `GET /api/v1/podcast/episodes/:feedId`, `POST /api/v1/podcast/episode/progress`. All endpoints enforce ownership checks — users can only access their own feeds.
+
+- **RSS parsing**: uses `fast-xml-parser` v5 (already a dependency). Handles `<itunes:image>`, `<itunes:duration>` (integer seconds or HH:MM:SS), `<ppg:enclosureSecure>` (BBC feeds), `<media:content>`, multi-namespace RSS 2.0 feeds. Strips HTML from episode descriptions.
+
+---
+
 > Merged from three source files covering all components of the velvet fork:
 > **`Changes-Velvet.md`** (versioned server + webapp log) · **`changes4GUIv2.md`** (GUIv2 player feature reference) · **`changes-adminGUIv2.md`** (admin panel v2 log).
 >
 > *Consolidated 2026-03-16. The three source files have been removed; this is the canonical changelog going forward.*
+
+---
+
+## Podcasts & Audiobooks nav section — 2026-03-21
+
+**Files:** `webapp/index.html`, `webapp/app.js`
+
+A dedicated "Podcasts & Audiobooks" section now appears in the sidebar for any
+user who has access to at least one vpath of type `audio-books`:
+
+- **Hidden by default** — the new `nav-section` (`id="podcasts-section"`) is
+  not rendered until `ping` returns `vpathMetaData`. After ping, if the user has
+  any `audio-books` vpaths, the section is revealed automatically with
+  `classList.remove('hidden')`. Users without such folders never see it.
+
+- **Per-user**: visibility is driven entirely by `S.vpaths` (server-side access
+  list) intersected with `S.vpathMeta` type information — no admin toggle
+  needed.
+
+- **Library view** (`viewPodcasts` / `_renderPodcastsView`): renders each
+  audio-books vpath as a folder card (reuses `.fe-dir`/`.fe-grid` CSS). Clicking
+  a card opens the file explorer at that vpath root. The back button in the file
+  explorer returns to the podcasts/audiobooks list.
+
+- **Nav dispatch**: `data-view="podcasts"` wired into the existing sidebar click
+  handler.
+
+- **Phase 2 (future)**: RSS podcast subscriptions tab, per-episode play-state
+  tracking, and auto-download — requires its own DB tables and backend.
+
+---
+
+## Audio-books isolation from music library — 2026-03-21
+
+
+**Files:** `src/db/sqlite-backend.js`, `src/db/loki-backend.js`, `src/api/db.js`, `webapp/app.js`
+
+Folders registered as type `audio-books` in the admin panel are now fully
+isolated from all music browsing, search, and playback:
+
+- **Scanner behaviour confirmed**: child vpaths (whose root sits inside another vpath) are never scanned independently — their files are stored in the parent vpath's DB space with a filepath prefix. This required a new `excludeFilepathPrefixes` mechanism beyond the existing `ignoreVPaths` to exclude them from queries at the DB level.
+
+- **New DB helper** `excludePrefixClauses()` (SQLite) / `_applyExcludePrefixes()` (Loki): generates `AND NOT (vpath = ? AND filepath LIKE ?)` clauses applied to every affected query.
+
+- **All music queries now exclude audio-books content**: Artists, Albums, Recently Added, Rated/Starred, Most Played, Recently Played, Random Songs (Auto-DJ lean + full paths), Search.
+
+- **Player helpers** `_musicVpaths()` and `_audioBookExclusions()`: compute the correct `ignoreVPaths` + `excludeFilepathPrefixes` from `S.vpathMeta` at call time. Applied to all browse/search/Auto-DJ API calls.
+
+- **After ping**: when `S.vpathMeta` is received, `S.djVpaths` is re-filtered to remove any audio-books vpaths that were included before metadata was known.
 
 ---
 

@@ -141,3 +141,16 @@ export function updateRadioStation(id, username, data) { return backend.updateRa
 export function deleteRadioStation(id, username) { return backend.deleteRadioStation(id, username); }
 export function getRadioStationImgUsageCount(img) { return backend.getRadioStationImgUsageCount(img); }
 export function reorderRadioStations(username, orderedIds) { return backend.reorderRadioStations(username, orderedIds); }
+// Podcast feeds
+export function getPodcastFeeds(username) { return backend.getPodcastFeeds(username); }
+export function getPodcastFeed(id, username) { return backend.getPodcastFeed(id, username); }
+export function createPodcastFeed(username, data) { return backend.createPodcastFeed(username, data); }
+export function deletePodcastFeed(id, username) { return backend.deletePodcastFeed(id, username); }
+export function updatePodcastFeedFetched(id, username, ts) { return backend.updatePodcastFeedFetched(id, username, ts); }
+export function updatePodcastFeedTitle(id, username, title) { return backend.updatePodcastFeedTitle(id, username, title); }
+export function reorderPodcastFeeds(username, orderedIds) { return backend.reorderPodcastFeeds(username, orderedIds); }
+export function getPodcastFeedImgUsageCount(img) { return backend.getPodcastFeedImgUsageCount(img); }
+// Podcast episodes
+export function getPodcastEpisodes(feedId) { return backend.getPodcastEpisodes(feedId); }
+export function upsertPodcastEpisodes(feedId, episodes) { return backend.upsertPodcastEpisodes(feedId, episodes); }
+export function saveEpisodeProgress(episodeId, feedId, position, played) { return backend.saveEpisodeProgress(episodeId, feedId, position, played); }
