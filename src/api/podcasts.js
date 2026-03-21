@@ -292,6 +292,16 @@ export function setup(mstream) {
       const parsed = await _fetchAndParse(feed.url);
       db.upsertPodcastEpisodes(id, parsed.episodes);
       db.updatePodcastFeedFetched(id, req.user.username, Math.floor(Date.now() / 1000));
+
+      // Re-cache art if the file is missing from disk (e.g. deleted by orphan cleanup)
+      if (parsed.imgUrl && feed.img) {
+        const fullPath = path.join(config.program.storage.albumArtDirectory, feed.img);
+        if (!existsSync(fullPath)) {
+          const newImg = await _cacheArt(parsed.imgUrl);
+          if (newImg) db.updatePodcastFeedImg(id, req.user.username, newImg);
+        }
+      }
+
       res.json(db.getPodcastFeed(id, req.user.username));
     } catch (e) {
       res.status(400).json({ error: e.message });

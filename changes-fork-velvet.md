@@ -1,5 +1,19 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Podcast feed art: orphan-cleanup protection + refresh recovery — 2026-03-21
+
+**Files:** `cleanup-albumart.mjs`, `src/api/podcasts.js`, `src/db/sqlite-backend.js`, `src/db/loki-backend.js`, `src/db/manager.js`
+
+**Bug:** Scan-triggered orphan cleanup (`cleanup-albumart.mjs`) was deleting all `podcast-*.{ext}` files from `image-cache/` because it only queried `radio_stations.img` for protection, not `podcast_feeds.img`.
+
+**Fixes:**
+- `cleanup-albumart.mjs`: added `podcast_feeds` query; `podcast-*` filenames now added to `referenced` set alongside radio logos and song album art.
+- `POST /api/v1/podcast/feeds/:id/refresh`: if the feed's cached art file is missing from disk (e.g. after a cleanup run), the endpoint now re-downloads and re-caches the art via `_cacheArt()`. Art filename updated in DB via new `updatePodcastFeedImg()`.
+- `updatePodcastFeedImg(id, username, img)` added to SQLite backend, Loki backend, and manager.
+- Existing art recovered by refreshing all affected feeds via the API.
+
+---
+
 ## Podcast Feeds — complete feature: RSS subscribe, episode browse, play, progress, drag-reorder — 2026-03-21
 
 **Files:** `src/api/podcasts.js` *(new)*, `src/server.js`, `src/db/sqlite-backend.js`, `src/db/loki-backend.js`, `src/db/manager.js`, `webapp/app.js`, `webapp/index.html`, `docs/podcasts.md` *(new)*
