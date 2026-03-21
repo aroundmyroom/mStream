@@ -1433,6 +1433,9 @@ export function updatePodcastFeedFetched(id, username, ts) {
 export function updatePodcastFeedTitle(id, username, title) {
   db.prepare('UPDATE podcast_feeds SET title = ? WHERE id = ? AND user = ?').run(title, id, username);
 }
+export function updatePodcastFeedImg(id, username, img) {
+  db.prepare('UPDATE podcast_feeds SET img = ? WHERE id = ? AND user = ?').run(img, id, username);
+}
 
 export function getPodcastFeedImgUsageCount(img) {
   return db.prepare('SELECT COUNT(*) AS cnt FROM podcast_feeds WHERE img = ?').get(img)?.cnt ?? 0;

@@ -1245,6 +1245,11 @@ export function updatePodcastFeedTitle(id, username, title) {
   const f = arr.find(x => x.id === id);
   if (f) f.title = title;
 }
+export function updatePodcastFeedImg(id, username, img) {
+  const arr = _podcastFeeds[username] || [];
+  const f = arr.find(x => x.id === id);
+  if (f) f.img = img;
+}
 export function getPodcastFeedImgUsageCount(img) {
   return Object.values(_podcastFeeds).flat().filter(f => f.img === img).length;
 }
