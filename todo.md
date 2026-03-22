@@ -78,12 +78,15 @@
 
 ### Smart Playlists
 
-> Note: an earlier prototype was removed in commit `d8e224fe` — needs a clean re-implementation.
-
-- [ ] Add `GET /api/v1/db/smart-playlist` endpoint accepting filters: `genre`, `yearFrom`, `yearTo`, `neverPlayed`, `limit`
-- [ ] Add a "Smart Playlist" view in the sidebar with a filter builder UI (genre/decade dropdowns)
-- [ ] Wire result into the queue (play-all / replace-queue buttons)
-- [ ] Persist the last-used filter per user with `_uKey('smart_pl_filter')`
+- [x] Full Smart Playlists feature implemented — filter builder, saved named playlists, CRUD, live preview count
+  - Filters: multi-genre, year range, min rating, play status (any/never/played/at-least N), starred, artist search
+  - Sort: artist, album, year ↑/↓, top rated, most played, recently played, random
+  - API: 6 REST endpoints under `/api/v1/smart-playlists`
+  - DB: `smart_playlists` table (SQLite) + in-memory store (Loki)
+  - UI: "Smart Playlists" sidebar section, filter builder view, results view with Edit button
+  - Docs: `docs/smart-playlists.md`
+- [x] Libraries (vpath) filter — toggle pills per music library; child-vpath prefix resolution
+- [x] Fresh Picks toggle — shuffle on every open; "New picks" button in results; nav indicator
 
 ---
 

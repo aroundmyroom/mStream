@@ -1278,3 +1278,99 @@ export function saveEpisodeProgress(episodeId, feedId, position, played) {
   const ep = arr.find(e => e.id === episodeId);
   if (ep) { ep.play_position = position; ep.played = played ? 1 : 0; }
 }
+
+// ── Smart Playlists (in-memory for Loki backend) ─────────────────────────────
+const _smartPlaylists = {};  // { username: [{id, name, filters, sort, limit_n, created}] }
+let _splNextId = 1;
+
+export function runSmartPlaylist(filters, sort, limitN, vpaths, username) {
+  if (!fileCollection) return [];
+  const limit = Math.min(Number(limitN) || 100, 1000);
+  let docs = fileCollection.find(renderOrClause(vpaths, null));
+
+  if (filters.genres && filters.genres.length > 0) {
+    const gs = new Set(filters.genres);
+    docs = docs.filter(d => gs.has(d.genre));
+  }
+  if (filters.yearFrom) docs = docs.filter(d => d.year >= Number(filters.yearFrom));
+  if (filters.yearTo)   docs = docs.filter(d => d.year <= Number(filters.yearTo));
+  if (filters.artistSearch && filters.artistSearch.trim()) {
+    const term = filters.artistSearch.trim().toLowerCase();
+    docs = docs.filter(d => (d.artist || '').toLowerCase().includes(term));
+  }
+
+  // Attach metadata for rating/play-count/starred filters
+  docs = docs.map(d => {
+    const meta = userMetadataCollection
+      ? userMetadataCollection.findOne({ '$and': [{ hash: d.hash }, { user: username }] })
+      : null;
+    return { ...d, _rating: meta?.rating ?? 0, _starred: meta?.starred ?? 0,
+      _pc: meta?.pc ?? 0, _lp: meta?.lp ?? null };
+  });
+
+  if (filters.minRating > 0) docs = docs.filter(d => d._rating >= Number(filters.minRating));
+  if (filters.playedStatus === 'never')  docs = docs.filter(d => d._pc === 0 || !d._pc);
+  else if (filters.playedStatus === 'played') docs = docs.filter(d => d._pc > 0);
+  else if (filters.minPlayCount > 0) docs = docs.filter(d => d._pc >= Number(filters.minPlayCount));
+  if (filters.starred) docs = docs.filter(d => d._starred === 1);
+
+  const sortKey = sort || 'artist';
+  if (sortKey === 'random') {
+    for (let i = docs.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [docs[i], docs[j]] = [docs[j], docs[i]];
+    }
+  } else if (sortKey === 'rating')      docs.sort((a, b) => (b._rating || 0) - (a._rating || 0));
+  else if (sortKey === 'play_count')    docs.sort((a, b) => (b._pc || 0) - (a._pc || 0));
+  else if (sortKey === 'last_played')   docs.sort((a, b) => (b._lp || 0) - (a._lp || 0));
+  else if (sortKey === 'year_asc')      docs.sort((a, b) => (a.year || 0) - (b.year || 0));
+  else if (sortKey === 'year_desc')     docs.sort((a, b) => (b.year || 0) - (a.year || 0));
+  else if (sortKey === 'album')         docs.sort((a, b) => (a.album || '').localeCompare(b.album || ''));
+  else                                  docs.sort((a, b) => (a.artist || '').localeCompare(b.artist || ''));
+
+  return docs.slice(0, limit).map(d => ({
+    ...d, rating: d._rating, starred: d._starred, lastPlayed: d._lp, playCount: d._pc,
+  }));
+}
+
+export function countSmartPlaylist(filters, vpaths, username) {
+  return runSmartPlaylist(filters, 'artist', 100000, vpaths, username).length;
+}
+
+export function getSmartPlaylists(username) {
+  return (_smartPlaylists[username] || []).slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+}
+
+export function getSmartPlaylist(id, username) {
+  return (_smartPlaylists[username] || []).find(s => s.id === id) || null;
+}
+
+export function saveSmartPlaylist(username, name, filters, sort, limitN) {
+  if (!_smartPlaylists[username]) _smartPlaylists[username] = [];
+  const id = _splNextId++;
+  _smartPlaylists[username].push({ id, user: username, name, filters, sort, limit_n: limitN,
+    created: Math.floor(Date.now() / 1000) });
+  return id;
+}
+
+export function updateSmartPlaylist(id, username, data) {
+  const arr = _smartPlaylists[username] || [];
+  const idx = arr.findIndex(s => s.id === id);
+  if (idx === -1) return false;
+  Object.assign(arr[idx], { name: data.name, filters: data.filters, sort: data.sort, limit_n: data.limit_n });
+  return true;
+}
+
+export function deleteSmartPlaylist(id, username) {
+  const arr = _smartPlaylists[username] || [];
+  const idx = arr.findIndex(s => s.id === id);
+  if (idx === -1) return false;
+  arr.splice(idx, 1);
+  return true;
+}
+
+// Genre Groups — loki backend keeps these in memory only (no persistence)
+let _genreGroups = [];
+export function getGenreGroups() { return _genreGroups; }
+export function saveGenreGroups(groups) { _genreGroups = groups; }
+

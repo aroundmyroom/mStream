@@ -1,5 +1,78 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Documentation — 2026-03-22
+
+**Files:** `docs/smart-playlists.md`, `docs/API.md`, `docs/API/smart-playlists.md` (new), `docs/API/admin_genre-groups.md` (new), `docs/API/podcasts.md` (new), `competitors.md`
+
+- Updated `docs/smart-playlists.md`: added Libraries filter and Fresh Picks sections; updated filters table and JSON schema
+- Created `docs/API/smart-playlists.md`: full REST reference for all six endpoints, filters schema table, DB schema
+- Created `docs/API/admin_genre-groups.md`: reference for `GET/POST /api/v1/admin/genre-groups` and `GET /api/v1/db/genre-groups`
+- Created `docs/API/podcasts.md`: reference for all eight podcast endpoints
+- Updated `docs/API.md`: added index entries for Smart Playlists, Genre Groups, and Podcasts
+- Updated `competitors.md`: fixed Smart Playlists row (⚠️ planned → ✅), added Genre Groups row, updated priority gaps and roadmap, added both to selling points
+
+---
+
+## Smart Playlists: Fresh Picks + vpath library filter — 2026-03-22
+
+**Files:** `src/api/smart-playlists.js`, `webapp/app.js`, `webapp/style.css`
+
+### Fresh Picks feature
+
+New per-playlist **"Fresh Picks"** toggle in the builder. When enabled, the playlist runs with `ORDER BY RANDOM()` every time it is opened from the sidebar — so each open gives a different selection of songs that match the filters. Useful for discovery-style playlists.
+
+- Builder toggle persisted in `filters.freshPicks` (boolean, default false)
+- Running a saved playlist checks `pl.filters.freshPicks` and forces `sort='random'` when true
+- Preview button in the builder also honours the toggle
+- A small shuffle icon appears next to the playlist name in the sidebar nav
+- A **"New picks"** re-shuffle button appears in the results header for Fresh Picks playlists
+- Default filters extracted to `_splDefaultFilters()` function (single source of truth)
+
+### vpath (library) filter for Smart Playlists
+
+New "Libraries" section in the builder when the server has more than one music vpath:
+
+- Toggle pills to include/exclude individual libraries
+- Deselecting all but one child vpath (e.g. "Top-40") correctly resolves to a `filepathPrefix` LIKE clause instead of a vpath exclusion, because child vpath files are stored under the parent vpath in the DB
+- `selectedVpaths: []` = all included; explicit list = only those vpaths
+- Backward-compatible migration from old `ignoreVPaths` format
+
+
+
+**Files:** `src/db/sqlite-backend.js`, `src/db/loki-backend.js`, `src/db/manager.js`, `src/api/smart-playlists.js` (new), `src/server.js`, `webapp/index.html`, `webapp/app.js`, `webapp/style.css`
+
+### What was added
+
+Smart Playlists are a dynamic filter system separate from static playlists. They query the music library on-demand using filter criteria and return a fresh list every time.
+
+**Filter options:**
+- Multi-genre select (pick any combination, or leave empty for all)
+- Year range (from/to)
+- Minimum star rating (any, ★ to ★★★★★ — stored as raw DB values 0/2/4/6/8/10)
+- Play status: any / never played / played / at-least N plays
+- Starred songs only
+- Artist text search (case-insensitive substring match)
+
+**Sort options:** Artist/Album, Album, Year ↑/↓, Top Rated, Most Played, Recently Played, Random
+
+**Max songs:** 25 / 50 / 100 / 200 / 500 / 1000
+
+**Filtering live preview:** A debounced count query fires 500ms after any filter change to show "X songs match" before running.
+
+**Save / CRUD:** Smart playlists can be named and saved. They appear in a new "Smart Playlists" sidebar section. Saved playlists can be run (re-evaluating the library live), edited, or deleted.
+
+**API routes:**
+- `GET /api/v1/smart-playlists` — list saved
+- `POST /api/v1/smart-playlists/run` — execute (no save)
+- `POST /api/v1/smart-playlists/count` — preview count
+- `POST /api/v1/smart-playlists` — save new
+- `PUT /api/v1/smart-playlists/:id` — update
+- `DELETE /api/v1/smart-playlists/:id` — delete
+
+**DB:** New `smart_playlists` table (SQLite) with `id, user, name, filters (JSON), sort, limit_n, created`. Migration-safe: `CREATE TABLE IF NOT EXISTS` with `UNIQUE(user, name)`. Loki backend uses in-memory store.
+
+---
+
 ## Podcast Feeds UI — full rewrite + art cache fix + RSS URL editing — 2026-03-21
 
 **Files:** `webapp/app.js`, `webapp/style.css`, `src/server.js`, `src/api/podcasts.js`, `src/db/sqlite-backend.js`, `src/db/loki-backend.js`, `src/db/manager.js`

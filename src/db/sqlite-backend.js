@@ -134,6 +134,23 @@ export function init(dbDirectory) {
       UNIQUE(feed_id, guid)
     );
     CREATE INDEX IF NOT EXISTS idx_pe_feed_id ON podcast_episodes(feed_id);
+
+    CREATE TABLE IF NOT EXISTS smart_playlists (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      user     TEXT NOT NULL,
+      name     TEXT NOT NULL,
+      filters  TEXT NOT NULL DEFAULT '{}',
+      sort     TEXT NOT NULL DEFAULT 'artist',
+      limit_n  INTEGER NOT NULL DEFAULT 100,
+      created  INTEGER NOT NULL,
+      UNIQUE(user, name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_spl_user ON smart_playlists(user);
+
+    CREATE TABLE IF NOT EXISTS genre_groups (
+      id     INTEGER PRIMARY KEY DEFAULT 1,
+      groups TEXT NOT NULL DEFAULT '[]'
+    );
   `);
   // Migration: add cuepoints column for databases created before this feature
   try { db.exec('ALTER TABLE files ADD COLUMN cuepoints TEXT'); } catch (_e) {}
@@ -1477,3 +1494,117 @@ export function saveEpisodeProgress(episodeId, feedId, position, played) {
   ).run(position, played ? 1 : 0, episodeId, feedId);
 }
 
+// ── Smart Playlists ──────────────────────────────────────────────────────────
+
+function _buildSmartPlaylistQuery(filters, vpaths, username, countOnly, ignoreVPaths, filepathPrefix) {
+  const filtered = vpathFilter(vpaths, ignoreVPaths || null);
+  if (filtered.length === 0) return null;
+  const vIn = inClause('f.vpath', filtered);
+  const params = [username, ...vIn.params];
+  let whereSql = `WHERE ${vIn.sql}`;
+
+  if (filepathPrefix && typeof filepathPrefix === 'string') {
+    whereSql += " AND f.filepath LIKE ? ESCAPE '\\'";
+    params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
+  }
+
+  if (filters.genres && filters.genres.length > 0) {
+    const gIn = inClause('f.genre', filters.genres);
+    whereSql += ` AND ${gIn.sql}`;
+    params.push(...gIn.params);
+  }
+  if (filters.yearFrom) { whereSql += ' AND f.year >= ?'; params.push(Number(filters.yearFrom)); }
+  if (filters.yearTo)   { whereSql += ' AND f.year <= ?'; params.push(Number(filters.yearTo)); }
+  if (filters.minRating > 0) {
+    whereSql += ' AND COALESCE(um.rating,0) >= ?';
+    params.push(Number(filters.minRating));
+  }
+  if (filters.playedStatus === 'never') {
+    whereSql += ' AND (um.pc IS NULL OR um.pc = 0)';
+  } else if (filters.playedStatus === 'played') {
+    whereSql += ' AND um.pc > 0';
+  } else if (filters.minPlayCount > 0) {
+    whereSql += ' AND um.pc >= ?';
+    params.push(Number(filters.minPlayCount));
+  }
+  if (filters.starred) { whereSql += ' AND um.starred = 1'; }
+  if (filters.artistSearch && filters.artistSearch.trim()) {
+    whereSql += ' AND f.artist LIKE ? COLLATE NOCASE';
+    params.push(`%${filters.artistSearch.trim()}%`);
+  }
+
+  const joinSql = 'FROM files f LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?';
+  return { joinSql, whereSql, params };
+}
+
+const _SORT_MAP = {
+  artist:      'f.artist COLLATE NOCASE, f.album COLLATE NOCASE, COALESCE(f.disk,0), COALESCE(f.track,0)',
+  album:       'f.album COLLATE NOCASE, COALESCE(f.disk,0), COALESCE(f.track,0)',
+  year_asc:    'f.year ASC, f.artist COLLATE NOCASE',
+  year_desc:   'f.year DESC, f.artist COLLATE NOCASE',
+  rating:      'COALESCE(um.rating,0) DESC, f.artist COLLATE NOCASE',
+  play_count:  'COALESCE(um.pc,0) DESC, f.artist COLLATE NOCASE',
+  last_played: 'um.lp DESC, f.artist COLLATE NOCASE',
+  random:      'RANDOM()',
+};
+
+export function runSmartPlaylist(filters, sort, limitN, vpaths, username, ignoreVPaths, filepathPrefix) {
+  const q = _buildSmartPlaylistQuery(filters, vpaths, username, false, ignoreVPaths, filepathPrefix);
+  if (!q) return [];
+  const orderSql = 'ORDER BY ' + (_SORT_MAP[sort] || _SORT_MAP.artist);
+  const limit = Math.min(Number(limitN) || 100, 1000);
+  const rows = db.prepare(
+    `SELECT f.rowid AS id, f.*, COALESCE(um.rating,0) AS rating, COALESCE(um.starred,0) AS starred, um.lp AS lastPlayed, COALESCE(um.pc,0) AS playCount ` +
+    `${q.joinSql} ${q.whereSql} ${orderSql} LIMIT ?`
+  ).all(...q.params, limit);
+  return rows.map(mapFileRow);
+}
+
+export function countSmartPlaylist(filters, vpaths, username, ignoreVPaths, filepathPrefix) {
+  const q = _buildSmartPlaylistQuery(filters, vpaths, username, true, ignoreVPaths, filepathPrefix);
+  if (!q) return 0;
+  return db.prepare(`SELECT COUNT(*) AS n ${q.joinSql} ${q.whereSql}`).get(...q.params).n;
+}
+
+export function getSmartPlaylists(username) {
+  return db.prepare('SELECT * FROM smart_playlists WHERE user = ? ORDER BY name COLLATE NOCASE').all(username)
+    .map(r => ({ ...r, filters: JSON.parse(r.filters) }));
+}
+
+export function getSmartPlaylist(id, username) {
+  const r = db.prepare('SELECT * FROM smart_playlists WHERE id = ? AND user = ?').get(id, username);
+  if (!r) return null;
+  return { ...r, filters: JSON.parse(r.filters) };
+}
+
+export function saveSmartPlaylist(username, name, filters, sort, limitN) {
+  const result = db.prepare(
+    'INSERT INTO smart_playlists (user, name, filters, sort, limit_n, created) VALUES (?,?,?,?,?,?)'
+  ).run(username, name, JSON.stringify(filters), sort, limitN, Math.floor(Date.now() / 1000));
+  return result.lastInsertRowid;
+}
+
+export function updateSmartPlaylist(id, username, data) {
+  const existing = db.prepare('SELECT id FROM smart_playlists WHERE id = ? AND user = ?').get(id, username);
+  if (!existing) return false;
+  db.prepare('UPDATE smart_playlists SET name = ?, filters = ?, sort = ?, limit_n = ? WHERE id = ? AND user = ?')
+    .run(data.name, JSON.stringify(data.filters), data.sort, data.limit_n, id, username);
+  return true;
+}
+
+export function deleteSmartPlaylist(id, username) {
+  const result = db.prepare('DELETE FROM smart_playlists WHERE id = ? AND user = ?').run(id, username);
+  return result.changes > 0;
+}
+
+// ── Genre Groups (admin-configured display groupings) ─────────────────────
+export function getGenreGroups() {
+  const row = db.prepare('SELECT groups FROM genre_groups WHERE id = 1').get();
+  if (!row) return [];
+  try { return JSON.parse(row.groups); } catch(_) { return []; }
+}
+
+export function saveGenreGroups(groups) {
+  db.prepare('INSERT INTO genre_groups(id, groups) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET groups=excluded.groups')
+    .run(JSON.stringify(groups));
+}

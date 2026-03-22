@@ -19,6 +19,7 @@ import { getVPathInfo } from '../util/vpath.js';
 import { getTransAlgos, getTransCodecs, getTransBitrates } from '../api/transcode.js';
 import * as scanProgress from '../state/scan-progress.js';
 import * as scrobblerApi from './scrobbler.js';
+import { mergeGenreRows } from '../util/genre-merge.js';
 
 export function setup(mstream) {
   mstream.all('/api/v1/admin/{*path}', (req, res, next) => {
@@ -812,6 +813,80 @@ export function setup(mstream) {
     config.program.lyrics.enabled = req.body.enabled;
 
     res.json({});
+  });
+
+  // ── Genre Groups (admin-configurable display groupings) ─────────────────
+  // Mirrors GENRE_BUCKETS in webapp/app.js — used to build auto-defaults when no groups saved
+  const GENRE_BUCKETS_DEFAULT = [
+    ['Rock',               /\b(rock|punk|metal|grunge|emo|hardcore|alternative|indie|shoegaze|post.rock|new.wave|prog(ressive)?|glam|gothic|psychedel|garage|britpop|surf|math.rock|noise.rock|skate)\b/i],
+    ['Electronic',         /\b(electro(nic)?|techno|house|trance|drum.?n?.?bass|dnb|d&b|ambient|synth|rave|edm|idm|breakbeat|dubstep|chillout|chill(?!i)|deep.house|trip.hop|downtempo|jungle|acid|minimal(?! folk|ist)|dance(?!.pop)|club|industrial|dark.wave|ebm|vaporwave|lo.?fi|hardstyle|psytrance|psybient|dub(?!step)|gabber|neurofunk|liquid drum|deathstep)\b/i],
+    ['Pop',                /\b(pop(?!.punk|.rock)|disco|bubblegum|teen.pop|j.?pop|k.?pop|c.?pop|city.pop)\b/i],
+    ['Hip-Hop & R&B',      /\b(hip.?hop|rap|r&b|rnb|neo.?soul|urban|grime|trap|drill|afroswing)\b/i],
+    ['Soul & Funk',        /\b(soul|funk|motown|rhythm.and.blues|boogie|northern.soul|groove(?! metal))\b/i],
+    ['Jazz & Blues',       /\b(jazz|blues|swing|bebop|be.bop|fusion|bossa|latin.jazz|cool.jazz|dixieland|delta|smooth.jazz|acid.jazz|nu.jazz)\b/i],
+    ['Classical',          /\b(classical|orchestral|opera|chamber|symphony|baroque|contempor|neoclassic|minimali(st)?|modern.classical)\b/i],
+    ['Folk & Country',     /\b(folk|country|bluegrass|acoustic(?!.rock)|singer.?songwriter|americana|celtic|irish|western|cowboy|outlaw|appalachian)\b/i],
+    ['World & Reggae',     /\b(world|reggae|latin(?!.jazz)|african|caribbean|cuban|salsa|bossa.nova|afrobeat|cumbia|flamenco|tango|polka|turkish|arabic|indian|bollywood|samba|merengue|calypso|afrobeats|dancehall)\b/i],
+    ['Gospel & Christian', /\b(gospel|christian|worship|spiritual|hymn|ccm|praise|inspirational|devotional)\b/i],
+  ];
+  function _autoGroupGenres(allGenres) {
+    const bucketMap = new Map(GENRE_BUCKETS_DEFAULT.map(([label]) => [label, []]));
+    const other = [];
+    for (const g of allGenres) {
+      let classified = false;
+      for (const [label, re] of GENRE_BUCKETS_DEFAULT) {
+        if (re.test(g)) { bucketMap.get(label).push(g); classified = true; break; }
+      }
+      if (!classified) other.push(g);
+    }
+    const result = GENRE_BUCKETS_DEFAULT
+      .map(([label]) => ({ name: label, genres: bucketMap.get(label) }))
+      .filter(g => g.genres.length > 0);
+    if (other.length > 0) result.push({ name: 'Other', genres: other });
+    return result;
+  }
+
+  mstream.get('/api/v1/admin/genre-groups', (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    try {
+      const savedGroups = db.getGenreGroups();
+      const rawRows = db.getGenres(req.user.vpaths);
+      const { genres: merged, rawMap } = mergeGenreRows(rawRows);
+      const allGenres = merged.map(g => g.genre); // merged display names
+      const allGenreSet = new Set(allGenres);
+      // Build reverse map: raw DB string → merged display name
+      const rawToDisplay = new Map();
+      for (const [display, rawSet] of rawMap) for (const raw of rawSet) rawToDisplay.set(raw, display);
+      const normalizeGenre = g => allGenreSet.has(g) ? g : (rawToDisplay.get(g) || null);
+      const isDefault = !savedGroups || savedGroups.length === 0;
+      let groups;
+      if (isDefault) {
+        groups = _autoGroupGenres(allGenres);
+      } else {
+        // Normalize any old raw strings to display names; drop genres not in current library
+        groups = savedGroups.map(grp => ({
+          name: grp.name,
+          genres: [...new Set(grp.genres.map(normalizeGenre).filter(Boolean))],
+        }));
+      }
+      res.json({ groups, allGenres, isDefault });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
+  mstream.post('/api/v1/admin/genre-groups', (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const schema = Joi.array().items(
+      Joi.object({
+        name:   Joi.string().max(120).required(),
+        genres: Joi.array().items(Joi.string().max(200)).required(),
+      })
+    );
+    const { error, value } = schema.validate(req.body);
+    if (error) return res.status(400).json({ error: error.message });
+    try {
+      db.saveGenreGroups(value);
+      res.json({ ok: true });
+    } catch(e) { res.status(500).json({ error: e.message }); }
   });
 
   // ── ID3 tag write ────────────────────────────────────────────

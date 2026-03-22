@@ -89,6 +89,18 @@ function _cleanHtml(s) {
   return r.replace(/\s+/g, ' ').trim();
 }
 
+// Decodes XML/HTML entities that commonly appear in RSS URL attributes.
+// Only decodes characters safe to unescape in a URL context.
+function _decodeUrlEntities(s) {
+  if (!s || !s.includes('&')) return s;
+  return String(s)
+    .replace(/&amp;/g,  '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g,   '<')
+    .replace(/&gt;/g,   '>');
+}
+
 function _parseRss(xmlText) {
   let parsed;
   try { parsed = _xmlParser.parse(xmlText); } catch (e) { throw new Error('Invalid XML: ' + e.message); }
@@ -105,6 +117,7 @@ function _parseRss(xmlText) {
   if (ch['itunes:image']?.['@_href']) imgUrl = String(ch['itunes:image']['@_href']);
   else if (ch['itunes:image']) imgUrl = _str(ch['itunes:image']);
   else if (ch.image?.url) imgUrl = _str(ch.image.url);
+  if (imgUrl) imgUrl = _decodeUrlEntities(imgUrl);
 
   const rawItems = Array.isArray(ch.item) ? ch.item : (ch.item ? [ch.item] : []);
 
@@ -125,6 +138,7 @@ function _parseRss(xmlText) {
       if (mc?.['@_url'] && mc['@_type']?.startsWith('audio/')) audioUrl = String(mc['@_url']);
     }
     if (!audioUrl || !/^https?:\/\//i.test(audioUrl)) continue;
+    audioUrl = _decodeUrlEntities(audioUrl);
 
     const guid = _str(item.guid?.['#text'] ?? item.guid) || audioUrl;
     const epTitle = _cleanHtml(_str(item.title)) || '(No title)';
@@ -138,7 +152,7 @@ function _parseRss(xmlText) {
       if (!isNaN(d.getTime())) pubDate = Math.floor(d.getTime() / 1000);
     }
 
-    const episodeImg = item['itunes:image']?.['@_href'] ? String(item['itunes:image']['@_href']) : null;
+    const episodeImg = item['itunes:image']?.['@_href'] ? _decodeUrlEntities(String(item['itunes:image']['@_href'])) : null;
 
     episodes.push({ guid, title: epTitle, description, audio_url: audioUrl, pub_date: pubDate, duration_secs: durationSecs, img: episodeImg });
   }

@@ -3025,6 +3025,257 @@ const radioView = Vue.component('radio-view', {
   }
 });
 
+// ── Genre Groups Admin View ────────────────────────────────────────────────
+const genreGroupsView = Vue.component('genre-groups-view', {
+  data() {
+    return {
+      groups: [],        // [{name, genres:[str], collapsed:false}, ...]
+      allGenres: [],     // all genre strings from library
+      isDefault: false,  // true = showing auto-defaults (nothing saved yet)
+      pending: false,
+      dragSrc: null,     // {groupIdx, genreIdx} — groupIdx=-2 means search results
+      dropTargetIdx: null,
+      newGroupName: '',
+      renamingIdx: null,
+      renamingVal: '',
+      searchQuery: '',
+    };
+  },
+  computed: {
+    otherGroupIdx() {
+      return this.groups.findIndex(g => g.name.toLowerCase() === 'other');
+    },
+    searchResults() {
+      const raw = this.searchQuery.trim();
+      if (!raw) return [];
+      // Parse tokens: -word = exclude, +word or bare word = must include
+      const must = [], exclude = [];
+      for (const token of raw.toLowerCase().split(/\s+/)) {
+        if (!token) continue;
+        if (token.startsWith('-') && token.length > 1) exclude.push(token.slice(1));
+        else if (token.startsWith('+') && token.length > 1) must.push(token.slice(1));
+        else must.push(token);
+      }
+      if (!must.length && !exclude.length) return [];
+      // Build full genre universe
+      const allGenreSet = new Set(this.allGenres);
+      for (const grp of this.groups) for (const g of grp.genres) allGenreSet.add(g);
+      return [...allGenreSet].filter(g => {
+        const gl = g.toLowerCase();
+        return must.every(t => gl.includes(t)) && !exclude.some(t => gl.includes(t));
+      }).sort();
+    },
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">Groups &amp; Genres</span>
+              <p style="margin-bottom:.5rem;">Organise genres into top-level groups for the <b>Genres</b> view and <b>Smart Playlists</b>.<br><small style="color:var(--t2)">Double-click a group name to rename it. Drag a genre chip from the right panel and drop it onto a group name on the left. Groups cannot be deleted — move unwanted genres to <em>Other</em>.</small></p>
+              <div v-if="isDefault" style="background:var(--raised);border-left:3px solid var(--accent,#6366f1);padding:10px 14px;border-radius:4px;margin-top:10px;font-size:.875rem;color:var(--t2);">Auto-detected defaults based on your music library. Edit and <b style="color:var(--t1)">Save</b> to store your custom grouping.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="gg-layout">
+        <!-- LEFT: group names as drop targets -->
+        <div class="gg-left">
+          <div v-for="(grp, gi) in groups" :key="gi"
+               class="gg-left-item"
+               :class="{'gg-left-active': dropTargetIdx === gi}"
+               @dragover.prevent="dropTargetIdx = gi"
+               @dragleave="onDragleave($event, gi)"
+               @drop.prevent="onDropToGroup(gi)">
+            <span class="gg-chevron-sm" @click="toggleCollapse(gi)" :title="grp.collapsed ? 'Expand' : 'Collapse'">{{grp.collapsed ? '▶' : '▼'}}</span>
+            <span v-if="renamingIdx !== gi" class="gg-left-name" @dblclick="startRename(gi)" title="Double-click to rename">{{grp.name}}</span>
+            <input v-else v-model="renamingVal" class="gg-rename-inp gg-left-rename" @blur="commitRename(gi)" @keydown.enter="commitRename(gi)" @keydown.esc="renamingIdx=null" ref="renameInput">
+            <span class="gg-left-cnt">{{grp.genres.length}}</span>
+            <button v-if="grp.genres.length === 0" class="gg-del-btn" @click.stop="deleteGroup(gi)" title="Delete empty group">&#x2715;</button>
+          </div>
+          <div class="gg-add-row">
+            <input v-model="newGroupName" type="text" placeholder="New group…" class="gg-add-inp" @keydown.enter="addGroup">
+            <button class="btn btn-small" @click="addGroup" :disabled="!newGroupName.trim()">+</button>
+          </div>
+        </div>
+
+        <!-- RIGHT: search + collapsible genre sections -->
+        <div class="gg-right">
+          <!-- Search bar -->
+          <div class="gg-search-row">
+            <span class="gg-search-icon">&#128269;</span>
+            <input v-model="searchQuery" type="text" placeholder="e.g. house  ·  deep house  ·  house -acid  ·  house +deep" class="gg-search-inp" @keydown.esc="searchQuery=''">
+            <button v-if="searchQuery" class="gg-search-clear" @click="searchQuery=''" title="Clear">&#x2715;</button>
+          </div>
+
+          <!-- Search results panel -->
+          <div v-if="searchQuery.trim()" class="gg-search-panel">
+            <div class="gg-search-panel-head">Results for <b>"{{searchQuery.trim()}}"</b> <span style="color:var(--t3);font-weight:400;">· +word = must include &nbsp; -word = exclude</span> — drag a chip to a group on the left</div>
+            <div class="gg-chips" style="padding:10px 14px;">
+              <span v-if="searchResults.length === 0" class="gg-empty-hint">No genres match</span>
+              <span v-for="(g, si) in searchResults" :key="g"
+                    class="gg-chip gg-chip-search"
+                    :class="{dragging: dragSrc && dragSrc.groupIdx===-2 && dragSrc.genreIdx===si}"
+                    draggable="true"
+                    @dragstart="onDragStartSearch(si)"
+                    @dragend="dragSrc=null">
+                {{g}}
+                <span class="gg-chip-group-hint">{{groupOf(g)}}</span>
+              </span>
+            </div>
+          </div>
+          <div v-for="(grp, gi) in groups" :key="gi" class="gg-group">
+            <div class="gg-group-head"
+                 :class="{'gg-drop-over': dropTargetIdx === gi}"
+                 @dragover.prevent="dropTargetIdx = gi"
+                 @dragleave="onDragleave($event, gi)"
+                 @drop.prevent="onDropToGroup(gi)">
+              <span class="gg-chevron" @click="toggleCollapse(gi)" style="cursor:pointer;margin-right:6px;">{{grp.collapsed ? '▶' : '▼'}}</span>
+              <span v-if="renamingIdx !== gi" style="flex:1;cursor:text;font-weight:700;" @dblclick="startRename(gi)">{{grp.name}}</span>
+              <input v-else v-model="renamingVal" class="gg-rename-inp" style="flex:1;" @blur="commitRename(gi)" @keydown.enter="commitRename(gi)" @keydown.esc="renamingIdx=null">
+              <small style="color:var(--t2);">{{grp.genres.length}}</small>
+            </div>
+            <div v-show="!grp.collapsed" class="gg-chips"
+                 :class="{'gg-drop-over': dropTargetIdx === gi}"
+                 @dragover.prevent="dropTargetIdx = gi"
+                 @dragleave="onDragleave($event, gi)"
+                 @drop.prevent="onDropToGroup(gi)">
+              <span v-for="(g, gei) in grp.genres" :key="g"
+                    class="gg-chip"
+                    :class="{dragging: dragSrc && dragSrc.groupIdx===gi && dragSrc.genreIdx===gei}"
+                    draggable="true"
+                    @dragstart="onDragStart(gi, gei)"
+                    @dragend="dragSrc=null">
+                {{g}}<span v-if="gi !== otherGroupIdx && otherGroupIdx !== -1" class="gg-chip-remove" @click.stop="moveToOther(gi, gei)" title="Move to Other">↓</span>
+              </span>
+              <span v-if="grp.genres.length === 0" class="gg-empty-hint">Drop genres here</span>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px;">
+            <button class="btn-flat" @click="resetToDefault">Reset to Auto</button>
+            <button class="btn" @click="save" :disabled="pending">{{ pending ? 'Saving…' : 'Save' }}</button>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  async mounted() {
+    await this.load();
+  },
+  watch: {
+    renamingIdx(v) {
+      if (v !== null) this.$nextTick(() => { const el = this.$refs.renameInput; if (el) { const arr = Array.isArray(el) ? el[0] : el; arr && arr.focus && arr.focus(); } });
+    }
+  },
+  methods: {
+    async load() {
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/genre-groups` });
+        this.allGenres = res.data.allGenres || [];
+        this.isDefault = !!res.data.isDefault;
+        this.groups = (res.data.groups || []).map(g => ({ name: g.name, genres: [...g.genres], collapsed: false }));
+        // If nothing is in the DB yet, seed it now so it persists immediately
+        if (this.isDefault) await this._autoSave();
+      } catch(e) { iziToast.error({ title: 'Failed to load genre groups', position: 'topCenter', timeout: 3000 }); }
+    },
+    toggleCollapse(gi) {
+      this.groups[gi].collapsed = !this.groups[gi].collapsed;
+      // collapse state is UI-only, no need to persist
+    },
+    async addGroup() {
+      const name = this.newGroupName.trim();
+      if (!name) return;
+      this.groups.push({ name, genres: [], collapsed: false });
+      this.newGroupName = '';
+      await this._autoSave();
+    },
+    async deleteGroup(gi) {
+      if (this.groups[gi].genres.length > 0) return;
+      this.groups.splice(gi, 1);
+      await this._autoSave();
+    },
+    async moveToOther(gi, gei) {
+      const [g] = this.groups[gi].genres.splice(gei, 1);
+      const oi = this.otherGroupIdx;
+      if (oi !== -1) {
+        this.groups[oi].genres.push(g);
+      } else {
+        this.groups.push({ name: 'Other', genres: [g], collapsed: false });
+      }
+      await this._autoSave();
+    },
+    startRename(gi) { this.renamingIdx = gi; this.renamingVal = this.groups[gi].name; },
+    async commitRename(gi) {
+      if (this.renamingVal.trim()) this.groups[gi].name = this.renamingVal.trim();
+      this.renamingIdx = null;
+      await this._autoSave();
+    },
+    // ── Drag-and-drop ────────────────────────────────────────────
+    onDragStart(groupIdx, genreIdx) { this.dragSrc = { groupIdx, genreIdx }; this.dropTargetIdx = null; },
+    onDragStartSearch(si) { this.dragSrc = { groupIdx: -2, genreIdx: si }; this.dropTargetIdx = null; },
+    groupOf(genre) {
+      const grp = this.groups.find(g => g.genres.includes(genre));
+      return grp ? grp.name : 'unassigned';
+    },
+    onDragleave(e, gi) {
+      if (!e.currentTarget.contains(e.relatedTarget)) {
+        if (this.dropTargetIdx === gi) this.dropTargetIdx = null;
+      }
+    },
+    async onDropToGroup(destGi) {
+      const src = this.dragSrc;
+      this.dragSrc = null;
+      this.dropTargetIdx = null;
+      if (!src) return;
+      let genre;
+      if (src.groupIdx === -2) {
+        // Drag from search results — find genre by value and remove from its current group
+        genre = this.searchResults[src.genreIdx];
+        if (!genre) return;
+        for (const grp of this.groups) {
+          const idx = grp.genres.indexOf(genre);
+          if (idx !== -1) { grp.genres.splice(idx, 1); break; }
+        }
+      } else {
+        if (src.groupIdx === destGi) return;
+        genre = this.groups[src.groupIdx].genres.splice(src.genreIdx, 1)[0];
+      }
+      if (!genre) return;
+      this.groups[destGi].genres.push(genre);
+      await this._autoSave();
+    },
+    // ── Auto-save (silent, called after every mutation) ──────────
+    async _autoSave() {
+      try {
+        const payload = this.groups.map(g => ({ name: g.name, genres: g.genres }));
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/genre-groups`, data: payload });
+        this.isDefault = false;
+      } catch(e) { iziToast.error({ title: 'Auto-save failed', position: 'topCenter', timeout: 3000 }); }
+    },
+    resetToDefault() {
+      adminConfirm('Reset genre groups?', 'All custom groups will be removed. The player will fall back to automatic genre classification.', 'Reset', async () => {
+        try {
+          await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/genre-groups`, data: [] });
+          await this.load();
+          iziToast.success({ title: 'Genre groups reset', position: 'topCenter', timeout: 2500 });
+        } catch(e) { iziToast.error({ title: 'Reset failed', position: 'topCenter', timeout: 3000 }); }
+      });
+    },
+    async save() {
+      this.pending = true;
+      try {
+        // Save all groups (including empty ones) so renamed group names are preserved
+        const payload = this.groups.map(g => ({ name: g.name, genres: g.genres }));
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/genre-groups`, data: payload });
+        this.isDefault = false;
+        iziToast.success({ title: 'Genre groups saved', position: 'topCenter', timeout: 2500 });
+      } catch(e) { iziToast.error({ title: 'Save failed', position: 'topCenter', timeout: 3000 }); }
+      finally { this.pending = false; }
+    }
+  }
+});
+
 const vm = new Vue({
   el: '#content',
   components: {
@@ -3043,6 +3294,7 @@ const vm = new Vue({
     'discogs-view': discogsView,
     'lyrics-view': lyricsView,
     'radio-view': radioView,
+    'genre-groups-view': genreGroupsView,
   },
   data: {
     currentViewMain: 'folders-view',

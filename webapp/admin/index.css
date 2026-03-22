@@ -786,3 +786,43 @@ tr:hover td { background: var(--raised); }
   font-size: .76rem; color: var(--t3);
 }
 .sp-filepath { word-break: break-all; color: var(--t2); }
+
+/* ── Genre Groups Admin ──────────────────────────────────────── */
+/* Genre Groups two-column layout */
+.gg-layout{display:flex;gap:18px;align-items:flex-start;}
+.gg-left{width:200px;flex-shrink:0;position:sticky;top:16px;display:flex;flex-direction:column;gap:4px;}
+.gg-left-item{display:flex;align-items:center;gap:6px;padding:8px 10px;border:2px solid var(--border);border-radius:8px;background:var(--raised);cursor:default;transition:border-color .15s,background .15s;min-height:40px;}
+.gg-left-item.gg-left-active{border-color:var(--primary,#6366f1);background:var(--primary-d,rgba(99,102,241,.12));}
+.gg-left-name{flex:1;font-size:.88rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:text;}
+.gg-left-rename{flex:1;background:transparent;border:none;border-bottom:1px solid var(--primary);color:var(--t1);font-size:.88rem;font-weight:600;outline:none;padding:0 2px;min-width:0;}
+.gg-left-cnt{font-size:.75rem;color:var(--t3);background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1px 7px;flex-shrink:0;}
+.gg-del-btn{margin-left:2px;flex-shrink:0;background:none;border:none;color:var(--t3);cursor:pointer;font-size:.8rem;padding:0 3px;line-height:1;border-radius:3px;}
+.gg-del-btn:hover{color:var(--danger,#e55);background:rgba(200,0,0,.08);}
+.gg-chevron-sm{font-size:.65rem;color:var(--t3);cursor:pointer;flex-shrink:0;width:14px;text-align:center;}
+.gg-add-row{display:flex;gap:6px;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);}
+.gg-add-inp{flex:1;min-width:0;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--raised);color:var(--t1);font-size:.82rem;}
+.gg-right{flex:1;min-width:0;}
+/* Group cards in right panel */
+.gg-group{border:1px solid var(--border);border-radius:8px;margin-bottom:12px;background:var(--surface);}
+.gg-group-head{display:flex;align-items:center;padding:9px 14px;background:var(--raised);border-bottom:1px solid var(--border);border-radius:8px 8px 0 0;gap:6px;transition:background .15s;}
+.gg-group-head.gg-drop-over{background:var(--primary-d,rgba(99,102,241,.15));}
+.gg-rename-inp{background:transparent;border:none;border-bottom:1px solid var(--primary);color:var(--t1);font-size:1rem;font-weight:700;outline:none;padding:0 2px;min-width:0;}
+.gg-chevron{font-size:.65rem;color:var(--t3);width:14px;text-align:center;flex-shrink:0;}
+.gg-chips{display:flex;flex-wrap:wrap;gap:7px;padding:11px 14px;min-height:46px;transition:background .15s;}
+.gg-chips.gg-drop-over{background:var(--primary-d,rgba(99,102,241,.08));}
+.gg-empty-hint{font-size:.8rem;color:var(--t3);align-self:center;font-style:italic;}
+.gg-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;background:var(--raised);border:1px solid var(--border);border-radius:20px;font-size:.8rem;cursor:grab;user-select:none;transition:background .12s,border-color .12s;}
+.gg-chip:hover{background:var(--primary-d,rgba(99,102,241,.12));border-color:var(--primary,#6366f1);}
+.gg-chip.dragging{opacity:.3;}
+.gg-chip-remove{cursor:pointer;font-size:.82rem;color:var(--t3);line-height:1;padding:0 1px;transition:color .1s;}
+.gg-chip-remove:hover{color:var(--primary,#6366f1);}
+/* Search */
+.gg-search-row{display:flex;align-items:center;gap:8px;margin-bottom:14px;background:var(--raised);border:1px solid var(--border);border-radius:8px;padding:6px 12px;}
+.gg-search-icon{font-size:1rem;color:var(--t3);flex-shrink:0;}
+.gg-search-inp{flex:1;background:transparent;border:none;outline:none;color:var(--t1);font-size:.9rem;min-width:0;}
+.gg-search-clear{background:none;border:none;cursor:pointer;color:var(--t3);font-size:.9rem;padding:0 2px;line-height:1;}
+.gg-search-clear:hover{color:var(--t1);}
+.gg-search-panel{border:1px solid var(--primary,#6366f1);border-radius:8px;margin-bottom:14px;background:var(--surface);}
+.gg-search-panel-head{padding:8px 14px;font-size:.82rem;color:var(--t2);border-bottom:1px solid var(--border);}
+.gg-chip-search{border-color:var(--primary,#6366f1);background:var(--primary-d,rgba(99,102,241,.08));}
+.gg-chip-group-hint{font-size:.7rem;color:var(--t3);margin-left:3px;font-style:italic;}

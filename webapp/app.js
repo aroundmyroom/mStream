@@ -520,7 +520,7 @@ const Player = {
     // Scrobble after 30 s (logs play count + last-played timestamp)
     clearTimeout(scrobbleTimer);
     (function(){ const el = document.getElementById('np-scrobble-status'); if (el) { el.textContent = ''; el.className = 'np-scrobble-status'; } })();
-    if (S.lastfmEnabled && !s.isRadio) {
+    if (S.lastfmEnabled && !s.isRadio && !s.isPodcast) {
       scrobbleTimer = setTimeout(async () => {
         const scrobbleEl = document.getElementById('np-scrobble-status');
         try {
@@ -556,7 +556,7 @@ const Player = {
       this.playAt(S.idx + 1);
     } else if (S.repeat === 'all') {
       this.playAt(0);
-    } else if (S.autoDJ) {
+    } else if (S.autoDJ && _isMusicSong(S.queue[S.idx])) {
       // If autoDJPrefetch already queued a song, just advance; otherwise fetch now
       if (S.queue.length > S.idx + 1) {
         this.playAt(S.idx + 1);
@@ -631,6 +631,19 @@ const Player = {
 };
 
 // ── AUTO-DJ ──────────────────────────────────────────────────
+// Returns true only for regular music songs (not radio, podcast, or audiobook vpath).
+function _isMusicSong(s) {
+  if (!s || s.isRadio || s.isPodcast) return false;
+  const meta = S.vpathMeta || {};
+  for (const v of S.vpaths) {
+    if ((meta[v]?.type || 'music') !== 'audio-books') continue;
+    // Standalone audiobook vpath: filepath starts with "{vpath}/"
+    if (!meta[v].parentVpath && s.filepath?.startsWith(v + '/')) return false;
+    // Child audiobook vpath: filepath starts with filepathPrefix
+    if (meta[v].parentVpath && meta[v].filepathPrefix && s.filepath?.startsWith(meta[v].filepathPrefix)) return false;
+  }
+  return true;
+}
 // Returns vpaths of type 'music' only (excludes 'audio-books' vpaths).
 function _musicVpaths() {
   const meta = S.vpathMeta || {};
@@ -861,6 +874,10 @@ async function autoDJFetch() {
 }
 
 function setAutoDJ(on, skipAutoStart) {
+  if (on && !_isMusicSong(S.queue[S.idx])) {
+    toast('Auto-DJ only works with music — stop radio, podcasts or audiobooks first');
+    return;
+  }
   S.autoDJ = on;
   localStorage.setItem(_uKey('autodj'), on ? '1' : '');
   document.getElementById('dj-light').classList.toggle('dj-inactive', !on);
@@ -5092,6 +5109,49 @@ function _mountAlbumVScroll(albums, buildCard, onClick, containerEl) {
   render(true);
 }
 
+// Super-category buckets for genre grouping — first match wins
+const GENRE_BUCKETS = [
+  ['Rock',               /\b(rock|punk|metal|grunge|emo|hardcore|alternative|indie|shoegaze|post.rock|new.wave|prog(ressive)?|glam|gothic|psychedel|garage|britpop|surf|math.rock|noise.rock|skate)\b/i],
+  ['Electronic',         /\b(electro(nic)?|techno|house|trance|drum.?n?.?bass|dnb|d&b|ambient|synth|rave|edm|idm|breakbeat|dubstep|chillout|chill(?!i)|deep.house|trip.hop|downtempo|jungle|acid|minimal(?! folk|ist)|dance(?!.pop)|club|industrial|dark.wave|ebm|vaporwave|lo.?fi|hardstyle|psytrance|psybient|dub(?!step)|gabber|neurofunk|liquid drum|deathstep)\b/i],
+  ['Pop',                /\b(pop(?!.punk|.rock)|disco|bubblegum|teen.pop|j.?pop|k.?pop|c.?pop|city.pop)\b/i],
+  ['Hip-Hop & R&B',      /\b(hip.?hop|rap|r&b|rnb|neo.?soul|urban|grime|trap|drill|afroswing)\b/i],
+  ['Soul & Funk',        /\b(soul|funk|motown|rhythm.and.blues|boogie|northern.soul|groove(?! metal))\b/i],
+  ['Jazz & Blues',       /\b(jazz|blues|swing|bebop|be.bop|fusion|bossa|latin.jazz|cool.jazz|dixieland|delta|smooth.jazz|acid.jazz|nu.jazz)\b/i],
+  ['Classical',          /\b(classical|orchestral|opera|chamber|symphony|baroque|contempor|neoclassic|minimali(st)?|modern.classical)\b/i],
+  ['Folk & Country',     /\b(folk|country|bluegrass|acoustic(?!.rock)|singer.?songwriter|americana|celtic|irish|western|cowboy|outlaw|appalachian)\b/i],
+  ['World & Reggae',     /\b(world|reggae|latin(?!.jazz)|african|caribbean|cuban|salsa|bossa.nova|afrobeat|cumbia|flamenco|tango|polka|turkish|arabic|indian|bollywood|samba|merengue|calypso|afrobeats|dancehall)\b/i],
+  ['Gospel & Christian', /\b(gospel|christian|worship|spiritual|hymn|ccm|praise|inspirational|devotional)\b/i],
+];
+function classifyGenre(name) {
+  for (const [label, re] of GENRE_BUCKETS) { if (re.test(name)) return label; }
+  return 'Other';
+}
+
+// Build genre sections HTML from server-provided groups (or fall back to GENRE_BUCKETS)
+// genreGroups: [{name, genres:[{genre,cnt}]}] or null
+// allGenres:   [{genre,cnt}]
+function _buildGenreSections(genreGroups, allGenres) {
+  let sectionList;
+  if (genreGroups && genreGroups.length > 0) {
+    sectionList = genreGroups;
+  } else {
+    // Fall back to GENRE_BUCKETS classifier
+    const bucketOrder = [...GENRE_BUCKETS.map(([l]) => l), 'Other'];
+    const grouped = {};
+    for (const g of allGenres) {
+      const cat = classifyGenre(g.genre);
+      (grouped[cat] = grouped[cat] || []).push(g);
+    }
+    sectionList = bucketOrder.filter(cat => grouped[cat]).map(cat => ({ name: cat, genres: grouped[cat] }));
+  }
+  return sectionList.map(grp => {
+    const chips = grp.genres.map(g =>
+      `<button class="genre-chip" data-genre="${esc(g.genre)}">${esc(g.genre)}<span class="genre-cnt">${g.cnt}</span></button>`
+    ).join('');
+    return `<div class="genre-section"><button class="genre-section-head"><span class="genre-section-name">${esc(grp.name)}</span><span class="genre-section-count">${grp.genres.length}</span><svg class="genre-section-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></button><div class="genre-grid">${chips}</div></div>`;
+  }).join('');
+}
+
 async function viewGenres() {
   setTitle('Genres'); setBack(null); setNavActive('genres'); S.view = 'genres';
   S.curSongs = [];
@@ -5099,15 +5159,16 @@ async function viewGenres() {
   document.getElementById('add-all-btn').onclick  = null;
   setBody('<div class="loading-state"></div>');
   try {
-    const d = await api('GET', 'api/v1/db/genres');
-    if (!d.genres || d.genres.length === 0) {
+    const d = await api('GET', 'api/v1/db/genre-groups');
+    const allGenres = d.genres || [];
+    if (!allGenres.length) {
       setBody('<div class="info-panel"><h2>No Genres</h2><p class="info-hint">Your library has no genre tags. Tag your files to use this view.</p></div>');
       return;
     }
-    const items = d.genres.map(g =>
-      `<button class="genre-chip" data-genre="${esc(g.genre)}">${esc(g.genre)}<span class="genre-cnt">${g.cnt}</span></button>`
-    ).join('');
-    setBody(`<div class="genre-grid">${items}</div>`);
+    setBody(`<div class="genre-sections">${_buildGenreSections(d.groups, allGenres)}</div>`);
+    document.querySelectorAll('.genre-section-head').forEach(btn =>
+      btn.addEventListener('click', () => btn.closest('.genre-section').classList.toggle('collapsed'))
+    );
     document.querySelectorAll('.genre-chip').forEach(el =>
       el.addEventListener('click', () => viewGenreDetail(el.dataset.genre))
     );
@@ -5446,7 +5507,483 @@ async function viewDecadeDetail(decade, label, defaultTab) {
 
 // ── SMART PLAYLIST ─────────────────────────────────────────────
 
-// ── TRANSCODE ─────────────────────────────────────────────────
+function _splDefaultFilters() {
+  return { genres: [], yearFrom: null, yearTo: null, minRating: 0, playedStatus: 'any', minPlayCount: 0, starred: false, artistSearch: '', selectedVpaths: [], freshPicks: false };
+}
+
+// State for the builder
+let _splFilters = _splDefaultFilters();
+let _splSort = 'random';
+let _splLimit = 100;
+let _splEditId = null;
+let _splEditName = null;
+let _splCountTimer = null;
+
+async function loadSmartPlaylists() {
+  try {
+    S.smartPlaylists = (await api('GET', 'api/v1/smart-playlists')).playlists || [];
+  } catch(_) { S.smartPlaylists = []; }
+  _renderSmartPlaylistNav();
+}
+
+function _renderSmartPlaylistNav() {
+  const nav = document.getElementById('smart-playlist-nav');
+  if (!nav) return;
+  const list = S.smartPlaylists || [];
+  if (!list.length) { nav.innerHTML = '<div class="pl-empty-hint">No smart playlists yet</div>'; return; }
+  nav.innerHTML = list.map(p => `
+    <div class="pl-row" data-splid="${p.id}">
+      <button class="pl-row-btn" data-splid="${p.id}">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22,3 2,3 10,12.46 10,19 14,21 14,12.46"/></svg>
+        ${p.filters?.freshPicks ? '<svg class="pl-fresh-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" title="Fresh Picks"><polyline points="17,1 21,5 17,9"/><path d="M3,11V9a4,4,0,0,1,4-4h14"/><polyline points="7,23 3,19 7,15"/><path d="M21,13v2a4,4,0,0,1-4,4H3"/></svg>' : ''}
+        ${esc(p.name)}
+      </button>
+      <button class="pl-row-del" data-splid="${p.id}" title="Delete">×</button>
+    </div>`).join('');
+
+  nav.querySelectorAll('.pl-row-btn').forEach(btn => {
+    btn.addEventListener('click', () => _runSavedSmartPlaylist(parseInt(btn.dataset.splid, 10)));
+  });
+  nav.querySelectorAll('.pl-row-del').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const id = parseInt(btn.dataset.splid, 10);
+      const pl = (S.smartPlaylists || []).find(p => p.id === id);
+      showConfirmModal(`Delete smart playlist "${pl?.name || id}"?`, 'This cannot be undone.', async () => {
+        try {
+          await api('DELETE', `api/v1/smart-playlists/${id}`);
+          await loadSmartPlaylists();
+          toast('Deleted');
+        } catch(_) { toast('Failed to delete'); }
+      });
+    });
+  });
+}
+
+async function _runSavedSmartPlaylist(id) {
+  const pl = (S.smartPlaylists || []).find(p => p.id === id);
+  if (!pl) return;
+  setTitle(pl.name); setBack(null); S.view = 'smart-playlist:' + id;
+  setBody('<div class="loading-state"></div>');
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+  try {
+    const effectiveSort = pl.filters?.freshPicks ? 'random' : pl.sort;
+    const d = await api('POST', 'api/v1/smart-playlists/run', { filters: pl.filters, sort: effectiveSort, limit: pl.limit_n });
+    _viewSmartPlaylistResults(d.songs, pl.name, id, pl.filters, pl.sort, pl.limit_n);
+  } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
+}
+
+function _viewSmartPlaylistResults(songs, name, splId, filters, sort, limitN) {
+  const mapped = (songs || []).map(norm);
+  S.curSongs = mapped;
+  const title = name || 'Smart Playlist';
+  setTitle(title);
+  document.getElementById('play-all-btn').onclick = () => {
+    if (mapped.length) { Player.setQueue(mapped, 0); toast(`Playing ${mapped.length} songs`); }
+  };
+  document.getElementById('add-all-btn').onclick = () => {
+    if (mapped.length) { Player.addAll(mapped); }
+  };
+
+  const editBtn = `<button class="spl-edit-btn" id="spl-result-edit-btn">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    Edit filter</button>`;
+  const reshuffleBtn = (filters?.freshPicks && splId)
+    ? `<button class="spl-reshuffle-btn" id="spl-reshuffle-btn" title="Get a new random selection">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17,1 21,5 17,9"/><path d="M3,11V9a4,4,0,0,1,4-4h14"/><polyline points="7,23 3,19 7,15"/><path d="M21,13v2a4,4,0,0,1-4,4H3"/></svg>
+        New picks</button>`
+    : '';
+
+  if (!mapped.length) {
+    setBody(`<div class="empty-state"><p>No songs match this filter.</p>${editBtn}${reshuffleBtn}</div>`);
+  } else {
+    const body = document.getElementById('content-body');
+    body.innerHTML = `<div class="spl-result-header">${editBtn}${reshuffleBtn}</div><div class="song-list">${renderSongRows(mapped)}</div>`;
+    attachSongListEvents(body, mapped);
+    highlightRow();
+  }
+
+  document.getElementById('spl-reshuffle-btn')?.addEventListener('click', () => _runSavedSmartPlaylist(splId));
+  document.getElementById('spl-result-edit-btn')?.addEventListener('click', () => {
+    _splFilters = filters ? JSON.parse(JSON.stringify(filters)) : _splDefaultFilters();
+    if (!Array.isArray(_splFilters.selectedVpaths)) _splFilters.selectedVpaths = [];
+    if (typeof _splFilters.freshPicks !== 'boolean') _splFilters.freshPicks = false;
+    // Backward compat: old saved playlists may have ignoreVPaths instead of selectedVpaths
+    if (_splFilters.ignoreVPaths && _splFilters.ignoreVPaths.length > 0 && _splFilters.selectedVpaths.length === 0) {
+      _splFilters.selectedVpaths = _musicVpaths().filter(v => !_splFilters.ignoreVPaths.includes(v));
+    }
+    delete _splFilters.ignoreVPaths;
+    _splSort = sort || 'random';
+    _splLimit = limitN || 100;
+    _splEditId = splId || null;
+    _splEditName = name || null;
+    viewSmartPlaylists();
+  });
+}
+
+async function viewSmartPlaylists(editData) {
+  if (editData) {
+    _splFilters = editData.filters ? JSON.parse(JSON.stringify(editData.filters)) : _splFilters;
+    _splSort    = editData.sort    || _splSort;
+    _splLimit   = editData.limit   || _splLimit;
+    _splEditId  = editData.id      || null;
+    _splEditName = editData.name   || null;
+  }
+  if (!Array.isArray(_splFilters.selectedVpaths)) _splFilters.selectedVpaths = [];
+  if (typeof _splFilters.freshPicks !== 'boolean') _splFilters.freshPicks = false;
+
+  S.view = 'smart-playlists';
+  setBack(null);
+  setTitle(_splEditId ? `Edit: ${_splEditName}` : 'New Smart Playlist');
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+  S.curSongs = [];
+
+  // Load genres — use genre-groups endpoint (server groups or fallback)
+  let genres = [];
+  let _splGenreGroups = null;
+  try {
+    const gd = await api('GET', 'api/v1/db/genre-groups');
+    genres = (gd.genres || []).map(g => g.genre || g);
+    _splGenreGroups = gd.groups || null;
+  } catch(_) {}
+
+  const SORTS = [
+    { v: 'artist',      l: 'Artist / Album' },
+    { v: 'album',       l: 'Album' },
+    { v: 'year_asc',    l: 'Year ↑' },
+    { v: 'year_desc',   l: 'Year ↓' },
+    { v: 'rating',      l: 'Top Rated' },
+    { v: 'play_count',  l: 'Most Played' },
+    { v: 'last_played', l: 'Recently Played' },
+    { v: 'random',      l: 'Random' },
+  ];
+  const LIMITS = [25, 50, 100, 200, 500, 1000];
+  const RATING_OPTS = [
+    { db: 0,  label: 'Any' },
+    { db: 2,  label: '★' },
+    { db: 4,  label: '★★' },
+    { db: 6,  label: '★★★' },
+    { db: 8,  label: '★★★★' },
+    { db: 10, label: '★★★★★' },
+  ];
+
+  const f = _splFilters;
+  if (!Array.isArray(f.selectedVpaths)) f.selectedVpaths = [];
+  // Build grouped genre picker — use server groups if available, else GENRE_BUCKETS
+  let _splSectionList;
+  if (_splGenreGroups && _splGenreGroups.length > 0) {
+    _splSectionList = _splGenreGroups.map(grp => ({ name: grp.name, genres: grp.genres.map(g => g.genre || g) }));
+    // Any genre from allGenres not in a group
+    const assigned = new Set(_splSectionList.flatMap(g => g.genres));
+    const other = genres.filter(g => !assigned.has(g));
+    if (other.length) _splSectionList.push({ name: 'Other', genres: other });
+  } else {
+    const _splBucketOrder = [...GENRE_BUCKETS.map(([l]) => l), 'Other'];
+    const _splGrouped = {};
+    for (const g of genres) { const cat = classifyGenre(g); (_splGrouped[cat] = _splGrouped[cat] || []).push(g); }
+    _splSectionList = _splBucketOrder.filter(cat => _splGrouped[cat]).map(cat => ({ name: cat, genres: _splGrouped[cat] }));
+  }
+  const genreGroupsHTML = !genres.length ? '<span class="spl-hint">No genres found</span>' :
+    _splSectionList.map(grp => {
+      const chips = grp.genres;
+      const activeCount = chips.filter(g => f.genres.includes(g)).length;
+      const allActive = chips.length > 0 && activeCount === chips.length;
+      const chipsHTML = chips.map(g => `<button class="spl-genre-chip${f.genres.includes(g) ? ' active' : ''}" data-genre="${esc(g)}">${esc(g)}</button>`).join('');
+      return `<div class="spl-genre-group${activeCount === 0 ? ' collapsed' : ''}"><div class="spl-genre-group-head"><button class="spl-genre-group-select${allActive ? ' all-active' : ''}" data-genres='${JSON.stringify(chips).replace(/'/g, "&#39;")}'><span class="spl-genre-group-name">${esc(grp.name)}</span>${activeCount ? `<span class="spl-genre-group-badge">${activeCount}</span>` : ''}<span class="spl-genre-group-total">${chips.length}</span></button><button class="spl-genre-group-chevron-btn"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></button></div><div class="spl-genre-group-chips">${chipsHTML}</div></div>`;
+    }).join('');
+  const ratingBtns = RATING_OPTS.map(o => `<button class="spl-rating-opt${f.minRating === o.db ? ' active' : ''}" data-db="${o.db}">${o.label}</button>`).join('');
+  const statusPills = ['any','never','played','at-least'].map(s => `<button class="spl-status-pill${(s === 'at-least' ? (f.playedStatus === 'played' && f.minPlayCount > 0 ? ' active' : '') : f.playedStatus === s ? ' active' : '')}" data-status="${s}">${s === 'any' ? 'Any' : s === 'never' ? 'Never played' : s === 'played' ? 'Played' : 'At least…'}</button>`).join('');
+  const sortOpts = SORTS.map(o => `<option value="${o.v}"${_splSort === o.v ? ' selected' : ''}>${o.l}</option>`).join('');
+  const limitOpts = LIMITS.map(n => `<option value="${n}"${_splLimit === n ? ' selected' : ''}>${n} songs</option>`).join('');
+
+  setBody(`
+    <div class="spl-builder">
+      <div class="spl-section">
+        <div class="spl-section-title">Genres <span class="spl-hint">(select multiple, or none for all)</span></div>
+        <div class="spl-genre-groups">${genreGroupsHTML}</div>
+      </div>
+
+      ${_musicVpaths().length > 1 ? `<div class="spl-section">
+        <div class="spl-section-title">Libraries <span class="spl-hint">(deselect to exclude)</span></div>
+        <div class="spl-vpath-pills" id="spl-vpaths">${_musicVpaths().map(v => `<button class="dj-vpath-pill${f.selectedVpaths.length === 0 || f.selectedVpaths.includes(v) ? ' on' : ''}" data-vpath="${esc(v)}">${esc(v)}</button>`).join('')}</div>
+      </div>` : ''}
+
+      <div class="spl-section spl-row-2">
+        <div>
+          <div class="spl-section-title">Year range</div>
+          <div class="spl-year-row">
+            <input type="number" id="spl-year-from" class="spl-year-inp" placeholder="From" min="1000" max="9999" value="${f.yearFrom || ''}">
+            <span class="spl-year-sep">–</span>
+            <input type="number" id="spl-year-to"   class="spl-year-inp" placeholder="To"   min="1000" max="9999" value="${f.yearTo   || ''}">
+          </div>
+        </div>
+        <div>
+          <div class="spl-section-title">Minimum rating</div>
+          <div class="spl-rating-row">${ratingBtns}</div>
+        </div>
+      </div>
+
+      <div class="spl-section">
+        <div class="spl-section-title">Play status</div>
+        <div class="spl-status-pills">
+          ${statusPills}
+          <input type="number" id="spl-min-pc" class="spl-minpc-inp${f.minPlayCount > 0 ? '' : ' hidden'}" min="1" max="99999" value="${f.minPlayCount || 5}" placeholder="times">
+        </div>
+      </div>
+
+      <div class="spl-section spl-row-2">
+        <div>
+          <div class="spl-section-title">Artist search</div>
+          <input type="text" id="spl-artist-search" class="spl-text-inp" placeholder="e.g. Beatles" value="${esc(f.artistSearch || '')}">
+        </div>
+        <div class="spl-starred-wrap">
+          <label class="spl-starred-label">
+            <input type="checkbox" id="spl-starred-cb"${f.starred ? ' checked' : ''}> Starred only
+          </label>
+        </div>
+      </div>
+
+      <div class="spl-section spl-row-2">
+        <div>
+          <div class="spl-section-title">Sort by</div>
+          <select id="spl-sort" class="spl-select">${sortOpts}</select>
+        </div>
+        <div>
+          <div class="spl-section-title">Max songs</div>
+          <select id="spl-limit" class="spl-select">${limitOpts}</select>
+        </div>
+      </div>
+
+      <div class="spl-section spl-fresh-picks-section">
+        <label class="spl-fresh-picks-label">
+          <input type="checkbox" id="spl-fresh-picks"${f.freshPicks ? ' checked' : ''}>
+          <div class="spl-fresh-picks-text">
+            <span class="spl-fresh-picks-name">Fresh Picks</span>
+            <span class="spl-hint">Shuffle on every open — different songs each time</span>
+          </div>
+        </label>
+      </div>
+
+      <div class="spl-actions">
+        <span class="spl-match-count" id="spl-match-count">…</span>
+        <button class="spl-btn-run" id="spl-run-btn">▶ Preview</button>
+        <button class="spl-btn-save" id="spl-save-btn">${_splEditId ? 'Update' : 'Save'}</button>
+      </div>
+    </div>
+  `);
+
+  _splScheduleCount();
+
+  // Genre group: chevron collapses, name/select button toggles all genres in group
+  document.querySelectorAll('.spl-genre-group-chevron-btn').forEach(btn => {
+    btn.addEventListener('click', () => btn.closest('.spl-genre-group').classList.toggle('collapsed'));
+  });
+  document.querySelectorAll('.spl-genre-group-select').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const group = btn.closest('.spl-genre-group');
+      const chips = JSON.parse(btn.dataset.genres || '[]');
+      const allActive = chips.every(g => _splFilters.genres.includes(g));
+      if (allActive) {
+        // Deselect all in this group
+        _splFilters.genres = _splFilters.genres.filter(g => !chips.includes(g));
+        group.querySelectorAll('.spl-genre-chip').forEach(c => c.classList.remove('active'));
+        btn.classList.remove('all-active');
+      } else {
+        // Select all in this group
+        for (const g of chips) { if (!_splFilters.genres.includes(g)) _splFilters.genres.push(g); }
+        group.querySelectorAll('.spl-genre-chip').forEach(c => c.classList.add('active'));
+        btn.classList.add('all-active');
+        group.classList.remove('collapsed');
+      }
+      // Update badge
+      const n = _splFilters.genres.filter(g => chips.includes(g)).length;
+      let badge = btn.querySelector('.spl-genre-group-badge');
+      if (n && !badge) {
+        badge = document.createElement('span');
+        badge.className = 'spl-genre-group-badge';
+        btn.querySelector('.spl-genre-group-name').after(badge);
+      }
+      if (badge) { if (n) badge.textContent = n; else badge.remove(); }
+      _splScheduleCount();
+    });
+  });
+  // Genre chips toggle
+  document.querySelectorAll('.spl-genre-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const g = chip.dataset.genre;
+      chip.classList.toggle('active');
+      if (chip.classList.contains('active')) {
+        if (!_splFilters.genres.includes(g)) _splFilters.genres.push(g);
+      } else {
+        _splFilters.genres = _splFilters.genres.filter(x => x !== g);
+      }
+      // Update active-count badge on the group header
+      const group = chip.closest('.spl-genre-group');
+      if (group) {
+        const selectBtn = group.querySelector('.spl-genre-group-select');
+        const groupChips = selectBtn ? JSON.parse(selectBtn.dataset.genres || '[]') : [];
+        const n = group.querySelectorAll('.spl-genre-chip.active').length;
+        let badge = selectBtn ? selectBtn.querySelector('.spl-genre-group-badge') : null;
+        if (n && !badge && selectBtn) {
+          badge = document.createElement('span');
+          badge.className = 'spl-genre-group-badge';
+          selectBtn.querySelector('.spl-genre-group-name').after(badge);
+        }
+        if (badge) { if (n) badge.textContent = n; else badge.remove(); }
+        if (selectBtn) {
+          if (groupChips.length > 0 && groupChips.every(g => _splFilters.genres.includes(g))) selectBtn.classList.add('all-active');
+          else selectBtn.classList.remove('all-active');
+        }
+      }
+      _splScheduleCount();
+    });
+  });
+
+  // Year range
+  document.getElementById('spl-year-from').addEventListener('input', e => {
+    _splFilters.yearFrom = e.target.value ? parseInt(e.target.value, 10) : null;
+    _splScheduleCount();
+  });
+  document.getElementById('spl-year-to').addEventListener('input', e => {
+    _splFilters.yearTo = e.target.value ? parseInt(e.target.value, 10) : null;
+    _splScheduleCount();
+  });
+
+  // Rating buttons
+  document.querySelectorAll('.spl-rating-opt').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.spl-rating-opt').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _splFilters.minRating = parseInt(btn.dataset.db, 10);
+      _splScheduleCount();
+    });
+  });
+
+  // Play status pills
+  document.querySelectorAll('.spl-status-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('.spl-status-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      const s = pill.dataset.status;
+      const inp = document.getElementById('spl-min-pc');
+      if (s === 'at-least') {
+        _splFilters.playedStatus = 'played';
+        _splFilters.minPlayCount = parseInt(inp?.value || 5, 10);
+        inp?.classList.remove('hidden');
+      } else {
+        _splFilters.playedStatus = s;
+        _splFilters.minPlayCount = 0;
+        inp?.classList.add('hidden');
+      }
+      _splScheduleCount();
+    });
+  });
+  document.getElementById('spl-min-pc')?.addEventListener('input', e => {
+    _splFilters.minPlayCount = parseInt(e.target.value, 10) || 1;
+    _splScheduleCount();
+  });
+
+  // Artist search
+  document.getElementById('spl-artist-search').addEventListener('input', e => {
+    _splFilters.artistSearch = e.target.value;
+    _splScheduleCount();
+  });
+
+  // Starred checkbox
+  document.getElementById('spl-starred-cb').addEventListener('change', e => {
+    _splFilters.starred = e.target.checked;
+    _splScheduleCount();
+  });
+
+  // Sort / limit
+  document.getElementById('spl-sort').addEventListener('change', e => { _splSort = e.target.value; });
+  document.getElementById('spl-limit').addEventListener('change', e => { _splLimit = parseInt(e.target.value, 10); });
+
+  // Fresh Picks toggle
+  document.getElementById('spl-fresh-picks')?.addEventListener('change', e => {
+    _splFilters.freshPicks = e.target.checked;
+  });
+
+  // Library (vpath) pills
+  if (_musicVpaths().length > 1) {
+    document.getElementById('spl-vpaths')?.addEventListener('click', e => {
+      const btn = e.target.closest('.dj-vpath-pill');
+      if (!btn) return;
+      const v = btn.dataset.vpath;
+      const mvps = _musicVpaths();
+      // Normalise: empty selectedVpaths = all selected
+      let sel = _splFilters.selectedVpaths.length === 0 ? [...mvps] : [..._splFilters.selectedVpaths];
+      const idx = sel.indexOf(v);
+      if (idx === -1) {
+        sel.push(v);
+      } else if (sel.length > 1) {
+        sel.splice(idx, 1);
+      } else {
+        return; // prevent deselecting last
+      }
+      // If all selected, collapse back to empty (= all)
+      _splFilters.selectedVpaths = sel.length === mvps.length ? [] : sel;
+      // Re-render pills
+      document.querySelectorAll('#spl-vpaths .dj-vpath-pill').forEach(p => {
+        p.classList.toggle('on', _splFilters.selectedVpaths.length === 0 || _splFilters.selectedVpaths.includes(p.dataset.vpath));
+      });
+      _splScheduleCount();
+    });
+  }
+
+  // Preview (run without saving) — honor freshPicks in preview too
+  document.getElementById('spl-run-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('spl-run-btn');
+    btn.disabled = true;
+    try {
+      const effectiveSort = _splFilters.freshPicks ? 'random' : _splSort;
+      const d = await api('POST', 'api/v1/smart-playlists/run', { filters: _splFilters, sort: effectiveSort, limit: _splLimit });
+      _viewSmartPlaylistResults(d.songs, _splEditName || 'Preview', _splEditId, _splFilters, _splSort, _splLimit);
+    } catch(e) { toast('Error: ' + e.message); }
+    finally { btn.disabled = false; }
+  });
+
+  // Save
+  document.getElementById('spl-save-btn').addEventListener('click', async () => {
+    if (_splEditId) {
+      // Update existing
+      try {
+        await api('PUT', `api/v1/smart-playlists/${_splEditId}`, { name: _splEditName, filters: _splFilters, sort: _splSort, limit: _splLimit });
+        await loadSmartPlaylists();
+        toast(`"${_splEditName}" updated`);
+        // Re-run to show results, honouring Fresh Picks
+        const effectiveSort = _splFilters.freshPicks ? 'random' : _splSort;
+        const d = await api('POST', 'api/v1/smart-playlists/run', { filters: _splFilters, sort: effectiveSort, limit: _splLimit });
+        _viewSmartPlaylistResults(d.songs, _splEditName, _splEditId, _splFilters, _splSort, _splLimit);
+      } catch(e) { toast('Error: ' + e.message); }
+    } else {
+      // Ask for name
+      document.getElementById('spl-save-modal-title').textContent = 'Save Smart Playlist';
+      document.getElementById('spl-save-name').value = '';
+      showModal('spl-save-modal');
+      setTimeout(() => document.getElementById('spl-save-name').focus(), 50);
+    }
+  });
+}
+
+function _splScheduleCount() {
+  clearTimeout(_splCountTimer);
+  _splCountTimer = setTimeout(async () => {
+    const el = document.getElementById('spl-match-count');
+    if (!el) return;
+    el.textContent = '…';
+    try {
+      const d = await api('POST', 'api/v1/smart-playlists/count', { filters: _splFilters });
+      if (document.getElementById('spl-match-count')) {
+        document.getElementById('spl-match-count').textContent = `${d.count} song${d.count !== 1 ? 's' : ''} match`;
+      }
+    } catch(_) { if (document.getElementById('spl-match-count')) document.getElementById('spl-match-count').textContent = ''; }
+  }, 500);
+}
+
+
 function viewTranscode() {
   S.curSongs = [];
   document.getElementById('play-all-btn').onclick = null;
@@ -6340,7 +6877,7 @@ function _attachRadioFormHandlers() {
 
 // ── PODCASTS & AUDIOBOOKS VIEW ────────────────────────────────
 function viewPodcasts() {
-  setTitle('Podcasts'); setBack(null); setNavActive('podcasts'); S.view = 'podcasts';
+  setTitle('Podcasts & Audiobooks'); setBack(null); setNavActive('podcasts'); S.view = 'podcasts';
   S.curSongs = [];
   document.getElementById('play-all-btn').onclick = null;
   document.getElementById('add-all-btn').onclick  = null;
@@ -6393,7 +6930,7 @@ function _fmtPubDate(unix) {
 }
 
 async function viewPodcastFeeds() {
-  setTitle('Podcast Feeds'); setBack(null); setNavActive('podcast-feeds'); S.view = 'podcast-feeds';
+  setTitle('Feeds'); setBack(null); setNavActive('podcast-feeds'); S.view = 'podcast-feeds';
   S.curSongs = [];
   document.getElementById('play-all-btn').onclick = null;
   document.getElementById('add-all-btn').onclick  = null;
@@ -8289,6 +8826,7 @@ function showApp() {
   // Mark queue btn active (panel is visible by default)
   document.getElementById('queue-btn').classList.add('active');
   loadPlaylists();
+  loadSmartPlaylists();
   viewRecent();
   refreshQueueUI();
   restoreQueue();
@@ -8446,6 +8984,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'radio')        viewRadio();
     else if (v === 'podcasts')        viewPodcasts();
     else if (v === 'podcast-feeds')  viewPodcastFeeds();
+    else if (v === 'smart-playlists') { _splEditId = null; _splEditName = null; _splFilters = { genres: [], yearFrom: null, yearTo: null, minRating: 0, playedStatus: 'any', minPlayCount: 0, starred: false, artistSearch: '' }; _splSort = 'random'; _splLimit = 100; viewSmartPlaylists(); }
   });
 });
 
@@ -8561,6 +9100,13 @@ document.getElementById('scan-btn').addEventListener('click', async () => {
 
 // New playlist
 document.getElementById('new-pl-btn').addEventListener('click', () => showNewPlaylistModal());
+// New smart playlist
+document.getElementById('new-spl-btn').addEventListener('click', () => {
+  _splEditId = null; _splEditName = null;
+  _splFilters = { genres: [], yearFrom: null, yearTo: null, minRating: 0, playedStatus: 'any', minPlayCount: 0, starred: false, artistSearch: '' };
+  _splSort = 'random'; _splLimit = 100;
+  viewSmartPlaylists();
+});
 document.getElementById('pl-new-cancel').addEventListener('click', () => hideModal('pl-new-modal'));
 document.getElementById('pl-new-ok').addEventListener('click', async () => {
   const name = document.getElementById('pl-new-name').value.trim();
@@ -8576,6 +9122,25 @@ document.getElementById('pl-new-ok').addEventListener('click', async () => {
 // Save playlist modal
 document.getElementById('share-pl-cancel').addEventListener('click', () => hideModal('share-pl-modal'));
 document.getElementById('pl-save-cancel').addEventListener('click', () => hideModal('pl-save-modal'));
+
+// Save smart playlist modal
+document.getElementById('spl-save-cancel').addEventListener('click', () => hideModal('spl-save-modal'));
+async function _doSaveSmartPlaylist() {
+  const name = document.getElementById('spl-save-name').value.trim();
+  if (!name) return;
+  hideModal('spl-save-modal');
+  try {
+    const r = await api('POST', 'api/v1/smart-playlists', { name, filters: _splFilters, sort: _splSort, limit: _splLimit });
+    _splEditId = r.id;
+    _splEditName = name;
+    await loadSmartPlaylists();
+    toast(`"${name}" saved`);
+    const d = await api('POST', 'api/v1/smart-playlists/run', { filters: _splFilters, sort: _splSort, limit: _splLimit });
+    _viewSmartPlaylistResults(d.songs, name, r.id, _splFilters, _splSort, _splLimit);
+  } catch(e) { toast('Error: ' + e.message); }
+}
+document.getElementById('spl-save-ok').addEventListener('click', _doSaveSmartPlaylist);
+document.getElementById('spl-save-name').addEventListener('keydown', e => { if (e.key === 'Enter') _doSaveSmartPlaylist(); });
 document.getElementById('pl-save-ok').addEventListener('click', async () => {
   const name = document.getElementById('pl-save-name').value.trim();
   if (!name) return;
@@ -9054,8 +9619,6 @@ function renderCueMarkers() {
     });
   });
 }
-// ─────────────────────────────────────────────────────────────
-
 function _onAudioTimeupdatePersist() {
   if (_persistTimer) return;
   _persistTimer = setTimeout(() => { _persistTimer = null; persistQueue(); }, 5000);
@@ -9086,7 +9649,7 @@ function _onAudioTimeupdateUI() {
   const _progThumb = document.getElementById('prog-thumb');
   if (_progThumb) _progThumb.style.left = pct + '%';
   _renderTimes();
-  if (S.autoDJ && S.idx === S.queue.length - 1 &&
+  if (S.autoDJ && S.idx === S.queue.length - 1 && _isMusicSong(S.queue[S.idx]) &&
       (audioEl.duration - audioEl.currentTime) < Math.max(
         S.djSimilar ? 45 : 25,   // similar-artists = 2 serial API calls; need more runway
         S.crossfade + 15
@@ -10035,6 +10598,7 @@ document.addEventListener('keydown', e => {
     if (stored.has(section.dataset.section) || section.dataset.section === 'tools') section.classList.add('collapsed');
     section.querySelector('.nav-toggle').addEventListener('click', e => {
       if (e.target.closest('#new-pl-btn')) return;
+      if (e.target.closest('#new-spl-btn')) return;
       section.classList.toggle('collapsed');
       const collapsed = [...document.querySelectorAll('.nav-section.collapsed')]
         .map(s => s.dataset.section);
