@@ -33,6 +33,7 @@ import * as userSettingsApi from './api/user-settings.js';
 import * as lyricsApi from './api/lyrics.js';
 import * as radioApi from './api/radio.js';
 import * as podcastApi from './api/podcasts.js';
+import * as smartPlaylistApi from './api/smart-playlists.js';
 import WebError from './util/web-error.js';
 import { sanitizeFilename } from './util/validation.js';
 
@@ -188,6 +189,7 @@ export async function serveIt(configFile) {
   lyricsApi.setup(mstream);
   radioApi.setup(mstream);
   podcastApi.setup(mstream);
+  smartPlaylistApi.setup(mstream);
   remoteApi.setupAfterAuth(mstream, server);
   sharedApi.setupAfterSecurity(mstream);
   syncthing.setup();

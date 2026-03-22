@@ -73,6 +73,18 @@
   </div>
 </div>
 
+<!-- Save smart playlist modal -->
+<div id="spl-save-modal" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h3 id="spl-save-modal-title">Save Smart Playlist</h3>
+    <input id="spl-save-name" type="text" placeholder="Smart playlist name…">
+    <div class="modal-actions">
+      <button id="spl-save-cancel" class="btn-ghost">Cancel</button>
+      <button id="spl-save-ok" class="btn-primary">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- New playlist modal -->
 <div id="pl-new-modal" class="modal-overlay hidden">
   <div class="modal-box">
@@ -363,7 +375,7 @@
       </div>
 
       <div class="nav-section hidden" id="podcasts-section" data-section="podcasts">
-      <div class="nav-label nav-toggle">Listen<svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
+      <div class="nav-label nav-toggle">Podcasts &amp; Audiobooks<svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
       <nav class="sidenav">
         <button class="nav-btn hidden" id="radio-nav-btn" data-view="radio">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M7.76 7.76a6 6 0 0 0 0 8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/></svg>
@@ -371,7 +383,7 @@
         </button>
         <button class="nav-btn" id="podcasts-nav-btn" data-view="podcasts">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
-          Podcasts
+          Episodes
         </button>
         <button class="nav-btn" id="podcast-feeds-nav-btn" data-view="podcast-feeds">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1" fill="currentColor"/></svg>
@@ -409,6 +421,21 @@
         </div>
       </div>
       <nav id="playlist-nav" class="sidenav playlist-nav">
+        <!-- dynamically populated -->
+      </nav>
+      </div>
+
+      <div class="nav-section" data-section="smart-playlists">
+      <div class="nav-label nav-label-row nav-toggle">
+        Smart Playlists
+        <div class="nav-label-actions">
+          <button id="new-spl-btn" class="icon-btn" title="New smart playlist">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+          <svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg>
+        </div>
+      </div>
+      <nav id="smart-playlist-nav" class="sidenav playlist-nav">
         <!-- dynamically populated -->
       </nav>
       </div>

@@ -156,3 +156,14 @@ export function getPodcastFeedImgUsageCount(img) { return backend.getPodcastFeed
 export function getPodcastEpisodes(feedId) { return backend.getPodcastEpisodes(feedId); }
 export function upsertPodcastEpisodes(feedId, episodes) { return backend.upsertPodcastEpisodes(feedId, episodes); }
 export function saveEpisodeProgress(episodeId, feedId, position, played) { return backend.saveEpisodeProgress(episodeId, feedId, position, played); }
+// Smart Playlists
+export function runSmartPlaylist(filters, sort, limitN, vpaths, username, ignoreVPaths, filepathPrefix) { return backend.runSmartPlaylist(filters, sort, limitN, vpaths, username, ignoreVPaths, filepathPrefix); }
+export function countSmartPlaylist(filters, vpaths, username, ignoreVPaths, filepathPrefix) { return backend.countSmartPlaylist(filters, vpaths, username, ignoreVPaths, filepathPrefix); }
+export function getSmartPlaylists(username) { return backend.getSmartPlaylists(username); }
+export function getSmartPlaylist(id, username) { return backend.getSmartPlaylist(id, username); }
+export function saveSmartPlaylist(username, name, filters, sort, limitN) { return backend.saveSmartPlaylist(username, name, filters, sort, limitN); }
+export function updateSmartPlaylist(id, username, data) { return backend.updateSmartPlaylist(id, username, data); }
+export function deleteSmartPlaylist(id, username) { return backend.deleteSmartPlaylist(id, username); }
+// Genre Groups
+export function getGenreGroups() { return backend.getGenreGroups(); }
+export function saveGenreGroups(groups) { return backend.saveGenreGroups(groups); }

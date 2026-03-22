@@ -530,6 +530,41 @@ export function setup(mstream) {
     res.json({ genres });
   });
 
+  // ── GENRE GROUPS (custom display groupings configured by admin) ───────────
+  mstream.get('/api/v1/db/genre-groups', (req, res) => {
+    try {
+      const savedGroups = db.getGenreGroups();
+      const { genres: merged, rawMap } = mergeGenreRows(db.getGenres(req.user.vpaths));
+      const cntMap = new Map(merged.map(g => [g.genre, g.cnt]));
+      if (!savedGroups || savedGroups.length === 0) {
+        return res.json({ groups: null, genres: merged });
+      }
+      // Build reverse map: raw DB string → merged display name (handles legacy raw strings in DB)
+      const rawToDisplay = new Map();
+      for (const [display, rawSet] of rawMap) for (const raw of rawSet) rawToDisplay.set(raw, display);
+      const resolveGenre = g => {
+        if (cntMap.has(g)) return g;
+        const d = rawToDisplay.get(g);
+        return (d && cntMap.has(d)) ? d : null;
+      };
+      const assignedGenres = new Set();
+      const groups = savedGroups.map(grp => ({
+        name: grp.name,
+        genres: [...new Set(grp.genres.map(resolveGenre).filter(Boolean))]
+          .map(g => ({ genre: g, cnt: cntMap.get(g) }))
+          .filter(g => g.cnt > 0),
+      })).filter(grp => grp.genres.length > 0);
+      for (const grp of groups) for (const g of grp.genres) assignedGenres.add(g.genre);
+      const otherGenres = merged.filter(g => !assignedGenres.has(g.genre));
+      if (otherGenres.length > 0) {
+        const existingOther = groups.find(g => g.name.toLowerCase() === 'other');
+        if (existingOther) { existingOther.genres.push(...otherGenres); }
+        else { groups.push({ name: 'Other', genres: otherGenres }); }
+      }
+      res.json({ groups, genres: merged });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+  });
+
   mstream.post('/api/v1/db/genre/songs', (req, res) => {
     const schema = Joi.object({
       genre: Joi.string().required(),

@@ -112,6 +112,18 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [/radio — stations CRUD, reorder, stream proxy, ICY now-playing, logo caching, admin config](API/radio.md)
 
+## Podcasts *(GitHub Copilot, 2026-03-21)*
+
+[/podcast — subscribe, list, refresh, rename, reorder, delete feeds; episode list; playback progress](API/podcasts.md)
+
+## Smart Playlists *(GitHub Copilot, 2026-03-22)*
+
+[/api/v1/smart-playlists — run, count, save, update, delete; filter schema with Fresh Picks and library selection](API/smart-playlists.md)
+
+## Genre Groups *(GitHub Copilot, 2026-03-22)*
+
+[/api/v1/db/genre-groups, /api/v1/admin/genre-groups — admin-configurable display groupings used in genre browser and smart playlist builder](API/admin_genre-groups.md)
+
 ## JukeBox
 
 [/jukebox/sessions](API/jukebox_sessions.md) *(admin)*
