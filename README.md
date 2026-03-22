@@ -45,6 +45,8 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 | Scan error repair | ❌ | ✅ Fix button re-muxes corrupt FLAC/MP3/WAV in-place; unrecoverable files flagged |
 | Internet radio | ❌ | ✅ Stream stations via proxy; station logos cached; drag-to-reorder; ICY now-playing metadata |
 | Podcasts | ❌ | ✅ RSS subscribe, episode browse & play, progress tracking, feed refresh, drag-to-reorder, RSS URL editing |
+| Genre Groups | ❌ | ✅ Admin panel to define named genre buckets used across genre browsing and smart playlist filtering; drag-to-reorder, auto-seeded defaults |
+| Smart Playlists | ❌ | ✅ Rule-based playlists: genre group, year range, min rating, play status, artist search, library (vpath) filters; Fresh Picks daily-shuffle mode |
 
 ---
 
@@ -100,6 +102,7 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 - Last.fm: server-side enable/disable toggle
 - ID3 tag editor toggle (per-installation setting)
 - Logout confirmation + BroadcastChannel to stop player in all open tabs
+- Genre Groups ("Groups & Genres") — define named buckets that map raw genre tags into display groups; used in genre browsing sidebar and as filter options in smart playlists; drag-to-reorder, inline add/delete, auto-seeded with defaults on first visit
 
 ### Internet Radio
 
@@ -117,6 +120,14 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 - One-click feed refresh — re-downloads missing artwork automatically
 - Drag-to-reorder feeds
 - Inline edit panel per feed: rename display name and update the RSS URL
+
+### Smart Playlists
+
+- **Filter builder** — combine genre group, year range, minimum rating, play status (played / unplayed), artist name search, and library (vpath) selection into a single rule-based playlist
+- **Fresh Picks** — per-playlist toggle for daily-shuffle mode: auto-shuffles once per day on first open, "New picks" button to reshuffle at any time; shuffle icon shown in the nav sidebar
+- **Library filter** — narrow picks to one or more configured music directories; child vpaths resolved to filepath prefix automatically
+- **CRUD management** — create, rename, edit filters, delete; each playlist remembers its own sort order
+- **Inline preview** — run a playlist before saving to see the live track count
 
 ---
 
