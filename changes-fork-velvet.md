@@ -1,5 +1,18 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Docker/SQLite fixes + theme sync — 2026-03-23
+
+**Files:** `src/state/config.js`, `src/db/sqlite-backend.js`, `src/db/loki-backend.js`, `Dockerfile`, `webapp/admin/index.html`
+
+- **Default DB engine changed from `loki` → `sqlite`** — fresh installs (including Docker) now use SQLite automatically
+- **SQLite directory auto-creation** — `sqlite-backend.js` calls `mkdirSync(dbDirectory, { recursive: true })` on init; no more crash if `save/db/` doesn't exist yet
+- **Config directory auto-creation** — `config.js` now creates parent directories before writing the config file on first boot
+- **`getGenres()` added to loki-backend** — was missing entirely, causing a 500 error on the admin genre-groups page when using loki engine
+- **Dockerfile: pre-create runtime dirs** — `RUN mkdir -p save/conf save/db save/logs save/sync image-cache waveform-cache` so SQLite and config writer work on first container start even without volumes
+- **Admin panel theme sync** — admin `index.html` boot script now reads the correct `ms2_theme_<username>` localStorage key (not the non-existent `ms2_theme`), so admin and player always share the same colour scheme; falls back to OS preference if no key found
+
+---
+
 ## Docker support — 2026-03-23
 
 **Files:** `Dockerfile`, `.dockerignore`

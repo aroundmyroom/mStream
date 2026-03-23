@@ -9,7 +9,7 @@ Every external service, library, and binary used in mStream Velvet was a deliber
 **What it does in mStream:** Four distinct jobs:
 
 1. **Transcoding** — Re-encodes any audio file on-the-fly to MP3, Opus, or AAC at the bitrate the client requests. This is how a FLAC file on your server plays on a phone with limited bandwidth: the server decodes FLAC and pipes compressed audio directly to the browser.
-2. **Waveform generation** — Decodes audio to raw PCM (32-bit float, 8000 Hz mono) via a pipe. Server-side JavaScript then computes 600 RMS values with a γ=0.7 perceptual curve and caches the result. This gives the seek bar its waveform display.
+2. **Waveform generation** — Decodes audio to raw PCM (32-bit floilat, 8000 Hz mono) via a pipe. Server-side JavaScript then computes 600 RMS values with a γ=0.7 perceptual curve and caches the result. This gives the seek bar its waveform display.
 3. **Scan error repair** — Re-muxes corrupt FLAC, MP3, and WAV files in-place (stream-copy first, then a full re-encode fallback). Strips broken APEv2 tags and corrupt embedded images. Available from the Admin → Scan Errors panel.
 4. **Tag writing** — Rewrites ID3/Vorbis tags (title, artist, album, year, genre) without re-encoding the audio, using FFmpeg's `-metadata` flag with `-c copy`.
 

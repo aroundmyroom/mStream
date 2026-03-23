@@ -1369,6 +1369,18 @@ export function deleteSmartPlaylist(id, username) {
   return true;
 }
 
+// Genre list (for genre-groups admin and SPL builder)
+export function getGenres(vpaths, ignoreVPaths) {
+  if (!fileCollection || !vpaths || vpaths.length === 0) return [];
+  const results = fileCollection.find(renderOrClause(vpaths, ignoreVPaths || []));
+  const genreMap = {};
+  for (const doc of results) {
+    const genre = doc.genre ? doc.genre.trim() : null;
+    if (genre) genreMap[genre] = (genreMap[genre] || 0) + 1;
+  }
+  return Object.entries(genreMap).map(([genre, cnt]) => ({ genre, cnt })).sort((a, b) => b.cnt - a.cnt);
+}
+
 // Genre Groups — loki backend keeps these in memory only (no persistence)
 let _genreGroups = [];
 export function getGenreGroups() { return _genreGroups; }
