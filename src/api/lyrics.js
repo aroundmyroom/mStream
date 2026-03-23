@@ -51,9 +51,24 @@ export function setup(mstream) {
   //       | { notFound: true }
   mstream.get('/api/v1/lyrics', async (req, res) => {
     if (config.program.lyrics?.enabled === false) return res.json({ notFound: true });
-    const artist   = (req.query.artist   || '').trim();
-    const title    = (req.query.title    || '').trim();
+    let artist     = (req.query.artist   || '').trim();
+    let title      = (req.query.title    || '').trim();
     const filepath = (req.query.filepath || '').trim();
+
+    // If the client passed a raw filename as the title (no DB metadata yet),
+    // strip the audio extension and attempt to parse "Artist - Title" from it.
+    // e.g. "Alesso & Katy Perry - When I'm Gone.mp3" → artist + title
+    const AUDIO_EXT_RE = /\.(mp3|flac|ogg|m4a|aac|wav|opus|wma|aiff?|dsf|dsd)$/i;
+    if (AUDIO_EXT_RE.test(title)) {
+      const bare = title.replace(AUDIO_EXT_RE, '').trim();
+      const sep  = bare.indexOf(' - ');
+      if (sep > 0 && !artist) {
+        artist = bare.slice(0, sep).trim();
+        title  = bare.slice(sep + 3).trim();
+      } else {
+        title = bare;
+      }
+    }
 
     // Prefer authoritative duration from DB; fall back to client-supplied value
     let duration = Number(req.query.duration) || 0;

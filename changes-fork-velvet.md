@@ -1,5 +1,13 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Lyrics: filename fallback parsing — 2026-03-23
+
+**Files:** `src/api/lyrics.js`
+
+- When a song is not yet in the DB, the client sends the raw filename as the title (e.g. `Alesso & Katy Perry - When I'm Gone.mp3`). The server now strips the audio extension and, if the filename follows the common `Artist - Title` convention, splits it into separate artist/title fields before querying lrclib.net. Previously lrclib was searched with the full filename string, which always returned no results.
+
+---
+
 ## Feature visibility fixes (all auth modes) — 2026-03-23
 
 **Files:** `webapp/app.js`
