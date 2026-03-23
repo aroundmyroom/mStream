@@ -1,5 +1,16 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Feature visibility fixes (all auth modes) — 2026-03-23
+
+**Files:** `webapp/app.js`
+
+- **Last.fm always hidden in no-auth/Docker mode** — no-auth path in `checkSession()` never called `api/v1/lastfm/status`, so `S.lastfmEnabled` stayed `false` and the Last.fm nav button was always hidden regardless of server config. Fixed by adding the same fetch the authenticated paths already had.
+- **Radio button doesn't appear after enabling in admin tab** — the `visibilitychange` handler (used to refresh feature flags when switching back from the admin panel) checked Discogs and Last.fm but not `radioEnabled`. Radio nav button now re-checks `api/v1/radio/enabled` on tab focus, same as Last.fm.
+- **Discogs flags not reset in no-auth admin-check failure** — no-auth isAdmin catch block now resets `discogsEnabled/discogsAllowUpdate/allowId3Edit = false` consistently with the other two auth paths.
+- **Podcasts/radio/feeds always visible** — `feedsEnabled = true` in all three auth paths (login, token-resume, no-auth); no-auth path fetches `radioEnabled`; delete-feed handler no longer hides podcasts section.
+
+---
+
 ## Docker/SQLite fixes + theme sync — 2026-03-23
 
 **Files:** `src/state/config.js`, `src/db/sqlite-backend.js`, `src/db/loki-backend.js`, `Dockerfile`, `webapp/admin/index.html`
