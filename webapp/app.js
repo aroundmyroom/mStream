@@ -6465,7 +6465,7 @@ async function viewSubsonic() {
         <div class="playback-row" style="background:var(--raised2,var(--raised));border-radius:8px;padding:.65rem .9rem;margin-top:.5rem;gap:1rem;flex-wrap:wrap;">
           <div class="playback-row-label">
             <div class="playback-row-name" style="font-size:.8rem;">App connection details</div>
-            <div class="playback-row-hint" id="subsonic-username-hint">Username: <strong>${esc(S.username || '')}</strong></div>
+            <div class="playback-row-hint" id="subsonic-username-hint">Username: <strong>${esc(S.username || 'mstream-user')}</strong>${S.username ? '' : ' <span style="font-size:.75rem;color:var(--t2);">(no-auth default)</span>'}</div>
             <div class="playback-row-hint">API path: <code style="font-size:.78rem;">/rest/</code></div>
             <div class="playback-row-hint" style="margin-top:.25rem;">Use <em>Token auth (MD5)</em> in your app when available — safer than plain-text mode.</div>
           </div>

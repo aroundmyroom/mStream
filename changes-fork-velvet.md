@@ -1,5 +1,13 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Subsonic no-auth username — fix the actual fix — 2026-03-23
+
+**Files:** `webapp/app.js`
+
+- The previous commit added the `mstream-user` hint to the admin Users page but completely missed the **Subsonic settings page in the main app** — which is exactly where users go to configure their Subsonic client. The "App connection details" username line was rendering blank (`S.username || ''`) in no-auth mode. Now shows `mstream-user (no-auth default)` when no user is logged in.
+
+---
+
 ## Subsonic no-auth username hint — 2026-03-23
 
 **Files:** `webapp/admin/index.js`
