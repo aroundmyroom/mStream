@@ -66,6 +66,9 @@ const S = {
   djFilterWords:   JSON.parse(localStorage.getItem('ms2_dj_filter_words_' + _u) || 'null') || [],
   // Time display mode: false = elapsed|total (default), true = total|countdown
   timeFlipped: localStorage.getItem('ms2_time_flipped_' + _u) === '1',
+  // Play source context — shown in "Now Playing" sub-label
+  // { type: 'radio'|'podcast'|'playlist'|'smart-playlist', name: string } or null
+  playSource: null,
 };
 
 let audioEl = document.getElementById('audio');
@@ -471,6 +474,7 @@ const Player = {
   // Add to queue; if nothing is playing yet, start immediately
   queueAndPlay(song) {
     if (!audioEl.src || audioEl.ended || S.queue.length === 0) {
+      if (!song.isRadio && !song.isPodcast) _setPlaySource(null);
       this.playSingle(song);
     } else {
       this.addSong(song);
@@ -573,6 +577,16 @@ const Player = {
   updateBar() {
     const s = S.queue[S.idx];
     if (!s) return;
+    // Reset progress bar immediately on song change
+    const _fillEl  = document.getElementById('prog-fill');
+    const _thumbEl = document.getElementById('prog-thumb');
+    if (s.isRadio) {
+      if (_fillEl)  _fillEl.style.width    = '100%';
+      if (_thumbEl) { _thumbEl.style.display = 'none'; }
+    } else {
+      if (_fillEl)  _fillEl.style.width    = '0%';
+      if (_thumbEl) { _thumbEl.style.display = ''; _thumbEl.style.left = '0%'; }
+    }
     document.getElementById('player-title').textContent  = s.title  || s.filepath?.split('/').pop() || '—';
     document.getElementById('player-artist').textContent = s.artist || '';
     const albumYear = [s.album, s.year].filter(Boolean).join(' · ');
@@ -1083,6 +1097,17 @@ function setPlaylistActive(name) {
   });
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
 }
+function setSplActive(id) {
+  document.querySelectorAll('.pl-row').forEach(r => {
+    r.classList.toggle('active', r.dataset.splid !== undefined && parseInt(r.dataset.splid, 10) === id);
+  });
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+}
+// Set the "Now Playing" context label (radio / podcast / playlist / smart-playlist)
+// Pass null to clear (generic library/queue play)
+function _setPlaySource(type, name) {
+  S.playSource = (type && name) ? { type, name } : null;
+}
 
 // ── SONG ROWS ────────────────────────────────────────────────
 function renderSongRows(songs) {
@@ -1227,7 +1252,7 @@ function renderMostPlayedRows(songs, maxPlays) {
 function showMostPlayed(songs) {
   S.curSongs = songs;
   document.getElementById('play-all-btn').onclick = () => {
-    if (songs.length) { Player.setQueue(songs, 0); toast(`Playing ${songs.length} songs`); }
+    if (songs.length) { _setPlaySource(null); Player.setQueue(songs, 0); toast(`Playing ${songs.length} songs`); }
   };
   document.getElementById('add-all-btn').onclick = () => {
     if (songs.length) { Player.addAll(songs); }
@@ -1275,7 +1300,7 @@ function attachSongListEvents(container, songs) {
 function showSongs(songs, title) {
   S.curSongs = songs;
   document.getElementById('play-all-btn').onclick = () => {
-    if (songs.length) { Player.setQueue(songs, 0); toast(`Playing ${songs.length} songs`); }
+    if (songs.length) { _setPlaySource(null); Player.setQueue(songs, 0); toast(`Playing ${songs.length} songs`); }
   };
   document.getElementById('add-all-btn').onclick = () => {
     if (songs.length) { Player.addAll(songs); }
@@ -1350,7 +1375,9 @@ function renderNPModal() {
   });
   document.getElementById('np-icon-play').classList.toggle('hidden', !audioEl.paused);
   document.getElementById('np-icon-pause').classList.toggle('hidden', audioEl.paused);
-  if (audioEl.duration) {
+  if (s.isRadio) {
+    document.getElementById('np-prog-fill').style.width = '100%';
+  } else if (audioEl.duration) {
     const pct = (audioEl.currentTime / audioEl.duration) * 100;
     document.getElementById('np-prog-fill').style.width   = pct + '%';
     _renderTimes();
@@ -3918,7 +3945,7 @@ async function openPlaylist(name) {
   setBody('<div class="loading-state"></div>');
 
   document.getElementById('play-all-btn').onclick = () => {
-    if (S.curSongs.length) { Player.setQueue(S.curSongs, 0); toast(`Playing "${name}"`); }
+    if (S.curSongs.length) { _setPlaySource('playlist', name); Player.setQueue(S.curSongs, 0); toast(`Playing "${name}"`); }
   };
   document.getElementById('add-all-btn').onclick = () => {
     if (S.curSongs.length) { Player.addAll(S.curSongs); }
@@ -5538,11 +5565,28 @@ function _renderSmartPlaylistNav() {
         ${p.filters?.freshPicks ? '<svg class="pl-fresh-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" title="Fresh Picks"><polyline points="17,1 21,5 17,9"/><path d="M3,11V9a4,4,0,0,1,4-4h14"/><polyline points="7,23 3,19 7,15"/><path d="M21,13v2a4,4,0,0,1-4,4H3"/></svg>' : ''}
         ${esc(p.name)}
       </button>
+      <button class="pl-row-edit" data-splid="${p.id}" title="Edit">✎</button>
       <button class="pl-row-del" data-splid="${p.id}" title="Delete">×</button>
     </div>`).join('');
 
   nav.querySelectorAll('.pl-row-btn').forEach(btn => {
     btn.addEventListener('click', () => _runSavedSmartPlaylist(parseInt(btn.dataset.splid, 10)));
+  });
+  nav.querySelectorAll('.pl-row-edit').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const id = parseInt(btn.dataset.splid, 10);
+      const pl = (S.smartPlaylists || []).find(p => p.id === id);
+      if (!pl) return;
+      _splFilters = pl.filters ? JSON.parse(JSON.stringify(pl.filters)) : _splDefaultFilters();
+      if (!Array.isArray(_splFilters.selectedVpaths)) _splFilters.selectedVpaths = [];
+      if (typeof _splFilters.freshPicks !== 'boolean') _splFilters.freshPicks = false;
+      _splSort = pl.sort || 'random';
+      _splLimit = pl.limit || 100;
+      _splEditId = id;
+      _splEditName = pl.name;
+      viewSmartPlaylists();
+    });
   });
   nav.querySelectorAll('.pl-row-del').forEach(btn => {
     btn.addEventListener('click', async e => {
@@ -5563,7 +5607,7 @@ function _renderSmartPlaylistNav() {
 async function _runSavedSmartPlaylist(id) {
   const pl = (S.smartPlaylists || []).find(p => p.id === id);
   if (!pl) return;
-  setTitle(pl.name); setBack(null); S.view = 'smart-playlist:' + id;
+  setTitle(pl.name); setBack(null); S.view = 'smart-playlist:' + id; setSplActive(id);
   setBody('<div class="loading-state"></div>');
   document.getElementById('play-all-btn').onclick = null;
   document.getElementById('add-all-btn').onclick  = null;
@@ -5579,8 +5623,9 @@ function _viewSmartPlaylistResults(songs, name, splId, filters, sort, limitN) {
   S.curSongs = mapped;
   const title = name || 'Smart Playlist';
   setTitle(title);
+  const _splTitle = name || 'Smart Playlist';
   document.getElementById('play-all-btn').onclick = () => {
-    if (mapped.length) { Player.setQueue(mapped, 0); toast(`Playing ${mapped.length} songs`); }
+    if (mapped.length) { _setPlaySource('smart-playlist', _splTitle); Player.setQueue(mapped, 0); toast(`Playing ${mapped.length} songs`); }
   };
   document.getElementById('add-all-btn').onclick = () => {
     if (mapped.length) { Player.addAll(mapped); }
@@ -5702,7 +5747,8 @@ async function viewSmartPlaylists(editData) {
     <div class="spl-builder">
       <div class="spl-section">
         <div class="spl-section-title">Genres <span class="spl-hint">(select multiple, or none for all)</span></div>
-        <div class="spl-genre-groups">${genreGroupsHTML}</div>
+        <input type="text" id="spl-genre-search" class="spl-text-inp" placeholder="Search genres… e.g. disco, house, indie" style="margin-bottom:8px">
+        <div class="spl-genre-groups" id="spl-genre-groups-wrap">${genreGroupsHTML}</div>
       </div>
 
       ${_musicVpaths().length > 1 ? `<div class="spl-section">
@@ -5776,37 +5822,21 @@ async function viewSmartPlaylists(editData) {
 
   _splScheduleCount();
 
-  // Genre group: chevron collapses, name/select button toggles all genres in group
-  document.querySelectorAll('.spl-genre-group-chevron-btn').forEach(btn => {
+  // Genre group: clicking the header row (name button or chevron) expands/collapses — does NOT auto-select
+  document.querySelectorAll('.spl-genre-group-chevron-btn, .spl-genre-group-select').forEach(btn => {
     btn.addEventListener('click', () => btn.closest('.spl-genre-group').classList.toggle('collapsed'));
   });
-  document.querySelectorAll('.spl-genre-group-select').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const group = btn.closest('.spl-genre-group');
-      const chips = JSON.parse(btn.dataset.genres || '[]');
-      const allActive = chips.every(g => _splFilters.genres.includes(g));
-      if (allActive) {
-        // Deselect all in this group
-        _splFilters.genres = _splFilters.genres.filter(g => !chips.includes(g));
-        group.querySelectorAll('.spl-genre-chip').forEach(c => c.classList.remove('active'));
-        btn.classList.remove('all-active');
-      } else {
-        // Select all in this group
-        for (const g of chips) { if (!_splFilters.genres.includes(g)) _splFilters.genres.push(g); }
-        group.querySelectorAll('.spl-genre-chip').forEach(c => c.classList.add('active'));
-        btn.classList.add('all-active');
-        group.classList.remove('collapsed');
-      }
-      // Update badge
-      const n = _splFilters.genres.filter(g => chips.includes(g)).length;
-      let badge = btn.querySelector('.spl-genre-group-badge');
-      if (n && !badge) {
-        badge = document.createElement('span');
-        badge.className = 'spl-genre-group-badge';
-        btn.querySelector('.spl-genre-group-name').after(badge);
-      }
-      if (badge) { if (n) badge.textContent = n; else badge.remove(); }
-      _splScheduleCount();
+
+  // Genre search filter
+  document.getElementById('spl-genre-search')?.addEventListener('input', function() {
+    const terms = this.value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    document.querySelectorAll('#spl-genre-groups-wrap .spl-genre-chip').forEach(c => {
+      c.style.display = (!terms.length || terms.some(t => c.dataset.genre.toLowerCase().includes(t))) ? '' : 'none';
+    });
+    document.querySelectorAll('#spl-genre-groups-wrap .spl-genre-group').forEach(grp => {
+      const hasVisible = [...grp.querySelectorAll('.spl-genre-chip')].some(c => c.style.display !== 'none');
+      grp.style.display = hasVisible ? '' : 'none';
+      if (hasVisible && terms.length) grp.classList.remove('collapsed');
     });
   });
   // Genre chips toggle
@@ -6620,6 +6650,7 @@ function _playRadio(station) {
     _radioLinks: links,
     _radioLinkIdx: 0,
   };
+  _setPlaySource('radio', station.name);
   _startRadioNowPlaying(song);
   Player.playSingle(song);
 }
@@ -6956,7 +6987,7 @@ function _renderPodcastFeedsView() {
         <div class="pf-info">
           <div class="pf-title">${esc(f.title || f.url)}</div>
           ${f.author ? `<div class="pf-author">${esc(f.author)}</div>` : ''}
-          <div class="pf-stats">${f.episode_count ?? 0} episode${(f.episode_count ?? 0) !== 1 ? 's' : ''}${f.last_fetched ? ` · refreshed ${_fmtPubDate(f.last_fetched)}` : ''}</div>
+          <div class="pf-stats">${f.episode_count ?? 0} episode${(f.episode_count ?? 0) !== 1 ? 's' : ''}${f.latest_pub_date ? ` · latest <span class="pf-latest-date">${_fmtPubDate(f.latest_pub_date)}</span>` : ''}${f.last_fetched ? ` · refreshed ${_fmtPubDate(f.last_fetched)}` : ''}</div>
           ${f.description ? `<div class="pf-desc">${esc(f.description)}</div>` : ''}
         </div>
         <div class="pf-btns pf-no-open">
@@ -7270,6 +7301,7 @@ async function viewPodcastEpisodes(feed) {
     btn.addEventListener('click', () => {
       const ep = episodes.find(e => e.id == btn.dataset.id);
       if (!ep) return;
+      _setPlaySource('podcast', feed.title || feed.url);
       Player.playSingle({
         title:          ep.title,
         artist:         feed.author || feed.title,
@@ -8795,6 +8827,13 @@ async function checkSession() {
         }
       }
       await _loadServerSettings();
+      // On a no-auth server (no users configured), the server grants admin to
+      // everyone — detect this so the admin button and scan button appear.
+      try {
+        await api('GET', 'api/v1/admin/directories');
+        S.isAdmin = true;
+        try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
+      } catch(_) { S.isAdmin = false; }
       return true;
     }
   } catch(_) {}
@@ -9400,12 +9439,27 @@ function _syncQueueLabel() {
     icon = '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>';
     text = 'Now Playing';
   }
-  const djSub = (!S.queue[S.idx]?.isRadio && S.autoDJ)
+  const cur = S.queue[S.idx];
+  const djSub = (!cur?.isRadio && S.autoDJ)
     ? (S.djSimilar
       ? ` <span class="ql-sub-label">· Auto-DJ: Similar Songs${S.crossfade > 0 ? ' &amp; Crossfade' : ''}</span>`
       : ` <span class="ql-sub-label">· Auto-DJ${S.crossfade > 0 ? ' &amp; Crossfade' : ''}</span>`)
     : '';
-  label.innerHTML = icon + ' ' + text + djSub;
+  // Context sub-label — derived from current song flags or stored playSource
+  let ctxSub = '';
+  if (!djSub) {
+    if (cur?.isRadio) {
+      ctxSub = ` <span class="ql-sub-label">· Radio Stream</span>`;
+    } else if (cur?.isPodcast) {
+      const pname = S.playSource?.type === 'podcast' ? S.playSource.name : '';
+      ctxSub = ` <span class="ql-sub-label">· Podcast${pname ? ': ' + esc(pname) : ''}</span>`;
+    } else if (S.playSource?.type === 'playlist') {
+      ctxSub = ` <span class="ql-sub-label">· Playlist: ${esc(S.playSource.name)}</span>`;
+    } else if (S.playSource?.type === 'smart-playlist') {
+      ctxSub = ` <span class="ql-sub-label">· Smart Playlist: ${esc(S.playSource.name)}</span>`;
+    }
+  }
+  label.innerHTML = icon + ' ' + text + djSub + ctxSub;
 }
 
 // ── Tab favicon + dynamic title ──────────────────────────────────────────────
@@ -9644,10 +9698,14 @@ function _onAudioTimeupdateUI() {
     }
   }
   if (_cuePoints.length && !_cueMarkersRendered) renderCueMarkers();
-  const pct = (audioEl.currentTime / audioEl.duration) * 100;
+  const _isLiveRadio = !!S.queue[S.idx]?.isRadio;
+  const pct = _isLiveRadio ? 100 : (audioEl.currentTime / audioEl.duration) * 100;
   document.getElementById('prog-fill').style.width = pct + '%';
   const _progThumb = document.getElementById('prog-thumb');
-  if (_progThumb) _progThumb.style.left = pct + '%';
+  if (_progThumb) {
+    _progThumb.style.display = _isLiveRadio ? 'none' : '';
+    if (!_isLiveRadio) _progThumb.style.left = pct + '%';
+  }
   _renderTimes();
   if (S.autoDJ && S.idx === S.queue.length - 1 && _isMusicSong(S.queue[S.idx]) &&
       (audioEl.duration - audioEl.currentTime) < Math.max(

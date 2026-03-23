@@ -351,7 +351,11 @@ export function getLiveArtFilenames() {
   const radioArt = db.prepare(
     "SELECT DISTINCT img FROM radio_stations WHERE img IS NOT NULL AND img NOT LIKE 'http%'"
   ).all().map(r => r.img);
-  return musicArt.concat(radioArt);
+  // Also protect locally-cached podcast feed artwork from post-scan orphan cleanup
+  const podcastArt = db.prepare(
+    "SELECT DISTINCT img FROM podcast_feeds WHERE img IS NOT NULL AND img NOT LIKE 'http%'"
+  ).all().map(r => r.img);
+  return musicArt.concat(radioArt, podcastArt);
 }
 
 export function getLiveHashes() {
@@ -1406,7 +1410,9 @@ export function reorderRadioStations(username, orderedIds) {
 // ── Podcast Feeds ─────────────────────────────────────────────
 export function getPodcastFeeds(username) {
   return db.prepare(`
-    SELECT f.*, (SELECT COUNT(*) FROM podcast_episodes e WHERE e.feed_id = f.id) AS episode_count
+    SELECT f.*,
+      (SELECT COUNT(*) FROM podcast_episodes e WHERE e.feed_id = f.id) AS episode_count,
+      (SELECT MAX(e.pub_date) FROM podcast_episodes e WHERE e.feed_id = f.id AND e.pub_date IS NOT NULL) AS latest_pub_date
     FROM podcast_feeds f WHERE f.user = ? ORDER BY f.sort_order ASC, f.created_at DESC
   `).all(username);
 }
@@ -1425,7 +1431,9 @@ export function reorderPodcastFeeds(username, orderedIds) {
 
 export function getPodcastFeed(id, username) {
   const row = db.prepare(`
-    SELECT f.*, (SELECT COUNT(*) FROM podcast_episodes e WHERE e.feed_id = f.id) AS episode_count
+    SELECT f.*,
+      (SELECT COUNT(*) FROM podcast_episodes e WHERE e.feed_id = f.id) AS episode_count,
+      (SELECT MAX(e.pub_date) FROM podcast_episodes e WHERE e.feed_id = f.id AND e.pub_date IS NOT NULL) AS latest_pub_date
     FROM podcast_feeds f WHERE f.id = ? AND f.user = ?
   `).get(id, username);
   return row || null;
