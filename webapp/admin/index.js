@@ -1129,6 +1129,11 @@ const usersView = Vue.component('users-view', {
         <div class="card-content">
           <span class="card-title">Users</span>
           <p v-if="Object.keys(users).length === 0" style="color:var(--t2);margin:.5rem 0 0;">No users &mdash; authentication is currently <strong>disabled</strong>. The first user you create must have admin access.</p>
+          <div v-if="Object.keys(users).length === 0" style="margin-top:.85rem;padding:.65rem .85rem;border-radius:6px;background:var(--raised);border:1px solid var(--border);font-size:.85rem;color:var(--t2);line-height:1.5;">
+            <strong style="color:var(--t1);">Subsonic API (no-auth mode)</strong><br>
+            Subsonic-compatible apps (Ultrasonic, DSub, Symfonium&hellip;) require a username.<br>
+            Use <code style="background:var(--bg);padding:.1rem .35rem;border-radius:3px;color:var(--primary);font-size:.9em;">mstream-user</code> as the username with any password.
+          </div>
           <table v-else>
             <thead>
               <tr>

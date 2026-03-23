@@ -1,5 +1,13 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Subsonic no-auth username hint — 2026-03-23
+
+**Files:** `webapp/admin/index.js`
+
+- When no users are configured (no-auth mode), the Users page now shows a notice explaining that Subsonic-compatible apps must use `mstream-user` as the username (with any password). The notice disappears automatically once the first real user is created.
+
+---
+
 ## Lyrics: filename fallback parsing — 2026-03-23
 
 **Files:** `src/api/lyrics.js`
