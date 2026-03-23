@@ -29,7 +29,7 @@ const scanOptions = Joi.object({
 
 const dbOptions = Joi.object({
   clearSharedInterval: Joi.number().integer().min(0).default(24),
-  engine: Joi.string().valid('loki', 'sqlite').default('loki')
+  engine: Joi.string().valid('loki', 'sqlite').default('sqlite')
 });
 
 const transcodeOptions = Joi.object({
@@ -131,11 +131,12 @@ export function asyncRandom(numBytes) {
 }
 
 export async function setup(configFileArg) {
-  // Create config if none exists
+  // Create config directory + file if they don't exist
   try {
     await fs.access(configFileArg);
   } catch (_err) {
     winston.info('Config File does not exist. Attempting to create file');
+    await fs.mkdir(path.dirname(configFileArg), { recursive: true });
     await fs.writeFile(configFileArg, JSON.stringify({}), 'utf8');
   }
 

@@ -1,4 +1,5 @@
 import path from 'path';
+import { mkdirSync } from 'fs';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'crypto';
 
@@ -19,6 +20,7 @@ let db;
 const _s = {}; // cached prepared statements — populated in init(), reused on every call
 
 export function init(dbDirectory) {
+  mkdirSync(dbDirectory, { recursive: true });
   db = new DatabaseSync(path.join(dbDirectory, 'mstream.sqlite'));
   db.exec('PRAGMA journal_mode=WAL');
   // NORMAL skips per-write fsync (safe with WAL); prevents 50-200ms event-loop

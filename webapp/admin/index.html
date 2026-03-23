@@ -25,7 +25,14 @@
 
   <script>
     (function() {
-      var t = localStorage.getItem('ms2_theme') || 'velvet';
+      // Main app stores theme under ms2_theme_<username> — scan localStorage for it.
+      var t = null;
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (key && key.indexOf('ms2_theme_') === 0) { t = localStorage.getItem(key); break; }
+      }
+      // Fall back to OS preference (same logic as main app)
+      if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'velvet' : 'light';
       if (t === 'dark')  document.documentElement.classList.add('dark');
       if (t === 'light') document.documentElement.classList.add('light');
     })();
