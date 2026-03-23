@@ -133,28 +133,51 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 
 ## Installing
 
+### Docker (recommended)
+
 ```shell
-# Clone this fork
+# 1. Clone
 git clone https://github.com/aroundmyroom/mStream.git
 cd mStream
 
-# Install dependencies
-npm install --only=prod
+# 2. Build the image
+docker build -t mstream-velvet .
 
-# Run
+# 3. Start (edit volume paths in compose.yaml first)
+docker compose up -d
+```
+
+Open **http://localhost:3000** — on a fresh install with no users the admin panel is accessible without login.
+
+See [docs/docker.md](docs/docker.md) for the full Docker guide: volume setup, adding your music library, user creation, updating, and reverse-proxy tips.
+
+### Bare-metal (Linux / systemd)
+
+```shell
+git clone https://github.com/aroundmyroom/mStream.git
+cd mStream
+npm install --only=prod
 node cli-boot-wrapper.js
 ```
 
-See [docs/install.md](docs/install.md) for full instructions including running as a background service with PM2.
+See [docs/install.md](docs/install.md) for running as a background service with systemd or PM2.
 
 See [docs/deploy.md](docs/deploy.md) for reverse-proxy (nginx) configuration — required for large FLAC libraries to avoid stall on idle connections.
 
-See [docs/technology-choices.md](docs/technology-choices.md) for a full explanation of every technology and service used — why FFmpeg, why LRCLIB over Musixmatch, why Discogs over Spotify, why Syncthing, and more.
+See [docs/technology-choices.md](docs/technology-choices.md) for a full explanation of every technology and service used.
 
 ---
 
 ## Updating
 
+**Docker:**
+```shell
+git pull
+docker build -t mstream-velvet .
+docker compose up -d
+```
+
+**Bare-metal:**
 ```shell
 git pull
 npm install --only=prod
@@ -186,10 +209,11 @@ The built-in Subsonic REST API also lets you use any Subsonic-compatible app:
 
 ## Technical Details
 
-- **Node.js:** v18 or greater (v22 recommended; tested on v22.22.0)
-- **Database:** SQLite via Node.js built-in `node:sqlite` (`DatabaseSync`)
+- **Node.js:** v22 or greater (v24 used in Docker image; tested on v22.22.0)
+- **Database:** SQLite via Node.js built-in `node:sqlite` (`DatabaseSync`) — default engine
+- **Docker base image:** `node:24-alpine`
 - **Supported audio formats:** flac, mp3, mp4, wav, ogg, opus, aac, m4a, w64, aiff
-- **Waveform generation:** requires `ffmpeg` in `bin/ffmpeg/`
+- **Waveform generation:** requires `ffmpeg` in `bin/ffmpeg/` (bare-metal) or pre-installed in Docker
 - **Cross-platform:** Linux, macOS, Windows, FreeBSD, ARM (Raspberry Pi)
 
 ---
