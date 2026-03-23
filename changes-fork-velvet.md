@@ -1,5 +1,14 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Docker support — 2026-03-23
+
+**Files:** `Dockerfile`, `.dockerignore`
+
+- `Dockerfile`: `node:24-alpine` base, installs production dependencies, exposes port 3000, starts via `cli-boot-wrapper.js`
+- `.dockerignore`: excludes `node_modules`, `.git`, runtime-generated folders (`save/`, `image-cache/`, `waveform-cache/`), Electron binaries (`bin/`), build artefacts, and docs — keeps the image lean; runtime folders are intended as Docker volumes
+
+---
+
 ## Bug fixes + SPL/Podcast/Radio polish — 2026-03-23
 
 **Files:** `webapp/app.js`, `webapp/style.css`, `src/db/sqlite-backend.js`
