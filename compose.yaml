@@ -1,0 +1,16 @@
+services:
+  mstream:
+    image: mstream-velvet
+    container_name: mstream-velvet
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persistent data — config, database, logs, sync state
+      - /home/mStream/save:/app/save
+      # Your music library (read-only recommended)
+      - /media/music:/music
+      # Cached waveform data
+      - /home/mStream/waveform-cache:/app/waveform-cache
+      # Cached album art / podcast / radio artwork
+      - /home/mStream/image-cache:/app/image-cache

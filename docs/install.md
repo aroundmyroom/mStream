@@ -1,44 +1,72 @@
-## Install on Ubuntu
+# Install mStream Velvet (bare-metal)
 
-**Dependencies**
+> **Prefer Docker?** See [docker.md](docker.md) for the recommended container-based setup.
 
-* NodeJS and NPM
-* git
+## Dependencies
 
-[How to Install NodeJS](https://nodejs.org/en/download/package-manager/)
+- Node.js v22 or greater ([nodejs.org](https://nodejs.org/en/download/package-manager/))
+- npm
+- git
 
-# Install mStream
+## Install
 
 ```shell
-git clone https://github.com/IrosTheBeggar/mStream.git
-
+git clone https://github.com/aroundmyroom/mStream.git
 cd mStream
-
-# Install dependencies and run
-npm run-script wizard
+npm install --only=prod
+node cli-boot-wrapper.js
 ```
 
-# Running mStream as a Background Process
+Open **http://localhost:3000** — on a fresh install with no users the admin panel is accessible without login.
 
-We will use [PM2](https://pm2.keymetrics.io/) to run mStream as a background process
+---
+
+## Running as a systemd service (Linux)
+
+Create `/etc/systemd/system/music.service`:
+
+```ini
+[Unit]
+Description=mStream Velvet
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/path/to/mStream
+ExecStart=/usr/bin/node cli-boot-wrapper.js
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ```shell
-# Install PM2
-npm install -g pm2
-
-# Run app
-pm2 start cli-boot-wrapper.js --name mStream
+systemctl daemon-reload
+systemctl enable music.service
+systemctl start music.service
 ```
 
-[See the PM2 docs for more information](https://pm2.keymetrics.io/docs/usage/quick-start/)
+---
 
-# Updating mStream
+## Running as a background process with PM2
 
-To update mStream just pull the changes from git and reboot your server
+```shell
+npm install -g pm2
+pm2 start cli-boot-wrapper.js --name mStream
+pm2 save
+pm2 startup
+```
+
+[PM2 quick-start docs](https://pm2.keymetrics.io/docs/usage/quick-start/)
+
+---
+
+## Updating
 
 ```shell
 git pull
 npm install --only=prod
-# Reboot mStream with PM2
-pm2 restart all
+systemctl restart music.service   # or: pm2 restart all
 ```
+
