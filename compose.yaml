@@ -8,7 +8,7 @@ services:
     volumes:
       # Persistent data — config, database, logs, sync state
       - /home/mStream/save:/app/save
-      # Your music library (read-only recommended)
+      # Your music library (read-write recommended due to specific functions in mStream-Velvet (album-art, tags)
       - /media/music:/music
       # Cached waveform data
       - /home/mStream/waveform-cache:/app/waveform-cache
