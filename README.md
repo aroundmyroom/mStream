@@ -133,7 +133,7 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 
 ## Installing
 
-### Docker (recommended)
+### Docker (not really recommended but there are people asking for it)
 
 ```shell
 # 1. Clone
