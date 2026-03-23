@@ -42,4 +42,5 @@ dist/*
 
 .env
 TODO.md
+competitors.md
 settings.local.json

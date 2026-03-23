@@ -173,11 +173,12 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 }
 .pl-row:hover .pl-row-btn,.pl-row.active .pl-row-btn{color:var(--t1);}
 .pl-row.active .pl-row-btn{color:var(--primary);}
-.pl-row-del{opacity:0;padding:6px 8px;color:var(--t3);font-size:16px;flex-shrink:0;transition:opacity .15s,color .15s;}
+.pl-row-del,.pl-row-edit{opacity:0;padding:6px 8px;color:var(--t3);font-size:16px;flex-shrink:0;transition:opacity .15s,color .15s;}
 .pl-row-share{opacity:0;padding:6px 6px;color:var(--t3);font-size:14px;flex-shrink:0;transition:opacity .15s,color .15s;display:flex;align-items:center;}
-.pl-row:hover .pl-row-del{opacity:1;}
+.pl-row:hover .pl-row-del,.pl-row:hover .pl-row-edit{opacity:1;}
 .pl-row:hover .pl-row-share{opacity:1;}
 .pl-row-del:hover{color:var(--red);}
+.pl-row-edit:hover{color:var(--primary);}
 .pl-row-share:hover{color:var(--accent);}
 .pl-fresh-icon{flex-shrink:0;opacity:.6;color:var(--primary);}
 .icon-btn{
@@ -1855,7 +1856,8 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .pf-info{flex:1;min-width:0;}
 .pf-title{font-size:.92rem;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .pf-author{font-size:.78rem;color:var(--t2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.pf-stats{font-size:.78rem;color:var(--t3);margin-top:2px;}
+.pf-stats{font-size:.78rem;color:var(--t2);margin-top:2px;}
+.pf-latest-date{color:var(--primary);}
 .pf-desc{font-size:.78rem;color:var(--t2);margin-top:3px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
 .pf-btns{display:flex;flex-direction:row;gap:3px;flex-shrink:0;align-items:center;}
 .pf-handle{display:none;align-items:center;justify-content:center;width:22px;align-self:stretch;cursor:grab;color:var(--t3);opacity:.4;flex-shrink:0;}

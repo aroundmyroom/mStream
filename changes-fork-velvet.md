@@ -1,5 +1,41 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Bug fixes + SPL/Podcast/Radio polish — 2026-03-23
+
+**Files:** `webapp/app.js`, `webapp/style.css`, `src/db/sqlite-backend.js`
+
+### Smart Playlists
+
+- Genre groups now open with all genres **deselected** by default (less overwhelming when picking individual genres)
+- **Genre search bar** added above the genre groups — supports comma-separated multi-term filtering
+- **Edit (✎) button** added to each SPL sidebar nav row — opens the builder pre-filled with that playlist's saved filters
+- SPL nav row turns accent colour when its results are the active view (consistent with playlists/radio rows)
+
+### Podcast
+
+- **Artwork protected from orphan cleanup** — `getLiveArtFilenames()` in `sqlite-backend.js` now includes a `podcast_feeds.img` query so scan-triggered cleanup never deletes cached podcast feed art
+- **Latest episode date** shown in feed overview (`latest_pub_date` subquery added to `getPodcastFeeds` and `getPodcastFeed`); displayed with accent colour above the "refreshed" date
+
+### Now Playing context sub-label
+
+`_syncQueueLabel` reads a new `S.playSource` state field and appends a secondary line:
+- `· Radio Stream` when playing a live radio station
+- `· Podcast: <feed name>` when playing a podcast episode
+- `· Playlist: <name>` when playing a static playlist
+- `· Smart Playlist: <name>` when playing a smart playlist
+
+### No-auth / Docker clean-install fix (Closes #25)
+
+**Bug:** On a fresh install with no users configured, the no-auth fallback in `checkSession()` never called the admin probe, so `S.isAdmin` stayed `false` — the admin panel button and scan button never appeared.  
+**Fix:** Added `api('GET', 'api/v1/admin/directories')` probe to the no-auth path, matching what the normal session path already does.
+
+### Radio progress bar
+
+- **Correct fill on live streams** — `timeupdate` handler now checks `isRadio`; forces fill to 100% and hides the seek thumb instead of dividing by `Infinity` duration (which produced 0%)
+- **Stale dot cleared on song switch** — `updateBar()` resets fill and thumb position immediately whenever the current song changes (radio → 100% + hidden thumb; music → 0% + visible thumb at left edge)
+
+---
+
 ## Documentation — 2026-03-22
 
 **Files:** `docs/smart-playlists.md`, `docs/API.md`, `docs/API/smart-playlists.md` (new), `docs/API/admin_genre-groups.md` (new), `docs/API/podcasts.md` (new), `competitors.md`
