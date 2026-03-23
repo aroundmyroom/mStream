@@ -7181,7 +7181,7 @@ function _renderPodcastFeedsView() {
       try {
         await api('DELETE', `api/v1/podcast/feeds/${id}`);
         _podcastFeeds = _podcastFeeds.filter(f => f.id !== id);
-        S.feedsEnabled = _podcastFeeds.length > 0;
+        // feedsEnabled stays true — section must remain visible so user can re-add feeds
         _updateListenSection();
         _renderPodcastFeedsView();
       } catch (e) { toast('Delete failed: ' + (e.message || '')); }
@@ -8759,7 +8759,7 @@ async function tryLogin(username, password) {
   } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
   try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
   try { const rd = await api('GET', 'api/v1/radio/enabled'); S.radioEnabled = rd?.enabled === true; } catch(_) { S.radioEnabled = false; }
-  try { const pf = await api('GET', 'api/v1/podcast/feeds'); S.feedsEnabled = Array.isArray(pf) && pf.length > 0; } catch(_) { S.feedsEnabled = false; }
+  S.feedsEnabled = true; // Podcasts always available — user needs the section to add their first feed
   await _loadServerSettings();
 }
 
@@ -8786,7 +8786,7 @@ async function checkSession() {
       } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
       try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
       try { const rd = await api('GET', 'api/v1/radio/enabled'); S.radioEnabled = rd?.enabled === true; } catch(_) { S.radioEnabled = false; }
-      try { const pf = await api('GET', 'api/v1/podcast/feeds'); S.feedsEnabled = Array.isArray(pf) && pf.length > 0; } catch(_) { S.feedsEnabled = false; }
+      S.feedsEnabled = true; // Podcasts always available — user needs the section to add their first feed
       await _loadServerSettings();
       return true;
     } catch(e) {
@@ -8833,7 +8833,10 @@ async function checkSession() {
         await api('GET', 'api/v1/admin/directories');
         S.isAdmin = true;
         try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
-      } catch(_) { S.isAdmin = false; }
+      } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
+      try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
+      try { const rd = await api('GET', 'api/v1/radio/enabled'); S.radioEnabled = rd?.enabled === true; } catch(_) { S.radioEnabled = false; }
+      S.feedsEnabled = true; // Podcasts are always available — user needs section to add first feed
       return true;
     }
   } catch(_) {}
@@ -8930,6 +8933,16 @@ function showApp() {
       if (lastfmBtn) {
         if (S.lastfmEnabled) lastfmBtn.classList.remove('hidden');
         else lastfmBtn.classList.add('hidden');
+      }
+    } catch (_) {}
+    // All-user flag: Radio enabled/disabled
+    try {
+      const rd = await api('GET', 'api/v1/radio/enabled');
+      S.radioEnabled = rd?.enabled === true;
+      const radioBtn = document.getElementById('radio-nav-btn');
+      if (radioBtn) {
+        if (S.radioEnabled) radioBtn.classList.remove('hidden');
+        else radioBtn.classList.add('hidden');
       }
     } catch (_) {}
   });
