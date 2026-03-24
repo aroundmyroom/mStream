@@ -84,8 +84,9 @@ async function _fetchIcyMeta(rawUrl) {
           return;
         }
         if (res.statusCode !== 200) { res.resume(); clearTimeout(timeout); resolve(null); return; }
+        const icyBr   = parseInt(res.headers['icy-br'] || '0', 10) || null;
         const metaint = parseInt(res.headers['icy-metaint'] || '0', 10);
-        if (!metaint) { res.resume(); clearTimeout(timeout); resolve(null); return; }
+        if (!metaint) { res.resume(); clearTimeout(timeout); resolve({ title: null, bitrate: icyBr }); return; }
 
         // Byte-level state machine: skip metaint audio bytes → length byte → length×16 meta bytes
         let audioLeft = metaint, metaWait = -1;
@@ -108,17 +109,18 @@ async function _fetchIcyMeta(rawUrl) {
               if (--metaWait === 0) {
                 req.destroy();
                 clearTimeout(timeout);
-                const text = Buffer.from(metaBuf).toString('utf8');
-                const m    = text.match(/StreamTitle='(.*?)(?:';|'\0|'$)/s);
-                resolve(m ? m[1].replace(/\0+$/, '').trim() || null : null);
+                const text  = Buffer.from(metaBuf).toString('utf8');
+                const m     = text.match(/StreamTitle='(.*?)(?:';|'\0|'$)/s);
+                const title = m ? (m[1].replace(/\0+$/, '').trim() || null) : null;
+                resolve({ title, bitrate: icyBr });
                 return;
               }
             }
           }
-          if (totalRead >= LIMIT) { req.destroy(); clearTimeout(timeout); resolve(null); }
+          if (totalRead >= LIMIT) { req.destroy(); clearTimeout(timeout); resolve({ title: null, bitrate: icyBr }); }
         });
-        res.on('end',   () => { clearTimeout(timeout); resolve(null); });
-        res.on('error', () => { clearTimeout(timeout); resolve(null); });
+        res.on('end',   () => { clearTimeout(timeout); resolve({ title: null, bitrate: icyBr }); });
+        res.on('error', () => { clearTimeout(timeout); resolve({ title: null, bitrate: icyBr }); });
       }
     );
     req.on('error', () => { clearTimeout(timeout); resolve(null); });
@@ -257,11 +259,10 @@ export function setup(mstream) {
     try { parsed = new URL(raw); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return res.status(400).json({ error: 'http/https only' });
     if (_ssrfCheck(parsed.hostname)) return res.status(403).end();
-    const streamTitle = await _fetchIcyMeta(parsed.href);
-    if (!streamTitle) return res.json({ title: null });
+    const meta = await _fetchIcyMeta(parsed.href);
     // Return the raw StreamTitle as-is — stations use different conventions
     // (some send "Artist - Title", others "Title - Artist"), so we don't split.
-    return res.json({ title: streamTitle });
+    return res.json({ title: meta?.title || null, bitrate: meta?.bitrate || null });
   });
 
   // ── Per-user station CRUD ──────────────────────────────────
