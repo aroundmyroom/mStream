@@ -29,7 +29,7 @@
 - **Record modal redesigned** — now has two tabs: **Record Now** (existing immediate flow) and **Schedule** (form + schedule list). The Schedule tab shows all existing schedules with On/Off toggle and delete button. Inline "recording" pulse indicator on active scheduled recordings.
 - **`radio-recorder.js` refactored** — extracted internal `startStreamRecording({ username, url, vpath, recordDir, stationName, artFile, durationMinutes })` exported function (used by both the HTTP endpoint and the scheduler). `stopStreamRecording` exported alias for `_autoStopRecording`.
 
-## Radio Recording — Cover Art Embed & Max Duration Cap — 2026-05-31
+## Radio Recording — Cover Art Embed & Max Duration Cap — 2026-03-24
 
 **Files:** `src/api/radio-recorder.js`, `src/state/config.js`, `src/util/admin.js`, `src/api/admin.js`, `webapp/app.js`, `webapp/index.html`, `webapp/style.css`, `webapp/admin/index.js`
 
@@ -40,7 +40,7 @@
   - Auto-stop implemented via `setTimeout` in the start callback; timer cleared on manual stop. `_autoStopRecording(id)` helper mirrors the stop-handler logic (flush writer, embed art, remove from active map).
 - **Bug fix** — incorrect config path `config.program.albumArtDirectory` corrected to `config.program.storage.albumArtDirectory` (was causing 500 on recording stop when a station logo was present)
 
-## Radio Stream Recording — 2026-05-30
+## Radio Stream Recording — 2026-03-24
 
 **Files:** `src/api/radio-recorder.js` *(new)*, `src/state/config.js`, `src/util/admin.js`, `src/api/admin.js`, `src/api/playlist.js`, `src/db/task-queue.js`, `src/server.js`, `webapp/index.html`, `webapp/app.js`, `webapp/style.css`, `webapp/admin/index.js`
 
