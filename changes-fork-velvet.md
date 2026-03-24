@@ -1,5 +1,15 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Radio Stream Bitrate Display + Menu Rename — 2026-03-24
+
+**Files:** `src/api/radio.js`, `webapp/app.js`, `webapp/index.html`, `webapp/style.css`
+
+- **Radio kbps in playbar** — when playing a radio stream the playbar now shows a small badge with the stream bitrate (e.g. `128 kbps`). Sourced from the `icy-br` ICY/Shoutcast response header captured during the metadata fetch. Hidden when not playing radio or when the stream doesn't advertise a bitrate.
+- **Backend** — `_fetchIcyMeta()` now returns `{ title, bitrate }` instead of a plain string; the `/api/v1/radio/nowplaying` endpoint includes `bitrate` in its JSON response.
+- **Frontend** — added `#player-radio-kbps` span to the playbar; `_pollRadioNowPlaying` shows/hides it; `_stopRadioNowPlaying` hides it on station change.
+- **Style** — `.player-radio-kbps` styled as a small monospace pill badge.
+- **Menu rename** — "Feeds" navigation item renamed to "Podcast Feeds".
+
 ## Podcast Episode Save to Library — 2026-03-24
 
 **Files:** `src/db/sqlite-backend.js`, `src/api/podcasts.js`, `webapp/app.js`, `webapp/style.css`

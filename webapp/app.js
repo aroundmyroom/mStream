@@ -6736,6 +6736,8 @@ function _stopRadioNowPlaying() {
   _radioNowPlayingStation = null;
   const el = document.getElementById('player-radio-np');
   if (el) el.classList.add('hidden');
+  const kbpsEl = document.getElementById('player-radio-kbps');
+  if (kbpsEl) kbpsEl.classList.add('hidden');
 }
 
 async function _pollRadioNowPlaying(station) {
@@ -6751,6 +6753,15 @@ async function _pollRadioNowPlaying(station) {
       el.classList.remove('hidden');
     } else {
       el.classList.add('hidden');
+    }
+    const kbpsEl = document.getElementById('player-radio-kbps');
+    if (kbpsEl) {
+      if (data?.bitrate) {
+        kbpsEl.textContent = `${data.bitrate} kbps`;
+        kbpsEl.classList.remove('hidden');
+      } else {
+        kbpsEl.classList.add('hidden');
+      }
     }
   } catch (_) {}
 }
