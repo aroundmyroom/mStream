@@ -907,6 +907,14 @@ const foldersView = Vue.component('folders-view', {
                 </span>
               </label>
 
+              <label style="display:flex;align-items:flex-start;gap:.6rem;cursor:pointer;">
+                <input id="folder-is-recordings" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;" />
+                <span>
+                  <span style="color:var(--t1);font-weight:600;">Radio Recordings folder</span><br>
+                  <small style="color:var(--t2);font-size:.82rem;">Designate this directory as the target for radio stream recordings. It will <strong>not</strong> be scanned into the music library. Users with recording permission can save streams here.</small>
+                </span>
+              </label>
+
             </div>
           </form>
         </div>
@@ -997,7 +1005,8 @@ const foldersView = Vue.component('folders-view', {
               directory: this.folder.value,
               vpath: this.dirName,
               autoAccess: document.getElementById('folder-auto-access').checked,
-              isAudioBooks: document.getElementById('folder-is-audiobooks').checked
+              isAudioBooks: document.getElementById('folder-is-audiobooks').checked,
+              isRecording: document.getElementById('folder-is-recordings').checked
             }
           });
 
@@ -1156,6 +1165,7 @@ const usersView = Vue.component('users-view', {
                     <button class="btn-small btn-flat" type="button" @click="changePassword(k)">Password</button>
                     <button class="btn-small btn-flat" type="button" @click="changeVPaths(k)">Folders</button>
                     <button class="btn-small btn-flat" type="button" @click="changeAccess(k)">Access</button>
+                    <button class="btn-small btn-flat" type="button" :title="v['allow-radio-recording'] ? 'Disable radio recording for this user' : 'Enable radio recording for this user'" :style="v['allow-radio-recording'] ? 'color:var(--red);border-color:var(--red);' : ''" @click="toggleRadioRecording(k, v)">&#9679; Record</button>
                     <button class="btn-small" type="button" style="background:var(--red);border-color:var(--red);" @click="deleteUser(k)">Delete</button>
                   </div>
                 </td>
@@ -1257,6 +1267,20 @@ const usersView = Vue.component('users-view', {
           });
         }finally {
           this.submitPending = false;
+        }
+      },
+      toggleRadioRecording: async function (username, user) {
+        const newVal = !user['allow-radio-recording'];
+        try {
+          await API.axios({
+            method: 'POST',
+            url: `${API.url()}/api/v1/admin/users/allow-radio-recording`,
+            data: { username, allow: newVal }
+          });
+          Vue.set(ADMINDATA.users[username], 'allow-radio-recording', newVal);
+          iziToast.success({ title: newVal ? 'Radio recording enabled' : 'Radio recording disabled', position: 'topCenter', timeout: 3000 });
+        } catch (err) {
+          iziToast.error({ title: 'Failed to update', position: 'topCenter', timeout: 3500 });
         }
       }
     }
@@ -2858,6 +2882,56 @@ const lastFMView = Vue.component('lastfm-view', {
   }
 });
 
+const listenBrainzView = Vue.component('listenbrainz-view', {
+  data() {
+    return { enabled: false, pending: false };
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">ListenBrainz</span>
+              <p style="margin-bottom:1rem;">
+                When enabled, users can enter their own ListenBrainz user token to scrobble every track they play.
+                Get a token at <a href="https://listenbrainz.org/profile/" target="_blank" rel="noopener">listenbrainz.org/profile</a>.
+              </p>
+              <table><tbody>
+                <tr>
+                  <td style="width:140px"><b>Enable</b></td>
+                  <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> Enable ListenBrainz scrobbling for users</td>
+                </tr>
+              </tbody></table>
+            </div>
+            <div class="card-action">
+              <button class="btn" v-on:click="save()" :disabled="pending">
+                {{ pending ? 'Saving...' : 'Save' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  async mounted() {
+    try {
+      const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/listenbrainz/config` });
+      this.enabled = res.data.enabled === true;
+    } catch(e) { /* ignore */ }
+  },
+  methods: {
+    save: async function() {
+      this.pending = true;
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/listenbrainz/config`, data: { enabled: this.enabled } });
+        iziToast.success({ title: 'ListenBrainz settings saved', position: 'topCenter', timeout: 3000 });
+      } catch(err) {
+        iziToast.error({ title: 'Failed to save ListenBrainz settings', position: 'topCenter', timeout: 3000 });
+      } finally { this.pending = false; }
+    }
+  }
+});
+
 const discogsView = Vue.component('discogs-view', {
   data() {
     return {
@@ -2968,6 +3042,7 @@ const radioView = Vue.component('radio-view', {
   data() {
     return {
       enabled: false,
+      maxRecordingMinutes: ADMINDATA.dbParams.maxRecordingMinutes || 180,
       pending: false,
     };
   },
@@ -2992,6 +3067,13 @@ const radioView = Vue.component('radio-view', {
                   <tr>
                     <td style="width:140px"><b>Enable</b></td>
                     <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> Allow users to add and play internet radio stations</td>
+                  </tr>
+                  <tr v-if="enabled">
+                    <td><b>Max Recording Duration</b></td>
+                    <td>
+                      <input type="number" v-model.number="maxRecordingMinutes" min="1" step="1" style="width:80px;display:inline-block;margin:0 6px 0 0;" />
+                      minutes — recordings are auto-stopped after this limit
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -3020,6 +3102,14 @@ const radioView = Vue.component('radio-view', {
           url: `${API.url()}/api/v1/admin/radio/config`,
           data: { enabled: this.enabled }
         });
+        if (this.enabled) {
+          await API.axios({
+            method: 'POST',
+            url: `${API.url()}/api/v1/admin/db/params/max-recording-minutes`,
+            data: { maxRecordingMinutes: this.maxRecordingMinutes }
+          });
+          Vue.set(ADMINDATA.dbParams, 'maxRecordingMinutes', this.maxRecordingMinutes);
+        }
         iziToast.success({ title: 'Radio settings saved', position: 'topCenter', timeout: 3000 });
       } catch(err) {
         iziToast.error({ title: 'Failed to save Radio settings', position: 'topCenter', timeout: 3000 });
@@ -3296,6 +3386,7 @@ const vm = new Vue({
     'lock-view': lockView,
     'scan-errors-view': scanErrorsView,
     'lastfm-view': lastFMView,
+    'listenbrainz-view': listenBrainzView,
     'discogs-view': discogsView,
     'lyrics-view': lyricsView,
     'radio-view': radioView,

@@ -1107,6 +1107,19 @@ export function setup(mstream) {
     sendResponse(req, res, makeResponse());
   });
 
+  // ── getArtistInfo / getAlbumInfo ─────────────────────────────────────────────
+  // Stubs — no biography/image fetching; return empty objects to silence client retries
+  router('getArtistInfo',  (req, res) => sendResponse(req, res, makeResponse('ok', { artistInfo: {} })));
+  router('getArtistInfo2', (req, res) => sendResponse(req, res, makeResponse('ok', { artistInfo: {} })));
+  router('getAlbumInfo',   (req, res) => sendResponse(req, res, makeResponse('ok', { albumInfo: {} })));
+  router('getAlbumInfo2',  (req, res) => sendResponse(req, res, makeResponse('ok', { albumInfo: {} })));
+
+  // ── getSimilarSongs / getTopSongs ─────────────────────────────────────────────
+  // Stubs — no audio-analysis/MusicBrainz lookup yet; return empty song lists
+  router('getSimilarSongs',  (req, res) => sendResponse(req, res, makeResponse('ok', { similarSongs:  { song: [] } })));
+  router('getSimilarSongs2', (req, res) => sendResponse(req, res, makeResponse('ok', { similarSongs2: { song: [] } })));
+  router('getTopSongs',      (req, res) => sendResponse(req, res, makeResponse('ok', { topSongs:      { song: [] } })));
+
   // ── getBookmarks / saveBookmark / deleteBookmark ─────────────────────────────
   // Stub — mStream doesn't support bookmarks yet
   router('getBookmarks',  (req, res) => sendResponse(req, res, makeResponse('ok', { bookmarks: {} })));

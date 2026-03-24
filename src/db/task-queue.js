@@ -43,6 +43,7 @@ function childVpaths() {
 function scanAll() {
   const children = childVpaths();
   Object.keys(config.program.folders).forEach((vpath) => {
+    if (config.program.folders[vpath]?.type === 'recordings') { return; } // recordings folders are never scanned
     if (!children.has(vpath)) { addScanTask(vpath); }
   });
 }
@@ -154,6 +155,7 @@ async function runOrphanCleanup() {
 }
 
 export function scanVPath(vPath) {
+  if (config.program.folders[vPath]?.type === 'recordings') { return; } // recordings folders are never scanned
   addScanTask(vPath);
 }
 

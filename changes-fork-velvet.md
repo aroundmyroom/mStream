@@ -1,5 +1,93 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Podcast Episode Save to Library — 2026-03-24
+
+**Files:** `src/db/sqlite-backend.js`, `src/api/podcasts.js`, `webapp/app.js`, `webapp/style.css`
+
+- **Save episode to server** — each episode row now has a download-to-server button (↓ arrow icon) that streams the episode audio directly from the podcast CDN to the server's AudioBooks/Podcasts folder.
+- **Automatic subfolder** — the episode is saved in `<AudioBooks vpath>/<feed title>/<YYYY-MM-DD title.ext>`. The feed subfolder is created automatically if it doesn't exist.
+- **File naming** — filename is `YYYY-MM-DD Episode Title.ext` (date from `pub_date`, extension from URL or Content-Type header). Both podcast title and episode title are sanitised (no path-special characters, max 80/100 chars).
+- **SSRF protection** — the episode audio URL is validated (must be http/https, not private/local range) before any outbound connection is made.
+- **Streaming download** — uses `node:stream/promises pipeline` + `createWriteStream` so large episodes are never buffered in RAM. Partial files are deleted on failure.
+- **Button states** — idle (↓ icon, dimmed), saving (spinner animation), saved (green ✓ + toast "Saved: filename"), error (red ✕ + error toast). Auto-resets to idle after 4 s.
+- **New DB helper** — `getPodcastEpisode(id)` single-row lookup added to `sqlite-backend.js`.
+- **New API endpoint** — `POST /api/v1/podcast/episode/save` with Joi validation, feed-ownership check, episode–feed cross-check, vpath type check, SSRF guard, streaming download, and partial-file cleanup on error.
+
+## Scheduled Radio Recording — 2026-03-24
+
+**Files:** `src/api/radio-scheduler.js` *(new)*, `src/api/radio-recorder.js`, `src/db/sqlite-backend.js`, `src/db/manager.js`, `src/server.js`, `webapp/index.html`, `webapp/app.js`, `webapp/style.css`
+
+- **Scheduled recordings** — users with `allow-radio-recording` permission can schedule any of their radio stations to record at a specific date+time, with configurable duration and recurrence.
+- **Recurrence modes**: Once, Every day, Weekdays (Mon–Fri), Custom (choose specific days of week).
+- **Server-side ticker** (`radio-scheduler.js`) — runs a 30 s interval that fires scheduled recordings even when the browser is closed. Checks all enabled schedules; fires any whose start time falls within the current 40 s window. For `once` schedules, automatically disables after firing.
+- **DB table** (`radio_schedules`) — stores per-user schedules with id, station name, stream URL, art file, vpath, start time, start date (once only), duration, recurrence, recur days, enabled flag, created_at.
+- **New API endpoints:**
+  - `GET  /api/v1/radio/schedules` — list user's schedules (includes `active: true` if currently recording)
+  - `POST /api/v1/radio/schedules` — create schedule; SSRF check, vpath type check, ownership check
+  - `DELETE /api/v1/radio/schedules/:id` — delete; stops active recording if in progress
+  - `PATCH /api/v1/radio/schedules/:id/enable` — toggle enabled/disabled state
+- **Record modal redesigned** — now has two tabs: **Record Now** (existing immediate flow) and **Schedule** (form + schedule list). The Schedule tab shows all existing schedules with On/Off toggle and delete button. Inline "recording" pulse indicator on active scheduled recordings.
+- **`radio-recorder.js` refactored** — extracted internal `startStreamRecording({ username, url, vpath, recordDir, stationName, artFile, durationMinutes })` exported function (used by both the HTTP endpoint and the scheduler). `stopStreamRecording` exported alias for `_autoStopRecording`.
+
+## Radio Recording — Cover Art Embed & Max Duration Cap — 2026-05-31
+
+**Files:** `src/api/radio-recorder.js`, `src/state/config.js`, `src/util/admin.js`, `src/api/admin.js`, `webapp/app.js`, `webapp/index.html`, `webapp/style.css`, `webapp/admin/index.js`
+
+- **Station logo embedded as cover art** — after a recording is stopped and the file writer is fully flushed, FFmpeg runs a copy-only pass (`-c:a copy`) to embed the station's logo into the recorded file as attached picture. Supported formats: mp3, m4a, aac, flac. Best-effort: any FFmpeg failure is logged and silently skipped so the recording is never lost.
+- **SVG record button** — replaced the plain `●` Unicode dot with an inline SVG ring+filled-circle icon (hardware REC button aesthetic). Pulsing animation and red colour preserved. `_updateRecordBtn()` now changes the inner circle's `r` attribute rather than swapping innerHTML.
+- **Max recording duration (admin setting)** — new `scanOptions.maxRecordingMinutes` config field (default 180). Recordings are automatically stopped after this many minutes. Admin can change the cap in the DB Scan Settings card (new "Max Recording Duration" row → modal with numeric input). Stored via `editMaxRecordingMinutes()` in util/admin.js; served by the existing `GET /api/v1/admin/db/params` endpoint.
+  - New endpoint: `POST /api/v1/admin/db/params/max-recording-minutes` — body: `{maxRecordingMinutes: number}`
+  - Auto-stop implemented via `setTimeout` in the start callback; timer cleared on manual stop. `_autoStopRecording(id)` helper mirrors the stop-handler logic (flush writer, embed art, remove from active map).
+- **Bug fix** — incorrect config path `config.program.albumArtDirectory` corrected to `config.program.storage.albumArtDirectory` (was causing 500 on recording stop when a station logo was present)
+
+## Radio Stream Recording — 2026-05-30
+
+**Files:** `src/api/radio-recorder.js` *(new)*, `src/state/config.js`, `src/util/admin.js`, `src/api/admin.js`, `src/api/playlist.js`, `src/db/task-queue.js`, `src/server.js`, `webapp/index.html`, `webapp/app.js`, `webapp/style.css`, `webapp/admin/index.js`
+
+- Users with the `allow-radio-recording` permission (per-user, toggled by admin) can record any live radio stream to disk.
+- **Recordings folder type** — added `'recordings'` as a vpath type alongside `'music'` and `'audio-books'`. Admin marks a folder as a Recordings folder in the directory add form. These folders are excluded from all library scans (`scanAll()` and `scanVPath()`).
+- **Per-user permission** — `allow-radio-recording` boolean stored in user config. New admin endpoint `POST /api/v1/admin/users/allow-radio-recording` toggles it. Admin UI shows a red `● Record` toggle button per user in the Users table. Permission is returned from `GET /api/v1/ping` as `allowRadioRecording`.
+- **Playbar record button** — red `●` button appears in the playbar only when a radio stream is playing and the user has the `allow-radio-recording` permission. Pulses while a recording is active. Elapsed time pill shown next to the button.
+- **Recording folder selection modal** — clicking `●` opens a small modal listing all configured Recordings-type vpaths. User picks a destination and clicks Start Recording.
+- **Auto-stop** — recording is automatically stopped when the user switches to a non-radio track.
+- **New API endpoints:**
+  - `GET  /api/v1/radio/record/active` — list active recordings for the current user
+  - `POST /api/v1/radio/record/start` — body: `{url, vpath, stationName?}`; SSRF check, validates vpath type, checks user access, pipes HTTP/S stream to a new file; returns `{id, filePath, filename}`
+  - `POST /api/v1/radio/record/stop` — body: `{id}`; closes the stream, returns `{filePath, filename, bytesWritten, durationSec}`
+  - `POST /api/v1/admin/users/allow-radio-recording` — admin-only; body: `{username, allow}`
+- **File naming** — `{stationName}_{YYYY-MM-DD_HH-MM-SS}{.ext}` where extension is resolved from the Content-Type header (supports mp3, aac, flac, ogg, opus, m4a, wav). Non-ASCII characters are stripped from the station name.
+- **Write permission check** — recording start probes the target directory for write access (temp file create/delete) before starting the stream pipe.
+- **SSRF protection** — uses the same `_ssrfCheck()` guard as the existing radio stream proxy.
+
+## Subsonic API — missing endpoint stubs — 2026-03-24
+
+**Files:** `src/api/subsonic.js`
+
+- Added empty-but-valid stub handlers for `getArtistInfo`, `getArtistInfo2`, `getAlbumInfo`, `getAlbumInfo2`, `getSimilarSongs`, `getSimilarSongs2`, and `getTopSongs`. These endpoints had **no router entry at all** — Subsonic clients (Symfonium, DSub, etc.) call them on every artist/album view and were getting unhandled-method errors, causing aggressive client-side retry storms. Stubs return well-formed empty responses (`artistInfo: {}`, `albumInfo: {}`, `song: []`) so clients accept the result and stop retrying.
+
+## ListenBrainz now-playing ping — 2026-03-24
+
+**Files:** `src/api/scrobbler.js`, `webapp/app.js`
+
+- Added `POST /api/v1/listenbrainz/playing-now` endpoint that fires a `listen_type: "playing_now"` submission to ListenBrainz immediately when a track starts. This makes the current track appear instantly on the ListenBrainz dashboard rather than waiting 10-20 min for the delayed history sync. The full scrobble (`listen_type: "single"`) still fires after 30 s as before.
+- Both `Player.playAt` and the crossfade `onended` handler now call `playing-now` at track start (fire-and-forget, errors silently ignored).
+- `lbSubmit()` refactored to accept `'playing_now'` as `listenedAt` value; adds `submission_client` / `media_player` fields to `additional_info` for better LB metadata.
+
+## ListenBrainz scrobbling — 2026-03-24
+
+**Files:** `src/state/config.js`, `src/api/scrobbler.js`, `src/server.js`, `webapp/admin/index.js`, `webapp/admin/index.html`, `webapp/app.js`, `webapp/index.html`
+
+- Added ListenBrainz scrobbling alongside existing Last.fm support. Admin enables it server-wide; each user enters their own LB user token. Plays scrobble 30 s after start, just like Last.fm.
+- Config: `listenBrainz.enabled` at root level, `users[x]['listenbrainz-token']` per user. Schema defaults added to Joi validation.
+- New API endpoints: `GET/POST /api/v1/admin/listenbrainz/config` (admin), `GET /api/v1/listenbrainz/status`, `POST /api/v1/listenbrainz/connect` (validates token via LB `/1/validate-token`), `POST /api/v1/listenbrainz/disconnect`, `POST /api/v1/listenbrainz/scrobble-by-filepath`.
+- Token validation uses Node built-in `https` (no extra dependency). Token stored in config file; no-auth users get in-memory-only token.
+- Scrobble status badge (`#np-scrobble-status`) now shows combined "Last.fm ✓ · ListenBrainz ✓" or per-service status independently.
+- Admin panel: new ListenBrainz page under External Services with enable/disable toggle.
+- Main app: new "ListenBrainz" nav button (hidden when disabled), `viewListenBrainz()` page with token entry, connect/disconnect UI.
+- Both scrobble timer blocks (`Player.playAt` and `_crossfadeTo`) updated to handle LFM-only, LB-only, or both simultaneously.
+
+---
+
 ## Subsonic no-auth username — fix the actual fix — 2026-03-23
 
 **Files:** `webapp/app.js`

@@ -39,9 +39,48 @@ Cards can be **drag-reordered** using the six-dot handle that appears on hover. 
 
 Clicking a feed card opens the episode list for that feed:
 - Episodes sorted newest first
-- Each row shows: title, publish date, duration, and a **Play** button
+- Each row shows: title, publish date, duration, a **Save** button, and a **Play** button
 - Click **Play** to stream the episode through the standard player bar (seek, volume, crossfade all work normally)
+- Click **Save** (↓ icon) to download and save the episode audio to the server's AudioBooks/Podcasts folder (see below)
 - A back arrow returns to the feed card grid
+
+---
+
+## Save Episode to Library
+
+The **Save** button on each episode row downloads the episode audio file directly from the podcast CDN to the server.
+
+### How it works
+1. The button sends `POST /api/v1/podcast/episode/save` with `feedId` and `episodeId`.
+2. The server finds the first `audio-books` vpath the user has access to.
+3. A subfolder named after the podcast feed title is created inside that vpath root if it doesn't exist.
+4. The episode audio is streamed (not buffered in RAM) from the remote CDN to disk.
+5. On success a toast shows the saved filename; on error a red toast shows the reason.
+
+### Saved file path
+```
+<AudioBooks vpath root>/<Feed Title>/<YYYY-MM-DD Episode Title>.ext
+```
+Example: `Audiobooks & Podcasts/Global News Podcast/2026-06-17 Global News Podcast.mp3`
+
+### File naming rules
+- Feed title and episode title are sanitised: path-special characters (`/ \ : * ? " < > |`) stripped, repeated `..` collapsed, leading/trailing whitespace removed.
+- Feed subfolder name capped at 80 characters; episode name capped at 100 characters.
+- File extension comes from the URL path (`.mp3`, `.m4a`, `.ogg`, etc.); if not present, falls back to the `Content-Type` header; defaults to `.mp3`.
+
+### Button states
+| State | Appearance |
+|---|---|
+| Idle | Download arrow (↓) icon, dimmed |
+| Saving | Spinning arc |
+| Saved | Green ✓; toast "Saved: filename.mp3" |
+| Error | Red ✕; error toast with reason |
+
+The button resets to idle after 4 seconds so the episode can be saved again if needed.
+
+### Requirements
+- At least one `audio-books` vpath must be configured and accessible to the user.
+- The episode audio URL must be an `http`/`https` URL and must not point to a private/local network range (SSRF protection).
 
 ---
 

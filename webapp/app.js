@@ -15,7 +15,14 @@ const S = {
   audiobooksEnabled: false,
   discogsAllowUpdate: false,
   allowId3Edit:   false,
+  allowRadioRecording: false,   // per-user: can record radio streams
+  recordingActive: false,       // is a recording currently in progress?
+  recordingId: null,            // active recording id (from server)
+  recordingElapsedSec: 0,       // elapsed seconds
+  _recordingTimer: null,        // setInterval handle
   lastfmEnabled: false,
+  listenbrainzEnabled: false,
+  listenbrainzLinked: false,
   vpaths:   [],
   queue:    [],
   idx:      -1,
@@ -34,6 +41,7 @@ const S = {
   ctxSong:  null,    // song target for context menu
   feDir:    '',      // file explorer current path
   feDirStack: [],    // navigation history stack
+  audioContentReturn: null, // set when viewFiles is launched from Audio Content
   canUpload: true,   // false when server has noUpload=true
   supportedAudioFiles: {},  // populated from ping
   // Transcode
@@ -524,14 +532,33 @@ const Player = {
     // Scrobble after 30 s (logs play count + last-played timestamp)
     clearTimeout(scrobbleTimer);
     (function(){ const el = document.getElementById('np-scrobble-status'); if (el) { el.textContent = ''; el.className = 'np-scrobble-status'; } })();
-    if (S.lastfmEnabled && !s.isRadio && !s.isPodcast) {
+    if ((S.lastfmEnabled || (S.listenbrainzEnabled && S.listenbrainzLinked)) && !s.isRadio && !s.isPodcast) {
+      if (S.listenbrainzEnabled && S.listenbrainzLinked) {
+        api('POST', 'api/v1/listenbrainz/playing-now', { filePath: s.filepath }).catch(() => {});
+      }
       scrobbleTimer = setTimeout(async () => {
         const scrobbleEl = document.getElementById('np-scrobble-status');
-        try {
-          await api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath });
-          if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: Scrobbled ✓'; scrobbleEl.className = 'np-scrobble-status np-scrobble-ok'; }
-        } catch (e) {
-          if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: ' + (e?.message || 'scrobble failed'); scrobbleEl.className = 'np-scrobble-status np-scrobble-err'; }
+        const msgs = [];
+        if (S.lastfmEnabled) {
+          try {
+            await api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath });
+            msgs.push('Last.fm ✓');
+          } catch (e) {
+            msgs.push('Last.fm: ' + (e?.message || 'failed'));
+          }
+        }
+        if (S.listenbrainzEnabled && S.listenbrainzLinked) {
+          try {
+            await api('POST', 'api/v1/listenbrainz/scrobble-by-filepath', { filePath: s.filepath });
+            msgs.push('ListenBrainz ✓');
+          } catch (e) {
+            msgs.push('ListenBrainz: ' + (e?.message || 'failed'));
+          }
+        }
+        if (scrobbleEl && msgs.length) {
+          const ok = msgs.every(m => m.endsWith('✓'));
+          scrobbleEl.textContent = msgs.join(' · ');
+          scrobbleEl.className = 'np-scrobble-status ' + (ok ? 'np-scrobble-ok' : 'np-scrobble-err');
         }
       }, 30000);
     }
@@ -624,6 +651,8 @@ const Player = {
       starsEl.dataset.fp = s.filepath;
       starsEl.dataset.rating = s.rating || 0;
       _stopRadioNowPlaying();
+      // Auto-stop any active recording when switching away from radio
+      if (S.recordingActive) { _stopRecording(); }
     }
     // sync NP modal if open
     if (!document.getElementById('np-modal').classList.contains('hidden')) {
@@ -641,6 +670,8 @@ const Player = {
     else { let _u = artUrl(s['album-art'], 'l'); if (_u && s['album-art-v']) _u += `&_v=${encodeURIComponent(s['album-art-v'])}`; _applyAlbumArtTheme(_u); }
     // Tab favicon + title
     _TabFav.setSong(s, !audioEl.paused);
+    // Update record button visibility (only shown for radio + permission)
+    _updateRecordBtn();
   },
 };
 
@@ -1082,7 +1113,11 @@ function highlightRow() {
 
 // ── VIEW HELPERS ──────────────────────────────────────────────
 function setTitle(t)  { document.getElementById('content-title').textContent = t; }
-function setBody(html) { document.getElementById('content-body').innerHTML = html; }
+function setBody(html) {
+  const b = document.getElementById('content-body');
+  b.classList.remove('browse-mode');
+  b.innerHTML = html;
+}
 function setBack(fn) {
   S.backFn = fn;
   document.getElementById('back-btn').classList.toggle('hidden', !fn);
@@ -4581,10 +4616,10 @@ async function doSearch(q) {
 
     if (d.artists?.length) {
       html += `<div class="search-section"><h3>Artists (${d.artists.length})</h3><div class="artist-list">${
-        d.artists.map(a => `<div class="artist-row" data-artist="${esc(a.name)}">
-          <div class="artist-av">${esc(a.name.charAt(0)).toUpperCase()}</div>
-          <div class="artist-name">${esc(a.name)}</div>
-        </div>`).join('')
+        d.artists.map(a => { const disp = cleanArtistDisplay(a.name); return `<div class="artist-row" data-artist="${esc(a.name)}">
+          <div class="artist-av">${esc(disp.charAt(0)).toUpperCase()}</div>
+          <div class="artist-name">${esc(disp)}</div>
+        </div>`; }).join('')
       }</div></div>`;
     }
     if (d.albums?.length) {
@@ -4644,7 +4679,7 @@ async function doSearch(q) {
     res.innerHTML = html;
     if (wasPlaying) VU_NEEDLE.start();
 
-    res.querySelectorAll('.artist-row[data-artist]').forEach(r => r.addEventListener('click', () => viewArtistAlbums(r.dataset.artist, () => viewSearch())));
+    res.querySelectorAll('.artist-row[data-artist]').forEach(r => r.addEventListener('click', () => viewArtistAlbums(cleanArtistDisplay(r.dataset.artist), [r.dataset.artist], () => viewSearch())));
     res.querySelectorAll('.artist-row[data-album]').forEach(r => r.addEventListener('click', () => viewAlbumSongs(r.dataset.album, null, () => viewSearch())));
     attachSongListEvents(res, displaySongs);
     S.curSongs = displaySongs;
@@ -4713,9 +4748,12 @@ async function viewFiles(dir, addToStack) {
 
 function renderFileExplorer(d) {
   const curPath = d.path || '/';
-  // Build breadcrumb
+  // Build breadcrumb — if inside Audio Content context, root crumb links back there
   const parts = curPath.replace(/^\/|\/$/g, '').split('/').filter(Boolean);
-  let crumbs = `<span class="fe-crumb" data-dir="">⌂ Root</span>`;
+  const _inAC = !!S.audioContentReturn;
+  let crumbs = _inAC
+    ? `<span class="fe-crumb" data-dir="__ac__">⌂ Audio Content</span>`
+    : `<span class="fe-crumb" data-dir="">⌂ Root</span>`;
   let cumPath = '';
   parts.forEach(p => {
     crumbs += `<span class="fe-crumb-sep">/</span>`;
@@ -4761,9 +4799,14 @@ function renderFileExplorer(d) {
       </div>`;
   }).join('');
 
-  // Back button logic
+  // Back button logic — when inside an Audio Content context, back goes to Audio Content root
   const hasBack = S.feDirStack.length > 0;
-  setBack(hasBack ? () => { const prev = S.feDirStack.pop(); S.feDir = prev; viewFiles(prev, false); } : null);
+  if (S.audioContentReturn) setNavActive('podcasts');
+  const _backFromStack = () => { const prev = S.feDirStack.pop(); S.feDir = prev; viewFiles(prev, false); };
+  const _backToAC = S.audioContentReturn
+    ? () => { const fn = S.audioContentReturn; S.audioContentReturn = null; fn(); }
+    : null;
+  setBack(hasBack ? _backFromStack : _backToAC);
   setTitle(parts.length ? parts[parts.length - 1] : 'File Explorer');
 
   // Play all for directory
@@ -4820,7 +4863,18 @@ function renderFileExplorer(d) {
 
   // Breadcrumb navigation
   body.querySelectorAll('.fe-crumb').forEach(el => {
-    el.addEventListener('click', () => { S.feDirStack = []; viewFiles(el.dataset.dir || '', false); });
+    el.addEventListener('click', () => {
+      if (el.dataset.dir === '__ac__') {
+        // Return to Audio Content root
+        const fn = S.audioContentReturn;
+        S.audioContentReturn = null;
+        S.feDirStack = [];
+        if (fn) fn(); else viewPodcasts();
+      } else {
+        S.feDirStack = [];
+        viewFiles(el.dataset.dir || '', false);
+      }
+    });
   });
   // Navigate into directory
   body.querySelectorAll('.fe-dir').forEach(el => {
@@ -6421,6 +6475,80 @@ async function viewLastFM() {
 
 }
 
+// ── LISTENBRAINZ ──────────────────────────────────────────────
+async function viewListenBrainz() {
+  setTitle('ListenBrainz'); setBack(null); setNavActive('listenbrainz'); S.view = 'listenbrainz';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+
+  let linked = false;
+  try { const d = await api('GET', 'api/v1/listenbrainz/status'); linked = d?.linked === true; } catch(_) {}
+
+  setBody(`
+    <div class="playback-panel">
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">🎵</div>
+          <div>
+            <div class="playback-section-title">Your ListenBrainz Account</div>
+            <div class="playback-section-desc">Link your ListenBrainz profile to scrobble every track you play on this server. Enter your ListenBrainz user token — you can find it at listenbrainz.org/profile.</div>
+          </div>
+        </div>
+
+        <div id="lb-connected" class="${linked ? '' : 'hidden'}">
+          <div class="playback-row">
+            <div class="playback-row-label">
+              <div class="playback-row-name">Token is saved and active.</div>
+            </div>
+            <button class="btn-danger" id="lb-disconnect-btn">Disconnect</button>
+          </div>
+        </div>
+
+        <div id="lb-form" class="${linked ? 'hidden' : ''}">
+          <div class="playback-row">
+            <label class="playback-row-label" for="lb-token">
+              <div class="playback-row-name">User Token</div>
+            </label>
+            <input type="password" id="lb-token" class="settings-input" style="max-width:340px" placeholder="ListenBrainz user token" autocomplete="new-password" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore>
+          </div>
+          <div class="playback-row" style="justify-content:flex-end">
+            <button class="btn-primary" id="lb-connect-btn">Connect</button>
+          </div>
+        </div>
+      </div>
+    </div>`);
+
+  document.getElementById('lb-disconnect-btn')?.addEventListener('click', async () => {
+    try {
+      await api('POST', 'api/v1/listenbrainz/disconnect', {});
+      S.listenbrainzLinked = false;
+      toast('ListenBrainz token removed');
+      viewListenBrainz();
+    } catch(e) { toast('Error: ' + e.message); }
+  });
+
+  document.getElementById('lb-connect-btn')?.addEventListener('click', async () => {
+    const btn   = document.getElementById('lb-connect-btn');
+    const token = document.getElementById('lb-token').value.trim();
+    if (!token) { toast('Enter your ListenBrainz user token'); return; }
+    btn.disabled = true; btn.textContent = 'Connecting…';
+    try {
+      await api('POST', 'api/v1/listenbrainz/connect', { lbToken: token });
+      S.listenbrainzLinked = true;
+      toast('\u2713 ListenBrainz connected');
+      viewListenBrainz();
+    } catch(e) {
+      toast('ListenBrainz: ' + (e.message || 'Token validation failed'));
+      btn.disabled = false; btn.textContent = 'Connect';
+    }
+  });
+
+  document.getElementById('lb-token')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('lb-connect-btn')?.click();
+  });
+}
+
 // ── SUBSONIC SETTINGS ─────────────────────────────────────────
 async function viewSubsonic() {
   setTitle('Subsonic API'); setBack(null); setNavActive('subsonic'); S.view = 'subsonic';
@@ -6906,34 +7034,69 @@ function _attachRadioFormHandlers() {
   });
 }
 
-// ── PODCASTS & AUDIOBOOKS VIEW ────────────────────────────────
+// ── AUDIO CONTENT VIEW (audio-books + recordings) ───────────────────────────
 function viewPodcasts() {
-  setTitle('Podcasts & Audiobooks'); setBack(null); setNavActive('podcasts'); S.view = 'podcasts';
+  setTitle('Audio Content'); setBack(null); setNavActive('podcasts'); S.view = 'podcasts';
   S.curSongs = [];
   document.getElementById('play-all-btn').onclick = null;
   document.getElementById('add-all-btn').onclick  = null;
   const meta = S.vpathMeta || {};
-  const abVpaths = S.vpaths.filter(v => meta[v]?.type === 'audio-books');
-  _renderPodcastsView(abVpaths);
+  const abVpaths  = S.vpaths.filter(v => meta[v]?.type === 'audio-books');
+  const recVpaths = S.vpaths.filter(v => meta[v]?.type === 'recordings');
+  _renderPodcastsView(abVpaths, recVpaths);
 }
 
-function _renderPodcastsView(abVpaths) {
-  if (abVpaths.length === 0) {
-    setBody('<div class="empty-state">No podcasts or audiobooks folders configured</div>');
+function _renderPodcastsView(abVpaths, recVpaths = []) {
+  if (abVpaths.length === 0 && recVpaths.length === 0) {
+    setBody('<div class="empty-state">No audio content folders configured</div>');
     return;
   }
-  const folders = abVpaths.map(v => `
-    <div class="fe-dir" data-vpath="${esc(v)}">
-      <svg class="fe-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
+  const folderIcon = `<svg class="fe-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
+  const chevron    = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--t3);flex-shrink:0"><polyline points="9,18 15,12 9,6"/></svg>`;
+  const mkRow = v => `
+    <div class="fe-dir" data-vpath="${esc(v)}" data-name="${esc(v)}">
+      ${folderIcon}
       <span class="fe-name">${esc(v)}</span>
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--t3);flex-shrink:0"><polyline points="9,18 15,12 9,6"/></svg>
-    </div>`).join('');
-  setBody(`<div class="fe-grid">${folders}</div>`);
-  document.querySelectorAll('#content-body .fe-dir[data-vpath]').forEach(el => {
+      ${chevron}
+    </div>`;
+  const allRows = [...abVpaths, ...recVpaths].map(mkRow).join('');
+
+  const body = document.getElementById('content-body');
+  body.innerHTML = `
+    <div class="fe-breadcrumb"><span class="fe-crumb" style="cursor:default">⌂ Audio Content</span></div>
+    <div class="fe-filter-row">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="fe-filter" class="fe-filter-input" type="text" placeholder="Filter folders…" autocomplete="off">
+      <span id="fe-match-count" class="fe-match-count"></span>
+      <button id="fe-filter-clear" class="fe-filter-clear hidden" title="Clear filter">✕</button>
+    </div>
+    <div id="fe-grid" class="fe-grid">${allRows}</div>`;
+
+  const filterInput = body.querySelector('#fe-filter');
+  const filterClear = body.querySelector('#fe-filter-clear');
+  const matchCount  = body.querySelector('#fe-match-count');
+  const grid        = body.querySelector('#fe-grid');
+
+  function applyFilter() {
+    const q = filterInput.value.trim().toLowerCase();
+    filterClear.classList.toggle('hidden', !q);
+    let visible = 0;
+    grid.querySelectorAll('.fe-dir').forEach(row => {
+      const name = (row.dataset.name || '').toLowerCase();
+      const matches = !q || name.includes(q);
+      row.classList.toggle('fe-hidden', !matches);
+      if (matches) visible++;
+    });
+    matchCount.textContent = q ? `${visible} result${visible !== 1 ? 's' : ''}` : '';
+  }
+  filterInput.addEventListener('input', applyFilter);
+  filterClear.addEventListener('click', () => { filterInput.value = ''; filterInput.focus(); applyFilter(); });
+
+  body.querySelectorAll('#fe-grid .fe-dir[data-vpath]').forEach(el => {
     el.addEventListener('click', async () => {
       S.feDirStack = [];
+      S.audioContentReturn = viewPodcasts;
       await viewFiles('/' + el.dataset.vpath, false);
-      setBack(() => viewPodcasts());
     });
   });
 }
@@ -7262,6 +7425,11 @@ async function viewPodcastEpisodes(feed) {
   const artHtml = feedImgUrl
     ? `<img src="${esc(feedImgUrl)}" alt="" style="width:96px;height:96px;object-fit:cover;display:block" onerror="this.remove()">`
     : `<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.35"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>`;
+  const _saveSvgIdle     = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+  const _saveSvgSpinner  = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="animation:spin .8s linear infinite"><path d="M12 2a10 10 0 1 0 10 10"/></svg>`;
+  const _saveSvgOk       = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+  const _saveSvgErr      = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+
   const epRows = episodes.map((ep, i) => `
     <div class="pf-ep-row" data-id="${ep.id}" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:var(--r);background:var(--raised);transition:background .12s;cursor:default">
       <div style="min-width:1.6rem;font-size:.75rem;color:var(--t2);text-align:right;flex-shrink:0">${i + 1}</div>
@@ -7272,6 +7440,7 @@ async function viewPodcastEpisodes(feed) {
           ${ep.duration_secs ? `<span>${_fmtDuration(ep.duration_secs)}</span>` : ''}
         </div>
       </div>
+      <button class="pf-ep-save-btn ctrl-btn ctrl-sm" data-id="${ep.id}" title="Save to library" style="flex-shrink:0">${_saveSvgIdle}</button>
       <button class="pf-ep-play-btn ctrl-btn ctrl-sm" data-id="${ep.id}" title="Play episode" style="flex-shrink:0">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8V4z"/></svg>
       </button>
@@ -7313,9 +7482,43 @@ async function viewPodcastEpisodes(feed) {
       });
     });
   });
-}
 
-// ── SLEEP TIMER LOGIC ───────────────────────────────
+  document.querySelectorAll('.pf-ep-save-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (btn.classList.contains('saving')) return;
+      const ep = episodes.find(e => e.id == btn.dataset.id);
+      if (!ep) return;
+      btn.classList.add('saving');
+      btn.innerHTML = _saveSvgSpinner;
+      btn.title = 'Saving…';
+      try {
+        const result = await api('POST', 'api/v1/podcast/episode/save', { feedId: feed.id, episodeId: ep.id });
+        btn.classList.remove('saving');
+        btn.classList.add('saved');
+        btn.innerHTML = _saveSvgOk;
+        btn.title = `Saved to ${result.savedTo}`;
+        toast(`Saved: ${result.savedTo.split('/').pop()}`, 3500);
+        // Reset to idle after 4 s so it can be saved again
+        setTimeout(() => {
+          btn.classList.remove('saved');
+          btn.innerHTML = _saveSvgIdle;
+          btn.title = 'Save to library';
+        }, 4000);
+      } catch (e) {
+        btn.classList.remove('saving');
+        btn.classList.add('error');
+        btn.innerHTML = _saveSvgErr;
+        btn.title = e.message || 'Save failed';
+        toastError(e.message || 'Save failed');
+        setTimeout(() => {
+          btn.classList.remove('error');
+          btn.innerHTML = _saveSvgIdle;
+          btn.title = 'Save to library';
+        }, 4000);
+      }
+    });
+  });
+}
 function viewPlayback() {
   setTitle('Settings'); setBack(null); setNavActive('playback'); S.view = 'playback';
   S.curSongs = [];
@@ -7691,6 +7894,248 @@ function _sleepFadeOut() {
       _updateSleepLight();
     }
   }, stepMs);
+}
+
+// ── RADIO RECORDING ───────────────────────────────────────────
+function _recordingVpaths() {
+  const meta = S.vpathMeta || {};
+  return S.vpaths.filter(v => meta[v]?.type === 'recordings');
+}
+
+function _updateRecordBtn() {
+  const btn     = document.getElementById('radio-rec-btn');
+  const elapsed = document.getElementById('radio-rec-elapsed');
+  if (!btn) return;
+  const s = S.queue[S.idx];
+  const isRadio = !!(s && s.isRadio);
+  const canRecord = S.allowRadioRecording && _recordingVpaths().length > 0;
+  const shouldShow = isRadio && canRecord;
+  btn.classList.toggle('hidden', !shouldShow);
+  if (elapsed) elapsed.classList.toggle('hidden', !shouldShow || !S.recordingActive);
+  if (shouldShow) {
+    btn.classList.toggle('recording', S.recordingActive);
+    btn.title = S.recordingActive ? 'Stop recording' : 'Record this stream';
+    const inner = btn.querySelector('.rec-icon circle:last-child');
+    if (inner) inner.setAttribute('r', S.recordingActive ? '5' : '8');
+  }
+}
+
+function _recElapsedStr(secs) {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  const pad = n => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+function _recurLabel(recurrence, recurDays) {
+  if (recurrence === 'daily')    return 'Daily';
+  if (recurrence === 'weekdays') return 'Weekdays';
+  if (recurrence === 'custom' && recurDays && recurDays.length) {
+    const names = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    return recurDays.map(d => names[d]).join(', ');
+  }
+  return recurrence;
+}
+
+function _recModalClose() {
+  document.getElementById('radio-rec-modal').classList.add('hidden');
+}
+
+function _recModalSwitchTab(tab) {
+  document.querySelectorAll('.rec-tab').forEach(btn => {
+    btn.classList.toggle('rec-tab-active', btn.dataset.tab === tab);
+  });
+  document.getElementById('rec-panel-now').classList.toggle('rec-panel-hidden', tab !== 'now');
+  document.getElementById('rec-panel-schedule').classList.toggle('rec-panel-hidden', tab !== 'schedule');
+}
+
+async function _loadScheduleList() {
+  const wrap = document.getElementById('rec-sched-list-wrap');
+  const list = document.getElementById('rec-sched-list');
+  try {
+    const schedules = await api('GET', 'api/v1/radio/schedules');
+    if (!schedules.length) { wrap.style.display = 'none'; return; }
+    wrap.style.display = '';
+    list.innerHTML = schedules.map(sc => {
+      const when = sc.recurrence === 'once'
+        ? `${sc.startDate || ''} ${sc.startTime}`
+        : `${_recurLabel(sc.recurrence, sc.recurDays)} @ ${sc.startTime}`;
+      const activeDot = sc.active ? `<span class="rec-sched-active-dot">&#9679;</span> ` : '';
+      return `<div class="rec-sched-item">
+        <div class="rec-sched-item-info">
+          <span class="rec-sched-station">${activeDot}${esc(sc.stationName)}</span>
+          <span class="rec-sched-when">${esc(when)} &bull; ${sc.durationMinutes} min &bull; ${esc(sc.vpath)}</span>
+        </div>
+        <div class="rec-sched-item-actions">
+          <button class="btn-xs${sc.enabled ? ' btn-xs-on' : ''}" onclick="_recToggleSchedule('${esc(sc.id)}',${sc.enabled})">${sc.enabled ? 'On' : 'Off'}</button>
+          <button class="btn-xs btn-xs-del" onclick="_recDeleteSchedule('${esc(sc.id)}')">&#x2715;</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (_) {
+    wrap.style.display = 'none';
+  }
+}
+
+function _recToggleSchedule(id, currentlyEnabled) {
+  api('PATCH', `api/v1/radio/schedules/${id}/enable`, { enabled: !currentlyEnabled })
+    .then(() => _loadScheduleList()).catch(() => {});
+}
+
+function _recDeleteSchedule(id) {
+  api('DELETE', `api/v1/radio/schedules/${id}`)
+    .then(() => _loadScheduleList()).catch(() => {});
+}
+
+async function _saveSchedule(station, streamUrl) {
+  const dtVal = document.getElementById('rec-sched-dt').value;
+  if (!dtVal) { _showInfoStrip('', '<span style="color:var(--err)">Please set a start date and time</span>', 4000, true); return; }
+
+  const [datePart, timePart] = dtVal.split('T');
+  const startTime = (timePart || '').slice(0, 5);
+  const recur     = document.getElementById('rec-sched-recur').value;
+  let recurDays   = null;
+  if (recur === 'custom') {
+    recurDays = [...document.querySelectorAll('#rec-sched-days-wrap input[type=checkbox]:checked')]
+      .map(cb => parseInt(cb.value, 10));
+    if (!recurDays.length) { _showInfoStrip('', '<span style="color:var(--err)">Select at least one day</span>', 4000, true); return; }
+  }
+
+  const vpath = document.getElementById('rec-sched-vpath').value;
+  const dur   = parseInt(document.getElementById('rec-sched-dur').value, 10) || 60;
+  const rawDesc = (document.getElementById('rec-sched-desc').value || '').trim();
+  const description = rawDesc.replace(/\s+/g, '_').replace(/[^\w-]/g, '').slice(0, 80) || null;
+
+  try {
+    await api('POST', 'api/v1/radio/schedules', {
+      stationName:     station.title || station.artist || 'Radio',
+      streamUrl,
+      artFile:         station['album-art'] || null,
+      vpath,
+      startTime,
+      startDate:       recur === 'once' ? datePart : null,
+      durationMinutes: dur,
+      recurrence:      recur,
+      recurDays,
+      description,
+    });
+    _showInfoStrip('', '<span>Recording scheduled &#10003;</span>', 3000, true);
+    _loadScheduleList();
+  } catch (e) {
+    _showInfoStrip('', `<span style="color:var(--err)">Schedule failed: ${esc(e.message || '')}</span>`, 5000, true);
+  }
+}
+
+function _initRecordingModal() {
+  // Tab switching
+  document.querySelectorAll('.rec-tab').forEach(btn => {
+    btn.addEventListener('click', () => _recModalSwitchTab(btn.dataset.tab));
+  });
+
+  // Close / cancel buttons
+  document.getElementById('radio-rec-modal-close').addEventListener('click', _recModalClose);
+  document.getElementById('radio-rec-cancel').addEventListener('click', _recModalClose);
+  document.getElementById('rec-sched-cancel').addEventListener('click', _recModalClose);
+
+  // Start recording now
+  document.getElementById('radio-rec-start').addEventListener('click', async () => {
+    _recModalClose();
+    const s = S.queue[S.idx];
+    if (!s || !s.isRadio) return;
+    const streamUrl = (s._radioLinks && s._radioLinks[s._radioLinkIdx || 0]) || s.filepath;
+    const vpath = document.getElementById('radio-rec-vpath').value;
+    if (!vpath) return;
+    const rawDesc = (document.getElementById('radio-rec-desc').value || '').trim();
+    const description = rawDesc.replace(/\s+/g, '_').replace(/[^\w-]/g, '').slice(0, 80) || null;
+    try {
+      const d = await api('POST', 'api/v1/radio/record/start', {
+        url: streamUrl, vpath,
+        stationName: s.title || s.artist || 'Radio',
+        artFile: s['album-art'] || null,
+        description,
+      });
+      S.recordingActive = true;
+      S.recordingId = d.id;
+      S.recordingElapsedSec = 0;
+      S._recordingTimer = setInterval(() => {
+        S.recordingElapsedSec++;
+        const elEl = document.getElementById('radio-rec-elapsed');
+        if (elEl) elEl.textContent = _recElapsedStr(S.recordingElapsedSec);
+      }, 1000);
+      _updateRecordBtn();
+      _showInfoStrip('', `<span style="color:var(--err)">&#9679; Recording started &rarr; <em>${esc(d.filename || vpath)}</em></span>`, 5000, true);
+    } catch (e) {
+      _showInfoStrip('', `<span style="color:var(--err)">Recording failed: ${esc(e.message || '')}</span>`, 6000, true);
+    }
+  });
+
+  // Save schedule
+  document.getElementById('rec-sched-save').addEventListener('click', () => {
+    const s = S.queue[S.idx];
+    if (!s || !s.isRadio) return;
+    const streamUrl = (s._radioLinks && s._radioLinks[s._radioLinkIdx || 0]) || s.filepath;
+    _saveSchedule(s, streamUrl);
+  });
+
+  // Show/hide day checkboxes when recurrence changes
+  document.getElementById('rec-sched-recur').addEventListener('change', e => {
+    document.getElementById('rec-sched-days-wrap').classList.toggle('rec-panel-hidden', e.target.value !== 'custom');
+  });
+}
+
+async function _startRecording() {
+  const s = S.queue[S.idx];
+  if (!s || !s.isRadio) return;
+  // Get the raw stream URL (first link configured for this station)
+  const streamUrl = (s._radioLinks && s._radioLinks[s._radioLinkIdx || 0]) || s.filepath || null;
+  if (!streamUrl || !/^https?:\/\//i.test(streamUrl)) {
+    _showInfoStrip('', '<span style="color:var(--err)">No stream URL for this station</span>', 4000, true); return;
+  }
+
+  const vpaths = _recordingVpaths();
+  if (vpaths.length === 0) { _showInfoStrip('', '<span style="color:var(--err)">No Recordings folder configured</span>', 4000, true); return; }
+
+  // Populate both folder dropdowns
+  const vpathOpts = vpaths.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  document.getElementById('radio-rec-vpath').innerHTML = vpathOpts;
+  document.getElementById('rec-sched-vpath').innerHTML = vpathOpts;
+
+  // Pre-fill datetime: current local time rounded up to nearest 5 min
+  const dt = new Date();
+  dt.setMinutes(Math.ceil(dt.getMinutes() / 5) * 5, 0, 0);
+  const pad2 = n => String(n).padStart(2, '0');
+  document.getElementById('rec-sched-dt').value =
+    `${dt.getFullYear()}-${pad2(dt.getMonth()+1)}-${pad2(dt.getDate())}T${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`;
+
+  // Clear description fields on every open
+  document.getElementById('radio-rec-desc').value = '';
+  document.getElementById('rec-sched-desc').value = '';
+
+  // Show modal, activate "Record Now" tab
+  _recModalSwitchTab('now');
+  document.getElementById('radio-rec-modal').classList.remove('hidden');
+
+  // Load schedule list in background
+  _loadScheduleList();
+}
+
+async function _stopRecording() {
+  if (!S.recordingId) return;
+  clearInterval(S._recordingTimer);
+  S._recordingTimer = null;
+  try {
+    const d = await api('POST', 'api/v1/radio/record/stop', { id: S.recordingId });
+    const dur = d.durationMs ? _recElapsedStr(Math.round(d.durationMs / 1000)) : '';
+    const kb  = d.bytesWritten ? ` (${(d.bytesWritten / 1024).toFixed(0)} KB)` : '';
+    _showInfoStrip('', `<span>Recording saved — ${dur}${kb}</span>`, 6000, true);
+  } catch (_) {}
+  S.recordingActive = false;
+  S.recordingId = null;
+  S.recordingElapsedSec = 0;
+  const elEl = document.getElementById('radio-rec-elapsed');
+  if (elEl) { elEl.textContent = ''; elEl.classList.add('hidden'); }
+  _updateRecordBtn();
 }
 
 // ── REPLAYGAIN ────────────────────────────────────────────────
@@ -8492,14 +8937,29 @@ function _doXfadeHandoff(nextIdx) {
   loadCuePoints(s.filepath);
   clearTimeout(scrobbleTimer);
   (function(){ const el = document.getElementById('np-scrobble-status'); if (el) { el.textContent = ''; el.className = 'np-scrobble-status'; } })();
-  if (S.lastfmEnabled) {
+  if ((S.lastfmEnabled || (S.listenbrainzEnabled && S.listenbrainzLinked)) && !s.isRadio && !s.isPodcast) {
+    if (S.listenbrainzEnabled && S.listenbrainzLinked) {
+      api('POST', 'api/v1/listenbrainz/playing-now', { filePath: s.filepath }).catch(() => {});
+    }
     scrobbleTimer = setTimeout(async () => {
       const scrobbleEl = document.getElementById('np-scrobble-status');
-      try {
-        await api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath });
-        if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: Scrobbled ✓'; scrobbleEl.className = 'np-scrobble-status np-scrobble-ok'; }
-      } catch (e) {
-        if (scrobbleEl) { scrobbleEl.textContent = 'Last.fm: ' + (e?.message || 'scrobble failed'); scrobbleEl.className = 'np-scrobble-status np-scrobble-err'; }
+      const msgs = [];
+      if (S.lastfmEnabled) {
+        try {
+          await api('POST', 'api/v1/lastfm/scrobble-by-filepath', { filePath: s.filepath });
+          msgs.push('Last.fm ✓');
+        } catch (e) { msgs.push('Last.fm: ' + (e?.message || 'failed')); }
+      }
+      if (S.listenbrainzEnabled && S.listenbrainzLinked) {
+        try {
+          await api('POST', 'api/v1/listenbrainz/scrobble-by-filepath', { filePath: s.filepath });
+          msgs.push('ListenBrainz ✓');
+        } catch (e) { msgs.push('ListenBrainz: ' + (e?.message || 'failed')); }
+      }
+      if (scrobbleEl && msgs.length) {
+        const ok = msgs.every(m => m.endsWith('✓'));
+        scrobbleEl.textContent = msgs.join(' · ');
+        scrobbleEl.className = 'np-scrobble-status ' + (ok ? 'np-scrobble-ok' : 'np-scrobble-err');
       }
     }, 30000);
   }
@@ -8758,6 +9218,7 @@ async function tryLogin(username, password) {
     try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
   } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
   try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
+  try { const lb = await api('GET', 'api/v1/listenbrainz/status'); S.listenbrainzEnabled = lb?.serverEnabled === true; S.listenbrainzLinked = lb?.linked === true; } catch(_) { S.listenbrainzEnabled = false; S.listenbrainzLinked = false; }
   try { const rd = await api('GET', 'api/v1/radio/enabled'); S.radioEnabled = rd?.enabled === true; } catch(_) { S.radioEnabled = false; }
   S.feedsEnabled = true; // Podcasts always available — user needs the section to add their first feed
   await _loadServerSettings();
@@ -8785,6 +9246,7 @@ async function checkSession() {
         try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
       } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
       try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
+      try { const lb = await api('GET', 'api/v1/listenbrainz/status'); S.listenbrainzEnabled = lb?.serverEnabled === true; S.listenbrainzLinked = lb?.linked === true; } catch(_) { S.listenbrainzEnabled = false; S.listenbrainzLinked = false; }
       try { const rd = await api('GET', 'api/v1/radio/enabled'); S.radioEnabled = rd?.enabled === true; } catch(_) { S.radioEnabled = false; }
       S.feedsEnabled = true; // Podcasts always available — user needs the section to add their first feed
       await _loadServerSettings();
@@ -8835,6 +9297,7 @@ async function checkSession() {
         try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
       } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
       try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
+      try { const lb = await api('GET', 'api/v1/listenbrainz/status'); S.listenbrainzEnabled = lb?.serverEnabled === true; S.listenbrainzLinked = lb?.linked === true; } catch(_) { S.listenbrainzEnabled = false; S.listenbrainzLinked = false; }
       try { const rd = await api('GET', 'api/v1/radio/enabled'); S.radioEnabled = rd?.enabled === true; } catch(_) { S.radioEnabled = false; }
       S.feedsEnabled = true; // Podcasts are always available — user needs section to add first feed
       return true;
@@ -8861,6 +9324,7 @@ function showApp() {
     if (S.discogsEnabled) document.getElementById('discogs-nav-btn').classList.remove('hidden');
   }
   if (S.lastfmEnabled) document.getElementById('lastfm-nav-btn').classList.remove('hidden');
+  if (S.listenbrainzEnabled) document.getElementById('listenbrainz-nav-btn')?.classList.remove('hidden');
   if (S.radioEnabled) {
     document.getElementById('radio-nav-btn').classList.remove('hidden');
   }
@@ -8935,6 +9399,17 @@ function showApp() {
         else lastfmBtn.classList.add('hidden');
       }
     } catch (_) {}
+    // All-user flag: ListenBrainz server enabled/status
+    try {
+      const lb = await api('GET', 'api/v1/listenbrainz/status');
+      S.listenbrainzEnabled = lb?.serverEnabled === true;
+      S.listenbrainzLinked  = lb?.linked === true;
+      const lbBtn = document.getElementById('listenbrainz-nav-btn');
+      if (lbBtn) {
+        if (S.listenbrainzEnabled) lbBtn.classList.remove('hidden');
+        else lbBtn.classList.add('hidden');
+      }
+    } catch (_) {}
     // All-user flag: Radio enabled/disabled
     try {
       const rd = await api('GET', 'api/v1/radio/enabled');
@@ -8967,14 +9442,18 @@ function showApp() {
         S.djVpaths = S.djVpaths.filter(v => musicOnly.includes(v));
         if (S.djVpaths.length === 0) S.djVpaths = [...musicOnly];
       }
-      // Show podcasts section if this user has any audio-books vpaths
-      const abVpaths = S.vpaths.filter(v => S.vpathMeta[v]?.type === 'audio-books');
-      S.audiobooksEnabled = abVpaths.length > 0;
+      // Show podcasts section if this user has any audio-books or recordings vpaths
+      const abVpaths  = S.vpaths.filter(v => S.vpathMeta[v]?.type === 'audio-books');
+      const recVpaths = S.vpaths.filter(v => S.vpathMeta[v]?.type === 'recordings');
+      S.audiobooksEnabled = abVpaths.length > 0 || recVpaths.length > 0;
       _updateListenSection();
     }
     // Upload capability
     S.canUpload = !d.noUpload;
     if (d.supportedAudioFiles) S.supportedAudioFiles = d.supportedAudioFiles;
+    // Per-user permission to record radio streams
+    S.allowRadioRecording = d.allowRadioRecording === true;
+    _updateRecordBtn();
   }).catch(() => { S.transInfo = { serverEnabled: false }; });
 
   // Register Media Session action handlers (OS lock-screen controls)
@@ -9013,6 +9492,7 @@ document.getElementById('login-form').addEventListener('submit', async e => {
 document.querySelectorAll('.nav-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const v = btn.dataset.view;
+    if (v !== 'podcasts') S.audioContentReturn = null; // clear Audio Content context on any other nav
     if (v === 'recent')      viewRecent();
     else if (v === 'artists') viewArtists();
     else if (v === 'albums')  viewAllAlbums();
@@ -9031,6 +9511,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'playback')  viewPlayback();
     else if (v === 'play-history') viewPlayHistory();
     else if (v === 'lastfm')       viewLastFM();
+    else if (v === 'listenbrainz') viewListenBrainz();
     else if (v === 'discogs')      viewDiscogs();
     else if (v === 'subsonic')     viewSubsonic();
     else if (v === 'radio')        viewRadio();
@@ -9087,6 +9568,84 @@ document.getElementById('repeat-btn').addEventListener('click', () => {
 
 // Queue toggle (player bar button)
 document.getElementById('queue-btn').addEventListener('click', toggleQueue);
+// Sidebar clock
+(function _initClock() {
+  const el = document.getElementById('sidebar-clock');
+  if (!el) return;
+  function _tick() {
+    const now = new Date();
+    const hh  = String(now.getHours()).padStart(2, '0');
+    const mm  = String(now.getMinutes()).padStart(2, '0');
+    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const day = days[now.getDay()];
+    const date = String(now.getDate()).padStart(2, '0');
+    const month = months[now.getMonth()];
+    el.innerHTML = `<div class="sc-time">${hh}:${mm}</div><div class="sc-date">${day} ${date} ${month}</div>`;
+    // schedule next tick at the start of the next minute
+    const msToNext = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+    setTimeout(_tick, msToNext);
+  }
+  _tick();
+})();
+
+// Live clock in recording modal — updates every second while page is open
+(function _initRecModalClock() {
+  const el = document.getElementById('rec-modal-clock');
+  if (!el) return;
+  function _fmt(d) {
+    const p = n => String(n).padStart(2, '0');
+    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${days[d.getDay()]} ${p(d.getDate())} ${months[d.getMonth()]} ${d.getFullYear()}  ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+  setInterval(() => { el.textContent = _fmt(new Date()); }, 1000);
+  el.textContent = _fmt(new Date());
+})();
+
+// Scheduled recording indicator — polls every 15s, shows pill in player bar
+(function _initSchedRecPoll() {
+  const el = document.getElementById('sched-rec-indicator');
+  if (!el) return;
+
+  el.addEventListener('click', () => {
+    // Open record modal on Schedule tab
+    const s = S.queue[S.idx];
+    if (s && s.isRadio) { _startRecording(); _recModalSwitchTab('schedule'); }
+    else { _recModalSwitchTab('schedule'); document.getElementById('radio-rec-modal').classList.remove('hidden'); }
+  });
+
+  async function _pollSched() {
+    if (!S.allowRadioRecording) { el.classList.add('hidden'); return; }
+    try {
+      const list = await api('GET', 'api/v1/radio/schedules/active');
+      if (!list || !list.length) { el.classList.add('hidden'); return; }
+      // Show first active scheduled recording (most common case is one)
+      const rec = list[0];
+      const elapsedSec = Math.floor((Date.now() - rec.startedAt) / 1000);
+      const h = Math.floor(elapsedSec / 3600);
+      const m = Math.floor((elapsedSec % 3600) / 60);
+      const s = elapsedSec % 60;
+      const pad = n => String(n).padStart(2, '0');
+      const elapsed = h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+      const extra = list.length > 1 ? ` +${list.length - 1}` : '';
+      el.innerHTML = `<span class="sri-dot"></span><span class="sri-label">${esc(rec.stationName)} ${elapsed}${extra}</span>`;
+      el.classList.remove('hidden');
+    } catch (_) {
+      el.classList.add('hidden');
+    }
+  }
+
+  // First poll after 5s (let the page settle), then every 15s
+  setTimeout(() => { _pollSched(); setInterval(_pollSched, 15000); }, 5000);
+})();
+
+// Radio record button
+document.getElementById('radio-rec-btn').addEventListener('click', () => {
+  if (S.recordingActive) { _stopRecording(); }
+  else { _startRecording(); }
+});
+_initRecordingModal();
 // Collapse button inside queue panel
 document.getElementById('qp-reopen-tab').addEventListener('click', toggleQueue);
 document.getElementById('qp-close-btn').addEventListener('click', () => {
@@ -10285,7 +10844,8 @@ function applyBarPos(top) {
 function _updateListenSection() {
   const section = document.getElementById('podcasts-section');
   if (!section) return;
-  const show = S.radioEnabled || S.feedsEnabled || S.audiobooksEnabled;
+  const recVpaths = S.vpathMeta ? S.vpaths.filter(v => S.vpathMeta[v]?.type === 'recordings') : [];
+  const show = S.radioEnabled || S.feedsEnabled || S.audiobooksEnabled || recVpaths.length > 0;
   section.classList.toggle('hidden', !show);
 }
 

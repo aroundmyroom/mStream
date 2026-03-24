@@ -24,7 +24,8 @@ const scanOptions = Joi.object({
   bootScanDelay: Joi.number().default(3),
   maxConcurrentTasks: Joi.number().integer().min(1).default(1),
   compressImage: Joi.boolean().default(true),
-  scanErrorRetentionHours: Joi.number().integer().valid(12, 24, 48, 72, 168, 336, 720).default(48)
+  scanErrorRetentionHours: Joi.number().integer().valid(12, 24, 48, 72, 168, 336, 720).default(48),
+  maxRecordingMinutes: Joi.number().integer().min(1).default(180)
 });
 
 const dbOptions = Joi.object({
@@ -55,6 +56,10 @@ const lastFMOptions = Joi.object({
   apiSecret: Joi.string().default('ffa27b8912cd04050e1fa14e9ced58a4')
 });
 
+const listenBrainzOptions = Joi.object({
+  enabled: Joi.boolean().default(false),
+});
+
 const discogsOptions = Joi.object({
   enabled:        Joi.boolean().default(false),
   allowArtUpdate: Joi.boolean().default(false),
@@ -80,6 +85,7 @@ const schema = Joi.object({
     "opus": true, "m3u": false
   }),
   lastFM: lastFMOptions.default(lastFMOptions.validate({}).value),
+  listenBrainz: listenBrainzOptions.default(listenBrainzOptions.validate({}).value),
   discogs: discogsOptions.default(discogsOptions.validate({}).value),
   scanOptions: scanOptions.default(scanOptions.validate({}).value),
   noUpload: Joi.boolean().default(false),
@@ -96,7 +102,7 @@ const schema = Joi.object({
     Joi.string(),
     Joi.object({
       root: Joi.string().required(),
-      type: Joi.string().valid('music', 'audio-books').default('music'),
+      type: Joi.string().valid('music', 'audio-books', 'recordings').default('music'),
     })
   ).default({}),
   users: Joi.object().pattern(
@@ -109,6 +115,8 @@ const schema = Joi.object({
       'lastfm-user': Joi.string().optional(),
       'lastfm-password': Joi.string().optional(),
       'lastfm-session': Joi.string().optional(),
+      'listenbrainz-token': Joi.string().allow('').optional(),
+      'allow-radio-recording': Joi.boolean().optional(),
     })
   ).default({}),
   ssl: Joi.object({

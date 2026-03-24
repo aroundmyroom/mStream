@@ -51,6 +51,8 @@ export function setup(mstream) {
       };
     });
 
+    returnThis.allowRadioRecording = req.user['allow-radio-recording'] === true;
+
     res.json(returnThis);
   });
 

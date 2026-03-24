@@ -1,6 +1,8 @@
 import { XMLParser } from 'fast-xml-parser';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { existsSync, unlink } from 'node:fs';
+import { existsSync, unlink, createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import Joi from 'joi';
@@ -353,5 +355,117 @@ export function setup(mstream) {
 
     db.saveEpisodeProgress(value.episodeId, value.feedId, value.position, value.played ?? false);
     res.json({});
+  });
+
+  // POST /api/v1/podcast/episode/save — download episode audio to the server's AudioBooks folder
+  mstream.post('/api/v1/podcast/episode/save', async (req, res) => {
+    const schema = Joi.object({
+      feedId:    Joi.number().integer().required(),
+      episodeId: Joi.number().integer().required(),
+    });
+    const { error, value } = schema.validate(req.body);
+    if (error) return res.status(400).json({ error: error.message });
+
+    // Verify feed belongs to this user
+    const feed = db.getPodcastFeed(value.feedId, req.user.username);
+    if (!feed) return res.status(404).json({ error: 'Feed not found' });
+
+    // Get episode and verify it belongs to the feed
+    const ep = db.getPodcastEpisode(value.episodeId);
+    if (!ep || ep.feed_id !== value.feedId) return res.status(404).json({ error: 'Episode not found' });
+
+    // SSRF-check the episode audio URL
+    let audioUrl;
+    try {
+      audioUrl = new URL(ep.audio_url);
+      if (audioUrl.protocol !== 'http:' && audioUrl.protocol !== 'https:')
+        return res.status(400).json({ error: 'Episode audio URL must be http or https' });
+      if (_ssrfCheck(audioUrl.hostname))
+        return res.status(400).json({ error: 'Episode audio URL is not allowed' });
+    } catch { return res.status(400).json({ error: 'Invalid episode audio URL' }); }
+
+    // Find first audio-books vpath the user can access
+    const userVpaths = config.program.users[req.user.username]?.vpaths || [];
+    let targetRoot = null;
+    let targetVpathName = null;
+    for (const vpath of userVpaths) {
+      const folder = config.program.folders[vpath];
+      if (folder && folder.type === 'audio-books') {
+        targetRoot = folder.root;
+        targetVpathName = vpath;
+        break;
+      }
+    }
+    if (!targetRoot) return res.status(400).json({ error: 'No AudioBooks/Podcasts folder is configured for your account' });
+
+    // Sanitize names for safe filesystem use (strip path-special and control chars)
+    const _sanitize = (s, max) =>
+      (s || '')
+        .replace(/[/\\:*?"<>|]/g, '')
+        .replace(/\.{2,}/g, '.')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, max) || 'unnamed';
+
+    const safeFeedTitle = _sanitize(feed.title, 80);
+    const safeEpTitle   = _sanitize(ep.title || 'episode', 100);
+    const dateStr       = ep.pub_date ? new Date(ep.pub_date * 1000).toISOString().slice(0, 10) : '';
+
+    // Determine extension from URL path; content-type will refine it below
+    const urlExt = audioUrl.pathname.match(/\.(mp3|m4a|ogg|flac|opus|aac|wav)$/i)?.[1]?.toLowerCase();
+    let ext = urlExt || 'mp3';
+
+    // Build paths
+    const folderPath = path.join(targetRoot, safeFeedTitle);
+    const baseName   = dateStr ? `${dateStr} ${safeEpTitle}` : safeEpTitle;
+
+    // Ensure target folder exists
+    try {
+      await mkdir(folderPath, { recursive: true });
+    } catch (e) {
+      return res.status(500).json({ error: 'Could not create folder: ' + (e?.message || 'unknown error') });
+    }
+
+    // Fetch the episode audio
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 120000);
+    let dlRes;
+    try {
+      dlRes = await fetch(ep.audio_url, {
+        signal: ac.signal,
+        redirect: 'follow',
+        headers: { 'User-Agent': 'mStream/5 PodcastClient' },
+      });
+      clearTimeout(timer);
+    } catch (e) {
+      clearTimeout(timer);
+      return res.status(502).json({ error: 'Failed to fetch episode: ' + (e?.message || 'network error') });
+    }
+    if (!dlRes.ok) return res.status(502).json({ error: `Episode server returned HTTP ${dlRes.status}` });
+
+    // Refine extension from content-type if we didn't get one from the URL
+    if (!urlExt) {
+      const ctExtMap = {
+        'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a',
+        'audio/ogg': 'ogg', 'audio/flac': 'flac', 'audio/opus': 'opus',
+        'audio/aac': 'aac', 'audio/wav': 'wav', 'audio/x-wav': 'wav',
+      };
+      const ct = (dlRes.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (ctExtMap[ct]) ext = ctExtMap[ct];
+    }
+
+    const filename = `${baseName}.${ext}`;
+    const filePath = path.join(folderPath, filename);
+
+    // Stream response body to disk
+    const fileStream = createWriteStream(filePath);
+    try {
+      await pipeline(Readable.fromWeb(dlRes.body), fileStream);
+    } catch (e) {
+      try { unlink(filePath, () => {}); } catch (_) {}
+      return res.status(500).json({ error: 'Failed to save file: ' + (e?.message || 'write error') });
+    }
+
+    res.json({ savedTo: path.join(targetVpathName, safeFeedTitle, filename) });
   });
 }

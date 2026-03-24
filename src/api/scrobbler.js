@@ -1,7 +1,9 @@
 import fs from 'fs/promises';
 import crypto from 'crypto';
+import https from 'https';
 import Joi from 'joi';
 import axios from 'axios';
+import winston from 'winston';
 import * as config from '../state/config.js';
 import Scribble from '../state/lastfm.js';
 import * as db from '../db/manager.js';
@@ -237,4 +239,209 @@ export function reset() {
 // Allow admin.js to update the runtime API keys without restarting
 export function updateApiKeys(apiKey, apiSecret) {
   Scrobbler.setKeys(apiKey, apiSecret);
+}
+
+// ── ListenBrainz ─────────────────────────────────────────────────────────────
+
+// In no-auth mode there are no persistent user objects, so we hold the token here.
+let _noAuthLbToken = null;
+
+/**
+ * Submit a listen to ListenBrainz.
+ * listen_type: 'single' (scrobble) or 'playing_now' (now-playing ping).
+ * https://listenbrainz.readthedocs.io/en/latest/users/api/index.html
+ */
+function lbSubmit(token, artist, track, release, listenedAt) {
+  const isNowPlaying = listenedAt === 'playing_now';
+  return new Promise((resolve, reject) => {
+    const trackMeta = {
+      artist_name: artist || '',
+      track_name:  track  || '',
+      ...(release ? { release_name: release } : {}),
+      additional_info: { submission_client: 'mStream', media_player: 'mStream' },
+    };
+    const listenEntry = isNowPlaying
+      ? { track_metadata: trackMeta }
+      : { listened_at: listenedAt || Math.floor(Date.now() / 1000), track_metadata: trackMeta };
+    const payload = JSON.stringify({
+      listen_type: isNowPlaying ? 'playing_now' : 'single',
+      payload: [listenEntry],
+    });
+    const req = https.request({
+      hostname: 'api.listenbrainz.org',
+      path: '/1/submit-listens',
+      method: 'POST',
+      headers: {
+        'Authorization': `Token ${token}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, res => {
+      let data = '';
+      res.on('data', c => { data += c; });
+      res.on('end', () => {
+        if (res.statusCode === 200) { resolve(true); }
+        else { reject(new Error(`ListenBrainz ${res.statusCode}: ${data.slice(0, 200)}`)); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(8000, () => { req.destroy(); reject(new Error('ListenBrainz timeout')); });
+    req.write(payload);
+    req.end();
+  });
+}
+
+export function setupListenBrainz(mstream) {
+  // ── Admin: enable/disable ───────────────────────────────────────────────────
+  mstream.get('/api/v1/admin/listenbrainz/config', (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    res.json({ enabled: config.program.listenBrainz?.enabled === true });
+  });
+
+  mstream.post('/api/v1/admin/listenbrainz/config', async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const schema = Joi.object({ enabled: Joi.boolean().required() });
+    joiValidate(schema, req.body);
+    const loadConfig = JSON.parse(await fs.readFile(config.configFile, 'utf-8'));
+    if (!loadConfig.listenBrainz) loadConfig.listenBrainz = {};
+    loadConfig.listenBrainz.enabled = req.body.enabled;
+    await fs.writeFile(config.configFile, JSON.stringify(loadConfig, null, 2), 'utf8');
+    config.program.listenBrainz.enabled = req.body.enabled;
+    res.json({});
+  });
+
+  // ── Per-user: status / connect / disconnect ─────────────────────────────────
+  mstream.get('/api/v1/listenbrainz/status', (req, res) => {
+    const isNoAuth = req.user.username === 'mstream-user';
+    const linked   = isNoAuth ? !!_noAuthLbToken : !!req.user['listenbrainz-token'];
+    res.json({
+      serverEnabled: config.program.listenBrainz?.enabled === true,
+      linked,
+    });
+  });
+
+  mstream.post('/api/v1/listenbrainz/connect', async (req, res) => {
+    const schema = Joi.object({ lbToken: Joi.string().required() });
+    joiValidate(schema, req.body);
+    const token = req.body.lbToken.trim();
+
+    // Validate the token by calling the LB validate-token endpoint
+    const vtRes = await new Promise((resolve) => {
+      https.get({
+        hostname: 'api.listenbrainz.org',
+        path: `/1/validate-token`,
+        headers: { 'Authorization': `Token ${token}` },
+      }, r => {
+        let d = ''; r.on('data', c => { d += c; }); r.on('end', () => resolve({ status: r.statusCode, body: d }));
+      }).on('error', () => resolve({ status: 0, body: '' }));
+    });
+    let vtJson;
+    try { vtJson = JSON.parse(vtRes.body); } catch(_) { vtJson = {}; }
+    if (vtRes.status !== 200 || !vtJson.valid) {
+      throw new WebError('Invalid ListenBrainz token — check and try again', 401);
+    }
+
+    // Persist token — no-auth uses in-memory only; real users go to config file
+    const username = req.user.username;
+    if (username === 'mstream-user') {
+      _noAuthLbToken = token;
+    } else {
+      const loadConfig = JSON.parse(await fs.readFile(config.configFile, 'utf-8'));
+      if (!loadConfig.users) loadConfig.users = {};
+      if (!loadConfig.users[username]) loadConfig.users[username] = {};
+      loadConfig.users[username]['listenbrainz-token'] = token;
+      await fs.writeFile(config.configFile, JSON.stringify(loadConfig, null, 2), 'utf8');
+      config.program.users[username]['listenbrainz-token'] = token;
+    }
+    res.json({ linked: true, lbUsername: vtJson.user_name || null });
+  });
+
+  mstream.post('/api/v1/listenbrainz/disconnect', async (req, res) => {
+    const username = req.user.username;
+    if (username === 'mstream-user') {
+      _noAuthLbToken = null;
+    } else {
+      const loadConfig = JSON.parse(await fs.readFile(config.configFile, 'utf-8'));
+      if (loadConfig.users?.[username]) {
+        delete loadConfig.users[username]['listenbrainz-token'];
+        await fs.writeFile(config.configFile, JSON.stringify(loadConfig, null, 2), 'utf8');
+      }
+      if (config.program.users[username]) delete config.program.users[username]['listenbrainz-token'];
+    }
+    res.json({});
+  });
+
+  // ── Now-playing ping (appears instantly on ListenBrainz) ───────────────────
+  mstream.post('/api/v1/listenbrainz/playing-now', async (req, res) => {
+    const schema = Joi.object({ filePath: Joi.string().required() });
+    joiValidate(schema, req.body);
+
+    const username = req.user.username;
+    const token = username === 'mstream-user'
+      ? _noAuthLbToken
+      : req.user['listenbrainz-token'];
+    if (!token) return res.json({ sent: false });
+
+    const pathInfo = getVPathInfo(req.body.filePath, req.user);
+    let dbFileInfo = db.findFileByPath(pathInfo.relativePath, pathInfo.vpath);
+    if (!dbFileInfo) {
+      const folders = config.program?.folders || {};
+      const myRoot  = folders[pathInfo.vpath]?.root.replace(/\/?$/, '/');
+      if (myRoot) {
+        for (const [parentKey, parentFolder] of Object.entries(folders)) {
+          if (parentKey === pathInfo.vpath) continue;
+          if (!req.user.vpaths.includes(parentKey)) continue;
+          const parentRoot = parentFolder.root.replace(/\/?$/, '/');
+          if (myRoot.startsWith(parentRoot) && myRoot !== parentRoot) {
+            const prefix = myRoot.slice(parentRoot.length);
+            dbFileInfo = db.findFileByPath(prefix + pathInfo.relativePath, parentKey);
+            if (dbFileInfo) break;
+          }
+        }
+      }
+    }
+    if (!dbFileInfo) return res.json({ sent: false });
+
+    res.json({ sent: true });
+    try {
+      await lbSubmit(token, dbFileInfo.artist, dbFileInfo.title, dbFileInfo.album, 'playing_now');
+    } catch (_e) { /* fire and forget */ }
+  });
+
+  // ── Scrobble ────────────────────────────────────────────────────────────────
+  mstream.post('/api/v1/listenbrainz/scrobble-by-filepath', async (req, res) => {
+    const schema = Joi.object({ filePath: Joi.string().required() });
+    joiValidate(schema, req.body);
+
+    const username = req.user.username;
+    const token = username === 'mstream-user'
+      ? _noAuthLbToken
+      : req.user['listenbrainz-token'];
+    if (!token) return res.json({ scrobble: false });
+
+    const pathInfo = getVPathInfo(req.body.filePath, req.user);
+    let dbFileInfo = db.findFileByPath(pathInfo.relativePath, pathInfo.vpath);
+    if (!dbFileInfo) {
+      const folders = config.program?.folders || {};
+      const myRoot  = folders[pathInfo.vpath]?.root.replace(/\/?$/, '/');
+      if (myRoot) {
+        for (const [parentKey, parentFolder] of Object.entries(folders)) {
+          if (parentKey === pathInfo.vpath) continue;
+          if (!req.user.vpaths.includes(parentKey)) continue;
+          const parentRoot = parentFolder.root.replace(/\/?$/, '/');
+          if (myRoot.startsWith(parentRoot) && myRoot !== parentRoot) {
+            const prefix = myRoot.slice(parentRoot.length);
+            dbFileInfo = db.findFileByPath(prefix + pathInfo.relativePath, parentKey);
+            if (dbFileInfo) break;
+          }
+        }
+      }
+    }
+    if (!dbFileInfo) return res.json({ scrobble: false });
+
+    res.json({});
+    try {
+      await lbSubmit(token, dbFileInfo.artist, dbFileInfo.title, dbFileInfo.album);
+    } catch (_e) { /* fire and forget */ }
+  });
 }
