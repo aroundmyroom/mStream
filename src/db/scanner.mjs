@@ -491,7 +491,7 @@ async function getAlbumArt(songInfo) {
     if (!fs.existsSync(path.join(loadJson.albumArtDirectory, songInfo.aaFile))) {
       // Save file sync
       fs.writeFileSync(path.join(loadJson.albumArtDirectory, songInfo.aaFile), songInfo.picture[0].data);
-      originalFileBuffer = songInfo.picture[0].data;
+      originalFileBuffer = Buffer.from(songInfo.picture[0].data);
     }
   } else {
     originalFileBuffer = await checkDirectoryForAlbumArt(songInfo);

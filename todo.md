@@ -4,7 +4,7 @@
 
 ## NOW — In Progress / Remaining
 
-### 🎙 Podcasts — ✅ DONE (2026-03-21)
+### 🎙 Podcasts — ✅ DONE (2026-03-21); Save to Library ✅ DONE (2026-06-17)
 
 > See [`docs/podcasts.md`](docs/podcasts.md) for full documentation.
 
@@ -18,9 +18,11 @@
 - [x] `podcast_feeds` + `podcast_episodes` tables (SQLite + Loki); unique `(feed_id, guid)` constraint
 - [x] `sort_order` via migration-safe `ALTER TABLE … ADD COLUMN`
 - [x] All DB functions: create, get, delete (cascade), upsert episodes, reorder, save progress, art usage count
+- [x] `getPodcastEpisode(id)` single-row lookup
 
 **Phase 2 — Backend (`src/api/podcasts.js`)** ✅
 - [x] 9 REST endpoints (preview, list, subscribe, reorder, rename, delete, refresh, episodes, progress)
+- [x] `POST /api/v1/podcast/episode/save` — stream episode audio to AudioBooks vpath folder; SSRF guard, sanitised naming, streaming pipeline, partial-file cleanup
 - [x] SSRF protection on all outbound fetches
 - [x] RSS parser handles BBC / NHK / Anchor feeds; dual-format `<itunes:duration>`; HTML stripping
 - [x] Cover art downloaded and cached as `podcast-{md5}.{ext}`; orphan-cleanup protected
@@ -33,6 +35,7 @@
 - [x] Rename / Refresh / Unsubscribe per card
 - [x] Episode list with Play button; `Player.playSingle()` with `isPodcast: true`
 - [x] External URL guards: waveform fetch + song rating silently skip `http(s)://` filepaths
+- [x] Save-to-library button per episode: spinner → green ✓ / red ✕ states; toast on result
 
 ---
 
@@ -60,9 +63,9 @@
 - [ ] **`getMusicDirectory`**: test with DSub, Ultrasonic, Jamstash — confirm folder hierarchy and parent-id navigation work in each client
 - [ ] **`search2` / `search3`**: test wildcard edge-cases and empty-query behaviour across clients
 - [ ] **`getAlbumList` / `getAlbumList2`**: audit `byYear`, `byGenre`, `newest`, `recent`, `random`, `alphabeticalByName/Artist`, `starred` — compare response shape with OpenSubsonic reference
-- [ ] **`getArtistInfo` / `getArtistInfo2`**: currently returns empty biography — wire up local cache or skip gracefully
-- [ ] **`getAlbumInfo` / `getAlbumInfo2`**: stub; add LastFM/Discogs info when available
-- [ ] **`getSimilarSongs` / `getSimilarSongs2`** and **`getTopSongs`**: currently empty — investigate Listenbrainz / last.fm fallback
+  - [x] **`getArtistInfo` / `getArtistInfo2`**: empty-stub added — returns `{ artistInfo: {} }` to silence client retries; no biography/image fetching
+  - [x] **`getAlbumInfo` / `getAlbumInfo2`**: empty-stub added — returns `{ albumInfo: {} }` to silence client retries
+  - [x] **`getSimilarSongs` / `getSimilarSongs2`** and **`getTopSongs`**: empty-stubs added — return `{ song: [] }`; proper implementation deferred to audio-analysis feature
 - [ ] **Bookmarks**: `getBookmarks` / `saveBookmark` / `deleteBookmark` — verify persistence and that multiple clients share bookmarks correctly
 - [ ] **Playlists**: `createPlaylist`, `updatePlaylist`, `deletePlaylist` — end-to-end test with Substreamer and Nautiline
 - [ ] **Scrobble**: currently a no-op; consider wiring to the same play-count path as the native player
@@ -141,6 +144,31 @@ Analyse every track's actual audio content (BPM, key, timbre, energy) and use th
 ---
 
 ## DONE — Completed features
+
+### Radio Stream Recording ✅
+- [x] `'recordings'` vpath folder type — excluded from all library scans
+- [x] Per-user `allow-radio-recording` permission; admin toggles per-user via `POST /api/v1/admin/users/allow-radio-recording`
+- [x] Admin UI: "Radio Recordings folder" checkbox in directory add form; `● Record` toggle button per user in Users table
+- [x] Playbar: SVG ring+circle record button visible only for radio + permission; pulsing animation while recording; elapsed time pill
+- [x] Folder-select modal on record click; auto-stop when switching to non-radio
+- [x] API: `GET /api/v1/radio/record/active`, `POST /api/v1/radio/record/start`, `POST /api/v1/radio/record/stop`
+- [x] SSRF protection; write permission probe before starting; Content-Type → extension mapping; safe filename generation
+- [x] Station logo embedded as cover art after recording stops (FFmpeg copy-only pass)
+- [x] Max recording duration cap in admin (default 180 min); auto-stops via `setTimeout`; new admin endpoint `POST /api/v1/admin/db/params/max-recording-minutes`
+- [x] Scheduled radio recording — `radio_schedules` DB table, `radio-scheduler.js` with 30s ticker, tabbed record modal (Record Now / Schedule), CRUD API (`GET/POST/DELETE/PATCH`), recurrence: once/daily/weekdays/custom days
+
+### Sleep timer ✅
+- [x] Countdown timer in Playback Settings — user sets duration in minutes
+- [x] Fade-out over the final seconds before stopping playback
+- [x] "End of current song" mode — stops after the current track finishes
+- [x] Timer state persists across reload (stored in `localStorage`)
+- [x] Cancel button visible while timer is active
+
+### In-browser ID3 tag editor ✅
+- [x] "Edit Tags" button in Now Playing modal (admin + `allowId3Edit` flag required)
+- [x] Editable fields: title, artist, album, track number, year, genre, disc number
+- [x] Writes tags directly to the media file via `PUT /api/v1/files/id3`
+- [x] File re-scanned automatically after save so library stays in sync
 
 ### Radio channels ✅
 - [x] Per-user station CRUD (`POST/PUT/DELETE /api/v1/radio/stations`)
@@ -505,7 +533,7 @@ This is a first-class concern and must be designed clearly up front.
 
 ### External Service Integrations
 - [ ] **Last.fm scrobbling** — POST to `track.scrobble` on song completion (>50% played); user API key in settings
-- [ ] **ListenBrainz scrobbling** — open-source alternative, no rate limits, good for privacy-conscious users
+- [x] **ListenBrainz scrobbling** — open-source alternative, no rate limits, good for privacy-conscious users
 - [ ] **Spotify audio features import** — fetch BPM, energy, danceability, valence per tagged track via Web API (OAuth); store locally — no ongoing dependency once fetched
 
 ---

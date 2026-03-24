@@ -21,7 +21,7 @@ export function saveFile(saveData, file) {
   return fs.writeFile(file, JSON.stringify(saveData, null, 2), 'utf8');
 }
 
-export async function addDirectory(directory, vpath, autoAccess, isAudioBooks, mstream) {
+export async function addDirectory(directory, vpath, autoAccess, isAudioBooks, mstream, isRecording = false) {
   // confirm directory is real
   const stat = await fs.stat(directory);
   if (!stat.isDirectory()) { throw new Error(`${directory} is not a directory`); }
@@ -34,6 +34,7 @@ export async function addDirectory(directory, vpath, autoAccess, isAudioBooks, m
   const memClone = JSON.parse(JSON.stringify(config.program.folders));
   memClone[vpath] = { root: directory };
   if (isAudioBooks) { memClone[vpath].type = 'audio-books'; }
+  if (isRecording) { memClone[vpath].type = 'recordings'; }
 
   // add directory to config file
   const loadConfig = await loadFile(config.configFile);
@@ -337,6 +338,24 @@ export async function editAllowId3Edit(val) {
   await saveFile(loadConfig, config.configFile);
 
   config.program.scanOptions.allowId3Edit = val;
+}
+
+export async function editMaxRecordingMinutes(val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
+  loadConfig.scanOptions.maxRecordingMinutes = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.scanOptions.maxRecordingMinutes = val;
+}
+
+export async function editAllowRadioRecording(username, val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.users || !loadConfig.users[username]) { throw new Error(`User '${username}' not found`); }
+  loadConfig.users[username]['allow-radio-recording'] = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.users[username]['allow-radio-recording'] = val;
 }
 
 export async function editScanErrorRetention(hours) {

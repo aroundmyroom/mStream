@@ -227,6 +227,13 @@ export function setup(mstream) {
     res.json({});
   });
 
+  mstream.post("/api/v1/admin/db/params/max-recording-minutes", async (req, res) => {
+    const schema = Joi.object({ maxRecordingMinutes: Joi.number().integer().min(1).required() });
+    joiValidate(schema, req.body);
+    await admin.editMaxRecordingMinutes(req.body.maxRecordingMinutes);
+    res.json({});
+  });
+
   mstream.get("/api/v1/admin/users", (req, res) => {
     // Scrub passwords and salts before sending to frontend
     const memClone = JSON.parse(JSON.stringify(config.program.users));
@@ -244,7 +251,8 @@ export function setup(mstream) {
       directory: Joi.string().required(),
       vpath: Joi.string().pattern(/[a-zA-Z0-9-]+/).required(),
       autoAccess: Joi.boolean().default(false),
-      isAudioBooks: Joi.boolean().default(false)
+      isAudioBooks: Joi.boolean().default(false),
+      isRecording: Joi.boolean().default(false)
     });
     const input = joiValidate(schema, req.body);
 
@@ -253,18 +261,23 @@ export function setup(mstream) {
       input.value.vpath,
       input.value.autoAccess,
       input.value.isAudioBooks,
-      mstream);
+      mstream,
+      input.value.isRecording);
     res.json({});
 
     try {
+      // Skip scan for recordings folders — they must not be indexed in the music library.
       // Only scan this vpath if it is NOT a child of another configured vpath.
       // Child folders (e.g. /media/music/Disco inside /media/music) are already
       // covered by their parent vpath scan — scanning them separately creates duplicates.
-      const isChild = Object.keys(config.program.folders).some(
-        other => other !== input.value.vpath && dbQueue.isChildOf(other, input.value.vpath)
-      );
-      if (!isChild) {
-        dbQueue.scanVPath(input.value.vpath);
+      const folderType = config.program.folders[input.value.vpath]?.type || 'music';
+      if (folderType !== 'recordings') {
+        const isChild = Object.keys(config.program.folders).some(
+          other => other !== input.value.vpath && dbQueue.isChildOf(other, input.value.vpath)
+        );
+        if (!isChild) {
+          dbQueue.scanVPath(input.value.vpath);
+        }
       }
     }catch (err) {
       winston.error('/api/v1/admin/directory failed to add ', { stack: err });
@@ -547,6 +560,17 @@ export function setup(mstream) {
     joiValidate(schema, req.body);
 
     await admin.editUserAccess(req.body.username, req.body.admin);
+    res.json({});
+  });
+
+  mstream.post("/api/v1/admin/users/allow-radio-recording", async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const schema = Joi.object({
+      username: Joi.string().required(),
+      allow: Joi.boolean().required()
+    });
+    joiValidate(schema, req.body);
+    await admin.editAllowRadioRecording(req.body.username, req.body.allow);
     res.json({});
   });
 

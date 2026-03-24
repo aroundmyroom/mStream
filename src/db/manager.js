@@ -136,6 +136,13 @@ export function getUserSettings(username) { return backend.getUserSettings(usern
 export function saveUserSettings(username, patch) { return backend.saveUserSettings(username, patch); }
 // Radio stations
 export function getRadioStations(username) { return backend.getRadioStations(username); }
+// Radio schedules
+export function getRadioSchedules(username) { return backend.getRadioSchedules(username); }
+export function createRadioSchedule(data) { return backend.createRadioSchedule(data); }
+export function deleteRadioSchedule(id, username) { return backend.deleteRadioSchedule(id, username); }
+export function toggleRadioSchedule(id, username, enabled) { return backend.toggleRadioSchedule(id, username, enabled); }
+export function toggleRadioScheduleById(id, enabled) { return backend.toggleRadioScheduleById(id, enabled); }
+export function getAllEnabledRadioSchedules() { return backend.getAllEnabledRadioSchedules(); }
 export function createRadioStation(username, data) { return backend.createRadioStation(username, data); }
 export function updateRadioStation(id, username, data) { return backend.updateRadioStation(id, username, data); }
 export function deleteRadioStation(id, username) { return backend.deleteRadioStation(id, username); }
@@ -153,6 +160,7 @@ export function updatePodcastFeedUrl(id, username, url) { return backend.updateP
 export function reorderPodcastFeeds(username, orderedIds) { return backend.reorderPodcastFeeds(username, orderedIds); }
 export function getPodcastFeedImgUsageCount(img) { return backend.getPodcastFeedImgUsageCount(img); }
 // Podcast episodes
+export function getPodcastEpisode(id) { return backend.getPodcastEpisode(id); }
 export function getPodcastEpisodes(feedId) { return backend.getPodcastEpisodes(feedId); }
 export function upsertPodcastEpisodes(feedId, episodes) { return backend.upsertPodcastEpisodes(feedId, episodes); }
 export function saveEpisodeProgress(episodeId, feedId, position, played) { return backend.saveEpisodeProgress(episodeId, feedId, position, played); }

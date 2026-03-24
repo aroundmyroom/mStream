@@ -160,3 +160,40 @@ Returns episodes sorted by `pub_date DESC` (newest first).
 | `played` | No | Boolean flag (default `false`) |
 
 **Response `200`:** `{}`
+
+---
+
+## Save episode audio to library
+
+Downloads the episode audio file from the podcast CDN and saves it to the server's AudioBooks/Podcasts folder. The file is streamed directly to disk — not buffered in RAM, safe for large files.
+
+* **URL:** `POST /api/v1/podcast/episode/save`
+
+**Body:**
+
+| Field | Required | Description |
+|---|---|---|
+| `feedId` | Yes | Feed `id` — verifies the feed belongs to the current user |
+| `episodeId` | Yes | Episode `id` — must belong to the given `feedId` |
+
+**Behaviour:**
+
+1. Looks up the first `audio-books` vpath the user has access to.
+2. Creates `<vpath root>/<feed title>/` if it does not exist.
+3. SSRF-checks the episode `audio_url` (must be `http`/`https`, not private range).
+4. Streams the remote audio to `<YYYY-MM-DD Episode Title>.ext` (extension from URL path or `Content-Type` header; defaults to `.mp3`).
+5. Deletes the partial file on any write error.
+
+**Response `200`:**
+```json
+{ "savedTo": "AudioBooks-Podcasts/Global News Podcast/2026-03-24 Episode Title.mp3" }
+```
+
+**Errors:**
+
+| Code | Reason |
+|---|---|
+| `400` | Validation error, no `audio-books` vpath configured for this user, invalid or SSRF-blocked audio URL |
+| `404` | Feed or episode not found / not owned by current user |
+| `502` | Remote CDN fetch failed |
+| `500` | Disk write error |

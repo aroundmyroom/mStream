@@ -153,6 +153,24 @@ export function init(dbDirectory) {
       id     INTEGER PRIMARY KEY DEFAULT 1,
       groups TEXT NOT NULL DEFAULT '[]'
     );
+
+    CREATE TABLE IF NOT EXISTS radio_schedules (
+      id           TEXT PRIMARY KEY,
+      username     TEXT NOT NULL,
+      station_name TEXT NOT NULL,
+      stream_url   TEXT NOT NULL,
+      art_file     TEXT,
+      vpath        TEXT NOT NULL,
+      start_time   TEXT NOT NULL,
+      start_date   TEXT,
+      duration_min INTEGER NOT NULL DEFAULT 60,
+      recurrence   TEXT NOT NULL DEFAULT 'once',
+      recur_days   TEXT,
+      description  TEXT,
+      enabled      INTEGER NOT NULL DEFAULT 1,
+      created_at   INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_rsched_user ON radio_schedules(username);
   `);
   // Migration: add cuepoints column for databases created before this feature
   try { db.exec('ALTER TABLE files ADD COLUMN cuepoints TEXT'); } catch (_e) {}
@@ -162,6 +180,8 @@ export function init(dbDirectory) {
   try { db.exec('ALTER TABLE files ADD COLUMN art_source TEXT'); } catch (_e) {}
   // Migration: add duration column (track length in seconds)
   try { db.exec('ALTER TABLE files ADD COLUMN duration REAL'); } catch (_e) {}
+  // Migration: add description column to radio_schedules
+  try { db.exec('ALTER TABLE radio_schedules ADD COLUMN description TEXT'); } catch (_e) {}
   // Migration: add fix_action column to record what the fix button actually did
   try { db.exec('ALTER TABLE scan_errors ADD COLUMN fix_action TEXT'); } catch (_e) {}
   // Migration: add confirmed_at column to record when a rescan confirmed the file is OK
@@ -1397,6 +1417,29 @@ export function deleteRadioStation(id, username) {
 export function getRadioStationImgUsageCount(imgFilename) {
   return db.prepare('SELECT COUNT(*) AS cnt FROM radio_stations WHERE img=?').get(imgFilename)?.cnt ?? 0;
 }
+// ── Radio Schedules ──────────────────────────────────────────
+export function getRadioSchedules(username) {
+  return db.prepare('SELECT * FROM radio_schedules WHERE username=? ORDER BY created_at DESC').all(username);
+}
+export function createRadioSchedule(data) {
+  db.prepare(
+    'INSERT INTO radio_schedules (id,username,station_name,stream_url,art_file,vpath,start_time,start_date,duration_min,recurrence,recur_days,description,enabled,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?)'
+  ).run(data.id, data.username, data.station_name, data.stream_url, data.art_file || null, data.vpath, data.start_time, data.start_date || null, data.duration_min, data.recurrence, data.recur_days || null, data.description || null, data.created_at);
+  return data.id;
+}
+export function deleteRadioSchedule(id, username) {
+  return db.prepare('DELETE FROM radio_schedules WHERE id=? AND username=?').run(id, username).changes > 0;
+}
+export function toggleRadioSchedule(id, username, enabled) {
+  return db.prepare('UPDATE radio_schedules SET enabled=? WHERE id=? AND username=?').run(enabled, id, username).changes > 0;
+}
+export function toggleRadioScheduleById(id, enabled) {
+  return db.prepare('UPDATE radio_schedules SET enabled=? WHERE id=?').run(enabled, id).changes > 0;
+}
+export function getAllEnabledRadioSchedules() {
+  return db.prepare('SELECT * FROM radio_schedules WHERE enabled=1').all();
+}
+
 export function reorderRadioStations(username, orderedIds) {
   const update = db.prepare('UPDATE radio_stations SET sort_order=? WHERE id=? AND user=?');
   db.exec('BEGIN');
@@ -1472,6 +1515,10 @@ export function getPodcastFeedImgUsageCount(img) {
 }
 
 // ── Podcast Episodes ──────────────────────────────────────────
+export function getPodcastEpisode(id) {
+  return db.prepare('SELECT * FROM podcast_episodes WHERE id = ?').get(id);
+}
+
 export function getPodcastEpisodes(feedId) {
   return db.prepare(
     'SELECT * FROM podcast_episodes WHERE feed_id = ? ORDER BY pub_date DESC, id DESC'
