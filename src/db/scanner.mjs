@@ -153,6 +153,7 @@ async function run() {
       });
     } catch (_e) { /* non-critical — prune fail should not abort scan */ }
 
+    const scanStartTs = Math.floor(Date.now() / 1000);
     await recursiveScan(loadJson.directory);
 
     await ax({
@@ -162,7 +163,8 @@ async function run() {
       responseType: 'json',
       data: {
         vpath: loadJson.vpath,
-        scanId: loadJson.scanId
+        scanId: loadJson.scanId,
+        scanStartTs
       }
     });
   }catch (err) {
@@ -502,8 +504,17 @@ async function getAlbumArt(songInfo) {
     try {
       await compressAlbumArt(originalFileBuffer, songInfo.aaFile);
     } catch (err) {
-      console.error(`Warning: failed to compress album art for ${songInfo.filePath}: ${err.message}`);
-      await reportError(path.join(loadJson.directory, songInfo.filePath), 'art', `Failed to compress album art: ${err.message}`, err.stack);
+      // Jimp couldn't decode the image (e.g. corrupted embedded PNG/JPEG).
+      // The original is already on disk; copy it as a fallback thumbnail so
+      // art still displays. Don't report a scan error — the user can't fix a
+      // corrupted embedded image and the error would persist every rescan.
+      try {
+        const zlPath = path.join(loadJson.albumArtDirectory, 'zl-' + songInfo.aaFile);
+        const zsPath = path.join(loadJson.albumArtDirectory, 'zs-' + songInfo.aaFile);
+        if (!fs.existsSync(zlPath)) { fs.writeFileSync(zlPath, originalFileBuffer); }
+        if (!fs.existsSync(zsPath)) { fs.writeFileSync(zsPath, originalFileBuffer); }
+      } catch (_) { /* ignore fallback failure */ }
+      console.warn(`Warning: could not compress album art for ${songInfo.filePath} (${err.message}) — using original`);
     }
   }
 }

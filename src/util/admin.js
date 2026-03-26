@@ -349,6 +349,15 @@ export async function editMaxRecordingMinutes(val) {
   config.program.scanOptions.maxRecordingMinutes = val;
 }
 
+export async function editMaxZipMb(val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
+  loadConfig.scanOptions.maxZipMb = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.scanOptions.maxZipMb = val;
+}
+
 export async function editAllowRadioRecording(username, val) {
   const loadConfig = await loadFile(config.configFile);
   if (!loadConfig.users || !loadConfig.users[username]) { throw new Error(`User '${username}' not found`); }

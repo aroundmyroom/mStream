@@ -85,6 +85,7 @@ export function init(dbDirectory) {
     );
     CREATE INDEX IF NOT EXISTS idx_se_last_seen ON scan_errors(last_seen);
     CREATE INDEX IF NOT EXISTS idx_se_vpath    ON scan_errors(vpath);
+    CREATE INDEX IF NOT EXISTS idx_se_fixed_at ON scan_errors(fixed_at);
 
     CREATE TABLE IF NOT EXISTS user_settings (
       username TEXT NOT NULL PRIMARY KEY,
@@ -170,7 +171,8 @@ export function init(dbDirectory) {
       enabled      INTEGER NOT NULL DEFAULT 1,
       created_at   INTEGER NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_rsched_user ON radio_schedules(username);
+    CREATE INDEX IF NOT EXISTS idx_rsched_user    ON radio_schedules(username);
+    CREATE INDEX IF NOT EXISTS idx_rsched_enabled ON radio_schedules(enabled);
   `);
   // Migration: add cuepoints column for databases created before this feature
   try { db.exec('ALTER TABLE files ADD COLUMN cuepoints TEXT'); } catch (_e) {}
@@ -247,6 +249,13 @@ export function close() {
 
 // Save operations (no-ops for SQLite - writes are immediate)
 export function saveFilesDB() {}
+
+export function beginTransaction() {
+  try { db.exec('BEGIN'); } catch (_e) { /* already in transaction */ }
+}
+export function commitTransaction() {
+  try { db.exec('COMMIT'); } catch (_e) { /* nothing to commit */ }
+}
 export function saveUserDB() {}
 export function saveShareDB() {}
 
@@ -399,6 +408,11 @@ export function removeFilesByVpath(vpath) {
 export function countFilesByVpath(vpath) {
   const row = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE vpath = ?').get(vpath);
   return row.cnt;
+}
+
+export function getLastScannedMs() {
+  const row = db.prepare('SELECT MAX(ts) AS ts FROM files').get();
+  return row?.ts ? row.ts * 1000 : null;
 }
 
 export function getStats() {
@@ -1065,6 +1079,13 @@ export function pruneScanErrors(retentionHours) {
   const fixedCutoff = Math.floor(Date.now() / 1000) - 48 * 3600;
   db.prepare('DELETE FROM scan_errors WHERE last_seen < ?').run(cutoff);
   db.prepare('DELETE FROM scan_errors WHERE fixed_at IS NOT NULL AND fixed_at < ?').run(fixedCutoff);
+}
+
+/** Remove errors for this vpath that were NOT re-encountered in the current scan.
+ *  Called at finish-scan — any error whose last_seen < scanStartTs was not triggered
+ *  this run, meaning the underlying problem is resolved. */
+export function clearResolvedErrors(vpath, scanStartTs) {
+  db.prepare('DELETE FROM scan_errors WHERE vpath = ? AND last_seen < ?').run(vpath, scanStartTs);
 }
 
 /** Mark a single error as fixed, storing what action was taken. */

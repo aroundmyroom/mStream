@@ -234,6 +234,13 @@ export function setup(mstream) {
     res.json({});
   });
 
+  mstream.post("/api/v1/admin/db/params/max-zip-mb", async (req, res) => {
+    const schema = Joi.object({ maxZipMb: Joi.number().integer().min(1).required() });
+    joiValidate(schema, req.body);
+    await admin.editMaxZipMb(req.body.maxZipMb);
+    res.json({});
+  });
+
   mstream.get("/api/v1/admin/users", (req, res) => {
     // Scrub passwords and salts before sending to frontend
     const memClone = JSON.parse(JSON.stringify(config.program.users));

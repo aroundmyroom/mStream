@@ -99,19 +99,33 @@ export function setup(mstream) {
       }
     } catch (_e) { /* non-critical — waveform cleanup must not abort scan */ }
     db.removeStaleFiles(req.body.vpath, req.body.scanId);
+    // Clear errors that were NOT re-encountered this scan — they are resolved.
+    if (req.body.scanStartTs) {
+      try { db.clearResolvedErrors(req.body.vpath, req.body.scanStartTs); } catch (_e) { /* non-critical */ }
+    }
     db.saveFilesDB();
+    // Commit any open scan transaction so the finished state is durable
+    // before we return the response.
+    db.commitTransaction();
     res.json({});
   });
 
-  let saveCounter = 0;
-  mstream.post('/api/v1/scanner/add-file', (req, res) => {
-    db.insertFile(req.body);
-    res.json({});
+  // Batch scan inserts into explicit SQLite transactions (50 at a time).
+  // Without batching, every insertFile() is its own auto-commit which causes
+  // an fsync/WAL flush per file.  On HDD/SD that takes 20-200 ms each,
+  // blocking the Node.js event loop and starving the audio stream of bytes
+  // — causing the browser to pause playback mid-song.
+  let _txBatch = 0;
+  const TX_BATCH_SIZE = 50;
 
-    saveCounter++;
-    if(saveCounter > config.program.scanOptions.saveInterval) {
-      saveCounter = 0;
-      db.saveFilesDB();
+  mstream.post('/api/v1/scanner/add-file', (req, res) => {
+    if (_txBatch === 0) db.beginTransaction();
+    db.insertFile(req.body);
+    _txBatch++;
+    if (_txBatch >= TX_BATCH_SIZE) {
+      db.commitTransaction();
+      _txBatch = 0;
     }
+    res.json({});
   });
 }

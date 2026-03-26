@@ -41,6 +41,8 @@ export function saveShareDB() { backend.saveShareDB(); }
 export function findFileByPath(filepath, vpath) { return backend.findFileByPath(filepath, vpath); }
 export function updateFileScanId(file, scanId) { return backend.updateFileScanId(file, scanId); }
 export function insertFile(fileData) { return backend.insertFile(fileData); }
+export function beginTransaction() { if (backend.beginTransaction) backend.beginTransaction(); }
+export function commitTransaction() { if (backend.commitTransaction) backend.commitTransaction(); }
 export function removeFileByPath(filepath, vpath) { return backend.removeFileByPath(filepath, vpath); }
 export function getLiveArtFilenames() { return backend.getLiveArtFilenames(); }
 export function getLiveHashes() { return backend.getLiveHashes(); }
@@ -49,6 +51,7 @@ export function removeStaleFiles(vpath, scanId) { return backend.removeStaleFile
 export function removeFilesByVpath(vpath) { return backend.removeFilesByVpath(vpath); }
 export function countFilesByVpath(vpath) { return backend.countFilesByVpath(vpath); }
 export function getStats() { return backend.getStats(); }
+export function getLastScannedMs() { return backend.getLastScannedMs(); }
 
 // Metadata Queries
 export function updateFileArt(filepath, vpath, aaFile, scanId, artSource) { return backend.updateFileArt(filepath, vpath, aaFile, scanId, artSource); }
@@ -110,6 +113,7 @@ export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stac
 export function getScanErrors() { return backend.getScanErrors(); }
 export function clearScanErrors() { return backend.clearScanErrors(); }
 export function pruneScanErrors(retentionHours) { return backend.pruneScanErrors(retentionHours); }
+export function clearResolvedErrors(vpath, scanStartTs) { return backend.clearResolvedErrors(vpath, scanStartTs); }
 export function getScanErrorCount() { return backend.getScanErrorCount(); }
 export function markScanErrorFixed(guid, fixAction) { return backend.markScanErrorFixed(guid, fixAction); }
 export function confirmScanErrorOk(filepath, vpath) { return backend.confirmScanErrorOk(filepath, vpath); }
