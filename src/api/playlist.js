@@ -47,7 +47,8 @@ export function setup(mstream) {
         // sibling folders like "Disco Mix Club Series/".
         filepathPrefix: parentVpath
           ? allFolders[p].root.replace(/\/?$/, '/').slice(allFolders[parentVpath].root.replace(/\/?$/, '/').length)
-          : null
+          : null,
+        allowRecordDelete: allFolders[p].allowRecordDelete === true
       };
     });
 

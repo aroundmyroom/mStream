@@ -1,6 +1,7 @@
 import archiver from 'archiver';
 import path from 'path';
 import fs from 'fs/promises';
+import Joi from 'joi';
 import winston from 'winston';
 import * as config from '../state/config.js';
 import * as vpath from '../util/vpath.js';
@@ -126,4 +127,44 @@ export function setup(mstream) {
 
     archive.finalize();
   }
+
+  // Delete a recording file from a recordings-type vpath.
+  // Only available when the folder has allowRecordDelete=true.
+  mstream.delete('/api/v1/files/recording', async (req, res) => {
+    const schema = Joi.object({ filepath: Joi.string().required() });
+    const { error, value } = schema.validate(req.body);
+    if (error) return res.status(400).json({ error: error.message });
+
+    let pathInfo;
+    try {
+      pathInfo = vpath.getVPathInfo(value.filepath, req.user);
+    } catch (e) {
+      return res.status(403).json({ error: e.message });
+    }
+
+    const folderCfg = config.program.folders[pathInfo.vpath];
+    if (!folderCfg || folderCfg.type !== 'recordings') {
+      return res.status(403).json({ error: 'Not a recordings folder' });
+    }
+    if (!folderCfg.allowRecordDelete) {
+      return res.status(403).json({ error: 'Deletion not permitted for this folder' });
+    }
+
+    // Only allow deleting audio files (no directory traversal to other types)
+    const ext = path.extname(pathInfo.fullPath).toLowerCase().replace('.', '');
+    const allowed = config.program.supportedAudioFiles || {};
+    if (!allowed[ext]) {
+      return res.status(400).json({ error: 'File type not allowed' });
+    }
+
+    try {
+      await fs.unlink(pathInfo.fullPath);
+      winston.info(`Recording deleted by ${req.user.username}: ${pathInfo.fullPath}`);
+      res.json({ deleted: true });
+    } catch (e) {
+      if (e.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
+      winston.error('Failed to delete recording', { stack: e });
+      res.status(500).json({ error: 'Failed to delete file' });
+    }
+  });
 }

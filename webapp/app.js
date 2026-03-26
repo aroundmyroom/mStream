@@ -389,7 +389,7 @@ function _syncQueueToDb() {
       .catch(() => {});
   }, 2000);
 }
-function restoreQueue() {
+function restoreQueue(silent = false) {
   const key = _queueKey();
   if (!key) return;
   let data;
@@ -405,9 +405,11 @@ function restoreQueue() {
   S.idx   = (typeof data.idx === 'number' && data.idx >= 0 && data.idx < data.queue.length)
             ? data.idx : 0;
   refreshQueueUI();
-  _showInfoStrip('✓',
-    `<span class="dj-strip-label">Queue restored</span><span class="dj-strip-sep">·</span><span class="dj-strip-queued">${S.queue.length}</span><span class="dj-strip-title">&nbsp;song${S.queue.length !== 1 ? 's' : ''}</span>`,
-    5000);
+  if (!silent) {
+    _showInfoStrip('✓',
+      `<span class="dj-strip-label">Queue restored</span><span class="dj-strip-sep">·</span><span class="dj-strip-queued">${S.queue.length}</span><span class="dj-strip-title">&nbsp;song${S.queue.length !== 1 ? 's' : ''}</span>`,
+      5000);
+  }
 
   // Set up audio element — failures here must NOT break queue display
   try {
@@ -5144,6 +5146,11 @@ function renderFileExplorer(d) {
     crumbs += `<span class="fe-crumb" data-dir="/${cumPath}">${esc(p)}</span>`;
   });
 
+  const feVpath = parts[0] || '';
+  const canDelete = feVpath &&
+    S.vpathMeta?.[feVpath]?.type === 'recordings' &&
+    S.vpathMeta?.[feVpath]?.allowRecordDelete === true;
+
   const dirs = (d.directories || []).map(dir => `
     <div class="fe-dir" data-dir="${esc(curPath + dir.name)}">
       <svg class="fe-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
@@ -5178,6 +5185,9 @@ function renderFileExplorer(d) {
           <a class="fe-act" href="${fp ? dlUrl(fp) : '#'}" download="${esc(file.name)}" title="Download" onclick="event.stopPropagation()">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           </a>
+          ${canDelete ? `<button class="fe-act fe-del-btn" title="Delete Recording" style="color:var(--red,#e05)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6l-1,14H6L5,6"/><path d="M10,11v6"/><path d="M14,11v6"/><path d="M9,6V4h6v2"/></svg>
+          </button>` : ''}
         </div>
       </div>`;
   }).join('');
@@ -5287,6 +5297,37 @@ function renderFileExplorer(d) {
       const fp = btn.closest('.fe-file').dataset.fp;
       const found = dirSongs.find(s => s.filepath === fp);
       if (found) Player.addSong(found);
+    });
+  });
+  body.querySelectorAll('.fe-del-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const fileEl = btn.closest('.fe-file');
+      const fp = fileEl.dataset.fp;
+      const fname = fp.split('/').pop();
+      showConfirmModal(
+        'Delete recording?',
+        `"${fname}" will be permanently deleted from the server. This cannot be undone.`,
+        async () => {
+          try {
+            await api('DELETE', 'api/v1/files/recording', { filepath: fp });
+            toast(`Deleted: ${fname}`);
+            fileEl.remove();
+            const idx = S.curSongs.findIndex(s => s.filepath === fp);
+            if (idx !== -1) S.curSongs.splice(idx, 1);
+            const qi = S.queue.findIndex(s => s.filepath === fp);
+            if (qi !== -1) {
+              S.queue.splice(qi, 1);
+              if (S.idx > qi) S.idx--;
+              else if (S.idx === qi) S.idx = Math.min(S.idx, S.queue.length - 1);
+              persistQueue();
+              refreshQueueUI();
+            }
+          } catch(_e) {
+            toast('Failed to delete recording');
+          }
+        }
+      );
     });
   });
 }
@@ -9737,10 +9778,14 @@ function showApp() {
   const _bootSt  = document.getElementById('boot-status');
   const _bootSkip = document.getElementById('boot-skip-btn');
   function _bootMsg(m) { if (_bootSt) _bootSt.textContent = m; }
+  let _bootOnDismiss = null; // callback fired once after boot overlay fades
   function _bootDismiss() {
     if (!_bootEl || _bootEl.classList.contains('boot-fade')) return;
     _bootEl.classList.add('boot-fade');
-    setTimeout(() => _bootEl.classList.add('hidden'), 600);
+    setTimeout(() => {
+      _bootEl.classList.add('hidden');
+      if (_bootOnDismiss) { _bootOnDismiss(); _bootOnDismiss = null; }
+    }, 600);
   }
   if (_bootEl) _bootEl.classList.remove('hidden');
   _bootMsg('Loading your library…');
@@ -9769,10 +9814,15 @@ function showApp() {
   loadSmartPlaylists();
   viewRecent();
   refreshQueueUI();
-  restoreQueue();
+  restoreQueue(/*silent=*/true);
   // Boot overlay dismiss — wait for audio seek (waveform position restored) or fall back.
   // Radio items are not preloaded on restore (no seek position) so skip the seeked wait.
   const _restoredSong = S.queue.length > 0 && S.idx >= 0 ? S.queue[S.idx] : null;
+  if (S.queue.length) {
+    _bootOnDismiss = () => _showInfoStrip('✓',
+      `<span class="dj-strip-label">Queue restored</span><span class="dj-strip-sep">·</span><span class="dj-strip-queued">${S.queue.length}</span><span class="dj-strip-title">&nbsp;song${S.queue.length !== 1 ? 's' : ''}</span>`,
+      5000);
+  }
   if (_restoredSong && !_restoredSong.isRadio) {
     _bootMsg('Restoring your session\u2026');
     audioEl.addEventListener('seeked', function _onBootSeeked() {

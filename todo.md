@@ -171,6 +171,7 @@ Analyse every track's actual audio content (BPM, key, timbre, energy) and use th
 - [x] Station logo embedded as cover art after recording stops (FFmpeg copy-only pass)
 - [x] Max recording duration cap in admin (default 180 min); auto-stops via `setTimeout`; new admin endpoint `POST /api/v1/admin/db/params/max-recording-minutes`
 - [x] Scheduled radio recording — `radio_schedules` DB table, `radio-scheduler.js` with 30s ticker, tabbed record modal (Record Now / Schedule), CRUD API (`GET/POST/DELETE/PATCH`), recurrence: once/daily/weekdays/custom days
+- [x] User recording deletion — `allowRecordDelete` flag per recordings folder; **Del: On/Off** admin toggle; delete button in file explorer and context menu; confirmation modal; `DELETE /api/v1/files/recording` endpoint
 
 ### Sleep timer ✅
 - [x] Countdown timer in Playback Settings — user sets duration in minutes

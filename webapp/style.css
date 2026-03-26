@@ -461,7 +461,7 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .shared-expired-tag{display:inline-block;background:rgba(248,113,113,.15);color:var(--red);font-size:10px;padding:1px 6px;border-radius:99px;margin-left:4px;vertical-align:middle;}
 .btn-primary-sm{background:var(--primary-d);color:var(--primary);border-color:rgba(139,92,246,.3);}
 .btn-primary-sm:hover{background:var(--primary);color:#fff;}
-.content-body{flex:1 1 0;overflow-y:auto;padding:16px 20px;min-height:0;}
+.content-body{flex:1 1 0;overflow-y:auto;padding:16px 20px;min-height:0;contain:content;}
 
 /* ── LOADING / EMPTY ───────────────────────────────────────── */
 .loading-state{display:flex;align-items:center;justify-content:center;height:160px;color:var(--t3);}
@@ -1516,11 +1516,17 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 
 /* ── EQUALIZER PANEL ───────────────────────────────────── */
 .eq-panel{
-  position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(14px);
+  position:fixed;bottom:76px;
+  /* default: center in main column when queue is collapsed */
+  left:calc(var(--sidebar)/2 + 50vw);transform:translateX(-50%) translateY(14px);
   width:min(700px,96vw);background:var(--surface);border:1px solid var(--border);
   border-radius:16px;padding:16px 20px 20px;
   box-shadow:0 -2px 40px rgba(0,0,0,.55);z-index:500;
   opacity:0;transition:opacity .22s,transform .22s;pointer-events:none;
+}
+/* when queue panel is open, shift center left to exclude its width */
+#queue-panel:not(.collapsed) ~ #eq-panel{
+  left:calc(var(--sidebar)/2 + 50vw - var(--qp-width)/2);
 }
 .eq-panel.open{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:all;}
 .eq-panel.hidden{display:none!important;}
@@ -1836,7 +1842,7 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .sort-pill.active{background:var(--primary-d);color:var(--primary);border-color:var(--primary-g);}
 .sort-pill:hover:not(.active){background:var(--hover);color:var(--t1);}
 .sort-dir{font-size:10px;opacity:.8;}
-.vslist-wrap{flex:1;min-height:0;overflow-y:auto;}
+.vslist-wrap{flex:1;min-height:0;overflow-y:auto;contain:strict;}
 .vslist-wrap .song-list{padding:0 8px;}
 .settings-input{background:var(--raised);border:1px solid var(--border2);border-radius:var(--r);padding:7px 10px;color:var(--t1);font-size:13px;width:100%;font-family:inherit;}
 .settings-input:focus{outline:none;border-color:var(--primary);}

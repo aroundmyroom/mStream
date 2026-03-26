@@ -85,6 +85,36 @@ Folders are set by key value pairs.  The key is used later to give access to fol
 
 If this is not set, the cwd will be used
 
+### Folder types
+
+Each folder entry supports an optional `type` key:
+
+| Value | Description |
+|-------|-------------|
+| `music` | *(default)* Standard music library — included in all scans |
+| `audio-books` | Audio-books / podcasts save target — included in scans |
+| `recordings` | Radio recordings destination — **excluded from library scans**. Files recorded from radio streams land here. |
+
+### Allow users to delete recordings
+
+When a folder is of type `recordings`, an optional `allowRecordDelete` flag controls whether users may delete their own recordings:
+
+```json
+{
+  "folders": {
+    "recordings": {
+      "root": "/media/radio-recordings",
+      "type": "recordings",
+      "allowRecordDelete": true
+    }
+  }
+}
+```
+
+When enabled, a red **Delete** (trash) button appears next to each file in the recordings folder browser, and a **Delete Recording** item appears in the song context menu. A confirmation prompt is always shown before deletion. The flag is set from the Admin panel (Directories → **Del: On / Off** toggle) without needing to remove and re-add the folder.
+
+> **Note:** If you toggle this setting in the admin panel, users must refresh the player page before the button becomes visible — the flag is loaded from `/api/v1/ping` at login time.
+
 ## Users
 
 If there is no users object, the login system will not be enabled and anyone will be abe to access the server.  All folders will be accessible

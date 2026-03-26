@@ -96,10 +96,16 @@ export function setup(mstream) {
 
     // Fetch from lrclib.net — try with duration first (exact match),
     // then without duration (fuzzy title+artist) as fallback.
+    // Each call is wrapped in its own try/catch so a timeout or error on the
+    // exact-duration call does NOT prevent the fuzzy fallback from running.
     try {
-      const data = duration > 0
-        ? (await lrclibFetch(artist, title, duration)) ?? (await lrclibFetch(artist, title, 0))
-        : await lrclibFetch(artist, title, 0);
+      let data = null;
+      if (duration > 0) {
+        try { data = await lrclibFetch(artist, title, duration); } catch (_e) { /* timeout/error — fall through to fuzzy */ }
+      }
+      if (!data) {
+        try { data = await lrclibFetch(artist, title, 0); } catch (_e) { /* timeout/error */ }
+      }
 
       if (!data || (!data.syncedLyrics && !data.plainLyrics)) {
         return res.json({ notFound: true });

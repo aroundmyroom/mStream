@@ -153,7 +153,7 @@
 
     <div class="side-nav-section-label">Navigation</div>
 
-    <div class="side-nav-item" onclick="if(window.opener&&!window.opener.closed){window.opener.focus();window.close();}else{window.location.href=window.location.origin+'/';}">
+    <div class="side-nav-item" onclick="gotoPlayer()">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
       <span>Go to Player</span>
     </div>
@@ -227,6 +227,29 @@
     function closeSideMenu() {
       var nav = document.getElementById('sidenav');
       if (nav.classList.contains('open')) toggleSideMenu();
+    }
+    function gotoPlayer() {
+      // window.open('', name) returns the existing named tab without navigating it,
+      // and .focus() from a click handler is allowed by the browser.
+      var playerOrigin = window.location.origin + '/';
+      var w = window.open('', 'mStream-Velvet');
+      if (w && w !== window) {
+        try {
+          if (!w.location.href || w.location.href === 'about:blank') {
+            // No player tab with that name — open one
+            w.location.href = playerOrigin;
+          }
+          w.focus();
+          window.close();
+        } catch(e) {
+          // Cross-origin fallback (shouldn't happen same-origin)
+          w.focus();
+          window.close();
+        }
+      } else {
+        // No named player window found — navigate this tab there
+        window.location.href = playerOrigin;
+      }
     }
   </script>
 
