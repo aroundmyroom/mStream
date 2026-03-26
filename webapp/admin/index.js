@@ -908,10 +908,19 @@ const foldersView = Vue.component('folders-view', {
               </label>
 
               <label style="display:flex;align-items:flex-start;gap:.6rem;cursor:pointer;">
-                <input id="folder-is-recordings" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;" />
+                <input id="folder-is-recordings" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;"
+                  @change="document.getElementById('folder-allow-record-delete-row').style.display = $event.target.checked ? 'flex' : 'none'; if(!$event.target.checked) document.getElementById('folder-allow-record-delete').checked=false;" />
                 <span>
                   <span style="color:var(--t1);font-weight:600;">Radio Recordings folder</span><br>
                   <small style="color:var(--t2);font-size:.82rem;">Designate this directory as the target for radio stream recordings. It will <strong>not</strong> be scanned into the music library. Users with recording permission can save streams here.</small>
+                </span>
+              </label>
+
+              <label id="folder-allow-record-delete-row" style="display:none;align-items:flex-start;gap:.6rem;cursor:pointer;margin-left:1.6rem;border-left:2px solid var(--border);padding-left:.8rem;">
+                <input id="folder-allow-record-delete" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;" />
+                <span>
+                  <span style="color:var(--t1);font-weight:600;">Allow users to delete their own recordings</span><br>
+                  <small style="color:var(--t2);font-size:.82rem;">When enabled, a <strong>Delete</strong> option appears in the song context menu for files stored in this folder. Users can only delete recordings they can access — a confirmation prompt is always shown before deletion.</small>
                 </span>
               </label>
 
@@ -941,14 +950,22 @@ const foldersView = Vue.component('folders-view', {
               <tr>
                 <th style="width:160px;">Path Alias (vPath)</th>
                 <th>Directory</th>
-                <th style="width:80px;">Action</th>
+                <th style="width:90px;">Type</th>
+                <th style="width:130px;">Action</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="(v, k) in folders">
                 <td><code style="color:var(--accent);">{{k}}</code></td>
                 <td style="word-break:break-all;color:var(--t2);">{{v.root}}</td>
-                <td>
+                <td style="color:var(--t2);font-size:12px;">{{v.type || 'music'}}</td>
+                <td style="display:flex;gap:6px;flex-wrap:wrap;">
+                  <button v-if="v.type === 'recordings'" class="btn-small" type="button"
+                    :style="v.allowRecordDelete ? 'background:var(--primary);color:#fff;' : ''"
+                    :title="v.allowRecordDelete ? 'Users can delete own recordings — click to disable' : 'Users cannot delete recordings — click to enable'"
+                    @click="toggleRecordDelete(k)">
+                    {{v.allowRecordDelete ? 'Del: On' : 'Del: Off'}}
+                  </button>
                   <button class="btn-small red" type="button" @click="removeFolder(k, v.root)">Remove</button>
                 </td>
               </tr>
@@ -1006,7 +1023,8 @@ const foldersView = Vue.component('folders-view', {
               vpath: this.dirName,
               autoAccess: document.getElementById('folder-auto-access').checked,
               isAudioBooks: document.getElementById('folder-is-audiobooks').checked,
-              isRecording: document.getElementById('folder-is-recordings').checked
+              isRecording: document.getElementById('folder-is-recordings').checked,
+              allowRecordDelete: document.getElementById('folder-allow-record-delete').checked
             }
           });
 
@@ -1034,6 +1052,24 @@ const foldersView = Vue.component('folders-view', {
       testAccess: function() {
         modVM.currentViewModal = 'dir-access-test-modal';
         modVM.openModal();
+      },
+      toggleRecordDelete: async function(vpath) {
+        const folder = ADMINDATA.folders[vpath];
+        const newVal = !folder.allowRecordDelete;
+        try {
+          await API.axios({
+            method: 'PATCH',
+            url: `${API.url()}/api/v1/admin/directory/flags`,
+            data: { vpath, allowRecordDelete: newVal }
+          });
+          Vue.set(ADMINDATA.folders[vpath], 'allowRecordDelete', newVal);
+          iziToast.success({
+            title: newVal ? 'Users can now delete their own recordings' : 'Recording deletion disabled',
+            position: 'topCenter', timeout: 3000
+          });
+        } catch (_e) {
+          iziToast.error({ title: 'Failed to update setting', position: 'topCenter', timeout: 3000 });
+        }
       },
       removeFolder: async function(vpath, folder) {
                 adminConfirm(`Remove access to <b>${folder}</b>?`, `No files will be deleted. Your server will need to reboot.`, 'Remove', () => {
@@ -1097,7 +1133,7 @@ const usersView = Vue.component('users-view', {
               <div class="input-field" style="flex:1;min-width:160px;">
                 <label for="new-password">Password</label>
                 <div class="pwd-wrap">
-                  <input v-model="newPassword" id="new-password" required :type="showNewPassword ? 'text' : 'password'" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="new-password">
+                  <input v-model="newPassword" id="new-password" required :type="showNewPassword ? 'text' : 'password'" placeholder="•••••••" autocomplete="new-password">
                   <button type="button" class="pwd-toggle" @click="showNewPassword = !showNewPassword" tabindex="-1" :title="showNewPassword ? 'Hide password' : 'Show password'">
                     <svg v-if="!showNewPassword" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                     <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>

@@ -1,5 +1,46 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Bug fixes — 2026-03-26
+
+**Files:** `webapp/app.js`, `webapp/index.html`, `webapp/admin/index.html`, `webapp/admin/index.js`, `webapp/style.css`
+
+- **Go to Player broken after admin panel refactor** — `openAdminPanel()` was using `window.open('/admin', '_blank')` instead of the required named target `'mstream-admin'`. The named target keeps `window.opener` set in the admin tab so "Go to Player" can focus the player tab and close itself. Fixed by restoring the correct target string. Guard added to `copilot-instructions.md` to prevent this regression again.
+- **"Queue restored" strip visible during boot overlay** — the notification fired immediately during queue restore, overlapping the boot screen. It now waits until after the boot overlay has fully faded out (via `_bootOnDismiss` callback), including when the skip button or hard-timeout fires.
+- **Equalizer panel off-centre** — `left:50%` was centering against the full viewport width, ignoring the sidebar. Now uses `left:calc(var(--sidebar)/2 + 50vw)` so it centers in the main content column. When the queue panel is open it shifts left by half the queue width via a CSS sibling rule (`webapp/style.css`).
+- **Go to Player — wrong tab focused after switching tabs** — `window.opener.focus()` focuses the browser window, not the specific tab, so switching tabs before clicking "Go to Player" returned to the previously active tab instead of the player. Fixed by tagging the player tab with `window.name = 'mStream-Velvet'` and using `window.open('', 'mStream-Velvet').focus()` from admin, which finds and focuses the exact named tab from a user-gesture click handler.
+- **Admin Users — password placeholder showing `&bull;&bull;&bull;` literally** — the Vue template string was not parsed as HTML so `&bull;` entities were never decoded. Replaced with the literal `•••••••` character.
+
+## Bug fixes — 2026-03-26 (2)
+
+**Files:** `src/api/lyrics.js`, `src/api/admin.js`, `webapp/admin/index.js`, `webapp/app.js`
+
+- **Lyrics intermittently not found** — lrclib fetch used `??` chaining so a timeout/thrown exception on the exact-duration call bypassed the fuzzy (no-duration) fallback entirely. Wrapped each call in its own `try/catch`; a failing exact-duration call now always falls through to the fuzzy attempt.
+- **`allowRecordDelete` toggle for existing recordings folders** — the admin panel had no way to enable/disable user recording deletion on an already-saved folder (no edit button, and `addDirectory()` throws if the vpath already exists). Added a new `PATCH /api/v1/admin/directory/flags` endpoint that updates only the `allowRecordDelete` flag in-memory and in the config file without touching the folder definition. Admin panel now shows a **Del: On / Del: Off** action button for every recordings-type folder.
+- **Delete button missing in file explorer (Radio / Podcasts recordings browse)** — when browsing a recordings folder from Radio/Podcasts → Audio Content the generic file explorer rendered only Play/Add/Download buttons; the context-menu delete option was unreachable because the file explorer has no three-dots menu. A red trash button now appears inline in each file row when the current vpath is a recordings folder with `allowRecordDelete` enabled. Clicking it shows the same confirmation modal and calls the same `DELETE /api/v1/files/recording` endpoint; on success the row is removed from the DOM and cleaned up from `S.curSongs` and the queue.
+
+## Recording deletion by users — 2026-03-26
+
+**Files:** `src/state/config.js`, `src/util/admin.js`, `src/api/admin.js`, `src/api/download.js`, `src/api/playlist.js`, `webapp/admin/index.js`, `webapp/index.html`, `webapp/app.js`
+
+- **New per-folder `allowRecordDelete` flag** — added to the Joi folder schema (`config.js`); stored in the config file per recordings-type vpath.
+- **Admin panel** — when "Radio Recordings folder" is checked a sub-option appears: **"Allow users to delete their own recordings"**. The sub-option is hidden and reset when the recordings checkbox is unchecked.
+- **New API endpoint `DELETE /api/v1/files/recording`** — accepts `{ filepath }`, resolves to the absolute path via `getVPathInfo`, enforces: vpath must be of type `recordings`, `allowRecordDelete` must be true, file extension must be a supported audio format. Deletes the file from disk and logs the event. Returns 403/404/500 on error.
+- **`GET /api/v1/ping` `vpathMetaData`** — now includes `allowRecordDelete: bool` per vpath entry; used client-side to decide whether to show the delete option.
+- **Context menu "Delete Recording" item** — appears (with a divider) only when the right-clicked song is from a recordings-type vpath with `allowRecordDelete=true`; hidden for all other songs. Coloured red for clarity.
+- **Confirmation modal** — uses the existing `showConfirmModal` with the filename and "This cannot be undone." message before sending the delete request.
+- **Post-delete cleanup** — on success: removes the row from the current view, removes the track from the queue (adjusting `S.idx`), persists the updated queue, and shows a toast.
+
+## Performance: startup speed, scroll jank, queue rendering — 2026-03-26
+
+**Files:** `webapp/index.html`, `webapp/app.js`, `webapp/style.css`
+
+- **`qr.js` now deferred** — was the only parser-blocking script in `<head>`; adding `defer` eliminates the stall (41 KB parsed before first paint, only needed for QR code generation).
+- **`checkSession()` parallelised** — `lastfm/status`, `listenbrainz/status`, and `radio/enabled` calls now run with `Promise.all` instead of in series; saves ~300–500 ms on login on a typical LAN.
+- **`visibilitychange` handler debounced** — 30 s cooldown prevents 4 serial API calls on every tab focus/unfocus cycle.
+- **Virtual scroll handlers wrapped in `requestAnimationFrame`** — all three scroll listeners (inline album vscroll, `_mountAlbumVScroll`, `_mountSongVScroll`) now use a rAF + pending-guard, preventing layout thrashing at 120 Hz scroll rates.
+- **Queue panel: per-element listeners replaced with event delegation** — previously created N × 5 event listeners on every `refreshQueueUI()` call (click, dragstart, dragend, dragover, dragleave, drop per item); now 5 delegated listeners on the container regardless of queue size.
+- **CSS `contain`** — added `contain: content` to `.content-body` and `contain: strict` to `.vslist-wrap`; limits layout and style recalculation scope to those subtrees during scroll renders.
+
 ## Release v5.16.28-velvet — 2026-03-26
 
 **Files:** `package.json`, `README.md`, `docs/API/download.md`, `releases/v5.16.28-velvet.md`

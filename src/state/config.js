@@ -104,6 +104,7 @@ const schema = Joi.object({
     Joi.object({
       root: Joi.string().required(),
       type: Joi.string().valid('music', 'audio-books', 'recordings').default('music'),
+      allowRecordDelete: Joi.boolean().default(false),
     })
   ).default({}),
   users: Joi.object().pattern(

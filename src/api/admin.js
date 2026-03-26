@@ -259,7 +259,8 @@ export function setup(mstream) {
       vpath: Joi.string().pattern(/[a-zA-Z0-9-]+/).required(),
       autoAccess: Joi.boolean().default(false),
       isAudioBooks: Joi.boolean().default(false),
-      isRecording: Joi.boolean().default(false)
+      isRecording: Joi.boolean().default(false),
+      allowRecordDelete: Joi.boolean().default(false)
     });
     const input = joiValidate(schema, req.body);
 
@@ -269,7 +270,8 @@ export function setup(mstream) {
       input.value.autoAccess,
       input.value.isAudioBooks,
       mstream,
-      input.value.isRecording);
+      input.value.isRecording,
+      input.value.allowRecordDelete);
     res.json({});
 
     try {
@@ -289,6 +291,39 @@ export function setup(mstream) {
     }catch (err) {
       winston.error('/api/v1/admin/directory failed to add ', { stack: err });
     }
+  });
+
+  // PATCH /api/v1/admin/directory/flags — update per-folder flags on an existing folder
+  // Currently supports: allowRecordDelete (recordings folders only)
+  mstream.patch("/api/v1/admin/directory/flags", async (req, res) => {
+    const schema = Joi.object({
+      vpath: Joi.string().pattern(/[a-zA-Z0-9-]+/).required(),
+      allowRecordDelete: Joi.boolean().required()
+    });
+    const input = joiValidate(schema, req.body);
+    const { vpath, allowRecordDelete } = input.value;
+    const folder = config.program.folders[vpath];
+    if (!folder) return res.status(404).json({ error: 'vpath not found' });
+    if (folder.type !== 'recordings') return res.status(400).json({ error: 'only recordings folders support this flag' });
+
+    // Update in-memory
+    if (allowRecordDelete) {
+      config.program.folders[vpath].allowRecordDelete = true;
+    } else {
+      delete config.program.folders[vpath].allowRecordDelete;
+    }
+
+    // Persist to config file
+    const loadConfig = await admin.loadFile(config.configFile);
+    if (!loadConfig.folders) loadConfig.folders = {};
+    if (!loadConfig.folders[vpath]) loadConfig.folders[vpath] = {};
+    if (allowRecordDelete) {
+      loadConfig.folders[vpath].allowRecordDelete = true;
+    } else {
+      delete loadConfig.folders[vpath].allowRecordDelete;
+    }
+    await admin.saveFile(loadConfig, config.configFile);
+    res.json({});
   });
 
   mstream.delete("/api/v1/admin/directory", async (req, res) => {
