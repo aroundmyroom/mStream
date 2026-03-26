@@ -1112,66 +1112,69 @@ function refreshQueueUI() {
 
   let _dragSrc = null;
 
-  list.querySelectorAll('.q-item').forEach(el => {
-    el.addEventListener('click', e => {
-      if (e.target.closest('.q-remove') || e.target.closest('.q-drag-handle')) return;
-      Player.playAt(parseInt(el.dataset.qi));
-    });
-
-    // ── drag-and-drop reorder ──
-    el.addEventListener('dragstart', e => {
-      _dragSrc = parseInt(el.dataset.qi);
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', _dragSrc);
-      setTimeout(() => el.classList.add('q-dragging'), 0);
-    });
-    el.addEventListener('dragend', () => {
-      el.classList.remove('q-dragging');
-      list.querySelectorAll('.q-drag-over').forEach(e => e.classList.remove('q-drag-over'));
-    });
-    el.addEventListener('dragover', e => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      if (!el.classList.contains('q-drag-over')) {
-        list.querySelectorAll('.q-drag-over').forEach(e => e.classList.remove('q-drag-over'));
-        el.classList.add('q-drag-over');
-      }
-    });
-    el.addEventListener('dragleave', e => {
-      if (!el.contains(e.relatedTarget)) el.classList.remove('q-drag-over');
-    });
-    el.addEventListener('drop', e => {
-      e.preventDefault();
-      const to = parseInt(el.dataset.qi);
-      if (_dragSrc === null || _dragSrc === to) { _dragSrc = null; return; }
-      const from = _dragSrc;
-      _dragSrc = null;
-
-      // Splice song from→to
-      const [moved] = S.queue.splice(from, 1);
-      S.queue.splice(to, 0, moved);
-
-      // Keep S.idx pointing at the same track
-      if      (S.idx === from)                       S.idx = to;
-      else if (from < S.idx && to >= S.idx)          S.idx--;
-      else if (from > S.idx && to <= S.idx)          S.idx++;
-
-      persistQueue();
-      _syncQueueToDb();
-      refreshQueueUI();
-    });
-  });
-
-  list.querySelectorAll('.q-remove').forEach(btn => {
-    btn.addEventListener('click', e => {
+  // ── Delegated click: play item or remove ──
+  list.addEventListener('click', e => {
+    const removeBtn = e.target.closest('.q-remove');
+    if (removeBtn) {
       e.stopPropagation();
-      const i = parseInt(btn.dataset.qi);
+      const i = parseInt(removeBtn.dataset.qi);
       S.queue.splice(i, 1);
       if (S.idx >= i && S.idx > 0) S.idx--;
       persistQueue();
       _syncQueueToDb();
       refreshQueueUI();
-    });
+      return;
+    }
+    const item = e.target.closest('.q-item');
+    if (!item || e.target.closest('.q-drag-handle')) return;
+    Player.playAt(parseInt(item.dataset.qi));
+  });
+
+  // ── Delegated drag-and-drop reorder ──
+  list.addEventListener('dragstart', e => {
+    const item = e.target.closest('.q-item');
+    if (!item) return;
+    _dragSrc = parseInt(item.dataset.qi);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', _dragSrc);
+    setTimeout(() => item.classList.add('q-dragging'), 0);
+  });
+  list.addEventListener('dragend', e => {
+    const item = e.target.closest('.q-item');
+    if (item) item.classList.remove('q-dragging');
+    list.querySelectorAll('.q-drag-over').forEach(el => el.classList.remove('q-drag-over'));
+  });
+  list.addEventListener('dragover', e => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const item = e.target.closest('.q-item');
+    if (!item || item.classList.contains('q-drag-over')) return;
+    list.querySelectorAll('.q-drag-over').forEach(el => el.classList.remove('q-drag-over'));
+    item.classList.add('q-drag-over');
+  });
+  list.addEventListener('dragleave', e => {
+    const item = e.target.closest('.q-item');
+    if (item && !item.contains(e.relatedTarget)) item.classList.remove('q-drag-over');
+  });
+  list.addEventListener('drop', e => {
+    e.preventDefault();
+    const item = e.target.closest('.q-item');
+    if (!item) return;
+    const to = parseInt(item.dataset.qi);
+    if (_dragSrc === null || _dragSrc === to) { _dragSrc = null; return; }
+    const from = _dragSrc;
+    _dragSrc = null;
+
+    const [moved] = S.queue.splice(from, 1);
+    S.queue.splice(to, 0, moved);
+
+    if      (S.idx === from)                  S.idx = to;
+    else if (from < S.idx && to >= S.idx)     S.idx--;
+    else if (from > S.idx && to <= S.idx)     S.idx++;
+
+    persistQueue();
+    _syncQueueToDb();
+    refreshQueueUI();
   });
 
   const active = list.querySelector('.q-active');
@@ -1468,8 +1471,16 @@ function showCtxMenu(x, y) {
   // Show remove-from-playlist only when inside a playlist view
   const inPlaylist = typeof S.view === 'string' && S.view.startsWith('playlist:');
   menu.querySelector('.ctx-remove-pl').classList.toggle('hidden', !inPlaylist);
+  // Show delete-recording only when song is from a recordings vpath with allowRecordDelete
+  const song = S.ctxSong;
+  const songVpath = song?.filepath?.split('/')[0];
+  const canDelete = songVpath &&
+    S.vpathMeta?.[songVpath]?.type === 'recordings' &&
+    S.vpathMeta?.[songVpath]?.allowRecordDelete === true;
+  menu.querySelector('.ctx-delete-rec').classList.toggle('hidden', !canDelete);
+  menu.querySelector('.ctx-delete-rec-divider').classList.toggle('hidden', !canDelete);
   // Keep within viewport
-  const mw = 180, mh = 200;
+  const mw = 180, mh = canDelete ? 230 : 200;
   const left = Math.min(x, window.innerWidth  - mw - 8);
   const top  = Math.min(y, window.innerHeight - mh - 8);
   menu.style.left = left + 'px';
@@ -4758,7 +4769,12 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
   }
 
   // Scroll: render on every scroll tick (cheap — only string-builds ~40 cards)
-  body.addEventListener('scroll', () => { if (grid.isConnected) renderWindow(false); });
+  let _rafPending = false;
+  body.addEventListener('scroll', () => {
+    if (_rafPending || !grid.isConnected) return;
+    _rafPending = true;
+    requestAnimationFrame(() => { _rafPending = false; if (grid.isConnected) renderWindow(false); });
+  });
 
   // Resize: re-measure column count + row height when the grid width changes
   let _roFrame = false;
@@ -5543,7 +5559,12 @@ function _mountAlbumVScroll(albums, buildCard, onClick, containerEl) {
     grid.innerHTML = html.join('');
   }
 
-  body.addEventListener('scroll', () => { if (grid.isConnected) render(false); });
+  let _rafA = false;
+  body.addEventListener('scroll', () => {
+    if (_rafA || !grid.isConnected) return;
+    _rafA = true;
+    requestAnimationFrame(() => { _rafA = false; if (grid.isConnected) render(false); });
+  });
   const ro = new ResizeObserver(() => requestAnimationFrame(() => {
     if (!grid.isConnected) { ro.disconnect(); return; }
     if (measure()) { fRow = -1; lRow = -1; render(true); }
@@ -5769,7 +5790,12 @@ function _mountSongVScroll(allSongs, container) {
     render(true);
   });
 
-  wrap.addEventListener('scroll', () => { if (list.isConnected) render(false); });
+  let _rafS = false;
+  wrap.addEventListener('scroll', () => {
+    if (_rafS || !list.isConnected) return;
+    _rafS = true;
+    requestAnimationFrame(() => { _rafS = false; if (list.isConnected) render(false); });
+  });
   const ro = new ResizeObserver(() => requestAnimationFrame(() => {
     if (!list.isConnected) { ro.disconnect(); return; }
     rowH = 0; fRow = -1; lRow = -1; render(true);
@@ -9623,9 +9649,15 @@ async function checkSession() {
         S.isAdmin = true;
         try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
       } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
-      try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
-      try { const lb = await api('GET', 'api/v1/listenbrainz/status'); S.listenbrainzEnabled = lb?.serverEnabled === true; S.listenbrainzLinked = lb?.linked === true; } catch(_) { S.listenbrainzEnabled = false; S.listenbrainzLinked = false; }
-      try { const rd = await api('GET', 'api/v1/radio/enabled'); S.radioEnabled = rd?.enabled === true; } catch(_) { S.radioEnabled = false; }
+      const [ls, lb, rd] = await Promise.all([
+        api('GET', 'api/v1/lastfm/status').catch(() => null),
+        api('GET', 'api/v1/listenbrainz/status').catch(() => null),
+        api('GET', 'api/v1/radio/enabled').catch(() => null),
+      ]);
+      S.lastfmEnabled       = ls?.serverEnabled !== false;
+      S.listenbrainzEnabled = lb?.serverEnabled === true;
+      S.listenbrainzLinked  = lb?.linked === true;
+      S.radioEnabled        = rd?.enabled === true;
       S.feedsEnabled = true; // Podcasts always available — user needs the section to add their first feed
       await _loadServerSettings();
       return true;
@@ -9674,9 +9706,15 @@ async function checkSession() {
         S.isAdmin = true;
         try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
       } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
-      try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
-      try { const lb = await api('GET', 'api/v1/listenbrainz/status'); S.listenbrainzEnabled = lb?.serverEnabled === true; S.listenbrainzLinked = lb?.linked === true; } catch(_) { S.listenbrainzEnabled = false; S.listenbrainzLinked = false; }
-      try { const rd = await api('GET', 'api/v1/radio/enabled'); S.radioEnabled = rd?.enabled === true; } catch(_) { S.radioEnabled = false; }
+      const [ls2, lb2, rd2] = await Promise.all([
+        api('GET', 'api/v1/lastfm/status').catch(() => null),
+        api('GET', 'api/v1/listenbrainz/status').catch(() => null),
+        api('GET', 'api/v1/radio/enabled').catch(() => null),
+      ]);
+      S.lastfmEnabled       = ls2?.serverEnabled !== false;
+      S.listenbrainzEnabled = lb2?.serverEnabled === true;
+      S.listenbrainzLinked  = lb2?.linked === true;
+      S.radioEnabled        = rd2?.enabled === true;
       S.feedsEnabled = true; // Podcasts are always available — user needs section to add first feed
       return true;
     }
@@ -9689,7 +9727,7 @@ function openAdminPanel() {
   if (_adminWin && !_adminWin.closed) {
     _adminWin.focus();
   } else {
-    _adminWin = window.open('/admin', '_blank');
+    _adminWin = window.open('/admin', 'mstream-admin');
   }
 }
 
@@ -9779,8 +9817,12 @@ function showApp() {
 
   // Re-check feature flags when returning to this tab (e.g. after changing
   // settings in the admin panel which opens in a separate tab).
+  let _lastVisRefresh = 0;
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState !== 'visible') return;
+    const now = Date.now();
+    if (now - _lastVisRefresh < 30000) return;
+    _lastVisRefresh = now;
     // Admin-only flags (Discogs)
     if (S.isAdmin) {
       try {
@@ -10218,6 +10260,43 @@ document.getElementById('ctx-menu').querySelectorAll('.ctx-item').forEach(btn =>
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
     }
     if (action === 'rate')        { showRatePanel(0, 0, song); document.getElementById('rate-panel').style.left = '50%'; document.getElementById('rate-panel').style.top = '40%'; }
+    if (action === 'delete-recording') {
+      const fname = song.filepath.split('/').pop();
+      showConfirmModal(
+        'Delete recording?',
+        `"${fname}" will be permanently deleted from the server. This cannot be undone.`,
+        async () => {
+          try {
+            await api('DELETE', 'api/v1/files/recording', { filepath: song.filepath });
+            toast(`Deleted: ${fname}`);
+            // Remove from current view if present
+            const idx = S.curSongs.findIndex(s => s.filepath === song.filepath);
+            if (idx !== -1) {
+              S.curSongs.splice(idx, 1);
+              // Re-render current view body if we're in the file browser
+              const body = document.getElementById('content-body');
+              const rows = body.querySelectorAll('.song-row');
+              rows.forEach(r => {
+                if (r.querySelector('.song-title')?.textContent === (song.title || fname)) {
+                  r.remove();
+                }
+              });
+            }
+            // Remove from queue if present
+            const qi = S.queue.findIndex(s => s.filepath === song.filepath);
+            if (qi !== -1) {
+              S.queue.splice(qi, 1);
+              if (S.idx > qi) S.idx--;
+              else if (S.idx === qi) S.idx = Math.min(S.idx, S.queue.length - 1);
+              persistQueue();
+              refreshQueueUI();
+            }
+          } catch(e) {
+            toast('Failed to delete recording');
+          }
+        }
+      );
+    }
   });
 });
 
