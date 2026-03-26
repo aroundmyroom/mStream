@@ -252,6 +252,14 @@ export function countFilesByVpath(vpath) {
   return fileCollection.count({ 'vpath': vpath });
 }
 
+export function getLastScannedMs() {
+  if (!fileCollection) return null;
+  const docs = fileCollection.data;
+  let max = null;
+  for (const d of docs) { if (d.ts && (!max || d.ts > max)) max = d.ts; }
+  return max ? max * 1000 : null;
+}
+
 export function getStats() {
   if (!fileCollection) {
     return {
@@ -898,6 +906,10 @@ export function pruneScanErrors(retentionHours) {
   const fixedCutoff = Math.floor(Date.now() / 1000) - 48 * 3600;
   scanErrorCollection.findAndRemove({ last_seen: { '$lt': cutoff } });
   scanErrorCollection.findAndRemove({ fixed_at: { '$ne': null, '$lt': fixedCutoff } });
+}
+
+export function clearResolvedErrors(vpath, scanStartTs) {
+  scanErrorCollection.findAndRemove({ vpath: { '$eq': vpath }, last_seen: { '$lt': scanStartTs } });
 }
 
 export function markScanErrorFixed(guid, fixAction) {

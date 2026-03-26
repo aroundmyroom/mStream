@@ -25,7 +25,8 @@ const scanOptions = Joi.object({
   maxConcurrentTasks: Joi.number().integer().min(1).default(1),
   compressImage: Joi.boolean().default(true),
   scanErrorRetentionHours: Joi.number().integer().valid(12, 24, 48, 72, 168, 336, 720).default(48),
-  maxRecordingMinutes: Joi.number().integer().min(1).default(180)
+  maxRecordingMinutes: Joi.number().integer().min(1).default(180),
+  maxZipMb: Joi.number().integer().min(1).default(500)
 });
 
 const dbOptions = Joi.object({

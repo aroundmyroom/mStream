@@ -456,8 +456,15 @@ export function setup(mstream) {
       name: k,
       artist: buckets[k]
     }));
+    const lastModifiedMs = db.getLastScannedMs() || Date.now();
+    const ifModifiedSince = parseInt(req.query.ifModifiedSince ?? req.body?.ifModifiedSince ?? '0', 10);
+    if (ifModifiedSince > 0 && lastModifiedMs <= ifModifiedSince) {
+      return sendResponse(req, res, makeResponse('ok', {
+        indexes: { index: [], lastModified: lastModifiedMs, ignoredArticles: 'The El La Los Las Le Les' }
+      }));
+    }
     sendResponse(req, res, makeResponse('ok', {
-      indexes: { index, lastModified: Date.now(), ignoredArticles: 'The El La Los Las Le Les' }
+      indexes: { index, lastModified: lastModifiedMs, ignoredArticles: 'The El La Los Las Le Les' }
     }));
   });
 

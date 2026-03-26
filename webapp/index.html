@@ -603,6 +603,14 @@
       <h2 id="content-title">Recently Added</h2>
       <div class="header-right">
         <div id="scan-progress-wrap" class="spc-wrap"></div>
+        <button id="select-mode-btn" class="btn-sm hidden" title="Select songs for ZIP">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="9,12 12,15 19,8"/></svg>
+          Select
+        </button>
+        <button id="zip-dl-btn" class="btn-sm hidden" title="Download as ZIP">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          ZIP<span id="zip-count-badge"></span>
+        </button>
         <button id="add-all-btn" class="btn-sm">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Append All
@@ -910,6 +918,30 @@
 <!-- EASTER EGG – outside #app so position:fixed is always viewport-relative -->
 <div id="egg-pixel" style="position:fixed;left:var(--sidebar);bottom:var(--player);width:6px;height:6px;opacity:0;cursor:pointer;z-index:9999;"></div>
 <canvas id="egg-canvas" style="display:none;position:fixed;left:0;right:0;bottom:var(--player);height:180px;z-index:9999;"></canvas>
+
+<div id="boot-overlay" class="hidden">
+  <div class="boot-card">
+    <svg class="boot-logo" width="52" height="52" viewBox="72 33 76 89">
+      <defs>
+        <linearGradient id="lg-bo-o" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#c4b5fd"/>
+          <stop offset="100%" stop-color="#6d28d9" stop-opacity=".85"/>
+        </linearGradient>
+        <linearGradient id="lg-bo-i" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#4c1d95"/>
+          <stop offset="100%" stop-color="#a78bfa"/>
+        </linearGradient>
+      </defs>
+      <polygon fill="url(#lg-bo-o)" points="75,118.5 75,35.5 96,48.5 96,118.5"/>
+      <polygon fill="url(#lg-bo-i)" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/>
+      <polygon fill="url(#lg-bo-o)" points="124,118.5 124,48.5 145,35.5 145,118.5"/>
+    </svg>
+    <div class="boot-title"><span class="boot-m">m</span><span class="boot-stream">Stream</span> <span class="boot-velvet-tag">Velvet</span></div>
+    <div id="boot-status" class="boot-status">Starting up…</div>
+    <div class="boot-dots"><span></span><span></span><span></span></div>
+    <button id="boot-skip-btn" class="boot-skip hidden">Continue anyway</button>
+  </div>
+</div>
 
 <div id="tip-box"></div>
 <script src="/app.js"></script>

@@ -4,7 +4,7 @@
 
 ## NOW — In Progress / Remaining
 
-### 🎙 Podcasts — ✅ DONE (2026-03-21); Save to Library ✅ DONE (2026-06-17)
+### 🎙 Podcasts — ✅ DONE (2026-03-21); Save to Library ✅ DONE (2026-03-24)
 
 > See [`docs/podcasts.md`](docs/podcasts.md) for full documentation.
 
@@ -59,7 +59,7 @@
 > See `docs/subsonic.md` for the full implementation reference.
 
 - [ ] **Auth**: verify `enc:` hex-encoded password variant works (some clients use it instead of MD5 token)
-- [ ] **`getIndexes`**: confirm `ifModifiedSince` filtering behaves correctly — currently ignored, always returns full list
+- [x] **`getIndexes`**: `ifModifiedSince` filtering implemented — returns empty `indexes` when library unchanged since given timestamp; `lastModified` now reflects actual last scan time instead of `Date.now()`
 - [ ] **`getMusicDirectory`**: test with DSub, Ultrasonic, Jamstash — confirm folder hierarchy and parent-id navigation work in each client
 - [ ] **`search2` / `search3`**: test wildcard edge-cases and empty-query behaviour across clients
 - [ ] **`getAlbumList` / `getAlbumList2`**: audit `byYear`, `byGenre`, `newest`, `recent`, `random`, `alphabeticalByName/Artist`, `starred` — compare response shape with OpenSubsonic reference
@@ -90,6 +90,21 @@
   - Docs: `docs/smart-playlists.md`
 - [x] Libraries (vpath) filter — toggle pills per music library; child-vpath prefix resolution
 - [x] Fresh Picks toggle — shuffle on every open; "New picks" button in results; nav indicator
+
+---
+
+### 📱 Mobile / PWA Responsive Layout — PLANNED (not started)
+
+Audit completed 2026-03-26. Strategy: **Option A — separate `mobile.css`** loaded via `<link media="(max-width:1023px)">`. Zero changes to existing `style.css` or desktop layout.
+
+- [ ] Create `webapp/mobile.css` with all phone/tablet overrides
+  - `≤768px` phones: CSS grid collapses to single column; sidebar + queue hidden; bottom tab-bar replaces sidebar nav; player compacts to ~80px mini-bar
+  - `769–1023px` tablet portrait (iPad): sidebar as slide-in drawer overlay; queue collapsible; full player
+- [ ] Add `<link rel="stylesheet" media="(max-width:1023px)" href="/webapp/mobile.css">` in `index.html`
+- [ ] iOS PWA meta tags (3 lines in `<head>`): `apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`, `theme-color`
+- [ ] Global `-webkit-tap-highlight-color: transparent` in `mobile.css`
+- [ ] Enhance inline Blob manifest: add `orientation:"portrait"`, `id`, `scope`
+- [ ] (Optional, low priority) Service worker for offline caching
 
 ---
 
@@ -201,9 +216,21 @@ Analyse every track's actual audio content (BPM, key, timbre, energy) and use th
 - [x] Backend: `filepathPrefix` added to `/api/v1/db/search`, `searchFiles`, `searchFilesAllWords` (SQLite + Loki)
 - [x] `save/lyrics/` added to `.gitignore`; `README.md` anchor committed
 
-### Subsonic REST API 1.16.1 + Open Subsonic ✅ (v5.16.17)
+### Radio: ICY bitrate display in playbar ✅ (2026-03-24)
+- [x] `_fetchIcyMeta()` returns `{ title, bitrate }` — captures `icy-br` response header
+- [x] `/api/v1/radio/nowplaying` includes `bitrate` in response
+- [x] `#player-radio-kbps` pill badge in playbar — shown when stream advertises bitrate, hidden otherwise
+- [x] "Podcast Feeds" menu rename (was "Feeds")
+
+### Auto-DJ keyword filter — fuzzy double-letter matching ✅ (2026-03-25)
+- [x] `_djSongBlocked()` normalises both haystack and filter word by collapsing repeated consecutive chars before comparing — `acapella` now matches `Acappella`, etc.
+
+### Subsonic `getIndexes` `ifModifiedSince` ✅ (2026-03-25)
+- [x] `lastModified` now reflects real last-scan timestamp (`MAX(ts)` from files table)
+- [x] When client sends `ifModifiedSince` ≥ last scan, returns empty index (no redundant transfer)
+- [x] `getLastScannedMs()` added to SQLite + Loki backends
 - [x] Full `/rest/*` endpoint suite: ping, getLicense, getMusicFolders, getIndexes, getArtists, getArtist, getAlbum, getSong, getMusicDirectory, search2/3, getAlbumList/2, getRandomSongs, getSongsByGenre, getGenres, getNowPlaying, getStarred/2, star, unstar, setRating, scrobble, stream, download, getCoverArt, getLyrics, getUser, getUsers, getPlaylists + CRUD, getBookmarks + CRUD, getScanStatus, getOpenSubsonicExtensions, createUser, updateUser, deleteUser, changePassword
-- [x] MD5 token auth (`?t=&s=`) + plaintext auth (`?p=`); separate `subsonic-password` field per user
+- [x] MD5 token auth (`?t=&s=`) + plaintext auth (`?p=`) + `enc:` hex-encoded password (`?p=enc:…`); separate `subsonic-password` field per user
 - [x] `openSubsonic: true` + `type: "mstream"` in every response
 - [x] Admin UI: Password modal has separate mStream and Subsonic password fields
 - [x] Player UI: "Subsonic API" nav item shows server URL, password change form, connection hints
@@ -372,10 +399,11 @@ Instead of searching Discogs by metadata, let the user paste a Discogs release o
 - [ ] Render duplicate groups with side-by-side metadata diff; allow selecting which to keep
 - [ ] Provide a "Delete file" action (admin-only, calls existing file-delete endpoint)
 
-### Bulk Download as ZIP
-- [ ] Server: add `POST /api/v1/download/zip` — accept array of filepaths, stream a ZIP archive using `archiver`
-- [ ] Client: add "Download Album" button on album detail views and "Download Playlist" on playlist views
-- [ ] Show a progress toast while the stream downloads; handle abort
+### ~~Bulk Download as ZIP~~ ✅ DONE — 2026-03-25
+- [x] Server: `POST /api/v1/download/zip` — accepts `fileArray` (JSON array of filepaths) + optional `filename`; streams a ZIP archive; pre-flight size guard returns 413 if over `maxZipMb` limit
+- [x] Client: Download ZIP button in page header — shown on album and playlist views, hidden elsewhere; filename = album/playlist name
+- [x] Admin: "Max ZIP Download Size" setting in DB Scan Settings (default 500 MB)
+- [x] Error handling: 413 → toast with MB limit details; network errors → generic toast
 
 ### Gapless — scan-time silence trimming *(optional enhancement)*
 The 80 ms timer-based gapless works well for most content. This would improve albums with deliberate silence gaps:

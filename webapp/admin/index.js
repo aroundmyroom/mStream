@@ -1546,6 +1546,12 @@ const dbView = Vue.component('db-view', {
                         <a v-on:click="toggleAllowId3Edit()" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
+                    <tr>
+                      <td><b>Max ZIP Download Size:</b> {{dbParams.maxZipMb || 500}} MB</td>
+                      <td>
+                        <a v-on:click="openModal('edit-max-zip-mb-modal')" class="btn-sm btn-sm-edit">edit</a>
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -4244,6 +4250,47 @@ const editScanIntervalView = Vue.component('edit-scan-interval-modal', {
   }
 });
 
+const editMaxZipMbModal = Vue.component('edit-max-zip-mb-modal', {
+  data() {
+    return {
+      params: ADMINDATA.dbParams,
+      submitPending: false,
+      editValue: ADMINDATA.dbParams.maxZipMb || 500
+    };
+  },
+  template: `
+    <form @submit.prevent="updateParam">
+      ${mHead('Max ZIP Download Size', 'Maximum total size of a ZIP download (MB)')}
+      <div class="modal-body">
+        <div class="field-group">
+          <label for="edit-max-zip-mb">Max size (MB)</label>
+          <input v-model.number="editValue" id="edit-max-zip-mb" required type="number" min="1" step="1">
+          <span class="field-hint">ZIP downloads exceeding this limit are rejected. Default: 500 MB.</span>
+        </div>
+      </div>
+      ${mFoot('Update', 'Updating')}
+    </form>`,
+  methods: {
+    updateParam: async function() {
+      try {
+        this.submitPending = true;
+        await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/admin/db/params/max-zip-mb`,
+          data: { maxZipMb: this.editValue }
+        });
+        Vue.set(ADMINDATA.dbParams, 'maxZipMb', this.editValue);
+        modVM.closeModal();
+        iziToast.success({ title: 'Updated Successfully', position: 'topCenter', timeout: 3500 });
+      } catch(err) {
+        iziToast.error({ title: 'Update Failed', position: 'topCenter', timeout: 3500 });
+      } finally {
+        this.submitPending = false;
+      }
+    }
+  }
+});
+
 const editSslModal =  Vue.component('edit-ssl-modal', {
   data() {
     const ssl = ADMINDATA.serverParams && ADMINDATA.serverParams.ssl;
@@ -4663,6 +4710,7 @@ const modVM = new Vue({
     'edit-ssl-modal': editSslModal,
     'federation-generate-invite-modal': federationGenerateInvite,
     'edit-db-engine-modal': editDbEngineModal,
+    'edit-max-zip-mb-modal': editMaxZipMbModal,
     'dir-access-test-modal': dirAccessTestModal,
     'null-modal': nullModal
   },

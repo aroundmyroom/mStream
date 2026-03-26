@@ -38,6 +38,8 @@ const S = {
   view:     'recent',
   backFn:   null,
   curSongs: [],      // songs in current view (for play-all / add-all)
+  selectMode: false, // true when song-selection mode is active
+  selectedIdxs: new Set(), // Set of curSongs indices chosen for ZIP
   ctxSong:  null,    // song target for context menu
   feDir:    '',      // file explorer current path
   feDirStack: [],    // navigation history stack
@@ -212,6 +214,84 @@ function mediaUrl(fp) {
 }
 function dlUrl(fp) { return `/media/${encodeFp(fp)}?token=${S.token}`; }
 
+// Download a list of songs as a ZIP file.
+// If select mode is active with songs chosen, downloads only the selection.
+// Shows a preparing indicator, triggers browser download, handles 413 size-limit error.
+async function _zipDownload(songs, filename) {
+  // Filter by active selection if any
+  let toDownload = songs;
+  if (S.selectMode && S.selectedIdxs && S.selectedIdxs.size > 0) {
+    toDownload = [...S.selectedIdxs].sort((a, b) => a - b).map(i => S.curSongs[i]).filter(Boolean);
+  }
+  if (!toDownload || !toDownload.length) { toast('No songs to download'); return; }
+  const zipBtn = document.getElementById('zip-dl-btn');
+  const badge  = document.getElementById('zip-count-badge');
+  if (zipBtn) { zipBtn.disabled = true; }
+  if (badge)  { badge.textContent = ' …'; }
+  toast('Preparing ZIP…');
+  try {
+    const resp = await fetch('/api/v1/download/zip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-access-token': S.token },
+      body: JSON.stringify({
+        fileArray: JSON.stringify(toDownload.map(s => s.filepath)),
+        filename: filename || 'mstream-download',
+      }),
+    });
+    if (resp.status === 413) {
+      const j = await resp.json().catch(() => ({}));
+      toast(`ZIP too large — server limit is ${j.maxMb || '?'} MB (increase in Admin → DB Settings)`);
+      return;
+    }
+    if (!resp.ok) { toast('Download failed'); return; }
+    const blob = await resp.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = (filename || 'mstream-download') + '.zip';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    toast('ZIP downloaded');
+  } catch (e) {
+    toast('Download failed');
+  } finally {
+    if (zipBtn) { zipBtn.disabled = false; }
+    _updateZipCount();
+  }
+}
+
+function _updateZipCount() {
+  const badge = document.getElementById('zip-count-badge');
+  if (!badge) return;
+  const n = (S.selectMode && S.selectedIdxs) ? S.selectedIdxs.size : 0;
+  badge.textContent = n > 0 ? ` (${n})` : '';
+}
+
+function _exitSelectMode() {
+  S.selectMode = false;
+  S.selectedIdxs = new Set();
+  document.querySelectorAll('.song-list.select-mode').forEach(l => l.classList.remove('select-mode'));
+  document.querySelectorAll('.song-row.selected').forEach(r => r.classList.remove('selected'));
+  const selBtn = document.getElementById('select-mode-btn');
+  if (selBtn) selBtn.classList.remove('active');
+  _updateZipCount();
+}
+
+function _toggleSelectMode() {
+  if (S.selectMode) {
+    _exitSelectMode();
+  } else {
+    S.selectMode = true;
+    S.selectedIdxs = new Set();
+    document.querySelectorAll('.song-list').forEach(l => l.classList.add('select-mode'));
+    const selBtn = document.getElementById('select-mode-btn');
+    if (selBtn) selBtn.classList.add('active');
+    _updateZipCount();
+  }
+}
+
 let _toastT;
 function toast(msg, ms = 2800) {
   const el = document.getElementById('toast');
@@ -333,8 +413,13 @@ function restoreQueue() {
   try {
     const s = S.queue[S.idx];
     if (s) {
-      audioEl.src = mediaUrl(s.filepath);
-      audioEl.load();
+      // Radio streams are live — never preload on restore (no seek position to recover,
+      // and opening the proxy connection only to tear it down when the user picks a
+      // different track causes network/event-loop contention that produces audio cracks).
+      if (!s.isRadio) {
+        audioEl.src = mediaUrl(s.filepath);
+        audioEl.load();
+      }
       Player.updateBar();
       highlightRow();
       if (s.isRadio) { _startRadioNowPlaying(s); }
@@ -718,13 +803,15 @@ function _audioBookExclusions() {
 // Returns true if a song should be EXCLUDED by the active keyword filter.
 function _djSongBlocked(song) {
   if (!S.djFilterEnabled || !S.djFilterWords.length) return false;
-  const haystack = [
+  // Normalise: lowercase + collapse repeated characters (acappella == acapella)
+  const norm = s => s.toLowerCase().replace(/(.)\1+/g, '$1');
+  const haystack = norm([
     song.title    || '',
     song.artist   || '',
     song.album    || '',
     song.filepath || '',
-  ].join(' ').toLowerCase();
-  return S.djFilterWords.some(w => w && haystack.includes(w.toLowerCase()));
+  ].join(' '));
+  return S.djFilterWords.some(w => w && haystack.includes(norm(w)));
 }
 
 // Shared helper — returns {ignoreList, songs} from the random-songs API
@@ -1125,6 +1212,11 @@ function setBack(fn) {
 function setNavActive(view) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   document.querySelectorAll('.pl-row').forEach(r => r.classList.remove('active'));
+  _exitSelectMode();
+  const zb = document.getElementById('zip-dl-btn');
+  if (zb) { zb.classList.add('hidden'); zb.onclick = null; }
+  const sb = document.getElementById('select-mode-btn');
+  if (sb) { sb.classList.add('hidden'); sb.onclick = null; }
 }
 function setPlaylistActive(name) {
   document.querySelectorAll('.pl-row').forEach(r => {
@@ -1137,6 +1229,11 @@ function setSplActive(id) {
     r.classList.toggle('active', r.dataset.splid !== undefined && parseInt(r.dataset.splid, 10) === id);
   });
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  _exitSelectMode();
+  const zb = document.getElementById('zip-dl-btn');
+  if (zb) { zb.classList.add('hidden'); zb.onclick = null; }
+  const sb = document.getElementById('select-mode-btn');
+  if (sb) { sb.classList.add('hidden'); sb.onclick = null; }
 }
 // Set the "Now Playing" context label (radio / podcast / playlist / smart-playlist)
 // Pass null to clear (generic library/queue play)
@@ -1154,6 +1251,7 @@ function renderSongRows(songs) {
     const art    = artUrl(s['album-art'], 's');
     return `<div class="song-row" data-ci="${i}">
       <div class="row-num">
+        <div class="row-check"></div>
         <span class="num-val">${i + 1}</span>
         <svg class="row-play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
       </div>
@@ -1305,6 +1403,12 @@ function attachSongListEvents(container, songs) {
     row.addEventListener('click', e => {
       if (e.target.closest('.add-btn') || e.target.closest('.ctx-btn') || e.target.closest('.row-stars')) return;
       const i = parseInt(row.dataset.ci);
+      if (S.selectMode) {
+        if (S.selectedIdxs.has(i)) { S.selectedIdxs.delete(i); row.classList.remove('selected'); }
+        else { S.selectedIdxs.add(i); row.classList.add('selected'); }
+        _updateZipCount();
+        return;
+      }
       if (songs[i]) Player.queueAndPlay(songs[i]);
     });
   });
@@ -1332,7 +1436,8 @@ function attachSongListEvents(container, songs) {
   });
 }
 
-function showSongs(songs, title) {
+function showSongs(songs, title, zipFilename) {
+  _exitSelectMode();
   S.curSongs = songs;
   document.getElementById('play-all-btn').onclick = () => {
     if (songs.length) { _setPlaySource(null); Player.setQueue(songs, 0); toast(`Playing ${songs.length} songs`); }
@@ -1340,6 +1445,15 @@ function showSongs(songs, title) {
   document.getElementById('add-all-btn').onclick = () => {
     if (songs.length) { Player.addAll(songs); }
   };
+  const zipBtn = document.getElementById('zip-dl-btn');
+  const selBtn = document.getElementById('select-mode-btn');
+  if (zipFilename) {
+    if (zipBtn) { zipBtn.classList.remove('hidden'); zipBtn.onclick = () => _zipDownload(songs, zipFilename); }
+    if (selBtn) { selBtn.classList.remove('hidden'); selBtn.onclick = _toggleSelectMode; }
+  } else {
+    if (zipBtn) { zipBtn.classList.add('hidden'); zipBtn.onclick = null; }
+    if (selBtn) { selBtn.classList.add('hidden'); selBtn.onclick = null; }
+  }
   if (!songs.length) { setBody('<div class="empty-state">No songs found</div>'); return; }
   const body = document.getElementById('content-body');
   body.innerHTML = `<div class="song-list">${renderSongRows(songs)}</div>`;
@@ -3563,6 +3677,248 @@ const VIZ = (() => {
     }
   }
 
+  // ── Split-flap (flipboard) mode ──────────────────────────────
+  // ── Split-flap (flipboard) mode ──────────────────────────────
+  // Self-contained board built from individual tile DOM nodes.
+  // Each tile has: fixed top half, fixed bottom half, and two flap halves
+  // that hinge on the centre line to animate character changes.
+  const FLIP_CHARSET = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,-!?\'/:()';
+  const FLIP_COLS    = 22;   // characters per row
+  const FLIP_ROWS    = 3;    // rows visible at once
+  const FLIP_STAGGER = 28;   // ms between each tile in a row
+  const FLIP_DUR     = 200;  // ms for one flip animation
+
+  // Board state
+  let _flipGrid   = [];     // FLIP_ROWS × FLIP_COLS DOM tile objects
+  let _flipChars  = [];     // current displayed chars [row][col]
+  let _flipActive = -1;     // which row is the "active" lyric (highlighted)
+  let _flipRafId  = null;
+  let _flipLyricActiveIdx = -1;  // mirrors lyricActiveIdx for flipboard
+
+  function _flipChar(charStr) {
+    // Normalise to a char in FLIP_CHARSET; uppercase only
+    const c = (charStr || ' ').toUpperCase();
+    return FLIP_CHARSET.includes(c) ? c : ' ';
+  }
+
+  function _createTile(initChar) {
+    const c = _flipChar(initChar);
+    const wrap = document.createElement('div');
+    wrap.className = 'flip-tile';
+
+    // Bottom half — always visible, pre-loaded with new char from first frame
+    const bottomBg = document.createElement('div');
+    bottomBg.className = 'ft-bottom-bg';
+    const bottomInner = document.createElement('div');
+    bottomInner.className = 'ft-inner';
+    bottomInner.textContent = c;
+    bottomBg.appendChild(bottomInner);
+
+    // Top half backing — shows new char's top half, sits behind the flap
+    const topBg = document.createElement('div');
+    topBg.className = 'ft-top-bg';
+    const topInner = document.createElement('div');
+    topInner.className = 'ft-inner';
+    topInner.textContent = c;
+    topBg.appendChild(topInner);
+
+    // Flap — covers top half, shows OLD char, drops 0°→90° on centre hinge
+    const flap = document.createElement('div');
+    flap.className = 'ft-flap';
+    const flapInner = document.createElement('div');
+    flapInner.className = 'ft-inner';
+    flapInner.textContent = c;
+    flap.appendChild(flapInner);
+
+    wrap.appendChild(bottomBg);
+    wrap.appendChild(topBg);
+    wrap.appendChild(flap);
+
+    return { el: wrap, bottomBg, topBg, flap, char: c, animating: false };
+  }
+
+  function _buildFlipBoard() {
+    const container = document.getElementById('vlm-flip-board');
+    if (!container) return;
+    container.innerHTML = '';
+    _flipGrid  = [];
+    _flipChars = [];
+
+    for (let r = 0; r < FLIP_ROWS; r++) {
+      const rowEl = document.createElement('div');
+      rowEl.className = 'flip-row';
+      const rowTiles = [];
+      const rowChars = [];
+      for (let c = 0; c < FLIP_COLS; c++) {
+        const tile = _createTile(' ');
+        rowEl.appendChild(tile.el);
+        rowTiles.push(tile);
+        rowChars.push(' ');
+      }
+      container.appendChild(rowEl);
+      _flipGrid.push({ el: rowEl, tiles: rowTiles });
+      _flipChars.push(rowChars);
+    }
+    _flipActive = -1;
+    _flipLyricActiveIdx = -1;
+  }
+
+  function _flipTileTo(tile, newChar, delay) {
+    const c = _flipChar(newChar);
+    if (tile.char === c && !tile.animating) return;
+    tile.char = c;
+
+    setTimeout(() => {
+      if (tile.animating) return;
+      tile.animating = true;
+
+      // Load new char on backing elements immediately.
+      // bottom half is already visible (real boards pre-show next card's bottom).
+      tile.bottomBg.querySelector('.ft-inner').textContent = c;
+      tile.topBg.querySelector('.ft-inner').textContent    = c;
+
+      // Animate flap (old char top half) falling: 0° → 90° around the centre hinge.
+      // backface-visibility:hidden makes it invisible once it passes 90°,
+      // cleanly revealing ft-top-bg (new char top) beneath.
+      const startTime = performance.now();
+
+      function animate(now) {
+        const t = Math.min((now - startTime) / FLIP_DUR, 1);
+        // ease-in quad — accelerates as the card falls, feels natural
+        const ease = t * t;
+        tile.flap.style.transform = `rotateX(${ease * 90}deg)`;
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          // Flap is edge-on/invisible at 90°. Snap text + angle back to rest.
+          tile.flap.querySelector('.ft-inner').textContent = c;
+          tile.flap.style.transition = 'none';
+          tile.flap.style.transform  = 'rotateX(0deg)';
+          requestAnimationFrame(() => {
+            tile.flap.style.transition = '';
+            tile.animating = false;
+          });
+        }
+      }
+      requestAnimationFrame(animate);
+    }, delay);
+  }
+
+  function _flipDisplayLines(lines, activeRow) {
+    // lines: array of strings, each up to FLIP_COLS chars
+    // activeRow: which row index to highlight (-1 = none)
+    for (let r = 0; r < FLIP_ROWS; r++) {
+      const text  = (lines[r] || '').toUpperCase();
+      const row   = _flipGrid[r];
+      if (!row) continue;
+
+      // Update active highlight
+      row.el.classList.toggle('flip-row-active', r === activeRow);
+
+      // Pad / centre text
+      const pad   = Math.max(0, Math.floor((FLIP_COLS - text.length) / 2));
+      const padded = (' '.repeat(pad) + text).padEnd(FLIP_COLS, ' ').slice(0, FLIP_COLS);
+
+      padded.split('').forEach((ch, c) => {
+        const want = _flipChar(ch);
+        if (_flipChars[r][c] !== want) {
+          _flipChars[r][c] = want;
+          _flipTileTo(row.tiles[c], want, c * FLIP_STAGGER);
+        }
+      });
+    }
+    _flipActive = activeRow;
+  }
+
+  // Slice FLIP_ROWS lines centred around activeIdx
+  function _flipGetWindow(lines, activeIdx) {
+    if (!lines || !lines.length) return { window: ['', '', ''], rowInWindow: -1 };
+    const total = lines.length;
+    if (total <= FLIP_ROWS) {
+      return {
+        window: lines.map(l => l.text || '').concat(Array(FLIP_ROWS).fill('')).slice(0, FLIP_ROWS),
+        rowInWindow: activeIdx >= 0 ? activeIdx : -1,
+      };
+    }
+    // Centre the active line in the middle row
+    const mid  = Math.floor(FLIP_ROWS / 2);
+    let start  = Math.max(0, activeIdx - mid);
+    let end    = start + FLIP_ROWS;
+    if (end > total) { end = total; start = Math.max(0, end - FLIP_ROWS); }
+    const slice = lines.slice(start, end).map(l => l.text || '');
+    while (slice.length < FLIP_ROWS) slice.push('');
+    return { window: slice, rowInWindow: activeIdx - start };
+  }
+
+  function flipboardTick(currentTime) {
+    if (vizTopMode !== 4) return;
+    if (!lyricLines.length) return;
+
+    const t = currentTime - 0.2;
+    let newIdx = -1;
+    for (let i = 0; i < lyricLines.length; i++) {
+      if (lyricLines[i].time != null && lyricLines[i].time <= t) newIdx = i;
+      else if (lyricLines[i].time != null) break;
+    }
+
+    if (newIdx === _flipLyricActiveIdx) return;
+    _flipLyricActiveIdx = newIdx;
+
+    const { window: win, rowInWindow } = _flipGetWindow(lyricLines, newIdx);
+    _flipDisplayLines(win, rowInWindow);
+  }
+
+  async function fetchAndRenderFlipboard() {
+    const container = document.getElementById('vlm-flip-board');
+    if (!container) return;
+
+    _buildFlipBoard();
+    _flipLyricActiveIdx = -1;
+
+    // Reuse the same lyric data already fetched (or fetch if not yet available)
+    if (lyricLines.length > 0) {
+      const { window: win, rowInWindow } = _flipGetWindow(lyricLines, lyricActiveIdx);
+      _flipDisplayLines(win, rowInWindow);
+      return;
+    }
+
+    // Need to fetch
+    const s = S.queue[S.idx];
+    if (!s) { _flipDisplayLines(['NO TRACK PLAYING', '', ''], -1); return; }
+
+    _flipDisplayLines(['LOADING...', '', ''], -1);
+
+    const artist   = encodeURIComponent(s.artist  || '');
+    const title    = encodeURIComponent(s.title   || s.filepath?.split('/').pop() || '');
+    const duration = encodeURIComponent(Math.round(s.duration || 0));
+    const filepath = encodeURIComponent(s.filepath || '');
+
+    try {
+      const r = await fetch(
+        `/api/v1/lyrics?artist=${artist}&title=${title}&duration=${duration}&filepath=${filepath}`,
+        { headers: { 'x-access-token': S.token } }
+      );
+      const data = await r.json();
+      if (data.notFound || !data.lines || !data.lines.length) {
+        // Show song info instead
+        _flipDisplayLines([
+          (s.title || '').toUpperCase().slice(0, FLIP_COLS),
+          (s.artist || '').toUpperCase().slice(0, FLIP_COLS),
+          'NO LYRICS FOUND',
+        ], -1);
+        return;
+      }
+      // Share the parsed state with regular lyrics mode
+      lyricLines  = data.lines;
+      lyricSynced = !!data.synced;
+      lyricActiveIdx = -1;
+      const { window: win, rowInWindow } = _flipGetWindow(lyricLines, -1);
+      _flipDisplayLines(win, rowInWindow);
+    } catch (_e) {
+      _flipDisplayLines(['ERROR LOADING', 'LYRICS', ''], -1);
+    }
+  }
+
   function applyMode() {
     const bcCanvas   = document.getElementById('viz-canvas');
     const spCanvas   = document.getElementById('spec-canvas');
@@ -3683,11 +4039,14 @@ const VIZ = (() => {
       vizTopMode = (vizTopMode + 1) % 4;
       applyMode();
     },
-    lyricTick(t) { lyricTick(t); },
+    lyricTick(t) {
+      lyricTick(t);
+    },
     songChanged() {
       updateSongInfo();
-      if (vizTopMode === 3 && !document.getElementById('viz-overlay').classList.contains('hidden')) {
-        fetchAndRenderLyrics();
+      const overlayHidden = document.getElementById('viz-overlay').classList.contains('hidden');
+      if (!overlayHidden) {
+        if (vizTopMode === 3) fetchAndRenderLyrics();
       }
     },
     initAudio()   { ensureAudio(); },
@@ -3985,6 +4344,14 @@ async function openPlaylist(name) {
   document.getElementById('add-all-btn').onclick = () => {
     if (S.curSongs.length) { Player.addAll(S.curSongs); }
   };
+  _exitSelectMode();
+  const zipBtnPl = document.getElementById('zip-dl-btn');
+  if (zipBtnPl) {
+    zipBtnPl.classList.remove('hidden');
+    zipBtnPl.onclick = () => _zipDownload(S.curSongs, name);
+  }
+  const selBtnPl = document.getElementById('select-mode-btn');
+  if (selBtnPl) { selBtnPl.classList.remove('hidden'); selBtnPl.onclick = _toggleSelectMode; }
 
   try {
     const d = await api('POST', 'api/v1/playlist/load', { playlistname: name });
@@ -4496,7 +4863,7 @@ async function viewAlbumSongs(albumName, artist, backFn) {
     const body = { album: albumName };
     if (artist) body.artist = artist;
     const d = await api('POST', 'api/v1/db/album-songs', body, sig);
-    showSongs(d.map(norm));
+    showSongs(d.map(norm), null, albumName || 'album');
   } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
@@ -9327,6 +9694,24 @@ function openAdminPanel() {
 }
 
 function showApp() {
+  // ── Boot overlay: show while queue/waveform restore is in progress ──────
+  const _bootEl  = document.getElementById('boot-overlay');
+  const _bootSt  = document.getElementById('boot-status');
+  const _bootSkip = document.getElementById('boot-skip-btn');
+  function _bootMsg(m) { if (_bootSt) _bootSt.textContent = m; }
+  function _bootDismiss() {
+    if (!_bootEl || _bootEl.classList.contains('boot-fade')) return;
+    _bootEl.classList.add('boot-fade');
+    setTimeout(() => _bootEl.classList.add('hidden'), 600);
+  }
+  if (_bootEl) _bootEl.classList.remove('hidden');
+  _bootMsg('Loading your library…');
+  // Skip button appears after 2.5 s for slow connections
+  const _skipShowT = setTimeout(() => { if (_bootSkip) _bootSkip.classList.remove('hidden'); }, 2500);
+  if (_bootSkip) _bootSkip.onclick = () => { clearTimeout(_skipShowT); _bootDismiss(); };
+  // Hard timeout — always dismiss after 6 s no matter what
+  const _bootHardT = setTimeout(() => _bootDismiss(), 6000);
+
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').classList.remove('hidden');
   if (S.isAdmin) {
@@ -9347,6 +9732,22 @@ function showApp() {
   viewRecent();
   refreshQueueUI();
   restoreQueue();
+  // Boot overlay dismiss — wait for audio seek (waveform position restored) or fall back.
+  // Radio items are not preloaded on restore (no seek position) so skip the seeked wait.
+  const _restoredSong = S.queue.length > 0 && S.idx >= 0 ? S.queue[S.idx] : null;
+  if (_restoredSong && !_restoredSong.isRadio) {
+    _bootMsg('Restoring your session\u2026');
+    audioEl.addEventListener('seeked', function _onBootSeeked() {
+      audioEl.removeEventListener('seeked', _onBootSeeked);
+      clearTimeout(_bootHardT); clearTimeout(_skipShowT);
+      _bootMsg('Ready!');
+      setTimeout(_bootDismiss, 450);
+    }, { once: true });
+  } else {
+    // No track to restore (or radio) — dismiss as soon as the library view is painted
+    clearTimeout(_bootHardT); clearTimeout(_skipShowT);
+    requestAnimationFrame(() => requestAnimationFrame(_bootDismiss));
+  }
   // Restore Auto-DJ play history before re-enabling so the DJ doesn't re-play recent songs
   const _savedIgnore = JSON.parse(localStorage.getItem(_djKey('ignore')) || 'null');
   if (_savedIgnore) S.djIgnore = _savedIgnore;

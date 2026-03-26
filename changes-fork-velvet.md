@@ -1,5 +1,42 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Release v5.16.28-velvet — 2026-03-26
+
+**Files:** `package.json`, `README.md`, `docs/API/download.md`, `releases/v5.16.28-velvet.md`
+
+- Bumped version to `5.16.28-velvet`
+- Created release notes `releases/v5.16.28-velvet.md` covering ZIP download, Subsonic `ifModifiedSince`, and Auto-DJ fuzzy keyword fix
+- Updated `README.md`: version line, comparison table (added ZIP download, ListenBrainz, recording rows; updated Internet Radio and Podcasts rows), new ZIP Download and ListenBrainz feature sections, recording + podcast save-to-server bullets
+- Rewrote `docs/API/download.md` to document the current `/api/v1/download/zip` endpoint (auth, `filename` param, 413 size-guard response)
+
+## Download as ZIP — 2026-03-25
+
+**Files:** `src/api/download.js`, `src/api/admin.js`, `src/util/admin.js`, `src/state/config.js`, `webapp/app.js`, `webapp/index.html`, `webapp/admin/index.js`
+
+- **ZIP download button** in the page header — appears as a small download icon + "ZIP" label when viewing an album or a playlist; hidden on all other views.
+- **Album downloads** — button wired in `viewAlbumSongs()`; filename defaults to the album name.
+- **Playlist downloads** — button wired in `openPlaylist()`; filename is the playlist name.
+- **Auto-hide** — `setNavActive()` and `setSplActive()` both hide the zip button so it never lingers on unrelated views; `showSongs()` hides it when called without an explicit filename.
+- **Backend size guard** — `POST /api/v1/download/zip` now accepts an optional `filename` parameter (sanitised, max 120 chars) and performs a pre-flight disk-size check. If the total exceeds the server limit a `413` is returned with `{ error, maxMb, sizeMb }`.
+- **Configurable max size** — new `maxZipMb` field in `scanOptions` (default 500 MB); updated via `POST /api/v1/admin/db/params/max-zip-mb`.
+- **Admin UI** — "Max ZIP Download Size" row added to the DB Scan Settings card with an edit modal.
+- **Frontend error handling** — 413 → toast with exact MB limit; network errors → generic toast.
+
+## Subsonic: getIndexes ifModifiedSince support — 2026-03-25
+
+**Files:** `src/api/subsonic.js`, `src/db/sqlite-backend.js`, `src/db/loki-backend.js`, `src/db/manager.js`
+
+- **`getIndexes` `ifModifiedSince`** — the parameter is now honoured. Clients that send `ifModifiedSince` (e.g. DSub, Symfonium) receive an empty `indexes` response when the library has not changed since the given timestamp, saving a full artist-list transfer on every poll.
+- **`lastModified`** in the `getIndexes` response now reflects the actual last-scan timestamp (`MAX(ts)` from the files table) instead of the always-changing `Date.now()` value.
+- Added lightweight `getLastScannedMs()` to both SQLite and Loki backends (single `SELECT MAX(ts)` — no full stats scan).
+- Note: `enc:` hex-password auth and scrobble→play-count were already implemented in a prior session.
+
+## Auto-DJ Keyword Filter: fuzzy double-letter matching — 2026-03-25
+
+**Files:** `webapp/app.js`
+
+- **Bug fix** — filter words like `acapella` now correctly block songs titled e.g. `(Album Acappella)`. Both sides of the comparison are normalised by collapsing repeated consecutive characters before matching, so spelling variants with single/double letters (`acapella` ↔ `acappella`, etc.) are treated as equal. Case-insensitivity was already in place.
+
 ## Radio Stream Bitrate Display + Menu Rename — 2026-03-24
 
 **Files:** `src/api/radio.js`, `webapp/app.js`, `webapp/index.html`, `webapp/style.css`

@@ -83,6 +83,32 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
   box-shadow:0 28px 70px rgba(0,0,0,.55),0 0 100px rgba(139,92,246,.08);
 }
 :root.light .login-card{box-shadow:0 12px 48px rgba(0,0,0,.13),0 0 60px rgba(109,60,230,.07);}
+
+/* ── BOOT OVERLAY ───────────────────────────────────────────── */
+#boot-overlay{
+  position:fixed;inset:0;z-index:150;
+  display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(139,92,246,.18),transparent),var(--bg);
+  transition:opacity .55s ease;
+}
+:root.light #boot-overlay{background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(109,60,230,.10),transparent),#f0f2f7;}
+:root.dark  #boot-overlay{background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(167,139,250,.12),transparent),#000;}
+#boot-overlay.boot-fade{opacity:0;pointer-events:none;}
+.boot-card{display:flex;flex-direction:column;align-items:center;gap:18px;}
+.boot-logo{animation:boot-pulse 2.2s ease-in-out infinite;}
+@keyframes boot-pulse{0%,100%{opacity:.65;transform:scale(1)}50%{opacity:1;transform:scale(1.07)}}
+.boot-title{font-size:22px;font-weight:400;letter-spacing:-.3px;color:var(--t1);}
+.boot-m{font-weight:300;color:var(--t2);}
+.boot-stream{font-weight:700;color:var(--t1);}
+.boot-velvet-tag{display:inline-block;font-size:10px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--primary);opacity:.85;margin-left:2px;vertical-align:middle;position:relative;top:-1px;}
+.boot-status{font-size:13px;color:var(--t2);min-height:18px;letter-spacing:.01em;}
+.boot-dots{display:flex;gap:9px;}
+.boot-dots span{width:8px;height:8px;border-radius:50%;background:var(--primary-d);animation:boot-dot 1.5s ease-in-out infinite;}
+.boot-dots span:nth-child(2){animation-delay:.25s;}
+.boot-dots span:nth-child(3){animation-delay:.5s;}
+@keyframes boot-dot{0%,80%,100%{background:var(--primary-d);transform:scale(.75)}40%{background:var(--primary);transform:scale(1.15)}}
+.boot-skip{margin-top:6px;background:none;border:none;color:var(--t3);font-size:12px;cursor:pointer;padding:4px 8px;border-radius:var(--r);transition:color .14s;}
+.boot-skip:hover{color:var(--t2);}
 .login-brand{text-align:center;margin-bottom:28px;}
 .login-brand svg{display:block;margin:0 auto 12px;}
 .login-brand h1{font-size:20px;font-weight:400;letter-spacing:-.3px;margin-bottom:6px;}
@@ -494,6 +520,17 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
   touch-action:manipulation;
 }
 .row-act-btn:hover{background:var(--raised);color:var(--t1);}
+
+/* ── SONG SELECTION MODE ────────────────────────────────── */
+.row-check{display:none;width:16px;height:16px;border:2px solid var(--t3);border-radius:3px;flex-shrink:0;position:relative;transition:background .14s,border-color .14s;}
+.song-list.select-mode .row-check{display:block;}
+.song-list.select-mode .num-val{display:none;}
+.song-list.select-mode .row-play-icon{display:none!important;}
+.song-row.selected{background:var(--active);}
+.song-row.selected .row-check{background:var(--primary);border-color:var(--primary);}
+.song-row.selected .row-check::after{content:'';position:absolute;left:3px;top:0;width:5px;height:9px;border:2px solid #fff;border-top:none;border-left:none;transform:rotate(45deg);}
+:root.light .song-row.selected{background:rgba(109,60,230,.10);}
+#select-mode-btn.active{background:var(--primary);color:#fff;}
 
 /* ── MOST PLAYED ─────────────────────────────────────────── */
 .song-row.mp-row{grid-template-columns:36px 48px 1fr 108px auto auto;}
@@ -1687,6 +1724,8 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
   .vlm-line{font-size:20px;}
   .vlm-line.vlm-active{font-size:48px;}
 }
+
+
 
 /* ── UPLOAD ─────────────────────────────────────────────────── */
 .upload-modal-box{max-width:520px!important;}
