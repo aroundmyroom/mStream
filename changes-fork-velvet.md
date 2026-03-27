@@ -1,12 +1,20 @@
 # mStream Velvet Fork — Combined Change Log
 
-## Backup feature — (pending commit)
+## About page update — 2026-03-27
+
+**Files:** `webapp/admin/index.js`
+
+- **Discord link** updated to mStream Velvet Discord (`https://discord.gg/KfsTCYrTkS`).
+- **Removed** GitHub Sponsors iframe from about page.
+- **Telemetry disclosure card** added — explains what data is sent (`id`, `version`, `platform`, `lastSeen`), states no personal data or IP is stored, and instructs how to opt out via `"telemetry": false` in config.
+
+## Backup feature — 2026-03-27
 
 **Files:** `src/api/backup.js` (new), `src/server.js`, `webapp/admin/index.html`, `webapp/admin/index.js`, `docs/backup.md` (new)
 
 - **Admin backup panel** — new "Backup" section in the admin nav (archive icon). Creates a zip of the database (SQLite: `mstream.sqlite` + WAL files; Loki: all three `.db` files) and `default.json`, stored in `save/backups/`. Up to 4 backups kept; oldest removed on 5th. Manual "Create Backup Now" button; backup list shows size, date, download button. Automatic weekly backup (checked hourly, 30s boot delay); timestamp in `save/backups/.last-weekly`.
 
-## Radio now-playing DB lookup badge — (pending commit)
+## Radio now-playing DB lookup badge — 2026-03-27
 
 **Files:** `webapp/app.js`, `webapp/index.html`, `webapp/style.css`
 
