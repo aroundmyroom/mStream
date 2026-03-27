@@ -76,6 +76,8 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [/db/recent/added, /db/stats/recently-played, /db/stats/most-played](API/db_stats-queries.md)
 
+[/db/stats/log-play — record a play (always active, no scrobbling required)](API/db_stats-queries.md#log-a-play) *(GitHub Copilot, 2026-03-27)*
+
 [/db/stats/reset-play-counts, /db/stats/reset-recently-played](API/db_stats-reset.md)
 
 [/db/rate-song](API/db_rate-song.md)
@@ -123,6 +125,10 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 ## Genre Groups *(GitHub Copilot, 2026-03-22)*
 
 [/api/v1/db/genre-groups, /api/v1/admin/genre-groups — admin-configurable display groupings used in genre browser and smart playlist builder](API/admin_genre-groups.md)
+
+## Home View *(GitHub Copilot, 2026-03-27)*
+
+[Home view — shelves, drag-to-reorder, Customize mode, Recently Played](home-view.md)
 
 ## JukeBox
 

@@ -26,15 +26,13 @@ async function createBackup() {
 
   const filesToInclude = [{ src: cfgFile, name: 'default.json' }];
 
-  if (config.program.db.engine === 'loki') {
-    // Loki engine — three separate .db files
-    for (const name of ['user-data.loki-v1.db', 'files.loki-v3.db', 'shared.loki-v1.db']) {
-      const src = path.join(dbDir, name);
-      try { await fsp.access(src); filesToInclude.push({ src, name }); } catch (_) {}
-    }
-  } else {
-    // SQLite engine — main db file + WAL files if present
-    const dbFile = path.join(dbDir, 'mstream.sqlite');
+  // Always include any db files that exist on disk — covers cases where the
+  // engine was switched (e.g. loki → sqlite) and both sets of files are present.
+
+  // SQLite — main file + WAL/SHM if present
+  const dbFile = path.join(dbDir, 'mstream.sqlite');
+  try {
+    await fsp.access(dbFile);
     filesToInclude.push({ src: dbFile, name: 'mstream.sqlite' });
     for (const ext of ['-wal', '-shm']) {
       try {
@@ -42,6 +40,12 @@ async function createBackup() {
         filesToInclude.push({ src: dbFile + ext, name: 'mstream.sqlite' + ext });
       } catch (_) {}
     }
+  } catch (_) {}
+
+  // Loki — three separate .db files
+  for (const name of ['user-data.loki-v1.db', 'files.loki-v3.db', 'shared.loki-v1.db']) {
+    const src = path.join(dbDir, name);
+    try { await fsp.access(src); filesToInclude.push({ src, name }); } catch (_) {}
   }
 
   await new Promise((resolve, reject) => {

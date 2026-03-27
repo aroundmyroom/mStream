@@ -1,5 +1,32 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Deezer album art search in NP modal — 2026-06-03
+
+**Files:** `webapp/app.js`, `src/api/discogs.js`
+
+- **NP modal** now shows a second "Search Album Art on Deezer" button alongside the existing Discogs button.
+- `_npDeezerSearch()` queries the public Deezer API (`/search/album?q=`) — no API key required — and displays thumbnails in the same grid as Discogs results.
+- Clicking a Deezer thumbnail embeds the cover via `POST /api/v1/discogs/embed` using the new `coverUrl` parameter.
+- `POST /api/v1/discogs/embed` extended: Joi schema now accepts either `releaseId` (Discogs) or `coverUrl` (direct URL); when `coverUrl` is provided the Discogs API fetch is skipped and the image is downloaded directly. DB art source tag set to `'deezer'` for Deezer embeds.
+
+## track-of field + public ping — 2026-06-03
+
+**Files:** `src/db/sqlite-backend.js`, `src/db/scanner.mjs`, `src/api/db.js`, `src/server.js`
+
+- **`track-of`** (`trackOf INTEGER`) — track total (e.g. 12 for track 3/12) added to the DB schema, scanner, and API. The field is populated from file tags during scan and returned as `"track-of"` in all metadata responses alongside `"track"`. Useful for clients that need to know whether an album is complete. Migration adds the column to existing databases automatically.
+- **`GET /api/v1/ping/public`** — lightweight pre-auth ping endpoint returning `{ status: 'ok' }`. No token required; useful for reachability checks before login.
+
+## Home view card fixes — 2026-06-03
+
+**Files:** `webapp/app.js`, `webapp/style.css`
+
+- Fixed `iconCard is not defined` JS error — renamed calls updated to `folderCard`/`folderCard`.
+- `folderCard()` redesigned with CSS variables (`var(--accent)`, `var(--surface)`, `var(--raised)`, `var(--t3)`) instead of random HSL colours.
+- Play icon and folder outline use `var(--accent)` (blue, consistent with file explorer).
+- Customize mode: removed `pointer-events:none` from hidden cards so they can be re-selected.
+- SVG sizing bug (6th+ card deformed in flex containers): removed HTML `width`/`height` attrs; added `.hc-art>svg{display:block;width:100%;height:auto;}` CSS rule.
+- Playlist shelf items now use `folderCard()` for a consistent icon across all shelf types.
+
 ## About page update — 2026-03-27
 
 **Files:** `webapp/admin/index.js`

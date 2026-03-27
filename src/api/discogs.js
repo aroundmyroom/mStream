@@ -396,6 +396,22 @@ export function setup(mstream) {
     }
   });
 
+  // ── GET /api/v1/deezer/search ──────────────────────────────────
+  // Server-side proxy for the Deezer album search API.
+  // Required because the Deezer API does not set CORS headers, so browsers
+  // can't call it directly from an HTTPS origin.
+  mstream.get('/api/v1/deezer/search', async (req, res) => {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.status(400).json({ error: 'q is required' });
+    try {
+      const url = `https://api.deezer.com/search/album?q=${encodeURIComponent(q)}&limit=10`;
+      const resp = await axios.get(url, { headers: { 'User-Agent': UA_BASE } });
+      res.json(resp.data);
+    } catch (e) {
+      res.status(502).json({ error: 'Deezer request failed: ' + e.message });
+    }
+  });
+
   // ── POST /api/v1/discogs/embed ─────────────────────────────────
   // Admin only. Downloads full-res cover from Discogs and embeds
   // it into the audio file using ffmpeg (no cover.jpg written to disk).
@@ -405,8 +421,9 @@ export function setup(mstream) {
 
     const schema = Joi.object({
       filepath:  Joi.string().required(),
-      releaseId: Joi.number().integer().required(),
-    });
+      releaseId: Joi.number().integer(),
+      coverUrl:  Joi.string().uri(),
+    }).or('releaseId', 'coverUrl');
 
     let pathInfo;
     try {
@@ -432,13 +449,20 @@ export function setup(mstream) {
     const tmpOut   = path.join(path.dirname(absPath), `.mstream-out-${_ts}${extLower}`);
 
     try {
-      // Fetch full-res primary image from Discogs
-      const release = await discogsGet(`https://api.discogs.com/releases/${req.body.releaseId}`);
-      const images  = release.images || [];
-      const img     = images.find(i => i.type === 'primary') || images[0];
-      if (!img?.uri) return res.status(404).json({ error: 'No cover image for this release' });
+      let imgUrl;
+      if (req.body.coverUrl) {
+        // Direct URL path (e.g. from Deezer) — skip Discogs API call
+        imgUrl = req.body.coverUrl;
+      } else {
+        // Fetch full-res primary image from Discogs
+        const release = await discogsGet(`https://api.discogs.com/releases/${req.body.releaseId}`);
+        const images  = release.images || [];
+        const img     = images.find(i => i.type === 'primary') || images[0];
+        if (!img?.uri) return res.status(404).json({ error: 'No cover image for this release' });
+        imgUrl = img.uri;
+      }
 
-      const imgBuf   = await fetchImageBuf(img.uri);
+      const imgBuf   = await fetchImageBuf(imgUrl);
       // Write temp files in the same directory as the audio file so renameSync
       // is atomic (same filesystem — avoids cross-device EXDEV errors).
       fs.writeFileSync(tmpCover, imgBuf);
@@ -505,7 +529,7 @@ export function setup(mstream) {
       } catch (_) { /* compression optional */ }
 
       // Update the DB record so grid/list views also show it after reload
-      try { dbManager.updateFileArt(pathInfo.relativePath, pathInfo.vpath, aaFile, null, 'discogs'); } catch (_) {}
+      try { dbManager.updateFileArt(pathInfo.relativePath, pathInfo.vpath, aaFile, null, req.body.coverUrl ? 'deezer' : 'discogs'); } catch (_) {}
 
       // ── Remove old art from cache/disk if it's now orphaned ──────────────
       if (oldAaFile && oldAaFile !== aaFile) {

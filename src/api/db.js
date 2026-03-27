@@ -16,6 +16,7 @@ function renderMetadataObj(row) {
       "hash": row.hash ? row.hash : null,
       "album": row.album ? row.album : null,
       "track": row.track ? row.track : null,
+      "track-of": row.trackOf ? row.trackOf : null,
       "disk": row.disk ? row.disk : null,
       "title": row.title ? row.title : null,
       "year": row.year ? row.year : null,
@@ -289,6 +290,26 @@ export function setup(mstream) {
       songs.push(renderMetadataObj(row));
     }
     res.json(songs);
+  });
+
+  // ── log a play (always runs — independent of scrobbling) ────
+  mstream.post('/api/v1/db/stats/log-play', (req, res) => {
+    const schema = Joi.object({ filePath: Joi.string().required() });
+    joiValidate(schema, req.body);
+    if (/^https?:\/\//i.test(req.body.filePath)) { return res.json({ ok: false }); }
+    const pathInfo = vpath.getVPathInfo(req.body.filePath, req.user);
+    const fileRow  = resolveFile(pathInfo, req.user);
+    if (!fileRow) { return res.json({ ok: false }); }
+    const existing = db.findUserMetadata(fileRow.hash, req.user.username);
+    if (!existing) {
+      db.insertUserMetadata({ user: req.user.username, hash: fileRow.hash, pc: 1, lp: Date.now() });
+    } else {
+      existing.pc = (existing.pc && typeof existing.pc === 'number') ? existing.pc + 1 : 1;
+      existing.lp = Date.now();
+      db.updateUserMetadata(existing);
+    }
+    db.saveUserDB();
+    res.json({ ok: true });
   });
 
   mstream.post('/api/v1/db/stats/recently-played', (req, res) => {

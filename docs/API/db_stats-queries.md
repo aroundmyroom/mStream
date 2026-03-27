@@ -114,3 +114,34 @@ All three endpoints return arrays of objects in this shape:
 | `last-played` | Unix timestamp (seconds) of last play, or `null`. |
 | `replaygain-track` | ReplayGain track gain in dB, or `null`. |
 | `duration` | Track length in seconds (float, e.g. `237.431`), or `null` for tracks not yet rescanned. |
+
+---
+
+### Log a Play *(GitHub Copilot, 2026-03-27)*
+
+Records a play against the authenticated user immediately — increments `play-count` and updates `last-played` timestamp.  This endpoint is called by the player unconditionally for every non-radio, non-podcast track and is **independent of scrobbling** (Last.fm / ListenBrainz).  Recently Played and Most Played therefore work even when no external scrobbling service is configured.
+
+* **URL**
+
+  `/api/v1/db/stats/log-play`
+
+* **Method:**
+
+  `POST`
+
+* **JSON Body**
+
+  | Field | Type | Required | Description |
+  |---|---|---|---|
+  | `filePath` | `string` | Yes | Full virtual path of the song (e.g. `/Music/Artist/song.flac`). External URLs (`http://…`) are rejected with `{ ok: false }`. |
+
+* **Success Response:**
+
+  * **Code:** 200
+  * **Content:** `{ "ok": true }` — or `{ "ok": false }` when the file cannot be resolved in the DB.
+
+* **Notes:**
+  * Radio streams and podcast episodes are never passed to this endpoint.
+  * If the file has no existing `user_metadata` row one is created with `pc = 1`.
+  * If a row already exists `pc` is incremented and `lp` is updated.
+  * Changes are flushed to disk immediately via `db.saveUserDB()`.

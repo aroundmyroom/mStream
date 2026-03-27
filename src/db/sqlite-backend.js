@@ -38,7 +38,7 @@ export function init(dbDirectory) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS files (
       title TEXT, artist TEXT, year INTEGER, album TEXT,
-      filepath TEXT NOT NULL, format TEXT, track INTEGER, disk INTEGER,
+      filepath TEXT NOT NULL, format TEXT, track INTEGER, trackOf INTEGER, disk INTEGER,
       modified REAL, hash TEXT, aaFile TEXT, vpath TEXT NOT NULL,
       ts INTEGER, sID TEXT, replaygainTrackDb REAL, genre TEXT, cuepoints TEXT,
       duration REAL, artist_id TEXT, album_id TEXT
@@ -195,6 +195,8 @@ export function init(dbDirectory) {
   try { db.exec('ALTER TABLE user_metadata ADD COLUMN starred INTEGER DEFAULT 0'); } catch (_e) {}
   // Migration: add sort_order to podcast_feeds for drag-to-reorder
   try { db.exec('ALTER TABLE podcast_feeds ADD COLUMN sort_order INTEGER DEFAULT 0'); } catch (_e) {}
+  // Migration: add trackOf (track total) for complete-album detection
+  try { db.exec('ALTER TABLE files ADD COLUMN trackOf INTEGER'); } catch (_e) {}
   // Ensure indexes exist (IF NOT EXISTS is idempotent — safe on every startup)
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_artist_id ON files(artist_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_album_id ON files(album_id)');
@@ -238,8 +240,8 @@ export function init(dbDirectory) {
     removeByPath:   db.prepare('DELETE FROM files WHERE filepath = ? AND vpath = ?'),
     insertFileTs:   db.prepare('SELECT ts FROM files WHERE hash = ? AND ts IS NOT NULL LIMIT 1'),
     insertFileRow:  db.prepare(
-      'INSERT INTO files (title, artist, year, album, filepath, format, track, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration, artist_id, album_id) ' +
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+      'INSERT INTO files (title, artist, year, album, filepath, format, track, trackOf, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration, artist_id, album_id) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),  
   });
 }
 
@@ -363,7 +365,7 @@ export function insertFile(fileData) {
   }
   const result = _s.insertFileRow.run(
     fileData.title ?? null, fileData.artist ?? null, fileData.year ?? null, fileData.album ?? null,
-    fileData.filepath, fileData.format ?? null, fileData.track ?? null, fileData.disk ?? null,
+    fileData.filepath, fileData.format ?? null, fileData.track ?? null, fileData.trackOf ?? null, fileData.disk ?? null,
     fileData.modified ?? null, fileData.hash ?? null, fileData.aaFile ?? null, fileData.vpath,
     ts, fileData.sID ?? null, fileData.replaygainTrackDb ?? null, fileData.genre ?? null, fileData.cuepoints ?? null,
     fileData.art_source ?? null, fileData.duration ?? null,

@@ -616,9 +616,12 @@ const Player = {
     this.updateBar();
     highlightRow();
     refreshQueueUI();
-    // Scrobble after 30 s (logs play count + last-played timestamp)
+    // Always log play after 30 s — independent of whether scrobbling is enabled
     clearTimeout(scrobbleTimer);
     (function(){ const el = document.getElementById('np-scrobble-status'); if (el) { el.textContent = ''; el.className = 'np-scrobble-status'; } })();
+    if (!s.isRadio && !s.isPodcast) {
+      api('POST', 'api/v1/db/stats/log-play', { filePath: s.filepath }).catch(() => {});
+    }
     if ((S.lastfmEnabled || (S.listenbrainzEnabled && S.listenbrainzLinked)) && !s.isRadio && !s.isPodcast) {
       if (S.listenbrainzEnabled && S.listenbrainzLinked) {
         api('POST', 'api/v1/listenbrainz/playing-now', { filePath: s.filepath }).catch(() => {});
@@ -1588,9 +1591,10 @@ function renderNPModal() {
         const _ext = (s.filepath || '').split('.').pop().toLowerCase();
         const _wavLike = ['wav','aiff','aif','w64'].includes(_ext);
         const _btn = `<button class="np-discogs-btn" id="np-discogs-search-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search Album Art on Discogs</button>`;
+        const _dzbtn = `<button class="np-discogs-btn" id="np-deezer-search-btn" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search Album Art on Deezer</button>`;
         _dsEl.innerHTML = _wavLike
-          ? _btn + `<span class="np-discogs-note" style="margin-top:5px;display:block">WAV files can\'t store embedded art — art will be saved to the database only.<br>It is lost on a DB reset or album-art cache delete.</span>`
-          : _btn;
+          ? _btn + _dzbtn + `<span class="np-discogs-note" style="margin-top:5px;display:block">WAV files can\'t store embedded art — art will be saved to the database only.<br>It is lost on a DB reset or album-art cache delete.</span>`
+          : _btn + _dzbtn;
       }
     } else {
       _dsEl.classList.add('hidden');
@@ -1619,6 +1623,46 @@ function hideNPModal() {
   // Force the Discogs section to re-render its initial button state on next open
   const _dsEl = document.getElementById('np-discogs-section');
   if (_dsEl) _dsEl.dataset.songFp = '';
+}
+
+// ── DEEZER ART IN NP MODAL ────────────────────────────────
+async function _npDeezerSearch(song) {
+  const dsEl   = document.getElementById('np-discogs-section');
+  const npLeft = document.getElementById('np-left');
+  if (!dsEl || !song) return;
+  dsEl.innerHTML = `<span class="np-discogs-status">Searching Deezer…</span>`;
+  npLeft?.classList.add('np-left--picking');
+  try {
+    const q = [song.artist, song.album].filter(Boolean).join(' ');
+    const data = await api('GET', `api/v1/deezer/search?q=${encodeURIComponent(q)}`);
+    const hits = (data.data || []).filter(h => h.cover_medium);
+    if (!hits.length) {
+      dsEl.innerHTML =
+        `<span class="np-discogs-status">No results found on Deezer</span>` +
+        `<button class="np-discogs-btn" id="np-deezer-search-btn" style="margin-top:8px">Try again</button>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
+      return;
+    }
+    const thumbsHtml = hits.map(h =>
+      `<img class="np-discogs-thumb np-deezer-thumb"
+        src="${h.cover_medium}" alt=""
+        title="${esc(h.title)}${h.artist?.name ? ' — ' + esc(h.artist.name) : ''}"
+        data-cover-xl="${esc(h.cover_xl || h.cover_big || h.cover_medium)}"
+        data-filepath="${esc(song.filepath || '')}">`
+    ).join('');
+    dsEl.innerHTML =
+      `<div class="np-discogs-pick-header">` +
+        `<span class="np-discogs-pick-title">Pick a cover (Deezer)</span>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn">← Cancel</button>` +
+      `</div>` +
+      `<div class="np-discogs-choices">${thumbsHtml}</div>` +
+      `<span class="np-discogs-note">via Deezer</span>`;
+    dsEl.dataset.songFp = song.filepath || '';
+  } catch(e) {
+    dsEl.innerHTML =
+      `<span class="np-discogs-status">Deezer search failed</span>` +
+      `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
+  }
 }
 
 // ── DISCOGS ART IN NP MODAL ───────────────────────────────
@@ -5116,6 +5160,296 @@ async function viewPlayed() {
     if (!d.length) { setBody('<div class="empty-state">No play history yet</div>'); return; }
     showSongs(d.map(norm));
   } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
+}
+
+// ── HOME ──────────────────────────────────────────────────────
+
+async function viewHome() {
+  setTitle('Home'); setBack(null); setNavActive('home'); S.view = 'home';
+  setBody('<div class="loading-state"></div>');
+
+  const sig = _navCancel();
+  const abEx = _audioBookExclusions();
+  // compute how many cards fit in one row at current container width
+  const _cw    = (document.getElementById('content-body')?.clientWidth || 800) - 32;
+  const _limit = Math.max(4, Math.floor((_cw + 10) / 130)); // 120px card + 10px gap
+  const base = {
+    limit: _limit,
+    ...(abEx.ignoreVPaths.length             ? { ignoreVPaths:             abEx.ignoreVPaths }             : {}),
+    ...(abEx.excludeFilepathPrefixes.length  ? { excludeFilepathPrefixes:  abEx.excludeFilepathPrefixes }  : {}),
+  };
+
+  let recentlyPlayed = [], mostPlayed = [], radioStations = [], podcastFeeds = [];
+  try {
+    [recentlyPlayed, mostPlayed, radioStations, podcastFeeds] = await Promise.all([
+      api('POST', 'api/v1/db/stats/recently-played', base, sig).catch(() => []),
+      api('POST', 'api/v1/db/stats/most-played',     base, sig).catch(() => []),
+      api('GET',  'api/v1/radio/stations',       undefined, sig).catch(() => []),
+      api('GET',  'api/v1/podcast/feeds',         undefined, sig).catch(() => []),
+    ]);
+  } catch(e) { if (e.name === 'AbortError') return; }
+
+  if (S.view !== 'home') return;
+
+  recentlyPlayed = recentlyPlayed.map(norm);
+  mostPlayed     = mostPlayed.map(s => { const n = norm(s); n._playCount = s.metadata?.['play-count']; return n; });
+  if (podcastFeeds.length) _podcastFeeds = podcastFeeds;
+
+  // ── helpers ─────────────────────────────────────────────────
+
+  // Art card — radio & podcast: 88×88 image on top, name + sub below
+  function artCard(imgUrl, title, sub, attrs) {
+    const artInner = imgUrl
+      ? `<img src="${imgUrl}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`
+      : noArtHtml();
+    return `<div class="hc" ${attrs || ''}>
+      <div class="hc-art">${artInner}</div>
+      <div class="hc-info">
+        <div class="hc-title">${esc(title)}</div>
+        ${sub ? `<div class="hc-sub">${esc(sub)}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  // Song card — same art-on-top layout
+  function songCard(s, showCount) {
+    const url = artUrl(s['album-art'], 's');
+    const artInner = url
+      ? `<img src="${url}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`
+      : noArtHtml();
+    const sub = showCount && s._playCount
+      ? `${esc(s.artist || '')}${s.artist ? ' · ' : ''}${s._playCount}×`
+      : esc(s.artist || '');
+    return `<div class="hc home-song" data-fp="${esc(s.filepath)}">
+      <div class="hc-art">${artInner}</div>
+      <div class="hc-info">
+        <div class="hc-title">${esc(s.title || s.filepath.split('/').pop())}</div>
+        ${sub ? `<div class="hc-sub">${sub}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  // Folder & playlist art cards — deterministic color per name, art-card layout
+  function folderCard(label, attrs) {
+    const art = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" style="fill:var(--surface)"/>
+      <path d="M12 44 H34 L42 36 H84 Q88 36 88 40 V72 Q88 75 84 75 H16 Q12 75 12 72 Z"
+            style="fill:var(--raised);stroke:var(--accent)" stroke-width="1.8" stroke-linejoin="round"/>
+      <line x1="20" y1="51" x2="65" y2="51" style="stroke:var(--t3)" stroke-width="2.2" stroke-linecap="round" opacity=".75"/>
+      <line x1="20" y1="59" x2="60" y2="59" style="stroke:var(--t3)" stroke-width="2.2" stroke-linecap="round" opacity=".75"/>
+      <line x1="20" y1="67" x2="50" y2="67" style="stroke:var(--t3)" stroke-width="2.2" stroke-linecap="round" opacity=".75"/>
+      <circle cx="74" cy="64" r="13" style="fill:var(--surface);stroke:var(--primary)" stroke-width="2.2"/>
+      <polygon points="70,58 70,70 82,64" style="fill:var(--primary)"/>
+    </svg>`;
+    return `<div class="hc" ${attrs || ''}>
+      <div class="hc-art">${art}</div>
+      <div class="hc-info"><div class="hc-title">${esc(label)}</div></div>
+    </div>`;
+  }
+
+  function playlistCard(label, attrs) {
+    const art = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" style="fill:var(--surface)"/>
+      <line x1="12" y1="34" x2="80" y2="34" style="stroke:var(--t2)" stroke-width="4" stroke-linecap="round"/>
+      <line x1="12" y1="50" x2="80" y2="50" style="stroke:var(--t2)" stroke-width="4" stroke-linecap="round"/>
+      <line x1="12" y1="66" x2="54" y2="66" style="stroke:var(--t2)" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="74" cy="67" r="14" style="fill:var(--surface);stroke:var(--primary)" stroke-width="2.2"/>
+      <polygon points="70,61 70,73 83,67" style="fill:var(--primary)"/>
+    </svg>`;
+    return `<div class="hc" ${attrs || ''}>
+      <div class="hc-art">${art}</div>
+      <div class="hc-info"><div class="hc-title">${esc(label)}</div></div>
+    </div>`;
+  }
+
+  const _GRIP_ICO = `<svg width="10" height="14" viewBox="0 0 10 16" fill="currentColor" aria-hidden="true"><circle cx="2.5" cy="2" r="1.5"/><circle cx="7.5" cy="2" r="1.5"/><circle cx="2.5" cy="6" r="1.5"/><circle cx="7.5" cy="6" r="1.5"/><circle cx="2.5" cy="10" r="1.5"/><circle cx="7.5" cy="10" r="1.5"/><circle cx="2.5" cy="14" r="1.5"/><circle cx="7.5" cy="14" r="1.5"/></svg>`;
+  function shelf(id, title, cards) {
+    if (!cards) return '';
+    return `<div class="home-shelf" data-shelf="${id}" draggable="true">
+      <div class="home-shelf-header">
+        <span class="home-grip" title="Drag to reorder">${_GRIP_ICO}</span>
+        <span class="home-shelf-title">${title}</span>
+      </div>
+      <div class="home-row">${cards}</div>
+    </div>`;
+  }
+
+  // ── five shelves ────────────────────────────────────────────
+
+  // shelf order helpers (shared with drag-to-reorder)
+  const _ORDER_KEY = `ms2_home_order_${S.user}`;
+  function _savedOrder() { try { return JSON.parse(localStorage.getItem(_ORDER_KEY) || 'null'); } catch(_) { return null; } }
+  function _saveOrder() {
+    const v = document.getElementById('content-body')?.querySelector('.home-view');
+    if (!v) return;
+    localStorage.setItem(_ORDER_KEY, JSON.stringify([...v.querySelectorAll(':scope > .home-shelf')].map(s => s.dataset.shelf)));
+  }
+
+  // 1. Radio Stations
+  const radioHtml    = radioStations.map(s =>
+    artCard(s.img ? artUrl(s.img, 's') : null, s.name, s.genre ? s.genre.split(',')[0].trim() : '', `data-rsid="${esc(String(s.id))}" data-hid="rs:${esc(String(s.id))}"`)
+  ).join('');
+  const radioShelf   = shelf('radio', 'Radio Stations', radioHtml || null);
+
+  // 2. Podcasts
+  const podcastHtml  = podcastFeeds.map(f =>
+    artCard(f.img ? artUrl(f.img, 's') : null, f.title || f.url, '', `data-pfid="${esc(String(f.id))}" data-hid="pf:${esc(String(f.id))}"`)
+  ).join('');
+  const podcastShelf = shelf('podcasts', 'Podcasts', podcastHtml || null);
+
+  // 3. Playlists & Folders
+  const vpathHtml    = S.vpaths.map(v    => folderCard(v,       `data-icid="${esc('vp:' + v)}" data-hid="ic:vp:${esc(v)}"`)   ).join('');
+  const playlistHtml = S.playlists.map(p => folderCard(p.name,  `data-icid="${esc('pl:' + p.name)}" data-hid="ic:pl:${esc(p.name)}"`)  ).join('');
+  const playlistShelf = shelf('playlists', 'Playlists & Folders', (vpathHtml + playlistHtml) || null);
+
+  // 4 & 5. Song shelves
+  const recentShelf = shelf('recent', 'Recently Played', recentlyPlayed.map(s => songCard(s, false)).join('') || null);
+  const mostShelf   = shelf('most',   'Most Played',     mostPlayed.map(s => songCard(s, true)).join('')  || null);
+
+  // ── render (restore saved shelf order) ──────────────────────
+  const _shelfMap  = { radio: radioShelf, podcasts: podcastShelf, playlists: playlistShelf, recent: recentShelf, most: mostShelf };
+  const _defOrder  = ['radio', 'podcasts', 'playlists', 'recent', 'most'];
+  const _order     = (_savedOrder() || _defOrder).filter(id => _shelfMap[id]);
+  _defOrder.forEach(id => { if (!_order.includes(id)) _order.push(id); });
+  const _orderedHtml = _order.map(id => _shelfMap[id] || '').join('');
+
+  setBody(`<div class="home-view">${_orderedHtml}</div>`);
+
+  const body = document.getElementById('content-body');
+
+  body.querySelectorAll('[data-rsid]').forEach(card => {
+    card.addEventListener('click', () => {
+      const s = radioStations.find(x => String(x.id) === card.dataset.rsid);
+      if (s) { _radioStations = radioStations; _playRadio(s); }
+    });
+  });
+
+  body.querySelectorAll('[data-pfid]').forEach(card => {
+    card.addEventListener('click', () => {
+      const f = podcastFeeds.find(x => String(x.id) === card.dataset.pfid);
+      if (f) viewPodcastEpisodes(f);
+    });
+  });
+
+  body.querySelectorAll('.home-song').forEach(card => {
+    card.addEventListener('click', () => {
+      const fp = card.dataset.fp;
+      const s = recentlyPlayed.concat(mostPlayed).find(x => x.filepath === fp);
+      if (s) { _setPlaySource('home', 'Home'); Player.queueAndPlay(s); }
+    });
+  });
+
+  body.querySelectorAll('[data-icid]').forEach(card => {
+    card.addEventListener('click', () => {
+      const id = card.dataset.icid;
+      if (id.startsWith('vp:'))      { S.feDirStack = []; viewFiles('/' + id.slice(3), false); }
+      else if (id.startsWith('pl:')) openPlaylist(id.slice(3));
+    });
+  });
+
+  // ── shelf drag-to-reorder ────────────────────────────────────
+  // dragstart fires on the shelf element, not the grip child, so composedPath()
+  // is useless — use a mousedown flag instead.
+  let _dragSrc = null, _canDrag = false;
+  body.querySelectorAll('.home-grip').forEach(grip => {
+    grip.addEventListener('mousedown', () => { _canDrag = true; });
+  });
+  body.addEventListener('mouseup', () => { _canDrag = false; });
+  body.querySelectorAll('.home-shelf').forEach(shelf => {
+    shelf.addEventListener('dragstart', e => {
+      if (!_canDrag) { e.preventDefault(); return; }
+      _dragSrc = shelf;
+      shelf.classList.add('hs-dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    shelf.addEventListener('dragend', () => {
+      _canDrag = false;
+      _dragSrc = null;
+      body.querySelectorAll('.home-shelf').forEach(s => s.classList.remove('hs-dragging', 'hs-over'));
+      _saveOrder();
+    });
+    shelf.addEventListener('dragover', e => {
+      if (!_dragSrc || _dragSrc === shelf) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      body.querySelectorAll('.home-shelf').forEach(s => s.classList.remove('hs-over'));
+      shelf.classList.add('hs-over');
+    });
+    shelf.addEventListener('dragleave', e => {
+      if (!shelf.contains(e.relatedTarget)) shelf.classList.remove('hs-over');
+    });
+    shelf.addEventListener('drop', e => {
+      e.preventDefault();
+      if (!_dragSrc || _dragSrc === shelf) return;
+      const view = shelf.closest('.home-view');
+      const all  = [...view.querySelectorAll(':scope > .home-shelf')];
+      const si   = all.indexOf(_dragSrc);
+      const di   = all.indexOf(shelf);
+      if (si < di) view.insertBefore(_dragSrc, shelf.nextSibling);
+      else         view.insertBefore(_dragSrc, shelf);
+    });
+  });
+
+  // ── favorites / compact home ─────────────────────────────────
+  const _HIDDEN_KEY = `ms2_home_hidden_${S.user}`;
+  function _loadHidden() {
+    try { return new Set(JSON.parse(localStorage.getItem(_HIDDEN_KEY) || '[]')); }
+    catch(_) { return new Set(); }
+  }
+  function _saveHidden(s) { localStorage.setItem(_HIDDEN_KEY, JSON.stringify([...s])); }
+
+  function _applyVisibility() {
+    const view = body.querySelector('.home-view');
+    if (!view) return;
+    const editing = view.classList.contains('home-editing');
+    const hidden  = _loadHidden();
+    body.querySelectorAll('[data-hid]').forEach(card => {
+      card.classList.toggle('hc-hidden', hidden.has(card.dataset.hid));
+    });
+    body.querySelectorAll('.home-shelf').forEach(s => {
+      const all = s.querySelectorAll('[data-hid]').length;
+      if (all === 0) { s.classList.remove('hs-empty'); return; } // dynamic shelf (songs) — always visible
+      const vis = s.querySelectorAll('[data-hid]:not(.hc-hidden)').length;
+      s.classList.toggle('hs-empty', !editing && vis === 0);
+    });
+  }
+
+  // inject Customize button into the first shelf header (right-aligned)
+  const _firstHeader = body.querySelector('.home-shelf .home-shelf-header');
+  if (_firstHeader) {
+    const _btn = document.createElement('button');
+    _btn.className = 'home-customize-btn';
+    _btn.textContent = 'Customize';
+    _firstHeader.appendChild(_btn);
+  }
+
+  _applyVisibility();
+
+  const _custBtn = body.querySelector('.home-customize-btn');
+  if (_custBtn) {
+    _custBtn.addEventListener('click', () => {
+      const view = body.querySelector('.home-view');
+      const editing = !view.classList.contains('home-editing');
+      view.classList.toggle('home-editing', editing);
+      _custBtn.textContent = editing ? 'Done' : 'Customize';
+      _custBtn.classList.toggle('active', editing);
+      _applyVisibility();
+    });
+  }
+
+  // In edit mode, intercept card clicks to toggle visibility instead of playing
+  body.addEventListener('click', e => {
+    const view = body.querySelector('.home-view');
+    if (!view || !view.classList.contains('home-editing')) return;
+    const card = e.target.closest('[data-hid]');
+    if (!card) return;
+    e.stopPropagation();
+    const hidden = _loadHidden();
+    const hid = card.dataset.hid;
+    if (hidden.has(hid)) hidden.delete(hid); else hidden.add(hid);
+    _saveHidden(hidden);
+    _applyVisibility();
+  }, true);
 }
 
 // ── FILE EXPLORER ─────────────────────────────────────────────
@@ -9412,6 +9746,9 @@ function _doXfadeHandoff(nextIdx) {
   loadCuePoints(s.filepath);
   clearTimeout(scrobbleTimer);
   (function(){ const el = document.getElementById('np-scrobble-status'); if (el) { el.textContent = ''; el.className = 'np-scrobble-status'; } })();
+  if (!s.isRadio && !s.isPodcast) {
+    api('POST', 'api/v1/db/stats/log-play', { filePath: s.filepath }).catch(() => {});
+  }
   if ((S.lastfmEnabled || (S.listenbrainzEnabled && S.listenbrainzLinked)) && !s.isRadio && !s.isPodcast) {
     if (S.listenbrainzEnabled && S.listenbrainzLinked) {
       api('POST', 'api/v1/listenbrainz/playing-now', { filePath: s.filepath }).catch(() => {});
@@ -9842,7 +10179,7 @@ function showApp() {
   document.getElementById('queue-btn').classList.add('active');
   loadPlaylists();
   loadSmartPlaylists();
-  viewRecent();
+  viewHome();
   refreshQueueUI();
   restoreQueue(/*silent=*/true);
   // Boot overlay dismiss — wait for audio seek (waveform position restored) or fall back.
@@ -10027,7 +10364,8 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const v = btn.dataset.view;
     if (v !== 'podcasts') S.audioContentReturn = null; // clear Audio Content context on any other nav
-    if (v === 'recent')      viewRecent();
+    if (v === 'home')        viewHome();
+    else if (v === 'recent')      viewRecent();
     else if (v === 'artists') viewArtists();
     else if (v === 'albums')  viewAllAlbums();
     else if (v === 'search')  viewSearch();
@@ -11166,13 +11504,64 @@ document.getElementById('np-left').addEventListener('click', async e => {
     _npDiscogsSearch(S.queue[S.idx]);
     return;
   }
-  // Search button
+  // Search button — Discogs
   if (e.target.closest('#np-discogs-search-btn')) {
     _npDiscogsSearch(S.queue[S.idx]);
     return;
   }
-  // Click a thumbnail to embed
+  // Search button — Deezer
+  if (e.target.closest('#np-deezer-search-btn')) {
+    _npDeezerSearch(S.queue[S.idx]);
+    return;
+  }
+  // Click a Deezer thumbnail — download cover_xl and embed via Discogs embed endpoint
+  const deezerThumb = e.target.closest('.np-deezer-thumb');
+  if (deezerThumb) {
+    const coverUrl = deezerThumb.dataset.coverXl;
+    const filepath = deezerThumb.dataset.filepath;
+    if (!filepath || !coverUrl) return;
+    deezerThumb.classList.add('selected');
+    const dsEl   = document.getElementById('np-discogs-section');
+    const npLeft = document.getElementById('np-left');
+    const _cacheOnly = ['wav','aiff','aif','w64'].includes((filepath || '').split('.').pop().toLowerCase());
+    const _label = _cacheOnly ? 'Saving art to database…' : 'Embedding cover art…';
+    const _isCurrentSong = S.queue[S.idx]?.filepath === filepath;
+    const _wasPlaying    = _isCurrentSong && !audioEl.paused;
+    if (_isCurrentSong && _wasPlaying) audioEl.pause();
+    if (dsEl) dsEl.innerHTML = `<div class="np-embed-spinner"></div><span class="np-embed-label">${_label}</span>`;
+    npLeft?.classList.add('np-left--embedding');
+    try {
+      const result = await api('POST', 'api/v1/discogs/embed', { filepath, coverUrl });
+      if (result?.aaFile) {
+        S.queue.forEach(q => { if (q.filepath === filepath) q['album-art'] = result.aaFile; });
+      }
+      npLeft?.classList.remove('np-left--embedding');
+      npLeft?.classList.remove('np-left--picking');
+      if (dsEl) dsEl.dataset.songFp = '';
+      renderNPModal();
+      if (S.queue[S.idx]?.filepath === filepath) Player.updateBar();
+      refreshQueueUI();
+      if (_isCurrentSong) {
+        clearTimeout(_netRecoveryTimer);
+        toast('Album art saved — restarting from the beginning');
+        audioEl.addEventListener('loadedmetadata', () => { if (_wasPlaying) audioEl.play().catch(() => {}); }, { once: true });
+        audioEl.src = mediaUrl(filepath) + '&_t=' + Date.now();
+        audioEl.load();
+      }
+    } catch(err) {
+      npLeft?.classList.remove('np-left--embedding');
+      if (_isCurrentSong && _wasPlaying) audioEl.play().catch(() => {});
+      if (dsEl) dsEl.innerHTML =
+        `<span class="np-discogs-status" style="color:rgba(255,100,100,.8)">Embed failed: ${esc(err?.message || 'error')}</span>` +
+        `<button class="np-deezer-search-btn" id="np-deezer-search-btn" style="margin-top:6px">Try again</button>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:4px">← Back</button>`;
+      deezerThumb.classList.remove('selected');
+    }
+    return;
+  }
+  // Click a Discogs thumbnail to embed (not a Deezer thumb — those are handled above)
   const thumb = e.target.closest('.np-discogs-thumb');
+  if (!thumb || thumb.classList.contains('np-deezer-thumb')) return;
   if (!thumb) return;
   const releaseId = Number(thumb.dataset.releaseId);
   const filepath  = thumb.dataset.filepath;
