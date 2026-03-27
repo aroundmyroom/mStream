@@ -66,6 +66,7 @@ async function insertEntries(song) {
     "filepath": song.filePath,
     "format": song.format,
     "track": song.track.no ? song.track.no : null,
+    "trackOf": song.track.of ? song.track.of : null,
     "disk": song.disk.no ? song.disk.no : null,
     "modified": song.modified,
     "hash": song.hash,

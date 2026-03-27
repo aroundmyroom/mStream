@@ -461,7 +461,7 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .shared-expired-tag{display:inline-block;background:rgba(248,113,113,.15);color:var(--red);font-size:10px;padding:1px 6px;border-radius:99px;margin-left:4px;vertical-align:middle;}
 .btn-primary-sm{background:var(--primary-d);color:var(--primary);border-color:rgba(139,92,246,.3);}
 .btn-primary-sm:hover{background:var(--primary);color:#fff;}
-.content-body{flex:1 1 0;overflow-y:auto;padding:16px 20px;min-height:0;contain:content;}
+.content-body{flex:1 1 0;overflow-y:auto;padding:16px 20px;min-height:0;contain:style layout;}
 
 /* ── LOADING / EMPTY ───────────────────────────────────────── */
 .loading-state{display:flex;align-items:center;justify-content:center;height:160px;color:var(--t3);}
@@ -1973,3 +1973,40 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .pf-ep-save-btn.saving{color:var(--t3);pointer-events:none;}
 .pf-ep-save-btn.saved{color:#22c55e;}
 .pf-ep-save-btn.error{color:#ef4444;}
+
+/* ── HOME VIEW ─────────────────────────────────────────────── */
+.home-view{padding:20px 16px 60px;max-width:1400px;}
+.home-shelf{margin-bottom:32px;min-width:0;}
+.home-shelf-title{font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--t2);}
+.home-shelf-header{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+.home-grip{display:flex;align-items:center;cursor:grab;color:var(--t2);opacity:.35;flex-shrink:0;user-select:none;padding:2px 1px;}
+.home-grip svg{pointer-events:none;}
+.home-grip:hover{opacity:.8;}
+.home-grip:active{cursor:grabbing;}
+.home-shelf.hs-dragging{opacity:.35;transition:opacity .1s;}
+.home-shelf.hs-over{outline:2px dashed var(--primary);outline-offset:4px;border-radius:var(--r2);}
+/* horizontal grid row — same auto-fill approach as radio station list */
+.home-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;}
+/* ── art card (radio, podcast, songs) ── */
+.hc{width:100%;cursor:pointer;border-radius:var(--r);overflow:hidden;background:var(--raised);border:1px solid var(--border);position:relative;display:flex;flex-direction:column;transition:background .12s,box-shadow .12s;}
+.hc:hover{background:var(--hover);box-shadow:0 0 0 1px var(--border2);}
+.hc-art{width:100%;aspect-ratio:1;flex-shrink:0;background:var(--surface);display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--t2);}
+.hc-art img{width:100%;height:100%;object-fit:cover;display:block;}
+.hc-art>svg{display:block;width:100%;height:auto;}
+.hc-info{padding:5px 8px 8px;min-width:0;}
+.hc-title{font-size:.72rem;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;}
+.hc-sub{font-size:.65rem;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}
+/* ── icon card (playlists, folders) ── */
+/* ── home: customize button ── */
+.home-customize-btn{margin-left:auto;font-size:.7rem;font-weight:600;padding:4px 12px;border-radius:var(--r);background:transparent;border:1px solid var(--border2);color:var(--t2);cursor:pointer;transition:background .12s,color .12s,border-color .12s;}
+.home-customize-btn:hover{background:var(--raised);color:var(--t1);}
+.home-customize-btn.active{background:var(--primary-d);color:var(--primary);border-color:var(--primary);}
+/* ── home: hidden items (favorites / compact mode) ── */
+[data-hid].hc-hidden{display:none!important;}
+.home-editing [data-hid].hc-hidden{display:flex!important;opacity:.3;box-shadow:none!important;}
+/* selected items get a colored ring in edit mode */
+.home-editing [data-hid]:not(.hc-hidden){box-shadow:0 0 0 2px var(--primary)!important;}
+/* empty shelves hidden outside edit mode */
+.home-shelf.hs-empty{display:none;}
+.home-editing .home-shelf.hs-empty{display:block;}
+

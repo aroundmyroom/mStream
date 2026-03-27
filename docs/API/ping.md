@@ -62,3 +62,35 @@
 * **Error Response:**
 
   Forwards to `/login` if not logged in.
+
+---
+
+**Public Ping**
+----
+  Lightweight reachability check that requires no authentication. Useful for
+  checking whether the server is online before attempting a login.
+
+* **URL**
+
+  `/api/v1/ping/public`
+
+* **Method:**
+
+  `GET`
+
+* **Headers**
+
+  None required.
+
+* **Success Response:**
+
+  * **Code:** 200
+
+  ```json
+  { "status": "ok" }
+  ```
+
+* **Notes**
+
+  This endpoint is intentionally minimal — it confirms the server process is
+  running and reachable but returns no user or configuration data.

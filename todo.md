@@ -535,10 +535,14 @@ This is a first-class concern and must be designed clearly up front.
 > Roadmap items from 2026-03-17 strategic review. Priority order: play_events table first — every other item in this section depends on it.
 
 ### Home Screen
-- [ ] Add **Home** nav entry — first view on load instead of blank state
+- [x] Add **Home** nav entry — first item in Music Library nav (2026-03-27)
+- [x] **Recently Played / Most Played / Recently Added** shelves — 8 cards each, click to play (2026-03-27)
+- [x] **Radio Stations** shelf — 8 stations, click to play (2026-03-27)
+- [x] **Shortcut cards** — all vpaths, playlists and radio stations shown; click navigates/plays (2026-03-27)
+- [x] **Pinnable shortcuts** — "Edit shortcuts" mode lets users pin/unpin items to the Pinned row; persisted in localStorage per user (2026-03-27)
+- [ ] **Home Proposal 3 — time-based play stats** — needs a `play_log(user, filepath, played_at, duration_sec)` table; songs played today/this week/month/year/total; minutes listened per period; listening streak counter
 - [ ] Time-aware greeting ("Good morning / evening") with contextual suggested playlist based on listening history
 - [ ] **Continue Listening** strip — last 3 albums/playlists with resume position
-- [ ] **Recently Added** strip — tracks sorted by file mtime since last scan
 - [ ] **Mood quick-picks** — one button per bucket (Energy / Chill / Nostalgia) generated from own play history, no external API
 
 ### Listening Analytics — Play Events
