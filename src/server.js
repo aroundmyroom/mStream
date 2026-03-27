@@ -35,6 +35,7 @@ import * as radioApi from './api/radio.js';
 import * as radioRecorderApi from './api/radio-recorder.js';
 import * as radioSchedulerApi from './api/radio-scheduler.js';
 import * as backupApi from './api/backup.js';
+import * as telemetryApi from './api/telemetry.js';
 import * as podcastApi from './api/podcasts.js';
 import * as smartPlaylistApi from './api/smart-playlists.js';
 import WebError from './util/web-error.js';
@@ -195,6 +196,7 @@ export async function serveIt(configFile) {
   radioRecorderApi.setup(mstream);
   radioSchedulerApi.setup(mstream);
   backupApi.setup(mstream);
+  telemetryApi.setup(packageJson.version);
   podcastApi.setup(mstream);
   smartPlaylistApi.setup(mstream);
   remoteApi.setupAfterAuth(mstream, server);
