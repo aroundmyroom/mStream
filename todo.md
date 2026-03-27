@@ -160,6 +160,12 @@ Analyse every track's actual audio content (BPM, key, timbre, energy) and use th
 
 ## DONE — Completed features
 
+### Admin Backup ✅
+- [x] `src/api/backup.js` — zip of `mstream.sqlite` (+ WAL files) and `default.json` into `save/backups/`
+- [x] Keeps 4 most recent backups; oldest removed on 5th
+- [x] Manual trigger + file list with download in admin panel ("Backup" nav item)
+- [x] Automatic weekly backup (checked hourly, 30s boot delay; timestamp in `.last-weekly`)
+
 ### Radio Stream Recording ✅
 - [x] `'recordings'` vpath folder type — excluded from all library scans
 - [x] Per-user `allow-radio-recording` permission; admin toggles per-user via `POST /api/v1/admin/users/allow-radio-recording`
