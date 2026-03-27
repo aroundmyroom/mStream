@@ -463,6 +463,10 @@ function _navCancel() {
   _navAbort = new AbortController();
   return _navAbort.signal;
 }
+// Home-view AbortController — aborted each time viewHome() re-runs so that
+// accumulated body capture listeners from repeated visibility-change refreshes
+// don't cause even-number-of-toggles cancellation in customize mode.
+let _homeAC = null;
 
 // ── API ───────────────────────────────────────────────────────
 async function api(method, path, body, signal) {
@@ -5166,6 +5170,9 @@ async function viewPlayed() {
 
 async function viewHome() {
   setTitle('Home'); setBack(null); setNavActive('home'); S.view = 'home';
+  // Abort any previous home-view body listeners to prevent accumulation
+  _homeAC?.abort();
+  _homeAC = (typeof AbortController !== 'undefined') ? new AbortController() : null;
   setBody('<div class="loading-state"></div>');
 
   const sig = _navCancel();
@@ -5231,8 +5238,8 @@ async function viewHome() {
 
   // Folder & playlist art cards — deterministic color per name, art-card layout
   function folderCard(label, attrs) {
-    const art = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-      <rect width="100" height="100" style="fill:var(--surface)"/>
+    const art = `<svg viewBox="4 28 92 56" xmlns="http://www.w3.org/2000/svg">
+      <rect x="4" y="28" width="92" height="56" style="fill:var(--surface)"/>
       <path d="M12 44 H34 L42 36 H84 Q88 36 88 40 V72 Q88 75 84 75 H16 Q12 75 12 72 Z"
             style="fill:var(--raised);stroke:var(--accent)" stroke-width="1.8" stroke-linejoin="round"/>
       <line x1="20" y1="51" x2="65" y2="51" style="stroke:var(--t3)" stroke-width="2.2" stroke-linecap="round" opacity=".75"/>
@@ -5282,7 +5289,9 @@ async function viewHome() {
   function _saveOrder() {
     const v = document.getElementById('content-body')?.querySelector('.home-view');
     if (!v) return;
-    localStorage.setItem(_ORDER_KEY, JSON.stringify([...v.querySelectorAll(':scope > .home-shelf')].map(s => s.dataset.shelf)));
+    const order = JSON.stringify([...v.querySelectorAll(':scope > .home-shelf')].map(s => s.dataset.shelf));
+    localStorage.setItem(_ORDER_KEY, order);
+    api('POST', 'api/v1/user/settings', { prefs: { home_order: order } }).catch(() => {});
   }
 
   // 1. Radio Stations
@@ -5313,7 +5322,10 @@ async function viewHome() {
   _defOrder.forEach(id => { if (!_order.includes(id)) _order.push(id); });
   const _orderedHtml = _order.map(id => _shelfMap[id] || '').join('');
 
-  setBody(`<div class="home-view">${_orderedHtml}</div>`);
+  // Toolbar with Customize button sits ABOVE all shelves and is not inside any
+  // shelf element, so drag-to-reorder cannot move it.
+  const _toolbarHtml = `<div class="home-toolbar"><button class="home-customize-btn">Customize</button></div>`;
+  setBody(`<div class="home-view">${_toolbarHtml}${_orderedHtml}</div>`);
 
   const body = document.getElementById('content-body');
 
@@ -5396,7 +5408,11 @@ async function viewHome() {
     try { return new Set(JSON.parse(localStorage.getItem(_HIDDEN_KEY) || '[]')); }
     catch(_) { return new Set(); }
   }
-  function _saveHidden(s) { localStorage.setItem(_HIDDEN_KEY, JSON.stringify([...s])); }
+  function _saveHidden(s) {
+    const v = JSON.stringify([...s]);
+    localStorage.setItem(_HIDDEN_KEY, v);
+    api('POST', 'api/v1/user/settings', { prefs: { home_hidden: v } }).catch(() => {});
+  }
 
   function _applyVisibility() {
     const view = body.querySelector('.home-view');
@@ -5414,14 +5430,7 @@ async function viewHome() {
     });
   }
 
-  // inject Customize button into the first shelf header (right-aligned)
-  const _firstHeader = body.querySelector('.home-shelf .home-shelf-header');
-  if (_firstHeader) {
-    const _btn = document.createElement('button');
-    _btn.className = 'home-customize-btn';
-    _btn.textContent = 'Customize';
-    _firstHeader.appendChild(_btn);
-  }
+  // Customize button is now rendered in the toolbar above shelves — no injection needed.
 
   _applyVisibility();
 
@@ -5438,6 +5447,7 @@ async function viewHome() {
   }
 
   // In edit mode, intercept card clicks to toggle visibility instead of playing
+  const _homeACOpts = _homeAC ? { capture: true, signal: _homeAC.signal } : { capture: true };
   body.addEventListener('click', e => {
     const view = body.querySelector('.home-view');
     if (!view || !view.classList.contains('home-editing')) return;
@@ -5449,7 +5459,7 @@ async function viewHome() {
     if (hidden.has(hid)) hidden.delete(hid); else hidden.add(hid);
     _saveHidden(hidden);
     _applyVisibility();
-  }, true);
+  }, _homeACOpts);
 }
 
 // ── FILE EXPLORER ─────────────────────────────────────────────
@@ -9995,6 +10005,9 @@ function _applyServerSettings(data) {
   }
   if (prefs.show_genres  != null) { ls('ms2_show_genres_'  + u, prefs.show_genres);  S.showGenres  = prefs.show_genres  !== '0'; }
   if (prefs.show_decades != null) { ls('ms2_show_decades_' + u, prefs.show_decades); S.showDecades = prefs.show_decades !== '0'; }
+  // Home view layout — shelf order and hidden cards synced across devices
+  if (prefs.home_order  != null) ls('ms2_home_order_'  + u, prefs.home_order);
+  if (prefs.home_hidden != null) ls('ms2_home_hidden_' + u, prefs.home_hidden);
   _applyNavVisibility();
   // Queue: the DB is the source of truth — always restore from it on load.
   // This ensures any browser/device always picks up whatever was last playing.
@@ -10291,6 +10304,32 @@ function showApp() {
         else radioBtn.classList.add('hidden');
       }
     } catch (_) {}
+
+    // ── Queue + prefs sync from server ───────────────────────────────────────
+    // Single GET fetches both queue and prefs. Apply prefs (home order/hidden
+    // etc.) unconditionally; apply queue only when paused AND server copy is
+    // newer (i.e. another device played songs while this tab was backgrounded).
+    try {
+      const settings = await api('GET', 'api/v1/user/settings');
+      if (settings?.prefs) _applyServerSettings(settings);
+      if (audioEl.paused && settings?.queue?.queue?.length) {
+        const srv = settings.queue;
+        let localSavedAt = 0;
+        try {
+          const localRaw = localStorage.getItem(_queueKey());
+          if (localRaw) localSavedAt = JSON.parse(localRaw)?.savedAt || 0;
+        } catch (_) {}
+        if ((srv.savedAt || 0) > localSavedAt) {
+          localStorage.setItem(_queueKey(), JSON.stringify(srv));
+          restoreQueue(true);
+        }
+      }
+    } catch (_) {}
+
+    // ── Home view refresh ─────────────────────────────────────────────────────
+    // Re-fetch home shelves (recently played, most played, etc.) if the home
+    // view is currently open so data from other devices shows up immediately.
+    if (S.view === 'home') viewHome();
   });
   // Fetch ping to get transcode server info + vpath metadata
   api('GET', 'api/v1/ping').then(d => {
