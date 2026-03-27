@@ -1998,7 +1998,8 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .hc-sub{font-size:.65rem;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}
 /* ── icon card (playlists, folders) ── */
 /* ── home: customize button ── */
-.home-customize-btn{margin-left:auto;font-size:.7rem;font-weight:600;padding:4px 12px;border-radius:var(--r);background:transparent;border:1px solid var(--border2);color:var(--t2);cursor:pointer;transition:background .12s,color .12s,border-color .12s;}
+.home-toolbar{display:flex;justify-content:flex-end;padding:0 2px 6px;}
+.home-customize-btn{font-size:.7rem;font-weight:600;padding:4px 12px;border-radius:var(--r);background:transparent;border:1px solid var(--border2);color:var(--t2);cursor:pointer;transition:background .12s,color .12s,border-color .12s;}
 .home-customize-btn:hover{background:var(--raised);color:var(--t1);}
 .home-customize-btn.active{background:var(--primary-d);color:var(--primary);border-color:var(--primary);}
 /* ── home: hidden items (favorites / compact mode) ── */
