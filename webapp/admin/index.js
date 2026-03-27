@@ -2047,6 +2047,118 @@ const dbView = Vue.component('db-view', {
   }
 });
 
+// ── Backup View ──────────────────────────────────────────────────────────────
+const backupView = Vue.component('backup-view', {
+  data() {
+    return {
+      backups: [],
+      isLoading: true,
+      isCreating: false,
+    };
+  },
+  mounted: async function() {
+    await this.loadBackups();
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">Backup</span>
+              <p style="color:var(--t2);margin-bottom:1rem;">
+                Create a backup of the database and configuration file. Backups are stored in
+                <code style="color:var(--accent);background:var(--raised);padding:.1rem .35rem;border-radius:4px;">save/backups/</code>.
+                A backup runs automatically every week and the 4 most recent are kept.
+              </p>
+              <div v-if="isLoading" style="text-align:center;padding:2rem 0;">
+                <svg class="spinner" width="40px" height="40px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
+              </div>
+              <div v-else>
+                <div v-if="backups.length === 0" style="color:var(--t2);margin:.5rem 0 1rem;">No backups yet.</div>
+                <table v-else>
+                  <thead>
+                    <tr>
+                      <th>Filename</th>
+                      <th>Size</th>
+                      <th>Created</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="b in backups" :key="b.filename">
+                      <td style="font-family:monospace;font-size:.85rem;">{{b.filename}}</td>
+                      <td>{{formatBytes(b.size)}}</td>
+                      <td>{{formatDate(b.mtime)}}</td>
+                      <td><a class="btn-sm btn-sm-download" title="Download" style="cursor:pointer;" @click="downloadBackup(b.filename)">Download</a></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="card-action">
+              <button class="btn" type="button" :disabled="isCreating" @click="createBackup()">
+                <span v-if="isCreating">Creating…</span>
+                <span v-else>Create Backup Now</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  methods: {
+    loadBackups: async function() {
+      this.isLoading = true;
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/backups` });
+        this.backups = res.data;
+      } catch (_) {
+        iziToast.error({ title: 'Failed to load backups', position: 'topCenter', timeout: 3500 });
+      }
+      this.isLoading = false;
+    },
+    createBackup: async function() {
+      this.isCreating = true;
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/backup` });
+        iziToast.success({ title: 'Backup created successfully', position: 'topCenter', timeout: 3500 });
+        await this.loadBackups();
+      } catch (_) {
+        iziToast.error({ title: 'Backup failed', position: 'topCenter', timeout: 3500 });
+        this.isCreating = false;
+      }
+      this.isCreating = false;
+    },
+    downloadBackup: async function(filename) {
+      try {
+        const response = await API.axios({
+          url: `${API.url()}/api/v1/admin/backup/download/${encodeURIComponent(filename)}`,
+          method: 'GET',
+          responseType: 'blob',
+        });
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', filename);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } catch (_) {
+        iziToast.error({ title: 'Download failed', position: 'topCenter', timeout: 3500 });
+      }
+    },
+    formatBytes: function(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    },
+    formatDate: function(ms) {
+      if (!ms) return '—';
+      return new Date(ms).toLocaleString();
+    },
+  }
+});
+
 const rpnView = Vue.component('rpn-view', {
   data() {
     return {
@@ -3419,6 +3531,7 @@ const vm = new Vue({
     'folders-view': foldersView,
     'users-view': usersView,
     'db-view': dbView,
+    'backup-view': backupView,
     'advanced-view': advancedView,
     'info-view': infoView,
     'transcode-view': transcodeView,

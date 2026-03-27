@@ -1,5 +1,17 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Backup feature — (pending commit)
+
+**Files:** `src/api/backup.js` (new), `src/server.js`, `webapp/admin/index.html`, `webapp/admin/index.js`, `docs/backup.md` (new)
+
+- **Admin backup panel** — new "Backup" section in the admin nav (archive icon). Creates a zip of the database (SQLite: `mstream.sqlite` + WAL files; Loki: all three `.db` files) and `default.json`, stored in `save/backups/`. Up to 4 backups kept; oldest removed on 5th. Manual "Create Backup Now" button; backup list shows size, date, download button. Automatic weekly backup (checked hourly, 30s boot delay); timestamp in `save/backups/.last-weekly`.
+
+## Radio now-playing DB lookup badge — (pending commit)
+
+**Files:** `webapp/app.js`, `webapp/index.html`, `webapp/style.css`
+
+- When a radio stream shows an artist/title, a small database icon appears after the text (3s after the track changes) if the song is found in the local library. Search uses the existing cross-field multi-word query so remixes, 12-inches etc. also match. Badge and timer are cleared on track change or when leaving radio.
+
 ## Bug fixes — 2026-03-26
 
 **Files:** `webapp/app.js`, `webapp/index.html`, `webapp/admin/index.html`, `webapp/admin/index.js`, `webapp/style.css`

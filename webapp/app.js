@@ -7154,6 +7154,8 @@ let _podcastFeeds  = [];
 let _radioNowPlayingTimer   = null;
 let _radioNowPlayingStation = null;
 let _radioPlayStart = 0;         // Date.now() when current radio stream started playing
+let _radioDbLookupTimer = null;  // delayed DB-check after now-playing changes
+let _radioNpLastText    = null;  // last seen now-playing string, to detect changes
 let _radioSpectrumEnabled = false; // toggled by clicking the progress bar during radio
 
 const _RADIO_ART_PLACEHOLDER = `<div style="width:48px;height:48px;background:var(--card);border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M7.76 7.76a6 6 0 0 0 0 8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/></svg></div>`;
@@ -7167,9 +7169,13 @@ function _radioArtHtml(imgUrl) {
 
 function _stopRadioNowPlaying() {
   if (_radioNowPlayingTimer) { clearInterval(_radioNowPlayingTimer); _radioNowPlayingTimer = null; }
+  if (_radioDbLookupTimer)  { clearTimeout(_radioDbLookupTimer);  _radioDbLookupTimer = null; }
   _radioNowPlayingStation = null;
+  _radioNpLastText = null;
   const el = document.getElementById('player-radio-np');
   if (el) el.classList.add('hidden');
+  const badge = document.getElementById('player-radio-db-badge');
+  if (badge) badge.classList.add('hidden');
   const kbpsEl = document.getElementById('player-radio-kbps');
   if (kbpsEl) kbpsEl.classList.add('hidden');
 }
@@ -7183,8 +7189,32 @@ async function _pollRadioNowPlaying(station) {
     const el = document.getElementById('player-radio-np');
     if (!el) return;
     if (data?.title) {
-      el.textContent = data.artist ? `${data.artist} — ${data.title}` : data.title;
+      const newText = data.artist ? `${data.artist} — ${data.title}` : data.title;
+      const textEl = document.getElementById('player-radio-np-text');
+      if (textEl) textEl.textContent = newText;
       el.classList.remove('hidden');
+      // If the track changed: reset badge and schedule a 10 s DB lookup
+      if (newText !== _radioNpLastText) {
+        _radioNpLastText = newText;
+        const badge = document.getElementById('player-radio-db-badge');
+        if (badge) badge.classList.add('hidden');
+        if (_radioDbLookupTimer) { clearTimeout(_radioDbLookupTimer); _radioDbLookupTimer = null; }
+        // Build a query from artist + title tokens; the cross-field search
+        // handles either order (artist-title or title-artist in the DB).
+        const query = [data.artist || '', data.title || ''].filter(Boolean).join(' ').trim();
+        if (query) {
+          _radioDbLookupTimer = setTimeout(async () => { // 3 s delay
+            try {
+              const res = await api('POST', 'api/v1/db/search', { search: query, noArtists: true, noAlbums: true, noFiles: true });
+              // Only show badge if the track hasn't changed in the meantime
+              if (_radioNpLastText === newText && res.title?.length > 0) {
+                const b = document.getElementById('player-radio-db-badge');
+                if (b) b.classList.remove('hidden');
+              }
+            } catch(_) {}
+          }, 3000);
+        }
+      }
     } else {
       el.classList.add('hidden');
     }
