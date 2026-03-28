@@ -1,5 +1,13 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Boot sequence: queue loaded twice on fresh navigation — 2026-03-28
+
+**Files:** `webapp/app.js`
+
+- **`_lastVisRefresh` initialised to `Date.now()`** (was `0`) — when the tab loads hidden (e.g. background tab, bookmark open) and becomes visible shortly after boot, `now - 0` was always ≥ 30 000 ms so the visibilitychange handler fired immediately, racing with the boot sequence. Initialising to `Date.now()` suppresses it for 30 s.
+- **Removed `restoreQueue()` from `_applyServerSettings`** — it was called unconditionally whenever the app was visible and paused, with no check whether the server copy was actually newer. The boot path (`showApp`) and the visibilitychange handler are the sole callers of `restoreQueue`; `_applyServerSettings` now only writes localStorage.
+- **`localSavedAt` read before `_applyServerSettings` in visibilitychange handler** — previously `_applyServerSettings` would write the server's `savedAt` into localStorage, then the comparison `srv.savedAt > localSavedAt` would always be false (equal), so `restoreQueue` from the outer block never fired. Now the pre-read gives the correct "what we had before" baseline.
+
 ## Embed fixes: PTS recovery, album-art sync, playback guard — 2026-03-28
 
 **Files:** `src/api/discogs.js`, `webapp/app.js`
