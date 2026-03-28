@@ -10028,12 +10028,12 @@ function _applyServerSettings(data) {
       }
     }
   } else if (data?.queue && Array.isArray(data.queue.queue) && data.queue.queue.length && queueKey) {
+    // Always persist server queue to localStorage so restoreQueue() (called by
+    // showApp on boot, or by the visibilitychange handler when server is newer)
+    // always has fresh data.  Never call restoreQueue() directly from here —
+    // the boot path calls it after checkSession returns; the visibility-change
+    // handler calls it only after a savedAt comparison.
     try { localStorage.setItem(queueKey, JSON.stringify(data.queue)); } catch(_) {}
-    // If showApp() has already run (cookie-auth path), restoreQueue must be
-    // called again now that localStorage has the correct data.
-    if (document.getElementById('app') && !document.getElementById('app').classList.contains('hidden')) {
-      restoreQueue();
-    }
   }
 }
 
@@ -10262,7 +10262,9 @@ function showApp() {
 
   // Re-check feature flags when returning to this tab (e.g. after changing
   // settings in the admin panel which opens in a separate tab).
-  let _lastVisRefresh = 0;
+  // Initialise to now so any visibilitychange that fires during the boot
+  // sequence (e.g. background tab becoming active) is suppressed for 30 s.
+  let _lastVisRefresh = Date.now();
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState !== 'visible') return;
     const now = Date.now();
@@ -10326,16 +10328,18 @@ function showApp() {
     // newer (i.e. another device played songs while this tab was backgrounded).
     try {
       const settings = await api('GET', 'api/v1/user/settings');
+      // Read localSavedAt BEFORE _applyServerSettings writes new data to
+      // localStorage — otherwise the comparison below would always be equal.
+      const _qk = _queueKey();
+      let _localSavedAt = 0;
+      if (_qk && settings?.queue?.queue?.length && audioEl.paused) {
+        try { const _r = localStorage.getItem(_qk); if (_r) _localSavedAt = JSON.parse(_r)?.savedAt || 0; } catch (_) {}
+      }
       if (settings?.prefs) _applyServerSettings(settings);
       if (audioEl.paused && settings?.queue?.queue?.length) {
         const srv = settings.queue;
-        let localSavedAt = 0;
-        try {
-          const localRaw = localStorage.getItem(_queueKey());
-          if (localRaw) localSavedAt = JSON.parse(localRaw)?.savedAt || 0;
-        } catch (_) {}
-        if ((srv.savedAt || 0) > localSavedAt) {
-          localStorage.setItem(_queueKey(), JSON.stringify(srv));
+        if ((srv.savedAt || 0) > _localSavedAt) {
+          if (_qk) localStorage.setItem(_qk, JSON.stringify(srv));
           restoreQueue(true);
         }
       }
