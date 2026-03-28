@@ -337,7 +337,12 @@ function _dismissInfoStrip() {
 }
 function _showDJStrip(song) {
   if (!S.autoDJ) return;
-  if (!_djSimilarFor || !_djSimilarArtists.length) return;
+  if (!_djSimilarArtists.length) return;
+  // Always use the currently-playing artist — _djSimilarFor may be stale
+  // if the user manually changed songs between the pre-fetch and now.
+  const _nowArtist = S.queue[S.idx]?.artist;
+  if (!_nowArtist) return;
+  _djSimilarFor = _nowArtist; // keep in sync so any later caller is also correct
   // Exclude the queued artist itself from the pills (it's already shown)
   const pills = _djSimilarArtists
     .filter(a => a.toLowerCase() !== (song.artist || '').toLowerCase())
@@ -1596,9 +1601,10 @@ function renderNPModal() {
         const _wavLike = ['wav','aiff','aif','w64'].includes(_ext);
         const _btn = `<button class="np-discogs-btn" id="np-discogs-search-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search Album Art on Discogs</button>`;
         const _dzbtn = `<button class="np-discogs-btn" id="np-deezer-search-btn" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search Album Art on Deezer</button>`;
+        const _urlbtn = `<button class="np-discogs-btn" id="np-url-paste-btn" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Paste Image URL</button>`;
         _dsEl.innerHTML = _wavLike
-          ? _btn + _dzbtn + `<span class="np-discogs-note" style="margin-top:5px;display:block">WAV files can\'t store embedded art — art will be saved to the database only.<br>It is lost on a DB reset or album-art cache delete.</span>`
-          : _btn + _dzbtn;
+          ? _btn + _dzbtn + _urlbtn + `<span class="np-discogs-note" style="margin-top:5px;display:block">WAV files can\'t store embedded art — art will be saved to the database only.<br>It is lost on a DB reset or album-art cache delete.</span>`
+          : _btn + _dzbtn + _urlbtn;
       }
     } else {
       _dsEl.classList.add('hidden');
@@ -1667,6 +1673,33 @@ async function _npDeezerSearch(song) {
       `<span class="np-discogs-status">Deezer search failed</span>` +
       `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
   }
+}
+
+// ── DIRECT-URL ART IN NP MODAL ────────────────────────────
+function _npUrlPaste(song) {
+  const dsEl   = document.getElementById('np-discogs-section');
+  const npLeft = document.getElementById('np-left');
+  if (!dsEl || !song) return;
+  npLeft?.classList.add('np-left--picking');
+  dsEl.dataset.songFp = song.filepath || '';
+  dsEl.innerHTML =
+    `<div class="np-discogs-pick-header">` +
+      `<span class="np-discogs-pick-title">Paste an image URL</span>` +
+      `<button class="np-discogs-cancel" id="np-discogs-back-btn">← Cancel</button>` +
+    `</div>` +
+    `<div class="np-url-paste-row">` +
+      `<input class="np-url-paste-inp" id="np-url-paste-inp" type="url" placeholder="https://…" autocomplete="off" spellcheck="false">` +
+      `<button class="np-url-paste-go" id="np-url-paste-go-btn">Use</button>` +
+    `</div>` +
+    `<span id="np-url-paste-preview-wrap" class="np-url-paste-preview-wrap hidden">` +
+      `<img id="np-url-paste-preview" class="np-url-paste-preview" alt="">` +
+    `</span>` +
+    `<span id="np-url-paste-status" class="np-discogs-status" style="display:none"></span>`;
+  // Focus the input after the DOM updates
+  requestAnimationFrame(() => {
+    const inp = document.getElementById('np-url-paste-inp');
+    if (inp) inp.focus();
+  });
 }
 
 // ── DISCOGS ART IN NP MODAL ───────────────────────────────
@@ -11572,6 +11605,62 @@ document.getElementById('np-left').addEventListener('click', async e => {
     _npDeezerSearch(S.queue[S.idx]);
     return;
   }
+  // Paste URL button
+  if (e.target.closest('#np-url-paste-btn')) {
+    _npUrlPaste(S.queue[S.idx]);
+    return;
+  }
+  // "Use" button — embed the pasted URL
+  if (e.target.closest('#np-url-paste-go-btn')) {
+    const inp = document.getElementById('np-url-paste-inp');
+    const coverUrl = (inp?.value || '').trim();
+    const song = S.queue[S.idx];
+    const statusEl = document.getElementById('np-url-paste-status');
+    if (!coverUrl || !song?.filepath) return;
+    // Basic URL validation — must start with http(s)://
+    if (!/^https?:\/\/.+/i.test(coverUrl)) {
+      if (statusEl) { statusEl.textContent = 'Please enter a valid https:// URL'; statusEl.style.display = ''; }
+      return;
+    }
+    const filepath = song.filepath;
+    const dsEl   = document.getElementById('np-discogs-section');
+    const npLeft = document.getElementById('np-left');
+    const _cacheOnly = ['wav','aiff','aif','w64'].includes((filepath || '').split('.').pop().toLowerCase());
+    const _label = _cacheOnly ? 'Saving art to database…' : 'Embedding cover art…';
+    const _isCurrentSong = S.queue[S.idx]?.filepath === filepath;
+    const _wasPlaying    = _isCurrentSong && !audioEl.paused;
+    if (_isCurrentSong && _wasPlaying) audioEl.pause();
+    if (dsEl) dsEl.innerHTML = `<div class="np-embed-spinner"></div><span class="np-embed-label">${_label}</span>`;
+    npLeft?.classList.add('np-left--embedding');
+    try {
+      const result = await api('POST', 'api/v1/discogs/embed', { filepath, coverUrl });
+      if (result?.aaFile) {
+        S.queue.forEach(q => { if (q.filepath === filepath) q['album-art'] = result.aaFile; });
+        _syncQueueToDb();
+      }
+      npLeft?.classList.remove('np-left--embedding');
+      npLeft?.classList.remove('np-left--picking');
+      if (dsEl) dsEl.dataset.songFp = '';
+      renderNPModal();
+      if (S.queue[S.idx]?.filepath === filepath) Player.updateBar();
+      refreshQueueUI();
+      if (_isCurrentSong) {
+        clearTimeout(_netRecoveryTimer);
+        toast('Album art saved — restarting from the beginning');
+        audioEl.addEventListener('loadedmetadata', () => { if (_wasPlaying) audioEl.play().catch(() => {}); }, { once: true });
+        audioEl.src = mediaUrl(filepath) + '&_t=' + Date.now();
+        audioEl.load();
+      }
+    } catch(err) {
+      npLeft?.classList.remove('np-left--embedding');
+      if (_isCurrentSong && _wasPlaying) audioEl.play().catch(() => {});
+      if (dsEl) dsEl.innerHTML =
+        `<span class="np-discogs-status" style="color:rgba(255,100,100,.8)">Embed failed: ${esc(err?.message || 'error')}</span>` +
+        `<button class="np-discogs-btn" id="np-url-paste-btn" style="margin-top:6px">Try again</button>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:4px">← Back</button>`;
+    }
+    return;
+  }
   // Click a Deezer thumbnail — download cover_xl and embed via Discogs embed endpoint
   const deezerThumb = e.target.closest('.np-deezer-thumb');
   if (deezerThumb) {
@@ -11686,6 +11775,24 @@ document.getElementById('np-left').addEventListener('click', async e => {
       `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:4px">← Back</button>`;
     thumb.classList.remove('selected');
   }
+});
+// Live image preview when the user types/pastes a URL in the URL-paste input
+document.getElementById('np-left').addEventListener('input', e => {
+  const inp = e.target.closest('#np-url-paste-inp');
+  if (!inp) return;
+  const url = inp.value.trim();
+  const wrap   = document.getElementById('np-url-paste-preview-wrap');
+  const imgEl  = document.getElementById('np-url-paste-preview');
+  const statEl = document.getElementById('np-url-paste-status');
+  if (!wrap || !imgEl) return;
+  if (!url || !/^https?:\/\/.+/i.test(url)) {
+    wrap.classList.add('hidden');
+    if (statEl) statEl.style.display = 'none';
+    return;
+  }
+  imgEl.onload  = () => { wrap.classList.remove('hidden'); if (statEl) statEl.style.display = 'none'; };
+  imgEl.onerror = () => { wrap.classList.add('hidden');    if (statEl) { statEl.textContent = 'Could not load image from that URL'; statEl.style.display = ''; } };
+  imgEl.src = url;
 });
 // ID3 tag edit buttons inside the NP modal right panel
 document.getElementById('np-right').addEventListener('click', async e => {
