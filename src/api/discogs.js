@@ -29,9 +29,9 @@ async function discogsGet(url) {
   return resp.data;
 }
 
-async function fetchImageBuf(url) {
+async function fetchImageBuf(url, useDiscogsAuth = true) {
   const resp = await axios.get(url, {
-    headers:      discogsHeaders(),
+    headers:      useDiscogsAuth ? discogsHeaders() : { 'User-Agent': UA_BASE },
     responseType: 'arraybuffer',
   });
   const buf = Buffer.from(resp.data);
@@ -462,7 +462,7 @@ export function setup(mstream) {
         imgUrl = img.uri;
       }
 
-      const imgBuf   = await fetchImageBuf(imgUrl);
+      const imgBuf   = await fetchImageBuf(imgUrl, !req.body.coverUrl);
       // Write temp files in the same directory as the audio file so renameSync
       // is atomic (same filesystem — avoids cross-device EXDEV errors).
       fs.writeFileSync(tmpCover, imgBuf);
@@ -496,7 +496,55 @@ export function setup(mstream) {
 
         // Atomic replace — single syscall, file is never in a mid-written state
         fs.renameSync(tmpOut, absPath);
-      }
+
+        // ── Post-embed validation ─────────────────────────────────────────────
+        // Probe the output for PTS / demuxer issues. ffmpeg exits 0 but writes
+        // error lines to stderr when a stream has missing timestamps.  If we
+        // detect those patterns, run a recovery pass: strip all video streams
+        // from the file, then re-embed the art with an explicit -r 1 framerate
+        // to guarantee proper PTS is written into the new stream.
+        let _probeStderr = '';
+        try {
+          const pr = await execFileAsync(ffmpegBin, [
+            '-v', 'error', '-i', absPath, '-f', 'null', '-',
+          ]);
+          _probeStderr = pr.stderr || '';
+        } catch (probeErr) {
+          _probeStderr = (probeErr.stderr || '') + String(probeErr.message || '');
+        }
+        if (/PTS|non monotonous|DEMUXER_ERROR|COULD_NOT_PARSE/i.test(_probeStderr)) {
+          console.warn('[discogs/embed] PTS issue detected after embed — running recovery:', absPath);
+          const tmpRecover = path.join(path.dirname(absPath), `.mstream-recover-${_ts}${extLower}`);
+          const tmpReembed = path.join(path.dirname(absPath), `.mstream-reembed-${_ts}${extLower}`);
+          try {
+            // Step 1: extract clean audio-only copy
+            await execFileAsync(ffmpegBin, [
+              '-y', '-i', absPath, '-map', '0:a', '-c:a', 'copy', tmpRecover,
+            ]);
+            // Step 2: re-embed art with explicit -r 1 to force PTS
+            await execFileAsync(ffmpegBin, [
+              '-y',
+              '-i', tmpRecover,
+              '-i', tmpCover,
+              '-map', '0:a', '-map', '1:v',
+              '-c:a', 'copy',
+              '-c:v', 'mjpeg',
+              '-r', '1',
+              '-disposition:v:0', 'attached_pic',
+              '-metadata:s:v', 'title=Cover (Front)',
+              '-metadata:s:v', 'comment=Cover (Front)',
+              tmpReembed,
+            ]);
+            fs.renameSync(tmpReembed, absPath);
+            console.log('[discogs/embed] PTS recovery completed successfully:', absPath);
+          } catch (recovErr) {
+            console.error('[discogs/embed] PTS recovery failed:', recovErr.message);
+          } finally {
+            try { fs.unlinkSync(tmpRecover); } catch (_) {}
+            try { fs.unlinkSync(tmpReembed); } catch (_) {}
+          }
+        }
+      } // end if (!cacheOnly)
 
       try { fs.unlinkSync(tmpCover); } catch (_) {}
 
