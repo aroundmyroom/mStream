@@ -5238,15 +5238,18 @@ async function viewHome() {
 
   // Folder & playlist art cards — deterministic color per name, art-card layout
   function folderCard(label, attrs) {
-    const art = `<svg viewBox="4 28 92 56" xmlns="http://www.w3.org/2000/svg">
-      <rect x="4" y="28" width="92" height="56" style="fill:var(--surface)"/>
-      <path d="M12 44 H34 L42 36 H84 Q88 36 88 40 V72 Q88 75 84 75 H16 Q12 75 12 72 Z"
+    // viewBox crops to the folder with ~8px margin each side.
+    // Path redesigned so body height = 52 units vs width = 76 units (ratio 1.46:1)
+    // instead of the old 39-tall (ratio 1.95:1) which looked squashed.
+    const art = `<svg viewBox="4 24 92 68" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" style="fill:var(--surface)"/>
+      <path d="M12 46 H34 L42 32 H84 Q88 32 88 37 V80 Q88 84 84 84 H16 Q12 84 12 80 Z"
             style="fill:var(--raised);stroke:var(--accent)" stroke-width="1.8" stroke-linejoin="round"/>
-      <line x1="20" y1="51" x2="65" y2="51" style="stroke:var(--t3)" stroke-width="2.2" stroke-linecap="round" opacity=".75"/>
-      <line x1="20" y1="59" x2="60" y2="59" style="stroke:var(--t3)" stroke-width="2.2" stroke-linecap="round" opacity=".75"/>
-      <line x1="20" y1="67" x2="50" y2="67" style="stroke:var(--t3)" stroke-width="2.2" stroke-linecap="round" opacity=".75"/>
-      <circle cx="74" cy="64" r="13" style="fill:var(--surface);stroke:var(--primary)" stroke-width="2.2"/>
-      <polygon points="70,58 70,70 82,64" style="fill:var(--primary)"/>
+      <line x1="20" y1="52" x2="65" y2="52" style="stroke:var(--t3)" stroke-width="2.2" stroke-linecap="round" opacity=".75"/>
+      <line x1="20" y1="61" x2="60" y2="61" style="stroke:var(--t3)" stroke-width="2.2" stroke-linecap="round" opacity=".75"/>
+      <line x1="20" y1="70" x2="50" y2="70" style="stroke:var(--t3)" stroke-width="2.2" stroke-linecap="round" opacity=".75"/>
+      <circle cx="74" cy="67" r="13" style="fill:var(--surface);stroke:var(--primary)" stroke-width="2.2"/>
+      <polygon points="70,61 70,73 82,67" style="fill:var(--primary)"/>
     </svg>`;
     return `<div class="hc" ${attrs || ''}>
       <div class="hc-art">${art}</div>
@@ -10011,8 +10014,20 @@ function _applyServerSettings(data) {
   _applyNavVisibility();
   // Queue: the DB is the source of truth — always restore from it on load.
   // This ensures any browser/device always picks up whatever was last playing.
+  // Guard: never interrupt active playback — only restore when paused so that
+  // a visibility-change triggered settings refresh doesn't reload the audio
+  // element and pause a song that is currently playing.
   const queueKey = _queueKey();
-  if (data?.queue && Array.isArray(data.queue.queue) && data.queue.queue.length && queueKey) {
+  if (!audioEl.paused) {
+    // Audio is playing — just keep localStorage up to date, don't call restoreQueue
+    if (data?.queue && Array.isArray(data.queue.queue) && data.queue.queue.length && queueKey) {
+      let localSavedAt = 0;
+      try { const r = localStorage.getItem(queueKey); if (r) localSavedAt = JSON.parse(r)?.savedAt || 0; } catch(_) {}
+      if ((data.queue.savedAt || 0) > localSavedAt) {
+        try { localStorage.setItem(queueKey, JSON.stringify(data.queue)); } catch(_) {}
+      }
+    }
+  } else if (data?.queue && Array.isArray(data.queue.queue) && data.queue.queue.length && queueKey) {
     try { localStorage.setItem(queueKey, JSON.stringify(data.queue)); } catch(_) {}
     // If showApp() has already run (cookie-auth path), restoreQueue must be
     // called again now that localStorage has the correct data.
@@ -11573,6 +11588,7 @@ document.getElementById('np-left').addEventListener('click', async e => {
       const result = await api('POST', 'api/v1/discogs/embed', { filepath, coverUrl });
       if (result?.aaFile) {
         S.queue.forEach(q => { if (q.filepath === filepath) q['album-art'] = result.aaFile; });
+        _syncQueueToDb(); // persist new art into server queue so tab-sync restores it correctly
       }
       npLeft?.classList.remove('np-left--embedding');
       npLeft?.classList.remove('np-left--picking');
@@ -11628,6 +11644,7 @@ document.getElementById('np-left').addEventListener('click', async e => {
     const result = await api('POST', 'api/v1/discogs/embed', { filepath, releaseId });
     if (result?.aaFile) {
       S.queue.forEach(q => { if (q.filepath === filepath) q['album-art'] = result.aaFile; });
+      _syncQueueToDb(); // persist new art into server queue so tab-sync restores it correctly
     }
     npLeft?.classList.remove('np-left--embedding');
     npLeft?.classList.remove('np-left--picking');

@@ -1,5 +1,15 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Embed fixes: PTS recovery, album-art sync, playback guard — 2026-03-28
+
+**Files:** `src/api/discogs.js`, `webapp/app.js`
+
+- **Post-embed PTS validation** — after every cover embed, ffmpeg probes the output file for PTS / demuxer errors. If `PTS`, `non monotonous`, `DEMUXER_ERROR`, or `COULD_NOT_PARSE` are detected, a two-step recovery runs: (1) extract a clean audio-only copy, (2) re-embed the cover with `-r 1` to force correct PTS into the attached-picture stream. Temp recovery files are cleaned up in a `finally` block.
+- **Deezer embed: correct auth headers** — `fetchImageBuf` now accepts a `useDiscogsAuth` flag. Deezer image URLs (passed via `coverUrl` body param) use a plain `User-Agent` header instead of the Discogs auth header, preventing 401 errors when downloading Deezer artwork.
+- **Album art persists across tab switches** — both the Deezer and Discogs embed success handlers now call `_syncQueueToDb()` after updating `S.queue['album-art']` in memory. Previously the server still held the pre-embed queue, so switching tabs and returning overwrote the new art.
+- **Playback not interrupted on tab return** — `_applyServerSettings()` now guards `restoreQueue()` with `!audioEl.paused`. When a song is actively playing and the tab regains focus, only localStorage is updated (if the server copy is newer); the audio element is never touched. Previously any tab-focus sync call would reload the queue and pause playback.
+- **Folder SVG redesigned** — `folderCard()` viewBox changed to `4 24 92 68`; body path redesigned to height 52 units (ratio 1.46:1) instead of the previous 39 units (ratio 1.95:1) which looked squashed.
+
 ## Deezer album art search in NP modal — 2026-06-03
 
 **Files:** `webapp/app.js`, `src/api/discogs.js`
