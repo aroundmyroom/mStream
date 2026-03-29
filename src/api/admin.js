@@ -294,34 +294,57 @@ export function setup(mstream) {
   });
 
   // PATCH /api/v1/admin/directory/flags — update per-folder flags on an existing folder
-  // Currently supports: allowRecordDelete (recordings folders only)
+  // Supports: allowRecordDelete (recordings folders only), albumsOnly (music/audio-books only)
   mstream.patch("/api/v1/admin/directory/flags", async (req, res) => {
     const schema = Joi.object({
       vpath: Joi.string().pattern(/[a-zA-Z0-9-]+/).required(),
-      allowRecordDelete: Joi.boolean().required()
-    });
+      allowRecordDelete: Joi.boolean().optional(),
+      albumsOnly: Joi.boolean().optional(),
+    }).or('allowRecordDelete', 'albumsOnly');
     const input = joiValidate(schema, req.body);
-    const { vpath, allowRecordDelete } = input.value;
+    const { vpath, allowRecordDelete, albumsOnly } = input.value;
     const folder = config.program.folders[vpath];
     if (!folder) return res.status(404).json({ error: 'vpath not found' });
-    if (folder.type !== 'recordings') return res.status(400).json({ error: 'only recordings folders support this flag' });
 
-    // Update in-memory
-    if (allowRecordDelete) {
-      config.program.folders[vpath].allowRecordDelete = true;
-    } else {
-      delete config.program.folders[vpath].allowRecordDelete;
+    if (allowRecordDelete !== undefined) {
+      if (folder.type !== 'recordings') return res.status(400).json({ error: 'only recordings folders support allowRecordDelete' });
+      if (allowRecordDelete) {
+        config.program.folders[vpath].allowRecordDelete = true;
+      } else {
+        delete config.program.folders[vpath].allowRecordDelete;
+      }
+    }
+
+    if (albumsOnly !== undefined) {
+      if (folder.type === 'recordings') return res.status(400).json({ error: 'recordings folders are not included in the albums view' });
+      if (albumsOnly) {
+        config.program.folders[vpath].albumsOnly = true;
+      } else {
+        delete config.program.folders[vpath].albumsOnly;
+      }
     }
 
     // Persist to config file
     const loadConfig = await admin.loadFile(config.configFile);
     if (!loadConfig.folders) loadConfig.folders = {};
     if (!loadConfig.folders[vpath]) loadConfig.folders[vpath] = {};
-    if (allowRecordDelete) {
-      loadConfig.folders[vpath].allowRecordDelete = true;
-    } else {
-      delete loadConfig.folders[vpath].allowRecordDelete;
+
+    if (allowRecordDelete !== undefined) {
+      if (allowRecordDelete) {
+        loadConfig.folders[vpath].allowRecordDelete = true;
+      } else {
+        delete loadConfig.folders[vpath].allowRecordDelete;
+      }
     }
+
+    if (albumsOnly !== undefined) {
+      if (albumsOnly) {
+        loadConfig.folders[vpath].albumsOnly = true;
+      } else {
+        delete loadConfig.folders[vpath].albumsOnly;
+      }
+    }
+
     await admin.saveFile(loadConfig, config.configFile);
     res.json({});
   });

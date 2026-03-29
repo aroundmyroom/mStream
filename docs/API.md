@@ -58,11 +58,11 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [/db/search](API/db_search.md)
 
-[/db/albums](API/db_albums.md)
+[/db/albums](API/db_albums.md) — GET (all) and POST with `ignoreVPaths`, `excludeFilepathPrefixes`, `includeFilepathPrefixes` (whitelist) *(updated v5.16.30)*
 
 [/db/artists](API/db_artists.md)
 
-[/db/artists-albums](API/db_artists-albums.md)
+[/db/artists-albums](API/db_artists-albums.md) — accepts same filter params as `/db/albums` *(updated v5.16.30)*
 
 [/db/album-songs](API/db_album-songs.md)
 
@@ -102,6 +102,10 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [Discogs cover art — search, embed, admin config](API/discogs.md) *(GitHub Copilot, 2026-03-07)*
 
+## Admin — Directory Flags
+
+[/admin/directory/flags — PATCH albumsOnly and allowRecordDelete per folder](API/admin_directory-flags.md) *(GitHub Copilot, 2026-03-29)*
+
 ## Admin — ID3 Tag Editing
 
 [ID3 tag write — enable setting, write tags to file](API/admin_id3-tags.md) *(GitHub Copilot, 2026-03-09)*
@@ -125,6 +129,10 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 ## Genre Groups *(GitHub Copilot, 2026-03-22)*
 
 [/api/v1/db/genre-groups, /api/v1/admin/genre-groups — admin-configurable display groupings used in genre browser and smart playlist builder](API/admin_genre-groups.md)
+
+## Albums-Only Folders *(GitHub Copilot, 2026-03-29)*
+
+[Albums-Only — restrict the Albums view to designated folders](albums-only.md)
 
 ## Home View *(GitHub Copilot, 2026-03-27)*
 

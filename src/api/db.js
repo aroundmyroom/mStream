@@ -127,7 +127,7 @@ export function setup(mstream) {
   });
 
   mstream.post('/api/v1/db/artists-albums', (req, res) => {
-    const albums = db.getArtistAlbums(req.body.artist, req.user.vpaths, req.body.ignoreVPaths, req.body.excludeFilepathPrefixes);
+    const albums = db.getArtistAlbums(req.body.artist, req.user.vpaths, req.body.ignoreVPaths, req.body.excludeFilepathPrefixes, req.body.includeFilepathPrefixes);
     res.json({ albums });
   });
 
@@ -136,7 +136,7 @@ export function setup(mstream) {
   });
 
   mstream.post('/api/v1/db/albums', (req, res) => {
-    res.json({ albums: db.getAlbums(req.user.vpaths, req.body.ignoreVPaths, req.body.excludeFilepathPrefixes) });
+    res.json({ albums: db.getAlbums(req.user.vpaths, req.body.ignoreVPaths, req.body.excludeFilepathPrefixes, req.body.includeFilepathPrefixes) });
   });
 
   mstream.post('/api/v1/db/album-songs', (req, res) => {
@@ -620,10 +620,11 @@ export function setup(mstream) {
   mstream.post('/api/v1/db/decade/albums', (req, res) => {
     const schema = Joi.object({
       decade: Joi.number().integer().required(),
-      ignoreVPaths: Joi.array().items(Joi.string()).optional()
+      ignoreVPaths: Joi.array().items(Joi.string()).optional(),
+      excludeFilepathPrefixes: Joi.array().items(Joi.object({ vpath: Joi.string().required(), prefix: Joi.string().required() })).optional()
     });
     joiValidate(schema, req.body);
-    const albums = db.getAlbumsByDecade(Number(req.body.decade), req.user.vpaths, req.body.ignoreVPaths);
+    const albums = db.getAlbumsByDecade(Number(req.body.decade), req.user.vpaths, req.body.ignoreVPaths, req.body.excludeFilepathPrefixes);
     res.json({ albums });
   });
 
@@ -640,7 +641,8 @@ export function setup(mstream) {
   mstream.post('/api/v1/db/genre/albums', (req, res) => {
     const schema = Joi.object({
       genre: Joi.string().required(),
-      ignoreVPaths: Joi.array().items(Joi.string()).optional()
+      ignoreVPaths: Joi.array().items(Joi.string()).optional(),
+      excludeFilepathPrefixes: Joi.array().items(Joi.object({ vpath: Joi.string().required(), prefix: Joi.string().required() })).optional()
     });
     joiValidate(schema, req.body);
     const { rawMap } = mergeGenreRows(db.getGenres(req.user.vpaths, req.body.ignoreVPaths));
@@ -652,7 +654,7 @@ export function setup(mstream) {
       }
     }
     if (!rawSet || rawSet.size === 0) return res.json({ albums: [] });
-    const albums = db.getAlbumsByGenre(rawSet, req.user.vpaths, req.body.ignoreVPaths);
+    const albums = db.getAlbumsByGenre(rawSet, req.user.vpaths, req.body.ignoreVPaths, req.body.excludeFilepathPrefixes);
     res.json({ albums });
   });
 }

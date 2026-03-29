@@ -472,6 +472,8 @@ function _navCancel() {
 // accumulated body capture listeners from repeated visibility-change refreshes
 // don't cause even-number-of-toggles cancellation in customize mode.
 let _homeAC = null;
+// Queue drag-and-drop state — module-scoped so _initQueueListeners (one-time) can close over it.
+let _qDragSrc = null;
 
 // ── API ───────────────────────────────────────────────────────
 async function api(method, path, body, signal) {
@@ -814,6 +816,54 @@ function _audioBookExclusions() {
   return { ignoreVPaths, excludeFilepathPrefixes };
 }
 
+// Returns { ignoreVPaths, excludeFilepathPrefixes } to restrict album views to
+// only albumsOnly-flagged vpaths.  Returns {} when no vpath has the flag (no-op).
+//
+// Uses a WHITELIST approach (same pattern as Auto-DJ child-vpath optimisation):
+// for parent vpaths that contain albumsOnly children, only include filepaths that
+// start with one of the albumsOnly child's filepathPrefix — nothing else leaks through.
+//   - ignoreVPaths:               drop entire root vpaths that have no albumsOnly content
+//   - includeFilepathPrefixes:    whitelist — for parent vpaths, only show prefix-matched rows
+function _albumsOnlyFilter() {
+  const meta = S.vpathMeta || {};
+  const allVpaths = S.vpaths || [];
+  const hasAny = allVpaths.some(v => meta[v]?.albumsOnly);
+  if (!hasAny) return {};
+
+  const albumsOnlyVpaths = allVpaths.filter(v => meta[v]?.albumsOnly);
+
+  // Root albumsOnly vpaths (no parentVpath) — include all files from these roots
+  const keepRoots = new Set(albumsOnlyVpaths.filter(v => !meta[v]?.parentVpath));
+
+  // Child albumsOnly vpaths — group by parent and collect their filepathPrefixes
+  const prefixByParent = {}; // parentVpath -> [prefix, ...]
+  for (const v of albumsOnlyVpaths) {
+    if (!meta[v]?.parentVpath) continue;
+    const p = meta[v].parentVpath;
+    if (!prefixByParent[p]) prefixByParent[p] = [];
+    if (meta[v].filepathPrefix) prefixByParent[p].push(meta[v].filepathPrefix);
+  }
+
+  // Query only: albumsOnly roots + parents of albumsOnly children
+  const queryVpaths = new Set([...keepRoots, ...Object.keys(prefixByParent)]);
+
+  // Ignore all root vpaths not in our query set
+  const ignoreVPaths = allVpaths.filter(v => !meta[v]?.parentVpath && !queryVpaths.has(v));
+
+  // Whitelist: for each parent vpath, only include rows matching one of the allowed prefixes
+  const includeFilepathPrefixes = [];
+  for (const [parent, prefixes] of Object.entries(prefixByParent)) {
+    for (const prefix of prefixes) {
+      includeFilepathPrefixes.push({ vpath: parent, prefix });
+    }
+  }
+
+  const result = {};
+  if (ignoreVPaths.length) result.ignoreVPaths = ignoreVPaths;
+  if (includeFilepathPrefixes.length) result.includeFilepathPrefixes = includeFilepathPrefixes;
+  return result;
+}
+
 // Returns true if a song should be EXCLUDED by the active keyword filter.
 function _djSongBlocked(song) {
   if (!S.djFilterEnabled || !S.djFilterWords.length) return false;
@@ -1124,9 +1174,18 @@ function refreshQueueUI() {
       </div>`;
   }).join('');
 
-  let _dragSrc = null;
+  const active = list.querySelector('.q-active');
+  if (active) active.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  _syncQueueLabel();
+}
 
-  // ── Delegated click: play item or remove ──
+// ── One-time queue event-listener setup ──────────────────────────────────────
+// MUST be called exactly once after the app boots. Delegated listeners work
+// even when #queue-list innerHTML is replaced by refreshQueueUI().
+function _initQueueListeners() {
+  const list = document.getElementById('queue-list');
+  if (!list) return;
+
   list.addEventListener('click', e => {
     const removeBtn = e.target.closest('.q-remove');
     if (removeBtn) {
@@ -1144,13 +1203,12 @@ function refreshQueueUI() {
     Player.playAt(parseInt(item.dataset.qi));
   });
 
-  // ── Delegated drag-and-drop reorder ──
   list.addEventListener('dragstart', e => {
     const item = e.target.closest('.q-item');
     if (!item) return;
-    _dragSrc = parseInt(item.dataset.qi);
+    _qDragSrc = parseInt(item.dataset.qi);
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', _dragSrc);
+    e.dataTransfer.setData('text/plain', _qDragSrc);
     setTimeout(() => item.classList.add('q-dragging'), 0);
   });
   list.addEventListener('dragend', e => {
@@ -1175,9 +1233,9 @@ function refreshQueueUI() {
     const item = e.target.closest('.q-item');
     if (!item) return;
     const to = parseInt(item.dataset.qi);
-    if (_dragSrc === null || _dragSrc === to) { _dragSrc = null; return; }
-    const from = _dragSrc;
-    _dragSrc = null;
+    if (_qDragSrc === null || _qDragSrc === to) { _qDragSrc = null; return; }
+    const from = _qDragSrc;
+    _qDragSrc = null;
 
     const [moved] = S.queue.splice(from, 1);
     S.queue.splice(to, 0, moved);
@@ -1190,10 +1248,6 @@ function refreshQueueUI() {
     _syncQueueToDb();
     refreshQueueUI();
   });
-
-  const active = list.querySelector('.q-active');
-  if (active) active.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  _syncQueueLabel();
 }
 
 function toggleQueue() {
@@ -4704,8 +4758,13 @@ async function viewArtistAlbums(displayName, variantsOrBackFn, backFn) {
   setBody('<div class="loading-state"></div>');
   try {
     // Parallel fetch for all name variants, then merge albums client-side
+    const aoF = _albumsOnlyFilter();
     const results = await Promise.all(
-      variants.map(a => api('POST', 'api/v1/db/artists-albums', { artist: a }, sig))
+      variants.map(a => api('POST', 'api/v1/db/artists-albums', {
+        artist: a,
+        ...(aoF.ignoreVPaths?.length                ? { ignoreVPaths: aoF.ignoreVPaths } : {}),
+        ...(aoF.includeFilepathPrefixes?.length ? { includeFilepathPrefixes: aoF.includeFilepathPrefixes } : {}),
+      }, sig))
     );
     const seen = new Set();
     const albums = [];
@@ -4727,9 +4786,13 @@ async function viewAllAlbums() {
   setBody('<div class="loading-state"></div>');
   try {
     const abEx = _audioBookExclusions();
+    const aoF  = _albumsOnlyFilter();
+    const mergedIgnore  = [...(abEx.ignoreVPaths || []), ...(aoF.ignoreVPaths || [])];
+    const mergedExclude = abEx.excludeFilepathPrefixes || [];
     const d = await api('POST', 'api/v1/db/albums', {
-      ...(abEx.ignoreVPaths.length ? { ignoreVPaths: abEx.ignoreVPaths } : {}),
-      ...(abEx.excludeFilepathPrefixes.length ? { excludeFilepathPrefixes: abEx.excludeFilepathPrefixes } : {}),
+      ...(mergedIgnore.length  ? { ignoreVPaths: mergedIgnore } : {}),
+      ...(mergedExclude.length ? { excludeFilepathPrefixes: mergedExclude } : {}),
+      ...(aoF.includeFilepathPrefixes?.length ? { includeFilepathPrefixes: aoF.includeFilepathPrefixes } : {}),
     });
     renderAlbumGrid(d.albums || [], null);
   } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
@@ -10238,6 +10301,7 @@ function showApp() {
   _updateListenSection();
   // Mark queue btn active (panel is visible by default)
   document.getElementById('queue-btn').classList.add('active');
+  _initQueueListeners();
   loadPlaylists();
   loadSmartPlaylists();
   viewHome();

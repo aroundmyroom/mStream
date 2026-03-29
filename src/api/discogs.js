@@ -576,8 +576,17 @@ export function setup(mstream) {
         await js.write(/** @type {any} */(path.join(artDir, `zs-${aaFile}`)));
       } catch (_) { /* compression optional */ }
 
+      // Commit any open scanner batch transaction before writing art, so this
+      // UPDATE is not swallowed by an uncommitted transaction that gets rolled
+      // back on server restart.  commitTransaction() is a no-op when no
+      // transaction is open (the error is silently caught inside it).
+      dbManager.commitTransaction();
       // Update the DB record so grid/list views also show it after reload
-      try { dbManager.updateFileArt(pathInfo.relativePath, pathInfo.vpath, aaFile, null, req.body.coverUrl ? 'deezer' : 'discogs'); } catch (_) {}
+      try {
+        dbManager.updateFileArt(pathInfo.relativePath, pathInfo.vpath, aaFile, null, req.body.coverUrl ? 'deezer' : 'discogs');
+      } catch (artErr) {
+        console.error('[discogs/embed] updateFileArt failed:', artErr.message);
+      }
 
       // ── Remove old art from cache/disk if it's now orphaned ──────────────
       if (oldAaFile && oldAaFile !== aaFile) {

@@ -302,6 +302,30 @@ function excludePrefixClauses(excludeFilepathPrefixes, vpathCol = 'vpath', pathC
   return { sql: ' AND ' + parts.join(' AND '), params };
 }
 
+// Generates AND clauses to WHITELIST filepath prefixes under specific vpaths.
+// Used for albumsOnly filtering: for each named parent vpath, only include rows
+// where the filepath starts with one of the given prefixes.
+// Other vpaths (not named here) are passed through unrestricted.
+// Logic per parent: AND (vpath != 'parent' OR (filepath LIKE 'prefix1%' OR ...))
+function includePrefixClauses(includeFilepathPrefixes, vpathCol = 'vpath', pathCol = 'filepath') {
+  if (!Array.isArray(includeFilepathPrefixes) || includeFilepathPrefixes.length === 0) {
+    return { sql: '', params: [] };
+  }
+  const byVpath = {};
+  for (const { vpath, prefix } of includeFilepathPrefixes) {
+    if (!byVpath[vpath]) byVpath[vpath] = [];
+    byVpath[vpath].push(prefix);
+  }
+  const parts = [];
+  const params = [];
+  for (const [vpath, prefixes] of Object.entries(byVpath)) {
+    const orParts = prefixes.map(() => `${pathCol} LIKE ? ESCAPE '\\'`);
+    parts.push(`(${vpathCol} != ? OR (${orParts.join(' OR ')}))`);
+    params.push(vpath, ...prefixes.map(p => p.replace(/[%_\\]/g, '\\$&') + '%'));
+  }
+  return { sql: ' AND ' + parts.join(' AND '), params };
+}
+
 // File Operations
 export function findFileByPath(filepath, vpath) {
   const row = _s.findFile.get(filepath, vpath);
@@ -515,17 +539,18 @@ export function getArtists(vpaths, ignoreVPaths, excludeFilepathPrefixes) {
   return rows.map(r => r.artist);
 }
 
-export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPrefixes) {
+export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
   const vIn = inClause('vpath', filtered);
   const ep = excludePrefixClauses(excludeFilepathPrefixes);
+  const ip = includePrefixClauses(includeFilepathPrefixes);
   const rows = db.prepare(`
     SELECT DISTINCT album AS name, year, aaFile AS album_art_file
     FROM files
-    WHERE ${vIn.sql}${ep.sql} AND artist = ?
+    WHERE ${vIn.sql}${ep.sql}${ip.sql} AND artist = ?
     ORDER BY year DESC
-  `).all(...vIn.params, ...ep.params, String(artist));
+  `).all(...vIn.params, ...ep.params, ...ip.params, String(artist));
 
   // Deduplicate like Loki backend does (by album+year combo)
   const albums = [];
@@ -544,17 +569,18 @@ export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPre
   return albums;
 }
 
-export function getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes) {
+export function getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
   const vIn = inClause('vpath', filtered);
   const ep = excludePrefixClauses(excludeFilepathPrefixes);
+  const ip = includePrefixClauses(includeFilepathPrefixes);
   const rows = db.prepare(`
     SELECT DISTINCT album AS name, aaFile AS album_art_file, year
     FROM files
-    WHERE ${vIn.sql}${ep.sql} AND album IS NOT NULL
+    WHERE ${vIn.sql}${ep.sql}${ip.sql} AND album IS NOT NULL
     ORDER BY album COLLATE NOCASE
-  `).all(...vIn.params, ...ep.params);
+  `).all(...vIn.params, ...ep.params, ...ip.params);
 
   const albums = [];
   const store = {};
@@ -885,10 +911,11 @@ export function getDecades(vpaths, ignoreVPaths) {
   ).all(...vIn.params);
 }
 
-export function getAlbumsByDecade(decade, vpaths, ignoreVPaths) {
+export function getAlbumsByDecade(decade, vpaths, ignoreVPaths, excludeFilepathPrefixes) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) return [];
   const vIn = inClause('vpath', filtered);
+  const ep  = excludePrefixClauses(excludeFilepathPrefixes);
   // GROUP BY album+artist so SQLite deduplicates — no JS loop needed.
   // MIN(year) picks a representative year; MAX(aaFile) prefers a non-null art file.
   return db.prepare(`
@@ -897,10 +924,10 @@ export function getAlbumsByDecade(decade, vpaths, ignoreVPaths) {
            MIN(year)   AS year,
            artist
     FROM files
-    WHERE ${vIn.sql} AND album IS NOT NULL AND year >= ? AND year <= ?
+    WHERE ${vIn.sql}${ep.sql} AND album IS NOT NULL AND year >= ? AND year <= ?
     GROUP BY album, artist
     ORDER BY MIN(year), album COLLATE NOCASE
-  `).all(...vIn.params, decade, decade + 9);
+  `).all(...vIn.params, ...ep.params, decade, decade + 9);
 }
 
 export function getSongsByDecade(decade, vpaths, username, ignoreVPaths) {
@@ -917,23 +944,24 @@ export function getSongsByDecade(decade, vpaths, username, ignoreVPaths) {
   return rows.map(mapFileRow);
 }
 
-export function getAlbumsByGenre(rawGenres, vpaths, ignoreVPaths) {
+export function getAlbumsByGenre(rawGenres, vpaths, ignoreVPaths, excludeFilepathPrefixes) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) return [];
   const genreList = [...rawGenres];
   if (genreList.length === 0) return [];
   const vIn = inClause('vpath', filtered);
   const gIn = inClause('genre', genreList);
+  const ep  = excludePrefixClauses(excludeFilepathPrefixes);
   return db.prepare(`
     SELECT album AS name,
            MAX(aaFile) AS album_art_file,
            MIN(year)   AS year,
            artist
     FROM files
-    WHERE ${vIn.sql} AND ${gIn.sql} AND album IS NOT NULL
+    WHERE ${vIn.sql} AND ${gIn.sql}${ep.sql} AND album IS NOT NULL
     GROUP BY album, artist
     ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE
-  `).all(...vIn.params, ...gIn.params);
+  `).all(...vIn.params, ...gIn.params, ...ep.params);
 }
 
 
