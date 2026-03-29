@@ -23,7 +23,7 @@
 
   ```json
   {
-    "vpaths": ["Music", "Audiobooks"],
+    "vpaths": ["Music", "Albums", "Disco", "Audiobooks"],
     "playlists": [{"name": "Favourites"}],
     "noUpload": false,
     "transcode": {
@@ -43,7 +43,10 @@
       "m3u": false
     },
     "vpathMetaData": {
-      "Music": { "type": "music" }
+      "Music":      { "type": "music" },
+      "Albums":     { "type": "music", "parentVpath": "Music", "filepathPrefix": "Albums/",  "albumsOnly": true },
+      "Disco":      { "type": "music", "parentVpath": "Music", "filepathPrefix": "Disco/" },
+      "Audiobooks": { "type": "audiobooksPodcasts" }
     }
   }
   ```
@@ -55,7 +58,17 @@
   | `noUpload` | `boolean` | `true` when the server has uploads globally disabled. |
   | `transcode` | `object\|false` | Transcode settings, or `false` if disabled. |
   | `supportedAudioFiles` | `object` | Map of file extension → `boolean`. Extensions set to `true` are playable and uploadable. Use this to validate files before upload. *(added by GitHub Copilot, 2026-02-27)* |
-  | `vpathMetaData` | `object` | Per-vpath metadata (type, parent vpath relationship). |
+  | `vpathMetaData` | `object` | Per-vpath metadata. See table below. |
+
+  **`vpathMetaData[vpath]` fields:**
+
+  | Field | Type | Description |
+  |---|---|---|
+  | `type` | `string` | Folder type: `"music"`, `"audiobooksPodcasts"`, `"recordings"` |
+  | `parentVpath` | `string\|undefined` | Set when this is a **child vpath** — the root vpath that actually holds the files in the DB. Child vpaths have no DB rows of their own; all their files are stored under the parent with `filepath LIKE filepathPrefix + '%'`. |
+  | `filepathPrefix` | `string\|undefined` | The sub-folder prefix within the parent vpath (e.g. `"Albums/"`). Only present when `parentVpath` is set. |
+  | `albumsOnly` | `boolean\|undefined` | `true` when this folder is flagged as Albums-Only. When any folder carries this flag, the Albums view shows content exclusively from flagged folders. See [Albums-Only](../albums-only.md). |
+  | `allowRecordDelete` | `boolean\|undefined` | `true` when users are permitted to delete their own recordings (only on `type: recordings` folders). |
 
   `transcode` is `false` when the server has transcoding disabled.
 
