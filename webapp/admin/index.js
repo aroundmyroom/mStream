@@ -966,6 +966,12 @@ const foldersView = Vue.component('folders-view', {
                     @click="toggleRecordDelete(k)">
                     {{v.allowRecordDelete ? 'Del: On' : 'Del: Off'}}
                   </button>
+                  <button v-if="v.type !== 'recordings'" class="btn-small" type="button"
+                    :style="v.albumsOnly ? 'background:var(--primary);color:#fff;' : ''"
+                    :title="v.albumsOnly ? 'Albums Only is ON — the Albums view only shows albums from this folder (and its child sub-folders). All other folders are hidden from Albums as long as at least one folder has this enabled. Click to disable.' : 'Albums Only is OFF — this folder has no restriction on the Albums view. Enable to restrict the Albums view to only show albums from this folder.'"
+                    @click="toggleAlbumsOnly(k)">
+                    {{v.albumsOnly ? 'Alb: On' : 'Alb: Off'}}
+                  </button>
                   <button class="btn-small red" type="button" @click="removeFolder(k, v.root)">Remove</button>
                 </td>
               </tr>
@@ -1065,6 +1071,24 @@ const foldersView = Vue.component('folders-view', {
           Vue.set(ADMINDATA.folders[vpath], 'allowRecordDelete', newVal);
           iziToast.success({
             title: newVal ? 'Users can now delete their own recordings' : 'Recording deletion disabled',
+            position: 'topCenter', timeout: 3000
+          });
+        } catch (_e) {
+          iziToast.error({ title: 'Failed to update setting', position: 'topCenter', timeout: 3000 });
+        }
+      },
+      toggleAlbumsOnly: async function(vpath) {
+        const folder = ADMINDATA.folders[vpath];
+        const newVal = !folder.albumsOnly;
+        try {
+          await API.axios({
+            method: 'PATCH',
+            url: `${API.url()}/api/v1/admin/directory/flags`,
+            data: { vpath, albumsOnly: newVal }
+          });
+          Vue.set(ADMINDATA.folders[vpath], 'albumsOnly', newVal);
+          iziToast.success({
+            title: newVal ? 'Albums Only enabled — Albums view restricted to this folder' : 'Albums Only disabled',
             position: 'topCenter', timeout: 3000
           });
         } catch (_e) {

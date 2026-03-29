@@ -1,5 +1,48 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Albums-Only Folders — v5.16.30
+
+**Files:** `src/state/config.js`, `src/api/admin.js`, `src/api/playlist.js`, `src/db/sqlite-backend.js`, `src/db/manager.js`, `src/api/db.js`, `webapp/app.js`, `webapp/admin/index.js`
+
+### What and why
+
+The Albums view used to show every track with a non-empty `album` tag — which meant DJ sets, loose singles, radio rips, and 12-inch collections all polluted the album browser. There was no way for the server to distinguish a real album from a tagged-but-not-really-an-album artefact.
+
+The new **Albums-Only** flag lets admins mark specific folders (vpaths) as the authoritative source for albums. When at least one folder carries the flag, the Albums view shows **only** content from those folders. Everything else stays accessible for playback and Auto-DJ but does not appear in the album browser. If no folder is flagged, existing behaviour is preserved (show all).
+
+### Technical approach — whitelist, not blacklist
+
+The initial implementation used a blacklist (`excludeFilepathPrefixes`): exclude siblings that are NOT albums-only. This leaked files stored directly at the root or in any sub-folder not registered as a child vpath.
+
+The final design follows the same **whitelist pattern as Auto-DJ** (`_djApiCall()` / `filepathPrefix`): for each parent vpath that contains an albums-only child, only include rows where `filepath LIKE 'ChildFolder/%'`. The SQL becomes:
+
+```sql
+WHERE vpath = 'Music' AND filepath LIKE 'Albums/%'
+```
+
+Nothing leaks. Files at the parent root, inside unregistered siblings, or inside non-albums-only siblings are all excluded by default.
+
+### Changes
+
+- **Config schema** (`src/state/config.js`): `albumsOnly: Joi.boolean().default(false)` added to folder Joi schema.
+- **PATCH endpoint** (`src/api/admin.js`): `PATCH /api/v1/admin/directory/flags` accepts `allowRecordDelete` and/or `albumsOnly`. `albumsOnly` rejected with 400 on `type: recordings` folders.
+- **vpathMetaData** (`src/api/playlist.js`): `albumsOnly` propagated to client via `GET /api/v1/ping`.
+- **New SQL helper** (`src/db/sqlite-backend.js`): `includePrefixClauses()` — generates `AND (vpath != 'Music' OR filepath LIKE 'Albums/%')` whitelist clauses. Counterpart to `excludePrefixClauses()`.
+- **`getAlbums` / `getArtistAlbums`** (`src/db/sqlite-backend.js`, `src/db/manager.js`): 4th param `includeFilepathPrefixes` passes whitelist through to SQL.
+- **API handlers** (`src/api/db.js`): `POST /api/v1/db/albums` and `POST /api/v1/db/artists-albums` now accept and forward `includeFilepathPrefixes` from the request body.
+- **Frontend** (`webapp/app.js`): `_albumsOnlyFilter()` rewritten — returns `{ ignoreVPaths, includeFilepathPrefixes }` using the whitelist pattern. `viewAllAlbums()` and `viewArtistAlbums()` pass the whitelist through. Genre and decade views are unaffected.
+- **Admin UI** (`webapp/admin/index.js`): `Alb: On / Alb: Off` toggle button per non-recordings folder. `toggleAlbumsOnly(vpath)` calls PATCH and refreshes the config display.
+- **Copilot instructions** (`.github/copilot-instructions.md`): child-vpath / filepathPrefix architecture documented permanently so the whitelist approach is never forgotten.
+- **Docs**: `docs/albums-only.md` (user guide), `docs/API/db_albums.md` (updated), `docs/API/db_artists-albums.md` (updated), `docs/API/admin_directory-flags.md` (new), `docs/API.md` (index updated).
+
+
+
+**File:** `src/api/discogs.js`
+
+- **Root cause:** when the file scanner was mid-batch (fewer than 50 files processed since its last `COMMIT`), it held an open `BEGIN` transaction on the SQLite connection. Any subsequent `updateFileArt()` call in the discogs embed handler was silently absorbed into that uncommitted transaction. On `systemctl restart`, Node.js closed the DB cleanly and SQLite rolled back all uncommitted work — including the art update — so `aaFile` was back to `null` after restart.
+- **Fix:** call `dbManager.commitTransaction()` immediately before `updateFileArt()` in the embed handler. This flushes any open scanner batch so the art write lands in autocommit and is immediately durable. `commitTransaction()` is a no-op when no transaction is open (the error is swallowed inside it). The scanner resumes in autocommit for its remaining files until its own `_txBatch` counter rolls back to 0 and starts a new batch — correct, just slightly less batched for that partial batch.
+- **Also:** replaced the silent `catch (_) {}` around `updateFileArt` with a `console.error` so failures are no longer invisible.
+
 ## Boot sequence: queue loaded twice on fresh navigation — 2026-03-28
 
 **Files:** `webapp/app.js`

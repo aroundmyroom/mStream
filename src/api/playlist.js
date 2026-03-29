@@ -48,7 +48,8 @@ export function setup(mstream) {
         filepathPrefix: parentVpath
           ? allFolders[p].root.replace(/\/?$/, '/').slice(allFolders[parentVpath].root.replace(/\/?$/, '/').length)
           : null,
-        allowRecordDelete: allFolders[p].allowRecordDelete === true
+        allowRecordDelete: allFolders[p].allowRecordDelete === true,
+        albumsOnly: allFolders[p].albumsOnly === true
       };
     });
 

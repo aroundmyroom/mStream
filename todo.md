@@ -160,6 +160,15 @@ Analyse every track's actual audio content (BPM, key, timbre, energy) and use th
 
 ## DONE — Completed features
 
+### Albums-Only Folders ✅ DONE — 2026-03-29
+- [x] `albumsOnly` boolean flag on any non-recordings vpath; persisted in `default.json`
+- [x] PATCH endpoint extended; `albumsOnly` propagated via `/api/v1/ping` vpathMetaData
+- [x] `includePrefixClauses()` whitelist helper in `sqlite-backend.js`; `getAlbums` + `getArtistAlbums` accept 4th param `includeFilepathPrefixes`
+- [x] `_albumsOnlyFilter()` rewritten in `webapp/app.js` — whitelist approach (mirrors Auto-DJ `filepathPrefix` pattern); applied to Albums view and artist-albums view
+- [x] Admin UI toggle: `Alb: On / Alb: Off` button per non-recordings folder
+- [x] Docs: `docs/albums-only.md`, updated `docs/API/db_albums.md`, `docs/API/db_artists-albums.md`, new `docs/API/admin_directory-flags.md`
+- [x] Copilot instructions updated with permanent child-vpath whitelist pattern note
+
 ### Admin Backup ✅
 - [x] `src/api/backup.js` — zip of `mstream.sqlite` (+ WAL files) and `default.json` into `save/backups/`
 - [x] Keeps 4 most recent backups; oldest removed on 5th
