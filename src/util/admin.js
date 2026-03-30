@@ -85,7 +85,7 @@ export async function removeDirectory(vpath) {
   mStreamServer.reboot();
 }
 
-export async function addUser(username, password, admin, vpaths) {
+export async function addUser(username, password, admin, vpaths, allowMkdir) {
   if (config.program.users[username]) { throw new Error(`'${username}' is already loaded into memory`); }
 
   // hash password
@@ -95,7 +95,8 @@ export async function addUser(username, password, admin, vpaths) {
     vpaths: vpaths,
     password: hash.hashPassword,
     salt: hash.salt,
-    admin: admin
+    admin: admin,
+    allowMkdir: allowMkdir
   };
 
   // This extra step is so we can handle the process like a SQL transaction
@@ -167,17 +168,19 @@ export async function editUserVPaths(username, vpaths) {
   config.program.users[username].vpaths = vpaths;
 }
 
-export async function editUserAccess(username, admin) {
+export async function editUserAccess(username, admin, allowMkdir) {
   if (!config.program.users[username]) { throw new Error(`'${username}' does not exist`); }
 
   const memClone = JSON.parse(JSON.stringify(config.program.users));
   memClone[username].admin = admin;
+  memClone[username].allowMkdir = allowMkdir;
 
   const loadConfig = await loadFile(config.configFile);
   loadConfig.users = memClone;
   await saveFile(loadConfig, config.configFile);
 
   config.program.users[username].admin = admin;
+  config.program.users[username].allowMkdir = allowMkdir;
 }
 
 export async function editPort(port) {

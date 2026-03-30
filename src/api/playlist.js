@@ -19,7 +19,7 @@ export function setup(mstream) {
       vpaths: req.user.vpaths,
       playlists: getPlaylists(req.user.username),
       transcode,
-      noMkdir: config.program.noMkdir,
+      noMkdir: config.program.noMkdir || req.user.allowMkdir === false,
       supportedAudioFiles: config.program.supportedAudioFiles,
       vpathMetaData: {}
     };

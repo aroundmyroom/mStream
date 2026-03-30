@@ -199,7 +199,8 @@ export function setup(mstream) {
       username: Joi.string().required(),
       password: Joi.string().required(),
       vpaths: Joi.array().items(Joi.string()).required(),
-      admin: Joi.boolean().optional().default(false)
+      admin: Joi.boolean().optional().default(false),
+      allowMkdir: Joi.boolean().optional().default(true)
     });
     const input = joiValidate(schema, req.body);
 
@@ -207,7 +208,8 @@ export function setup(mstream) {
       input.value.username,
       input.value.password,
       input.value.admin,
-      input.value.vpaths
+      input.value.vpaths,
+      input.value.allowMkdir
     );
     res.json({});
   });
@@ -281,11 +283,12 @@ export function setup(mstream) {
   mstream.post("/api/v1/admin/users/access", async (req, res) => {
     const schema = Joi.object({
       username: Joi.string().required(),
-      admin: Joi.boolean().required()
+      admin: Joi.boolean().required(),
+      allowMkdir: Joi.boolean().required()
     });
     joiValidate(schema, req.body);
 
-    await admin.editUserAccess(req.body.username, req.body.admin);
+    await admin.editUserAccess(req.body.username, req.body.admin, req.body.allowMkdir);
     res.json({});
   });
 

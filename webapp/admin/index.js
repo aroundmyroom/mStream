@@ -435,6 +435,7 @@ const usersView = Vue.component('users-view', {
       newUsername: '',
       newPassword: '',
       makeAdmin: Object.keys(ADMINDATA.users).length === 0 ? true : false,
+      allowMkdir: true,
       submitPending: false,
       selectInstance: null
     };
@@ -473,6 +474,10 @@ const usersView = Vue.component('users-view', {
                         <input id="folder-autoaccess" type="checkbox" v-model="makeAdmin"/>
                         <span>Make Admin</span>
                       </label></div>
+                      <div class="pad-checkbox"><label>
+                        <input type="checkbox" v-model="allowMkdir"/>
+                        <span>Allow Create Folders</span>
+                      </label></div>
                     </div>
                     <!-- <div class="col s12 m6">
                       <a v-on:click="openLastFmModal()" href="#!">Add last.fm account</a>
@@ -509,6 +514,7 @@ const usersView = Vue.component('users-view', {
                 <th>User</th>
                 <th>Directories</th>
                 <th>Admin</th>
+                <th>Create Folders</th>
                 <th>Modify</th>
               </tr>
             </thead>
@@ -518,6 +524,9 @@ const usersView = Vue.component('users-view', {
                 <td>{{v.vpaths.join(', ')}}</td>
                 <td>
                   <svg v-if="v.admin === true" height="24px" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 117.72 117.72"><path d="M58.86 0c9.13 0 17.77 2.08 25.49 5.79-3.16 2.5-6.09 4.9-8.82 7.21a48.673 48.673 0 00-16.66-2.92c-13.47 0-25.67 5.46-34.49 14.29-8.83 8.83-14.29 21.02-14.29 34.49 0 13.47 5.46 25.66 14.29 34.49 8.83 8.83 21.02 14.29 34.49 14.29s25.67-5.46 34.49-14.29c8.83-8.83 14.29-21.02 14.29-34.49 0-3.2-.31-6.34-.9-9.37 2.53-3.3 5.12-6.59 7.77-9.85a58.762 58.762 0 013.21 19.22c0 16.25-6.59 30.97-17.24 41.62-10.65 10.65-25.37 17.24-41.62 17.24-16.25 0-30.97-6.59-41.62-17.24C6.59 89.83 0 75.11 0 58.86c0-16.25 6.59-30.97 17.24-41.62S42.61 0 58.86 0zM31.44 49.19L45.8 49l1.07.28c2.9 1.67 5.63 3.58 8.18 5.74a56.18 56.18 0 015.27 5.1c5.15-8.29 10.64-15.9 16.44-22.9a196.16 196.16 0 0120.17-20.98l1.4-.54H114l-3.16 3.51C101.13 30 92.32 41.15 84.36 52.65a325.966 325.966 0 00-21.41 35.62l-1.97 3.8-1.81-3.87c-3.34-7.17-7.34-13.75-12.11-19.63-4.77-5.88-10.32-11.1-16.79-15.54l1.17-3.84z" fill="#01a601"/></svg>
+                </td>
+                <td>
+                  <svg v-if="v.allowMkdir !== false" height="24px" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 117.72 117.72"><path d="M58.86 0c9.13 0 17.77 2.08 25.49 5.79-3.16 2.5-6.09 4.9-8.82 7.21a48.673 48.673 0 00-16.66-2.92c-13.47 0-25.67 5.46-34.49 14.29-8.83 8.83-14.29 21.02-14.29 34.49 0 13.47 5.46 25.66 14.29 34.49 8.83 8.83 21.02 14.29 34.49 14.29s25.67-5.46 34.49-14.29c8.83-8.83 14.29-21.02 14.29-34.49 0-3.2-.31-6.34-.9-9.37 2.53-3.3 5.12-6.59 7.77-9.85a58.762 58.762 0 013.21 19.22c0 16.25-6.59 30.97-17.24 41.62-10.65 10.65-25.37 17.24-41.62 17.24-16.25 0-30.97-6.59-41.62-17.24C6.59 89.83 0 75.11 0 58.86c0-16.25 6.59-30.97 17.24-41.62S42.61 0 58.86 0zM31.44 49.19L45.8 49l1.07.28c2.9 1.67 5.63 3.58 8.18 5.74a56.18 56.18 0 015.27 5.1c5.15-8.29 10.64-15.9 16.44-22.9a196.16 196.16 0 0120.17-20.98l1.4-.54H114l-3.16 3.51C101.13 30 92.32 41.15 84.36 52.65a325.966 325.966 0 00-21.41 35.62l-1.97 3.8-1.81-3.87c-3.34-7.17-7.34-13.75-12.11-19.63-4.77-5.88-10.32-11.1-16.79-15.54l1.17-3.84z" fill="#01a601"/></svg>
                 </td>
                 <td>
                   [<a v-on:click="changePassword(k)">change pass</a>]
@@ -605,7 +614,8 @@ const usersView = Vue.component('users-view', {
             username: this.newUsername,
             password: this.newPassword,
             vpaths: Array.from(selected).map(el => el.value),
-            admin: this.makeAdmin
+            admin: this.makeAdmin,
+            allowMkdir: this.allowMkdir
           };
 
           await API.axios({
@@ -614,7 +624,7 @@ const usersView = Vue.component('users-view', {
             data: data
           });
 
-          Vue.set(ADMINDATA.users, this.newUsername, { vpaths: data.vpaths, admin: data.admin });
+          Vue.set(ADMINDATA.users, this.newUsername, { vpaths: data.vpaths, admin: data.admin, allowMkdir: data.allowMkdir });
           this.newUsername = '';
           this.newPassword = '';
 
@@ -2470,7 +2480,8 @@ const userAccessView = Vue.component('user-access-view', {
       users: ADMINDATA.users,
       currentUser: ADMINDATA.selectedUser,
       submitPending: false,
-      isAdmin: ADMINDATA.users[ADMINDATA.selectedUser.value].admin
+      isAdmin: ADMINDATA.users[ADMINDATA.selectedUser.value].admin,
+      allowMkdir: ADMINDATA.users[ADMINDATA.selectedUser.value].allowMkdir !== false
     };
   },
   template: `
@@ -2481,6 +2492,10 @@ const userAccessView = Vue.component('user-access-view', {
         <div class="pad-checkbox"><label>
           <input type="checkbox" v-model="isAdmin"/>
           <span>Admin</span>
+        </label></div>
+        <div class="pad-checkbox"><label>
+          <input type="checkbox" v-model="allowMkdir"/>
+          <span>Create Folders</span>
         </label></div>
       </div>
       <div class="modal-footer">
@@ -2504,12 +2519,14 @@ const userAccessView = Vue.component('user-access-view', {
             url: `${API.url()}/api/v1/admin/users/access`,
             data: {
               username: this.currentUser.value,
-              admin: this.isAdmin
+              admin: this.isAdmin,
+              allowMkdir: this.allowMkdir
             }
           });
 
           // update fronted data
           Vue.set(ADMINDATA.users[this.currentUser.value], 'admin', this.isAdmin);
+          Vue.set(ADMINDATA.users[this.currentUser.value], 'allowMkdir', this.allowMkdir);
     
           // close & reset the modal
           M.Modal.getInstance(document.getElementById('admin-modal')).close();

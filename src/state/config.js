@@ -94,6 +94,7 @@ const schema = Joi.object({
       admin: Joi.boolean().default(false),
       salt: Joi.string().required(),
       vpaths: Joi.array().items(Joi.string()),
+      allowMkdir: Joi.boolean().default(true),
       'lastfm-user': Joi.string().optional(),
       'lastfm-password': Joi.string().optional(),
     })
