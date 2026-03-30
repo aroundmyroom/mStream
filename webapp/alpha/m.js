@@ -607,6 +607,11 @@ function openYtdlModal() {
   }
   document.getElementById('ytdl_filepath').textContent = getFileExplorerPath();
   document.getElementById('ytdl_meta_loading').classList.add('super-hide');
+  document.getElementById('ytdl_metadata').classList.add('super-hide');
+  document.getElementById('ytdl_meta_title').textContent = '';
+  document.getElementById('ytdl_meta_artist').textContent = '';
+  document.getElementById('ytdl_meta_album').textContent = '';
+  document.getElementById('ytdl_meta_year').textContent = '';
   myModal.open('#ytdlModal');
 }
 
@@ -673,6 +678,7 @@ document.getElementById('ytdl_url').addEventListener('input', function() {
       document.getElementById('ytdl_meta_title').textContent = meta.title || '';
       document.getElementById('ytdl_meta_artist').textContent = meta.artist || '';
       document.getElementById('ytdl_meta_album').textContent = meta.album || '';
+      document.getElementById('ytdl_meta_year').textContent = meta.year || '';
 
       var thumb = document.getElementById('ytdl_meta_thumb');
       if (meta.thumbnail) {
@@ -703,10 +709,21 @@ async function submitYtdl() {
     return iziToast.warning({ title: 'Invalid URL', position: 'topCenter', timeout: 3500 });
   }
 
+  // Collect user-edited metadata overrides
+  const metadata = {};
+  const metaTitle = document.getElementById('ytdl_meta_title').textContent.trim();
+  const metaArtist = document.getElementById('ytdl_meta_artist').textContent.trim();
+  const metaAlbum = document.getElementById('ytdl_meta_album').textContent.trim();
+  const metaYear = document.getElementById('ytdl_meta_year').textContent.trim();
+  if (metaTitle) { metadata.title = metaTitle; }
+  if (metaArtist) { metadata.artist = metaArtist; }
+  if (metaAlbum) { metadata.album = metaAlbum; }
+  if (metaYear) { metadata.year = metaYear; }
+
   document.getElementById('ytdl_submit').disabled = true;
 
   try {
-    await MSTREAMAPI.ytdl(url, outputCodec, filepath);
+    await MSTREAMAPI.ytdl(url, outputCodec, filepath, metadata);
     myModal.close();
     document.getElementById('ytdl_url').value = '';
     document.getElementById('ytdl_metadata').classList.add('super-hide');

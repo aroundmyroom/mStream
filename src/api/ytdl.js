@@ -56,6 +56,7 @@ function lookupMetadata(url) {
           title: json.title || null,
           artist: json.artist || json.creator || json.uploader || null,
           album: json.album || null,
+          year: json.release_year || json.release_date?.substring(0, 4) || null,
           thumbnail: json.thumbnail || null,
         });
       } catch (e) {
@@ -86,6 +87,12 @@ export function setup(mstream) {
       directory: Joi.string().required(),
       url: youtubeUrlSchema,
       outputCodec: Joi.string().valid(...filesFormats).default('mp3'),
+      metadata: Joi.object({
+        title: Joi.string().allow('').optional(),
+        artist: Joi.string().allow('').optional(),
+        album: Joi.string().allow('').optional(),
+        year: Joi.string().allow('').optional(),
+      }).optional().default({}),
     });
     const { value } = joiValidate(schema, req.body);
 
@@ -118,6 +125,7 @@ export function setup(mstream) {
       process: ytdl,
       url: value.url,
       outputCodec: value.outputCodec,
+      metadata: value.metadata,
       status: 'downloading',
       startTime: Date.now(),
     });
@@ -178,12 +186,14 @@ export function setup(mstream) {
         const hash = crypto.createHash('md5').update(fileBuffer).digest('hex');
 
         // Build DB record matching the scanner schema
+        // User-submitted metadata overrides take priority over parsed file metadata
+        const userMeta = entry.metadata || {};
         const relativePath = path.relative(pathInfo.basePath, downloadedFile);
         const data = {
-          title: metadata.title ? String(metadata.title) : null,
-          artist: metadata.artist ? String(metadata.artist) : null,
-          year: metadata.year || null,
-          album: metadata.album ? String(metadata.album) : null,
+          title: userMeta.title || (metadata.title ? String(metadata.title) : null),
+          artist: userMeta.artist || (metadata.artist ? String(metadata.artist) : null),
+          year: userMeta.year ? Number(userMeta.year) : (metadata.year || null),
+          album: userMeta.album || (metadata.album ? String(metadata.album) : null),
           filepath: relativePath,
           format: value.outputCodec,
           track: metadata.track?.no || null,

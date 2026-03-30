@@ -252,12 +252,13 @@
             <p style="color:#fff; margin: 0 0 12px; opacity: 0.7;"><b>Download To: </b><span id="ytdl_filepath"></span></p>
             <input id="ytdl_url" autocomplete="off" type="url" required placeholder="Enter URL" style="color:#fff;">
             <select id="ytdl_codec"></select>
-            <div id="ytdl_metadata" class="super-hide" style="display:flex; align-items:center; gap:14px; margin:12px 0; color:#fff;">
-              <img id="ytdl_meta_thumb" src="" style="width:80px; height:80px; object-fit:cover; border-radius:4px;">
-              <div>
-                <div id="ytdl_meta_title" style="font-weight:bold;"></div>
-                <div id="ytdl_meta_artist" style="opacity:0.7;"></div>
-                <div id="ytdl_meta_album" style="opacity:0.7;"></div>
+            <div id="ytdl_metadata" class="super-hide" style="display:flex; align-items:flex-start; gap:14px; margin:12px 0; color:#fff;">
+              <img id="ytdl_meta_thumb" src="" style="width:80px; height:80px; object-fit:cover; border-radius:4px; flex-shrink:0;">
+              <div style="flex:1; line-height:1.6;">
+                <div><b>Title:</b> <span id="ytdl_meta_title" contenteditable="true" style="display:inline-block; min-width:120px; border-bottom:1px solid rgba(255,255,255,0.3);"></span></div>
+                <div><b>Artist:</b> <span id="ytdl_meta_artist" contenteditable="true" style="display:inline-block; min-width:120px; border-bottom:1px solid rgba(255,255,255,0.3);"></span></div>
+                <div><b>Album:</b> <span id="ytdl_meta_album" contenteditable="true" style="display:inline-block; min-width:120px; border-bottom:1px solid rgba(255,255,255,0.3);"></span></div>
+                <div><b>Year:</b> <span id="ytdl_meta_year" contenteditable="true" style="display:inline-block; min-width:60px; border-bottom:1px solid rgba(255,255,255,0.3);"></span></div>
               </div>
             </div>
             <div id="ytdl_meta_loading" class="super-hide" style="color:#fff; opacity:0.5; margin:12px 0;">Loading metadata...</div>
