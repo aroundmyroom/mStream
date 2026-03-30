@@ -20,6 +20,7 @@ export function setup(mstream) {
       playlists: getPlaylists(req.user.username),
       transcode,
       noMkdir: config.program.noMkdir || req.user.allowMkdir === false,
+      noUpload: config.program.noUpload || req.user.allowUpload === false,
       supportedAudioFiles: config.program.supportedAudioFiles,
       vpathMetaData: {}
     };

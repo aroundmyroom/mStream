@@ -85,7 +85,7 @@ export async function removeDirectory(vpath) {
   mStreamServer.reboot();
 }
 
-export async function addUser(username, password, admin, vpaths, allowMkdir) {
+export async function addUser(username, password, admin, vpaths, allowMkdir, allowUpload) {
   if (config.program.users[username]) { throw new Error(`'${username}' is already loaded into memory`); }
 
   // hash password
@@ -96,7 +96,8 @@ export async function addUser(username, password, admin, vpaths, allowMkdir) {
     password: hash.hashPassword,
     salt: hash.salt,
     admin: admin,
-    allowMkdir: allowMkdir
+    allowMkdir: allowMkdir,
+    allowUpload: allowUpload
   };
 
   // This extra step is so we can handle the process like a SQL transaction
@@ -168,12 +169,13 @@ export async function editUserVPaths(username, vpaths) {
   config.program.users[username].vpaths = vpaths;
 }
 
-export async function editUserAccess(username, admin, allowMkdir) {
+export async function editUserAccess(username, admin, allowMkdir, allowUpload) {
   if (!config.program.users[username]) { throw new Error(`'${username}' does not exist`); }
 
   const memClone = JSON.parse(JSON.stringify(config.program.users));
   memClone[username].admin = admin;
   memClone[username].allowMkdir = allowMkdir;
+  memClone[username].allowUpload = allowUpload;
 
   const loadConfig = await loadFile(config.configFile);
   loadConfig.users = memClone;
@@ -181,6 +183,7 @@ export async function editUserAccess(username, admin, allowMkdir) {
 
   config.program.users[username].admin = admin;
   config.program.users[username].allowMkdir = allowMkdir;
+  config.program.users[username].allowUpload = allowUpload;
 }
 
 export async function editPort(port) {

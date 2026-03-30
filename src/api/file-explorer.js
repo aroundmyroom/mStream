@@ -129,6 +129,7 @@ export function setup(mstream) {
 
   mstream.post('/api/v1/file-explorer/upload', (req, res) => {
     if (config.program.noUpload === true) { throw new WebError('Uploading Disabled'); }
+    if (req.user.allowUpload === false) { throw new WebError('Uploading Disabled', 403); }
     if (!req.headers['data-location']) { throw new WebError('No Location Provided', 403); }
 
     const pathInfo = vpath.getVPathInfo(decodeURI(req.headers['data-location']), req.user);
