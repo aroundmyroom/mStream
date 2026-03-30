@@ -8,6 +8,11 @@ import * as config from '../state/config.js';
 import * as transcode from './transcode.js';
 import { joiValidate } from '../util/validation.js';
 import * as vpath from '../util/vpath.js';
+import * as db from '../db/manager.js';
+import { parseFile } from 'music-metadata';
+import { Jimp } from 'jimp';
+import mime from 'mime-types';
+import crypto from 'crypto';
 import fs from 'fs/promises';
 
 const downloadTracker = new Map();
@@ -104,7 +109,10 @@ export function setup(mstream) {
     }
 
     const downloadDir = path.join(pathInfo.fullPath, `%(title)s.%(ext)s`);
-    const ytdl = spawn('yt-dlp', ['-f', "ba", "-x", value.url, '-o', downloadDir, "--ffmpeg-location", ffmpegPath, "--audio-format", value.outputCodec]);
+    const ytdl = spawn('yt-dlp', ['-f', "ba", "-x", value.url, '-o', downloadDir,
+      "--ffmpeg-location", ffmpegPath, "--audio-format", value.outputCodec,
+      "--embed-thumbnail", "--convert-thumbnails", "jpg", "--embed-metadata"]);
+    
     downloadTracker.set(ytdl.pid, {
       process: ytdl,
       url: value.url,
@@ -122,7 +130,7 @@ export function setup(mstream) {
       winston.error('yt-dlp error:', data.toString());
     });
 
-    ytdl.on('close', (code) => {
+    ytdl.on('close', async (code) => {
       const entry = downloadTracker.get(ytdl.pid);
       if (entry) {
         entry.status = code === 0 ? 'complete' : 'error';
@@ -130,10 +138,104 @@ export function setup(mstream) {
       }
       if (code !== 0) {
         winston.error(`yt-dlp process exited with code ${code}`);
+        return;
+      }
+
+      try {
+        // Find the downloaded file by scanning for new files matching the output codec
+        const dirFiles = await fs.readdir(pathInfo.fullPath);
+        let downloadedFile = null;
+        let downloadedStat = null;
+        for (const file of dirFiles) {
+          if (!file.endsWith('.' + value.outputCodec)) continue;
+          const filePath = path.join(pathInfo.fullPath, file);
+          const stat = await fs.stat(filePath);
+          if (stat.mtime.getTime() >= entry.startTime) {
+            downloadedFile = filePath;
+            downloadedStat = stat;
+            break;
+          }
+        }
+
+        if (!downloadedFile) {
+          winston.error('yt-dlp: could not find downloaded file in ' + pathInfo.fullPath);
+          return;
+        }
+
+        // Parse metadata from the downloaded file (include covers for album art)
+        const skipImg = config.program.scanOptions.skipImg === true;
+        let metadata;
+        try {
+          metadata = (await parseFile(downloadedFile, { skipCovers: skipImg })).common;
+        } catch (err) {
+          winston.error('yt-dlp: metadata parse error', { stack: err });
+          metadata = { track: { no: null, of: null }, disk: { no: null, of: null } };
+        }
+
+        // Compute file hash
+        const fileBuffer = await fs.readFile(downloadedFile);
+        const hash = crypto.createHash('md5').update(fileBuffer).digest('hex');
+
+        // Build DB record matching the scanner schema
+        const relativePath = path.relative(pathInfo.basePath, downloadedFile);
+        const data = {
+          title: metadata.title ? String(metadata.title) : null,
+          artist: metadata.artist ? String(metadata.artist) : null,
+          year: metadata.year || null,
+          album: metadata.album ? String(metadata.album) : null,
+          filepath: relativePath,
+          format: value.outputCodec,
+          track: metadata.track?.no || null,
+          disk: metadata.disk?.no || null,
+          modified: downloadedStat.mtime.getTime(),
+          hash: hash,
+          aaFile: null,
+          vpath: pathInfo.vpath,
+          ts: Math.floor(Date.now() / 1000),
+          sID: 'ytdl',
+          replaygainTrackDb: metadata.replaygain_track_gain ? metadata.replaygain_track_gain.dB : null,
+        };
+
+        if (metadata.genre) { data.genre = metadata.genre; }
+
+        // Extract and save album art from embedded thumbnail
+        if (!skipImg && metadata.picture && metadata.picture[0]) {
+          try {
+            const picData = metadata.picture[0].data;
+            const picHashString = crypto.createHash('md5').update(picData.toString('utf-8')).digest('hex');
+            const extension = mime.extension(metadata.picture[0].format) || 'jpg';
+            data.aaFile = picHashString + '.' + extension;
+
+            const aaDir = config.program.storage.albumArtDirectory;
+            const aaFilePath = path.join(aaDir, data.aaFile);
+
+            // Save original if it doesn't already exist in the cache
+            let isNewFile = false;
+            try {
+              await fs.access(aaFilePath);
+            } catch {
+              await fs.writeFile(aaFilePath, picData);
+              isNewFile = true;
+            }
+
+            // Create compressed versions for thumbnails
+            if (isNewFile && config.program.scanOptions.compressImage) {
+              const img = await Jimp.fromBuffer(picData);
+              await img.scaleToFit({ w: 256, h: 256 }).write(path.join(aaDir, 'zl-' + data.aaFile));
+              await img.scaleToFit({ w: 92, h: 92 }).write(path.join(aaDir, 'zs-' + data.aaFile));
+            }
+          } catch (err) {
+            winston.error('yt-dlp: failed to extract album art', { stack: err });
+          }
+        }
+
+        db.getFileCollection().insert(data);
+        db.saveFilesDB();
+        winston.info(`yt-dlp: added ${relativePath} to database`);
+      } catch (err) {
+        winston.error('yt-dlp: failed to add file to database', { stack: err });
       }
     });
-
-    // TODO: embed album art and metadata
 
     res.json({ message: 'Download started' });
   });
