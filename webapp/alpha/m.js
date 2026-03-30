@@ -231,6 +231,7 @@ function setBrowserRootPanel(panelName, showBar) {
   document.getElementById('directoryName').innerHTML = '';
   document.getElementById('local_search_btn').style.display = '';
   document.getElementById('ytdl_btn').classList.add('super-hide');
+  document.getElementById('mkdir_btn').classList.add('super-hide');
 
   ([...document.getElementsByClassName('panel_one_name')]).forEach(el => {
     el.innerHTML = panelName;
@@ -268,12 +269,15 @@ async function senddir(root) {
       });
     }
 
-    // Show ytdl button only when inside a vpath (not at root)
+    // Show ytdl and mkdir buttons only when inside a vpath (not at root)
     const ytdlBtn = document.getElementById('ytdl_btn');
+    const mkdirBtn = document.getElementById('mkdir_btn');
     if (fileExplorerArray.length > 0) {
       ytdlBtn.classList.remove('super-hide');
+      mkdirBtn.classList.remove('super-hide');
     } else {
       ytdlBtn.classList.add('super-hide');
+      mkdirBtn.classList.add('super-hide');
     }
 
     printdir(response);
@@ -598,6 +602,39 @@ function openYtdlModal() {
   document.getElementById('ytdl_filepath').textContent = getFileExplorerPath();
   document.getElementById('ytdl_meta_loading').classList.add('super-hide');
   myModal.open('#ytdlModal');
+}
+
+function openMkdirModal() {
+  document.getElementById('mkdir_filepath').textContent = getFileExplorerPath();
+  document.getElementById('mkdir_name').value = '';
+  myModal.open('#mkdirModal');
+}
+
+async function submitMkdir() {
+  const folderName = document.getElementById('mkdir_name').value.trim();
+  if (!folderName) { return; }
+
+  const directory = getFileExplorerPath() + folderName;
+  document.getElementById('mkdir_submit').disabled = true;
+
+  try {
+    await MSTREAMAPI.mkdir(directory);
+    iziToast.success({
+      title: 'Folder Created',
+      position: 'topCenter',
+      timeout: 3500
+    });
+    myModal.close();
+    senddir();
+  } catch (err) {
+    iziToast.error({
+      title: 'Failed to create folder',
+      position: 'topCenter',
+      timeout: 3500
+    });
+  } finally {
+    document.getElementById('mkdir_submit').disabled = false;
+  }
 }
 
 function isYoutubeUrl(url) {

@@ -127,6 +127,10 @@ const MSTREAMAPI = (() => {
     return req('POST', mstreamModule.currentServer.host + "api/v1/db/random-songs", postObject);
   }
 
+  mstreamModule.mkdir = (directory) => {
+    return req('POST', mstreamModule.currentServer.host + "api/v1/file-explorer/mkdir", { directory: directory });
+  }
+
   mstreamModule.ytdl = (url, outputCodec, directory) => {
     return req('POST', mstreamModule.currentServer.host + "api/v1/ytdl/", { url: url, outputCodec: outputCodec, directory: directory });
   }

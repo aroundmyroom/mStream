@@ -106,6 +106,24 @@ export function setup(mstream) {
     res.json(await recursiveFileScan(pathInfo.fullPath, [], pathInfo.relativePath, pathInfo.vpath));
   });
 
+  mstream.post("/api/v1/file-explorer/mkdir", async (req, res) => {
+    const schema = Joi.object({
+      directory: Joi.string().required(),
+    });
+    const { value } = joiValidate(schema, req.body);
+
+    const pathInfo = vpath.getVPathInfo(value.directory, req.user);
+
+    // Do not allow creating directories outside the vpath
+    if (pathInfo.fullPath.substring(0, pathInfo.basePath.length) !== pathInfo.basePath) {
+      winston.warn(`user '${req.user.username}' attempted to create a directory outside their vpath: ${pathInfo.fullPath}`);
+      throw new WebError('Access to directory not allowed', 403);
+    }
+
+    await fs.mkdir(pathInfo.fullPath, { recursive: true });
+    res.json({});
+  });
+
   mstream.post('/api/v1/file-explorer/upload', (req, res) => {
     if (config.program.noUpload === true) { throw new WebError('Uploading Disabled'); }
     if (!req.headers['data-location']) { throw new WebError('No Location Provided', 403); }
