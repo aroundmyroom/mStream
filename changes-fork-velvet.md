@@ -1,5 +1,18 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Unreleased — FTS5 full-text search + exclusion queries
+
+- **SQLite FTS5 index** (`fts_files`) replaces `LIKE '%…%'` full-table-scans for all music search queries
+- Index covers `title`, `artist`, `album`, `filepath`; tokenizer `unicode61 remove_diacritics 1` (diacritic-folding, case-insensitive)
+- Prefix matching: `lenn*`, `talk*` — partial words find full matches
+- Results ranked by BM25 relevance (best matches first)
+- **Exclusion search:** `-word` or `NOT word` syntax excludes results containing that word (e.g. `talking -heads`, `chaka khan NOT remix`)
+- Index kept in sync on insert, delete, tag-edit, vpath-removal, and post-scan stale-file cleanup
+- On first start after upgrade the index is auto-rebuilt from the existing `files` table
+- Bug fix: initial rebuild condition checks `fts_files_data` row count (< 5 = empty) rather than `COUNT(*) FROM fts_files` which always equals the files table on external-content tables
+- Node.js upgraded to v24.14.1 (was v22.22.0) — matches Docker image (`node:24-alpine`)
+- Docker GitHub Actions updated to Node 24 native versions: `actions/checkout@v6`, `docker/*@v4–v7`; `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` env var added
+
 ## v5.16.31 — Admin UI, settings persistence, Docker publish
 
 - Admin sidebar restructured: Config section expanded with Settings/Database/Backup/Transcoding/Federation/Logs/Scan Errors/Lock Admin API; About moved last under Server

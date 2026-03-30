@@ -67,3 +67,41 @@ POST /api/v1/db/search
   "files":   [{ "name": "...", "filepath": "...", "album_art_file": "..." }]
 }
 ```
+
+## Search engine — SQLite FTS5
+
+All music searches run against a **FTS5 virtual table** (`fts_files`) instead
+of `LIKE '%…%'` full-table scans.
+
+| Property | Value |
+|---|---|
+| Tokenizer | `unicode61 remove_diacritics 1` |
+| Diacritic folding | yes — café matches cafe |
+| Case | insensitive |
+| Prefix matching | yes — `lenn*`, `talk*` |
+| Ranking | BM25 (best matches first) |
+| Columns indexed | `title`, `artist`, `album`, `filepath` |
+| Backing table | external-content on `files` |
+
+The index is kept in sync automatically:
+
+| Event | FTS action |
+|---|---|
+| File inserted during scan | row added to FTS index |
+| File removed (stale / vpath delete) | row removed or full rebuild |
+| Tag edited via admin panel | old entry deleted, new entry inserted |
+| First start after upgrade | full rebuild if index is empty |
+
+## Excluding words from results
+
+Prefix a word with `-` or precede it with `NOT` to exclude results that
+contain that word:
+
+| Query | Meaning |
+|---|---|
+| `talking -heads` | tracks with "talking" but NOT "heads" |
+| `talking NOT heads` | same |
+| `chaka khan -remix` | Chaka Khan tracks that are not remixes |
+
+Multiple exclusions are supported: `disco -medley -megamix`.
+
