@@ -107,6 +107,10 @@ export function setup(mstream) {
     // Commit any open scan transaction so the finished state is durable
     // before we return the response.
     db.commitTransaction();
+    // Rebuild the folder and artist search indexes after every scan.
+    // These are non-critical background operations — errors must not fail the scan.
+    try { db.rebuildFolderIndex(); } catch (_e) { /* non-critical */ }
+    try { db.rebuildArtistIndex(); } catch (_e) { /* non-critical */ }
     res.json({});
   });
 

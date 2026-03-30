@@ -4757,27 +4757,13 @@ async function viewArtistAlbums(displayName, variantsOrBackFn, backFn) {
   const sig = _navCancel();
   setBody('<div class="loading-state"></div>');
   try {
-    // Parallel fetch for all name variants, then merge albums client-side
     const aoF = _albumsOnlyFilter();
-    const results = await Promise.all(
-      variants.map(a => api('POST', 'api/v1/db/artists-albums', {
-        artist: a,
-        ...(aoF.ignoreVPaths?.length                ? { ignoreVPaths: aoF.ignoreVPaths } : {}),
-        ...(aoF.includeFilepathPrefixes?.length ? { includeFilepathPrefixes: aoF.includeFilepathPrefixes } : {}),
-      }, sig))
-    );
-    const seen = new Set();
-    const albums = [];
-    for (let i = 0; i < results.length; i++) {
-      for (const alb of (results[i].albums || [])) {
-        const key = `${alb.name}|${alb.year}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          albums.push({ ...alb, _rawArtist: variants[i] });
-        }
-      }
-    }
-    renderAlbumGrid(albums, displayName, variants);
+    const d = await api('POST', 'api/v1/db/artists-albums-multi', {
+      artists: variants,
+      ...(aoF.ignoreVPaths?.length                ? { ignoreVPaths: aoF.ignoreVPaths } : {}),
+      ...(aoF.includeFilepathPrefixes?.length ? { includeFilepathPrefixes: aoF.includeFilepathPrefixes } : {}),
+    }, sig);
+    renderAlbumGrid(d.albums || [], displayName, variants);
   } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
@@ -5143,12 +5129,20 @@ async function doSearch(q) {
     if (gen !== _searchGen) return;
     let html = '';
 
+    if (d.folders?.length) {
+      html += `<div class="search-section"><h3>Folders (${d.folders.length})</h3><div class="artist-list">${
+        d.folders.map(f => `<div class="artist-row" data-browse-path="${esc(f.browse_path)}">
+          <div class="artist-av">📁</div>
+          <div class="artist-name">${esc(f.folder_name)}</div>
+        </div>`).join('')
+      }</div></div>`;
+    }
     if (d.artists?.length) {
       html += `<div class="search-section"><h3>Artists (${d.artists.length})</h3><div class="artist-list">${
-        d.artists.map(a => { const disp = cleanArtistDisplay(a.name); return `<div class="artist-row" data-artist="${esc(a.name)}">
-          <div class="artist-av">${esc(disp.charAt(0)).toUpperCase()}</div>
-          <div class="artist-name">${esc(disp)}</div>
-        </div>`; }).join('')
+        d.artists.map(a => `<div class="artist-row" data-artist-disp="${esc(a.name)}" data-artist-variants="${esc(JSON.stringify(a.variants))}">
+          <div class="artist-av">${esc(a.name.charAt(0)).toUpperCase()}</div>
+          <div class="artist-name">${esc(a.name)}</div>
+        </div>`).join('')
       }</div></div>`;
     }
     if (d.albums?.length) {
@@ -5208,7 +5202,15 @@ async function doSearch(q) {
     res.innerHTML = html;
     if (wasPlaying) VU_NEEDLE.start();
 
-    res.querySelectorAll('.artist-row[data-artist]').forEach(r => r.addEventListener('click', () => viewArtistAlbums(cleanArtistDisplay(r.dataset.artist), [r.dataset.artist], () => viewSearch())));
+    res.querySelectorAll('.artist-row[data-artist-disp]').forEach(r => {
+      let vars; try { vars = JSON.parse(r.dataset.artistVariants); } catch { vars = [r.dataset.artistDisp]; }
+      r.addEventListener('click', () => viewArtistAlbums(r.dataset.artistDisp, vars, () => viewSearch()));
+    });
+    res.querySelectorAll('.artist-row[data-browse-path]').forEach(r => r.addEventListener('click', () => {
+      S.feSearchReturn = () => viewSearch();
+      S.feDirStack = []; // start fresh stack so back goes to search, not a stale dir
+      viewFiles(r.dataset.browsePath, false);
+    }));
     res.querySelectorAll('.artist-row[data-album]').forEach(r => r.addEventListener('click', () => viewAlbumSongs(r.dataset.album, null, () => viewSearch())));
     attachSongListEvents(res, displaySongs);
     S.curSongs = displaySongs;
@@ -5642,7 +5644,10 @@ function renderFileExplorer(d) {
   const _backToAC = S.audioContentReturn
     ? () => { const fn = S.audioContentReturn; S.audioContentReturn = null; fn(); }
     : null;
-  setBack(hasBack ? _backFromStack : _backToAC);
+  const _backToSearch = S.feSearchReturn
+    ? () => { const fn = S.feSearchReturn; S.feSearchReturn = null; fn(); }
+    : null;
+  setBack(hasBack ? _backFromStack : (_backToAC || _backToSearch));
   setTitle(parts.length ? parts[parts.length - 1] : 'File Explorer');
 
   // Play all for directory

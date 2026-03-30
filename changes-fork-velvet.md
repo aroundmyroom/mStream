@@ -1,5 +1,18 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Unreleased — Three-entity search: Folders, Artists (normalized), Songs
+
+- **Search now returns three separate sections:** Folders, Artists, Songs+Albums
+- **Folder search:** unique directory paths extracted from the library and indexed in `fts_folders` (FTS5 trigram tokenizer); clicking a folder result opens the file browser at that location; back button returns to search results
+- **Artist normalization:** raw artist tags normalized at index-build time — strips any 2+ digit leading number (`01 `, `28 `, `68 `, etc.) and leading symbols, so all numbered variants group under the clean name; all raw variants stored so album queries find files regardless of how they were tagged
+- Normalized artists stored in `artists_normalized` + `fts_artists` (FTS5 trigram), rebuilt after every scan
+- `vpaths_json` column on `artists_normalized` stores which vpaths each artist appears in; artist search filters by the user's selected vpath(s)
+- **Artist → albums: single SQL query** — `getArtistAlbumsMulti(artists[])` uses `WHERE artist IN (...)` for all variants in one call; previously fired up to 68 parallel requests which overloaded SQLite and returned empty results
+- New `POST /api/v1/db/artists-albums-multi` endpoint accepts `artists[]` array
+- **Back button from folder results:** uses `S.feSearchReturn` slot so `renderFileExplorer` preserves it; pressing ← returns to search with previous query intact
+- Both indexes rebuilt automatically after each scan; also built once on first start if empty
+- No schema changes to the `files` table
+
 ## Unreleased — FTS5 full-text search + exclusion queries
 
 - **SQLite FTS5 index** (`fts_files`) replaces `LIKE '%…%'` full-table-scans for all music search queries

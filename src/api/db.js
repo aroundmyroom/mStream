@@ -131,6 +131,18 @@ export function setup(mstream) {
     res.json({ albums });
   });
 
+  mstream.post('/api/v1/db/artists-albums-multi', (req, res) => {
+    const schema = Joi.object({
+      artists: Joi.array().items(Joi.string()).min(1).required(),
+      ignoreVPaths: Joi.array().items(Joi.string()).optional(),
+      excludeFilepathPrefixes: Joi.array().items(Joi.object({ vpath: Joi.string().required(), prefix: Joi.string().required() })).optional(),
+      includeFilepathPrefixes: Joi.array().items(Joi.object({ vpath: Joi.string().required(), prefix: Joi.string().required() })).optional(),
+    });
+    joiValidate(schema, req.body);
+    const albums = db.getArtistAlbumsMulti(req.body.artists, req.user.vpaths, req.body.ignoreVPaths, req.body.excludeFilepathPrefixes, req.body.includeFilepathPrefixes);
+    res.json({ albums });
+  });
+
   mstream.get('/api/v1/db/albums', (req, res) => {
     res.json({ albums: db.getAlbums(req.user.vpaths) });
   });
@@ -161,6 +173,7 @@ export function setup(mstream) {
       noAlbums: Joi.boolean().optional(),
       noTitles: Joi.boolean().optional(),
       noFiles: Joi.boolean().optional(),
+      noFolders: Joi.boolean().optional(),
       ignoreVPaths: Joi.array().items(Joi.string()).optional(),
       filepathPrefix: Joi.string().optional(),
       excludeFilepathPrefixes: Joi.array().items(Joi.object({ vpath: Joi.string().required(), prefix: Joi.string().required() })).optional()
@@ -168,10 +181,22 @@ export function setup(mstream) {
     joiValidate(schema, req.body);
 
     const { positiveTerms, negativeTerms } = parseSearchQuery(req.body.search);
-    if (!positiveTerms.length) { res.json({ artists: [], albums: [], files: [], title: [] }); return; }
+    if (!positiveTerms.length) { res.json({ artists: [], folders: [], albums: [], files: [], title: [] }); return; }
     const posSearch = positiveTerms.join(' ');
 
-    const artists = req.body.noArtists === true ? [] : searchByX(req, 'artist',   undefined, posSearch, negativeTerms);
+    // ── Artists: use normalized index (groups "01 Ben Liebrand" → "Ben Liebrand")
+    const artists = req.body.noArtists === true ? [] : db.searchArtistsNormalized(posSearch, req.user.vpaths, req.body.ignoreVPaths);
+
+    // ── Folders: search folder names via trigram FTS
+    const folders = req.body.noFolders === true ? [] :
+      db.searchFolders(posSearch, req.user.vpaths, req.body.ignoreVPaths).map(f => ({
+        vpath:       f.vpath,
+        dirpath:     f.dirpath,
+        folder_name: f.folder_name,
+        // Full path as expected by viewFiles(): "/vpath/dir/path"
+        browse_path: '/' + f.vpath + '/' + f.dirpath,
+      }));
+
     const albums  = req.body.noAlbums  === true ? [] : searchByX(req, 'album',    undefined, posSearch, negativeTerms);
     const files   = req.body.noFiles   === true ? [] : searchByX(req, 'filepath', undefined, posSearch, negativeTerms);
     const title   = req.body.noTitles  === true ? [] : searchByX(req, 'title', 'filepath',   posSearch, negativeTerms);
@@ -195,7 +220,7 @@ export function setup(mstream) {
       }
     }
 
-    res.json({ artists, albums, files, title });
+    res.json({ artists, folders, albums, files, title });
   });
 
   function searchByX(req, searchCol, resCol, posSearch, negativeTerms = []) {

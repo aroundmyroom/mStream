@@ -223,7 +223,7 @@ export function init(dbDirectory) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_um_user_rating  ON user_metadata(user, rating)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_um_user_starred ON user_metadata(user, starred)');
 
-  // ── FTS5 full-text index ─────────────────────────────────────────────────
+  // ── FTS5 full-text index (songs) ─────────────────────────────────────────
   // External-content table: FTS5 tokenises title/artist/album/filepath columns
   // from the `files` table without duplicating the raw data.
   // unicode61 tokenizer with remove_diacritics=1: café == cafe, case-insensitive.
@@ -239,6 +239,40 @@ export function init(dbDirectory) {
   if (_ftsDataRows < 5) {
     db.exec("INSERT INTO fts_files(fts_files) VALUES ('rebuild')");
   }
+
+  // ── Folder index ─────────────────────────────────────────────────────────
+  // One row per unique directory path extracted from files.filepath.
+  // folder_name = the last path component (most information-dense part).
+  db.exec(`CREATE TABLE IF NOT EXISTS folders (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    vpath       TEXT NOT NULL,
+    dirpath     TEXT NOT NULL,
+    folder_name TEXT NOT NULL,
+    UNIQUE(vpath, dirpath)
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_folders_vpath ON folders(vpath)');
+  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS fts_folders USING fts5(
+    folder_name,
+    content='folders', content_rowid='id',
+    tokenize='trigram'
+  )`);
+
+  // ── Normalized artist index ───────────────────────────────────────────────
+  // One row per unique normalized artist name. artist_raw_variants stores all
+  // raw tag variants that normalize to the same name (JSON array).
+  // The DB itself is NOT modified — normalization happens at index-build time.
+  db.exec(`CREATE TABLE IF NOT EXISTS artists_normalized (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    artist_clean        TEXT NOT NULL UNIQUE,
+    artist_raw_variants TEXT NOT NULL DEFAULT '[]'
+  )`);
+  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS fts_artists USING fts5(
+    artist_clean,
+    content='artists_normalized', content_rowid='id',
+    tokenize='trigram'
+  )`);
+  // Migration: add vpaths_json column if missing (introduced after initial release)
+  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN vpaths_json TEXT DEFAULT '[]'"); } catch (_e) { /* already exists */ }
 
   // ── Cache hot-path prepared statements ───────────────────────────────────
   // These functions are called once per file during scans (up to 123K times).
@@ -281,6 +315,99 @@ export function commitTransaction() {
 }
 export function saveUserDB() {}
 export function saveShareDB() {}
+
+// ── Artist name normalization ─────────────────────────────────────────────
+// Server-side equivalent of the frontend cleanArtistDisplay() / normalizeArtist().
+// Strip leading noise (symbols, zero-padded numbers like "01 ", "02 ") from
+// artist tag values that were maltagged with track numbers.
+// Genuinely numeric names (10cc, 2Pac, 808 State) are preserved because they
+// don't match the zero-padded number pattern.
+function _cleanArtist(name) {
+  if (!name) return '';
+  const noise = /^[\s#'"`()|[\]{}_.,\-\u2013\u2014*!/\\]+/;
+  return String(name)
+    .replace(noise, '')               // strip leading symbols
+    .replace(/^\d{2,}[\s.,)\]]+/, '') // strip any 2-digit+ leading number ("01 ", "28 ", "100 ", etc.)
+    .replace(noise, '')               // strip any newly-exposed leading symbols
+    .trim();
+}
+function _normalizeArtist(name) {
+  return _cleanArtist(name).toLowerCase();
+}
+
+// ── Rebuild folder index ──────────────────────────────────────────────────
+// Called after every scan completes. Extracts all unique directory paths from
+// the files table, populates the `folders` table, and rebuilds fts_folders.
+export function rebuildFolderIndex() {
+  // Extract unique (vpath, dirpath) combinations from files.filepath
+  const rows = db.prepare(
+    "SELECT vpath, filepath FROM files WHERE filepath IS NOT NULL"
+  ).all();
+
+  const seen = new Set();
+  const toInsert = [];
+  for (const row of rows) {
+    // dirpath = everything except the filename (last path component)
+    const slashIdx = row.filepath.lastIndexOf('/');
+    if (slashIdx <= 0) continue; // file is directly at root of vpath, no folder
+    const dirpath = row.filepath.slice(0, slashIdx);
+    const key = `${row.vpath}\0${dirpath}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // folder_name = the last component of the dirpath
+    const lastSlash = dirpath.lastIndexOf('/');
+    const folder_name = lastSlash >= 0 ? dirpath.slice(lastSlash + 1) : dirpath;
+    toInsert.push({ vpath: row.vpath, dirpath, folder_name });
+  }
+
+  db.exec('BEGIN');
+  db.exec('DELETE FROM folders');
+  const ins = db.prepare('INSERT INTO folders (vpath, dirpath, folder_name) VALUES (?, ?, ?)');
+  for (const r of toInsert) ins.run(r.vpath, r.dirpath, r.folder_name);
+  db.exec('COMMIT');
+
+  // Rebuild FTS from the freshly populated folders table
+  db.exec("INSERT INTO fts_folders(fts_folders) VALUES ('rebuild')");
+}
+
+// ── Rebuild normalized artist index ──────────────────────────────────────
+// Called after every scan completes. Groups all raw artist tag values by their
+// normalized form and stores the grouping in artists_normalized.
+export function rebuildArtistIndex() {
+  // Fetch all distinct (artist, vpath) pairs in one pass
+  const rows = db.prepare(
+    "SELECT DISTINCT artist, vpath FROM files WHERE artist IS NOT NULL AND artist != ''"
+  ).all();
+
+  // Group by normalized key, collecting raw variants and vpaths
+  const groupMap = new Map(); // normalizedKey → { clean, variantSet, vpathSet }
+  for (const row of rows) {
+    const key   = _normalizeArtist(row.artist);
+    const clean = _cleanArtist(row.artist);
+    if (!groupMap.has(key)) {
+      groupMap.set(key, { clean, variantSet: new Set([row.artist]), vpathSet: new Set([row.vpath]) });
+    } else {
+      const g = groupMap.get(key);
+      g.variantSet.add(row.artist);
+      g.vpathSet.add(row.vpath);
+      // Prefer a clean version that starts with a real letter for display
+      if (!/^[a-zA-Z]/i.test(g.clean) && /^[a-zA-Z]/i.test(clean)) {
+        g.clean = clean;
+      }
+    }
+  }
+
+  db.exec('BEGIN');
+  db.exec('DELETE FROM artists_normalized');
+  const ins = db.prepare('INSERT INTO artists_normalized (artist_clean, artist_raw_variants, vpaths_json) VALUES (?, ?, ?)');
+  for (const g of groupMap.values()) {
+    ins.run(g.clean, JSON.stringify([...g.variantSet]), JSON.stringify([...g.vpathSet]));
+  }
+  db.exec('COMMIT');
+
+  // Rebuild FTS from freshly populated artists_normalized table
+  db.exec("INSERT INTO fts_artists(fts_artists) VALUES ('rebuild')");
+}
 
 // Helper: build IN clause for variable-length arrays
 function vpathFilter(vpaths, ignoreVPaths) {
@@ -584,6 +711,35 @@ export function getArtists(vpaths, ignoreVPaths, excludeFilepathPrefixes) {
   return rows.map(r => r.artist);
 }
 
+// Multi-artist variant of getArtistAlbums — accepts an array of raw artist
+// tag values and fetches all albums in a single SQL query using artist IN (...).
+// Used from the normalized-artist search path to avoid N parallel HTTP calls.
+export function getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) {
+  if (!Array.isArray(artists) || artists.length === 0) return [];
+  const filtered = vpathFilter(vpaths, ignoreVPaths);
+  if (filtered.length === 0) return [];
+  const vIn = inClause('vpath', filtered);
+  const ep  = excludePrefixClauses(excludeFilepathPrefixes);
+  const ip  = includePrefixClauses(includeFilepathPrefixes);
+  const aIn = inClause('artist', artists.map(String));
+  const rows = db.prepare(`
+    SELECT DISTINCT album AS name, year, aaFile AS album_art_file
+    FROM files
+    WHERE ${vIn.sql}${ep.sql}${ip.sql} AND ${aIn.sql}
+    ORDER BY year DESC
+  `).all(...vIn.params, ...ep.params, ...ip.params, ...aIn.params);
+  const albums = [], store = {};
+  for (const row of rows) {
+    if (row.name === null) {
+      if (!store[null]) { albums.push({ name: null, year: null, album_art_file: row.album_art_file || null }); store[null] = true; }
+    } else if (!store[`${row.name}${row.year}`]) {
+      albums.push({ name: row.name, year: row.year, album_art_file: row.album_art_file || null });
+      store[`${row.name}${row.year}`] = true;
+    }
+  }
+  return albums;
+}
+
 export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
@@ -678,6 +834,80 @@ export function getAlbumSongs(album, vpaths, username, opts) {
 // Escape a raw search term for use in an FTS5 MATCH expression.
 // Double-quotes inside the term are escaped by doubling them.
 function escapeFts(term) { return String(term).replace(/"/g, '""'); }
+
+// Sanitize raw user input for FTS5 trigram queries:
+// trigram doesn't use operators, but strip characters that could cause issues.
+function sanitizeTrigram(raw) {
+  return String(raw).replace(/["*\-()]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// ── Folder search ─────────────────────────────────────────────────────────
+// Searches folder names using the trigram FTS index.
+// Returns folders the user has access to, ranked by match quality.
+// Each result includes enough info for the frontend to open the file browser.
+export function searchFolders(query, vpaths, ignoreVPaths) {
+  if (!query || !query.trim()) return [];
+  const filtered = vpathFilter(vpaths, ignoreVPaths);
+  if (filtered.length === 0) return [];
+
+  const q = sanitizeTrigram(query);
+  if (q.length < 3) return []; // trigram needs at least 3 chars
+
+  const vIn = inClause('f.vpath', filtered);
+  const rows = db.prepare(`
+    SELECT f.id, f.vpath, f.dirpath, f.folder_name
+    FROM folders f
+    JOIN fts_folders ft ON f.id = ft.rowid
+    WHERE ${vIn.sql}
+    AND fts_folders MATCH ?
+    ORDER BY rank
+    LIMIT 50
+  `).all(...vIn.params, q);
+  return rows;
+}
+
+// ── Normalized artist search ───────────────────────────────────────────────
+// Searches the normalized artist index using trigram FTS.
+// Returns artist_clean (display name) + artist_raw_variants[] (all raw tag
+// values that normalize to this name) — the variants are needed by the
+// frontend to query artist-albums across all maltagged variants at once.
+export function searchArtistsNormalized(query, vpaths, ignoreVPaths) {
+  if (!query || !query.trim()) return [];
+
+  const q = sanitizeTrigram(query);
+  if (q.length < 3) return [];
+
+  // Compute the set of vpaths the user is allowed to see
+  let filteredVpaths = null;
+  if (Array.isArray(vpaths) && vpaths.length > 0) {
+    filteredVpaths = vpathFilter(vpaths, ignoreVPaths);
+    if (filteredVpaths.length === 0) return [];
+  }
+
+  // Fetch more than 50 from FTS so we still have 50 after vpath filtering
+  const rows = db.prepare(`
+    SELECT an.id, an.artist_clean, an.artist_raw_variants, an.vpaths_json
+    FROM artists_normalized an
+    JOIN fts_artists fa ON an.id = fa.rowid
+    WHERE fts_artists MATCH ?
+    ORDER BY rank
+    LIMIT 200
+  `).all(q);
+
+  return rows
+    .filter(r => {
+      if (!filteredVpaths) return true;
+      try {
+        const artistVpaths = JSON.parse(r.vpaths_json || '[]');
+        return artistVpaths.some(v => filteredVpaths.includes(v));
+      } catch { return true; }
+    })
+    .slice(0, 50)
+    .map(r => ({
+      name:     r.artist_clean,
+      variants: (() => { try { return JSON.parse(r.artist_raw_variants); } catch { return [r.artist_clean]; } })(),
+    }));
+}
 
 export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms = []) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);

@@ -52,6 +52,8 @@ export function removeFilesByVpath(vpath) { return backend.removeFilesByVpath(vp
 export function countFilesByVpath(vpath) { return backend.countFilesByVpath(vpath); }
 export function getStats() { return backend.getStats(); }
 export function getLastScannedMs() { return backend.getLastScannedMs(); }
+export function rebuildFolderIndex() { if (backend.rebuildFolderIndex) backend.rebuildFolderIndex(); }
+export function rebuildArtistIndex() { if (backend.rebuildArtistIndex) backend.rebuildArtistIndex(); }
 
 // Metadata Queries
 export function updateFileArt(filepath, vpath, aaFile, scanId, artSource) { return backend.updateFileArt(filepath, vpath, aaFile, scanId, artSource); }
@@ -63,10 +65,13 @@ export function updateFileTags(filepath, vpath, tags) { return backend.updateFil
 export function getFileWithMetadata(filepath, vpath, username) { return backend.getFileWithMetadata(filepath, vpath, username); }
 export function getArtists(vpaths, ignoreVPaths, excludeFilepathPrefixes) { return backend.getArtists(vpaths, ignoreVPaths, excludeFilepathPrefixes); }
 export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) { return backend.getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes); }
+export function getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) { return backend.getArtistAlbumsMulti ? backend.getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) : []; }
 export function getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) { return backend.getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes); }
 export function getAlbumSongs(album, vpaths, username, opts) { return backend.getAlbumSongs(album, vpaths, username, opts); }
-export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix) { return backend.searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix); }
-export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix) { return backend.searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix); }
+export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
+export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
+export function searchFolders(query, vpaths, ignoreVPaths) { return backend.searchFolders ? backend.searchFolders(query, vpaths, ignoreVPaths) : []; }
+export function searchArtistsNormalized(query, vpaths, ignoreVPaths) { return backend.searchArtistsNormalized ? backend.searchArtistsNormalized(query, vpaths, ignoreVPaths) : []; }
 export function getRatedSongs(vpaths, username, ignoreVPaths) { return backend.getRatedSongs(vpaths, username, ignoreVPaths); }
 export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts); }
 export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts); }
