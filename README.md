@@ -157,21 +157,51 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 
 ## Installing
 
-### Docker (not really recommended but there are people asking for it)
+### Docker
+
+Pull the pre-built image directly — no clone or build needed:
 
 ```shell
-# 1. Clone
-git clone https://github.com/aroundmyroom/mStream.git
-cd mStream
+docker pull ghcr.io/aroundmyroom/mstream-velvet:latest
+```
 
-# 2. Build the image
-docker build -t mstream-velvet .
+Create a `compose.yaml`:
 
-# 3. Start (edit volume paths in compose.yaml first)
+```yaml
+services:
+  mstream:
+    image: ghcr.io/aroundmyroom/mstream-velvet:latest
+    container_name: mstream-velvet
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./save:/app/save          # config, database, logs
+      - /media/music:/music       # your music library
+      - ./waveform-cache:/app/waveform-cache
+      - ./image-cache:/app/image-cache
+```
+
+```shell
 docker compose up -d
 ```
 
 Open **http://localhost:3000** — on a fresh install with no users the admin panel is accessible without login.
+
+Or pin to a specific release:
+
+```shell
+docker pull ghcr.io/aroundmyroom/mstream-velvet:v5.16.31-velvet
+```
+
+**Build from source** (optional):
+
+```shell
+git clone https://github.com/aroundmyroom/mStream.git
+cd mStream
+docker build -t mstream-velvet .
+# then use  image: mstream-velvet  in compose.yaml
+```
 
 See [docs/docker.md](docs/docker.md) for the full Docker guide: volume setup, adding your music library, user creation, updating, and reverse-proxy tips.
 
