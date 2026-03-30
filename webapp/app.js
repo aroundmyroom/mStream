@@ -5383,7 +5383,7 @@ async function viewHome() {
   // ── five shelves ────────────────────────────────────────────
 
   // shelf order helpers (shared with drag-to-reorder)
-  const _ORDER_KEY = `ms2_home_order_${S.user}`;
+  const _ORDER_KEY = `ms2_home_order_${S.username || ''}`;  
   function _savedOrder() { try { return JSON.parse(localStorage.getItem(_ORDER_KEY) || 'null'); } catch(_) { return null; } }
   function _saveOrder() {
     const v = document.getElementById('content-body')?.querySelector('.home-view');
@@ -5502,7 +5502,7 @@ async function viewHome() {
   });
 
   // ── favorites / compact home ─────────────────────────────────
-  const _HIDDEN_KEY = `ms2_home_hidden_${S.user}`;
+  const _HIDDEN_KEY = `ms2_home_hidden_${S.username || ''}`;  
   function _loadHidden() {
     try { return new Set(JSON.parse(localStorage.getItem(_HIDDEN_KEY) || '[]')); }
     catch(_) { return new Set(); }
@@ -10006,6 +10006,10 @@ function _collectPrefs() {
     dj_artist_history: localStorage.getItem('ms2_dj_artist_history_' + u),
     show_genres:  localStorage.getItem('ms2_show_genres_'  + u),
     show_decades: localStorage.getItem('ms2_show_decades_' + u),
+    home_order:   localStorage.getItem('ms2_home_order_'   + u),
+    home_hidden:  localStorage.getItem('ms2_home_hidden_'  + u),
+    mute:         localStorage.getItem('ms2_mute_'          + u),
+    shuffle:      localStorage.getItem('ms2_shuffle_'       + u),
   };
 }
 
@@ -10107,6 +10111,23 @@ function _applyServerSettings(data) {
   // Home view layout — shelf order and hidden cards synced across devices
   if (prefs.home_order  != null) ls('ms2_home_order_'  + u, prefs.home_order);
   if (prefs.home_hidden != null) ls('ms2_home_hidden_' + u, prefs.home_hidden);
+  if (prefs.shuffle != null) {
+    ls('ms2_shuffle_' + u, prefs.shuffle);
+    S.shuffle = prefs.shuffle === '1';
+    document.getElementById('shuffle-btn')?.classList.toggle('active', S.shuffle);
+  }
+  if (prefs.mute != null) {
+    ls('ms2_mute_' + u, prefs.mute);
+    if (prefs.mute === '1') {
+      _preMuteVol = audioEl.volume;
+      audioEl.volume = 0;
+      const volEl = document.getElementById('volume');
+      if (volEl) { volEl.value = 0; _setVolPct(0); }
+      document.getElementById('mute-btn')?.classList.add('muted');
+      document.getElementById('vol-icon-on')?.classList.add('hidden');
+      document.getElementById('vol-icon-off')?.classList.remove('hidden');
+    }
+  }
   _applyNavVisibility();
   // Queue: the DB is the source of truth — always restore from it on load.
   // This ensures any browser/device always picks up whatever was last playing.
@@ -10571,6 +10592,8 @@ document.getElementById('shuffle-btn').addEventListener('click', () => {
   S.shuffle = !S.shuffle;
   document.getElementById('shuffle-btn').classList.toggle('active', S.shuffle);
   _showInfoStrip('', _shuffleStripHtml(), 3000, true);
+  localStorage.setItem(_uKey('shuffle'), S.shuffle ? '1' : '0');
+  _syncPrefs();
 });
 
 // Repeat
@@ -11616,6 +11639,8 @@ document.getElementById('mute-btn').addEventListener('click', () => {
     document.getElementById('mute-btn').classList.add('muted');
     document.getElementById('vol-icon-on').classList.add('hidden');
     document.getElementById('vol-icon-off').classList.remove('hidden');
+    localStorage.setItem(_uKey('mute'), '1');
+    _syncPrefs();
   } else {
     audioEl.volume = _preMuteVol;
     document.getElementById('volume').value = Math.round(_preMuteVol * 100);
@@ -11623,6 +11648,8 @@ document.getElementById('mute-btn').addEventListener('click', () => {
     document.getElementById('mute-btn').classList.remove('muted');
     document.getElementById('vol-icon-on').classList.remove('hidden');
     document.getElementById('vol-icon-off').classList.add('hidden');
+    localStorage.removeItem(_uKey('mute'));
+    _syncPrefs();
   }
 });
 // Restore mute icon if user drags slider back up from 0
@@ -11631,6 +11658,7 @@ document.getElementById('volume').addEventListener('input', e => {
     document.getElementById('mute-btn').classList.remove('muted');
     document.getElementById('vol-icon-on').classList.remove('hidden');
     document.getElementById('vol-icon-off').classList.add('hidden');
+    localStorage.removeItem(_uKey('mute'));
   }
 });
 

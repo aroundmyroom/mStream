@@ -1,5 +1,15 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v5.16.31 — Admin UI, settings persistence, Docker publish
+
+- Admin sidebar restructured: Config section expanded with Settings/Database/Backup/Transcoding/Federation/Logs/Scan Errors/Lock Admin API; About moved last under Server
+- About view credits rewritten; GitHub + Discord buttons added
+- "Sign Out" → "Logout" standardised in player footer, admin sidebar, and confirm dialog
+- **Bug fix:** home layout (`home_order`, `home_hidden`) used `S.user` (undefined) — keys resolved to `ms2_home_order_undefined`; fixed to `S.username`; both keys added to `_collectPrefs()` so they sync to DB
+- **Bug fix:** mute state not persisted — `ms2_mute` now saved/restored; pre-mute volume preserved
+- **Bug fix:** shuffle state not persisted — `ms2_shuffle` now saved/restored
+- Docker publish workflow added — auto-builds multi-arch image to `ghcr.io/aroundmyroom/mstream` on every `v*-velvet` tag
+
 ## Albums-Only Folders — v5.16.30
 
 **Files:** `src/state/config.js`, `src/api/admin.js`, `src/api/playlist.js`, `src/db/sqlite-backend.js`, `src/db/manager.js`, `src/api/db.js`, `webapp/app.js`, `webapp/admin/index.js`

@@ -1,8 +1,45 @@
 # Running mStream Velvet with Docker
 
-## Quick start
+## Quick start — pull from GitHub Container Registry
 
-### 1. Clone and build
+The easiest way. No build step required.
+
+```shell
+docker pull ghcr.io/aroundmyroom/mstream:latest
+```
+
+Or pin to a specific release:
+
+```shell
+docker pull ghcr.io/aroundmyroom/mstream:v5.16.30-velvet
+```
+
+### compose.yaml (ghcr.io — recommended)
+
+```yaml
+services:
+  mstream:
+    image: ghcr.io/aroundmyroom/mstream:latest
+    container_name: mstream-velvet
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./save:/app/save
+      - /media/music:/music
+      - ./waveform-cache:/app/waveform-cache
+      - ./image-cache:/app/image-cache
+```
+
+```shell
+docker compose up -d
+```
+
+Open **http://localhost:3000**
+
+---
+
+## Build from source
 
 ```shell
 git clone https://github.com/aroundmyroom/mStream.git
@@ -10,40 +47,18 @@ cd mStream
 docker build -t mstream-velvet .
 ```
 
-### 2. Start with Docker Compose
-
-Edit the volume paths in `compose.yaml` to match your system, then:
-
-```shell
-docker compose up -d
-```
-
-Open your browser at **http://localhost:3000**
+Then change the `image:` line in `compose.yaml` to `mstream-velvet`.
 
 ---
 
-## compose.yaml
+## How the image is published
 
-```yaml
-services:
-  mstream:
-    image: mstream-velvet
-    container_name: mstream-velvet
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    volumes:
-      # Persistent data — config, database, logs, sync state
-      - /home/mStream/save:/app/save
-      # Your music library (read-only recommended)
-      - /media/music:/music
-      # Cached waveform data
-      - /home/mStream/waveform-cache:/app/waveform-cache
-      # Cached album art / podcast / radio artwork
-      - /home/mStream/image-cache:/app/image-cache
-```
+Every time a `v*-velvet` tag is pushed to GitHub, the workflow `.github/workflows/docker-publish.yml` automatically:
 
-Adjust the host-side paths (`/home/mStream/…`, `/media/music`) to wherever you want to store data on your machine.
+1. Builds a multi-arch image (`linux/amd64` + `linux/arm64`)
+2. Pushes it to `ghcr.io/aroundmyroom/mstream` with the version tag and `latest`
+
+No manual steps are needed — tagging a release is enough.
 
 ---
 
