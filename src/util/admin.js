@@ -210,6 +210,14 @@ export async function editUpload(val) {
   config.program.noUpload = val;
 }
 
+export async function editMkdir(val) {
+  const loadConfig = await loadFile(config.configFile);
+  loadConfig.noMkdir = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.noMkdir = val;
+}
+
 
 export async function editAddress(val) {
   const loadConfig = await loadFile(config.configFile);

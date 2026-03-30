@@ -107,6 +107,8 @@ export function setup(mstream) {
   });
 
   mstream.post("/api/v1/file-explorer/mkdir", async (req, res) => {
+    if (config.program.noMkdir === true) { throw new WebError('Create Folder Disabled'); }
+
     const schema = Joi.object({
       directory: Joi.string().required(),
     });

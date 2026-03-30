@@ -294,6 +294,7 @@ export function setup(mstream) {
       address: config.program.address,
       port: config.program.port,
       noUpload: config.program.noUpload,
+      noMkdir: config.program.noMkdir,
       writeLogs: config.program.writeLogs,
       secret: config.program.secret.slice(-4),
       ssl: config.program.ssl,
@@ -339,6 +340,16 @@ export function setup(mstream) {
     joiValidate(schema, req.body);
 
     await admin.editUpload(req.body.noUpload);
+    res.json({});
+  });
+
+  mstream.post("/api/v1/admin/config/nomkdir", async (req, res) => {
+    const schema = Joi.object({
+      noMkdir: Joi.boolean().required()
+    });
+    joiValidate(schema, req.body);
+
+    await admin.editMkdir(req.body.noMkdir);
     res.json({});
   });
 

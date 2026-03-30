@@ -70,6 +70,7 @@ const schema = Joi.object({
   lastFM: lastFMOptions.default(lastFMOptions.validate({}).value),
   scanOptions: scanOptions.default(scanOptions.validate({}).value),
   noUpload: Joi.boolean().default(false),
+  noMkdir: Joi.boolean().default(false),
   writeLogs: Joi.boolean().default(false),
   lockAdmin: Joi.boolean().default(false),
   storage: storageJoi.default(storageJoi.validate({}).value),

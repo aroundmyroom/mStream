@@ -679,6 +679,12 @@ const advancedView = Vue.component('advanced-view', {
                       </td>
                     </tr>
                     <tr>
+                      <td><b>Create Folder:</b> {{params.noMkdir === false ? 'Enabled' : 'Disabled'}}</td>
+                      <td>
+                        [<a v-on:click="toggleMkdir()">edit</a>]
+                      </td>
+                    </tr>
+                    <tr>
                       <td><b>Auth Key:</b> ****************{{params.secret}}</td>
                       <td>
                         [<a v-on:click="generateNewKey()">edit</a>]
@@ -829,6 +835,48 @@ const advancedView = Vue.component('advanced-view', {
               data: { strength: 128 }
             }).then(() => {
               API.logout();
+            }).catch(() => {
+              iziToast.error({
+                title: 'Failed',
+                position: 'topCenter',
+                timeout: 3500
+              });
+            });
+          }, true],
+          ['<button>Go Back</button>', (instance, toast) => {
+            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
+          }],
+        ]
+      });
+    },
+    toggleMkdir: function() {
+      iziToast.question({
+        timeout: 20000,
+        close: false,
+        overlayClose: true,
+        overlay: true,
+        displayMode: 'once',
+        id: 'question',
+        zindex: 99999,
+        layout: 2,
+        maxWidth: 600,
+        title: `<b>${this.params.noMkdir === false ? 'Disable' : 'Enable'} Create Folder?</b>`,
+        position: 'center',
+        buttons: [
+          [`<button><b>${this.params.noMkdir === false ? 'Disable' : 'Enable'}</b></button>`, (instance, toast) => {
+            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
+            API.axios({
+              method: 'POST',
+              url: `${API.url()}/api/v1/admin/config/nomkdir`,
+              data: { noMkdir: !this.params.noMkdir }
+            }).then(() => {
+              Vue.set(ADMINDATA.serverParams, 'noMkdir', !this.params.noMkdir);
+
+              iziToast.success({
+                title: 'Updated Successfully',
+                position: 'topCenter',
+                timeout: 3500
+              });
             }).catch(() => {
               iziToast.error({
                 title: 'Failed',

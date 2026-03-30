@@ -274,7 +274,11 @@ async function senddir(root) {
     const mkdirBtn = document.getElementById('mkdir_btn');
     if (fileExplorerArray.length > 0) {
       ytdlBtn.classList.remove('super-hide');
-      mkdirBtn.classList.remove('super-hide');
+      if (MSTREAMAPI.currentServer.noMkdir === true) {
+        mkdirBtn.classList.add('super-hide');
+      } else {
+        mkdirBtn.classList.remove('super-hide');
+      }
     } else {
       ytdlBtn.classList.add('super-hide');
       mkdirBtn.classList.add('super-hide');
@@ -452,6 +456,8 @@ async function init() {
         }
       });
     }
+
+    MSTREAMAPI.currentServer.noMkdir = response.noMkdir === true;
 
     if (response.transcode) {
       MSTREAMPLAYER.transcodeOptions.serverEnabled = true;
