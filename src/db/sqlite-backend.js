@@ -223,6 +223,23 @@ export function init(dbDirectory) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_um_user_rating  ON user_metadata(user, rating)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_um_user_starred ON user_metadata(user, starred)');
 
+  // ── FTS5 full-text index ─────────────────────────────────────────────────
+  // External-content table: FTS5 tokenises title/artist/album/filepath columns
+  // from the `files` table without duplicating the raw data.
+  // unicode61 tokenizer with remove_diacritics=1: café == cafe, case-insensitive.
+  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS fts_files USING fts5(
+    title, artist, album, filepath,
+    content='files', content_rowid='rowid',
+    tokenize='unicode61 remove_diacritics 1'
+  )`);
+  // Rebuild the FTS index if it is empty (first start after introducing FTS).
+  // External-content tables report COUNT(*) == files count even when hollow,
+  // so we check fts_files_data (the real B-tree backing store) instead.
+  const _ftsDataRows = db.prepare('SELECT COUNT(*) AS cnt FROM fts_files_data').get().cnt;
+  if (_ftsDataRows < 5) {
+    db.exec("INSERT INTO fts_files(fts_files) VALUES ('rebuild')");
+  }
+
   // ── Cache hot-path prepared statements ───────────────────────────────────
   // These functions are called once per file during scans (up to 123K times).
   // Caching avoids re-running sqlite3_prepare_v2 on every call.
@@ -241,7 +258,11 @@ export function init(dbDirectory) {
     insertFileTs:   db.prepare('SELECT ts FROM files WHERE hash = ? AND ts IS NOT NULL LIMIT 1'),
     insertFileRow:  db.prepare(
       'INSERT INTO files (title, artist, year, album, filepath, format, track, trackOf, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration, artist_id, album_id) ' +
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),  
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+    // FTS5 write statements — used in insert / remove / tag-update paths
+    ftsInsert:  db.prepare('INSERT INTO fts_files(rowid, title, artist, album, filepath) VALUES (?, ?, ?, ?, ?)'),
+    ftsDel:     db.prepare("INSERT INTO fts_files(fts_files, rowid, title, artist, album, filepath) VALUES ('delete', ?, ?, ?, ?, ?)"),
+    ftsRebuild: db.prepare("INSERT INTO fts_files(fts_files) VALUES ('rebuild')"),
   });
 }
 
@@ -375,8 +396,22 @@ export function updateFileTags(filepath, vpath, tags) {
     fields.push('album_id = ?');  values.push(_makeAlbumId(a, b));
   }
   if (!fields.length) return;
+  // Snapshot current FTS values before we overwrite them
+  const ftsAffected = 'title' in tags || 'artist' in tags || 'album' in tags;
+  let ftsOld = null;
+  if (ftsAffected) {
+    ftsOld = db.prepare('SELECT rowid, title, artist, album, filepath FROM files WHERE filepath = ? AND vpath = ?').get(filepath, vpath);
+  }
   values.push(filepath, vpath);
   db.prepare(`UPDATE files SET ${fields.join(', ')} WHERE filepath = ? AND vpath = ?`).run(...values);
+  // Keep FTS index in sync: delete old entry, insert updated one
+  if (ftsAffected && ftsOld) {
+    const updated = db.prepare('SELECT rowid, title, artist, album, filepath FROM files WHERE filepath = ? AND vpath = ?').get(filepath, vpath);
+    if (updated) {
+      _s.ftsDel.run(ftsOld.rowid, ftsOld.title ?? null, ftsOld.artist ?? null, ftsOld.album ?? null, ftsOld.filepath);
+      _s.ftsInsert.run(updated.rowid, updated.title ?? null, updated.artist ?? null, updated.album ?? null, updated.filepath);
+    }
+  }
 }
 
 export function insertFile(fileData) {
@@ -395,10 +430,17 @@ export function insertFile(fileData) {
     fileData.art_source ?? null, fileData.duration ?? null,
     fileData.artist_id ?? _makeArtistId(fileData.artist), fileData.album_id ?? _makeAlbumId(fileData.artist, fileData.album)
   );
-  return { ...fileData, id: Number(result.lastInsertRowid) };
+  const rowId = Number(result.lastInsertRowid);
+  _s.ftsInsert.run(rowId, fileData.title ?? null, fileData.artist ?? null, fileData.album ?? null, fileData.filepath);
+  return { ...fileData, id: rowId };
 }
 
 export function removeFileByPath(filepath, vpath) {
+  // Delete from FTS before removing the row (we need the old values)
+  const old = db.prepare('SELECT rowid, title, artist, album, filepath FROM files WHERE filepath = ? AND vpath = ?').get(filepath, vpath);
+  if (old) {
+    _s.ftsDel.run(old.rowid, old.title ?? null, old.artist ?? null, old.album ?? null, old.filepath);
+  }
   _s.removeByPath.run(filepath, vpath);
 }
 
@@ -425,10 +467,13 @@ export function getStaleFileHashes(vpath, scanId) {
 
 export function removeStaleFiles(vpath, scanId) {
   _s.removeStale.run(vpath, scanId);
+  // Rebuild FTS after bulk delete — individual ftsDel on 10K+ rows would be slow
+  _s.ftsRebuild.run();
 }
 
 export function removeFilesByVpath(vpath) {
   db.prepare('DELETE FROM files WHERE vpath = ?').run(vpath);
+  _s.ftsRebuild.run();
 }
 
 export function countFilesByVpath(vpath) {
@@ -630,7 +675,11 @@ export function getAlbumSongs(album, vpaths, username, opts) {
   return rows.map(mapFileRow);
 }
 
-export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes) {
+// Escape a raw search term for use in an FTS5 MATCH expression.
+// Double-quotes inside the term are escaped by doubling them.
+function escapeFts(term) { return String(term).replace(/"/g, '""'); }
+
+export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms = []) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
 
@@ -639,35 +688,48 @@ export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepat
 
   const vIn = inClause('vpath', filtered);
   const ep = excludePrefixClauses(excludeFilepathPrefixes);
-  const params = [...vIn.params, ...ep.params, String(searchTerm)];
-  let sql = `SELECT rowid AS id, * FROM files WHERE ${vIn.sql}${ep.sql} AND ${searchCol} LIKE '%' || ? || '%' COLLATE NOCASE`;
+
+  // Build FTS5 MATCH query: column-filtered prefix match + optional NOT exclusions
+  const notClause = negativeTerms.map(t => ` NOT "${escapeFts(t)}"`).join('');
+  const ftsQuery = `{${searchCol}} : "${escapeFts(searchTerm)}"*${notClause}`;
+
+  const params = [...vIn.params, ...ep.params, ftsQuery];
+  let sql = `SELECT f.rowid AS id, f.* FROM files f
+    JOIN fts_files ft ON f.rowid = ft.rowid
+    WHERE ${vIn.sql.replace(/\bvpath\b/g, 'f.vpath')}${ep.sql.replace(/\bvpath\b/g, 'f.vpath').replace(/\bfilepath\b/g, 'f.filepath')}
+    AND ft.fts_files MATCH ?
+    ORDER BY bm25(fts_files)`;
   if (filepathPrefix && typeof filepathPrefix === 'string') {
-    sql += " AND filepath LIKE ? ESCAPE '\\'";
+    sql += " AND f.filepath LIKE ? ESCAPE '\\'";
     params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
   }
   const rows = db.prepare(sql).all(...params);
   return rows.map(mapFileRow);
 }
 
-// Multi-word cross-field search: every token must appear in at least one of
-// title, artist, album, or filepath. Enables queries like "chaka khan fate"
-// where the artist and track title words are spread across separate columns.
-export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes) {
+// Multi-word cross-field search: every positive token must appear somewhere
+// across title/artist/album/filepath. Enables queries like "chaka khan fate"
+// where artist words and title words are spread across columns.
+export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms = []) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0 || tokens.length === 0) { return []; }
 
   const vIn = inClause('vpath', filtered);
   const ep = excludePrefixClauses(excludeFilepathPrefixes);
-  const params = [...vIn.params, ...ep.params];
 
-  const tokenClauses = tokens.map(token => {
-    params.push(token, token, token, token);
-    return `(title LIKE '%' || ? || '%' COLLATE NOCASE OR artist LIKE '%' || ? || '%' COLLATE NOCASE OR album LIKE '%' || ? || '%' COLLATE NOCASE OR filepath LIKE '%' || ? || '%' COLLATE NOCASE)`;
-  });
+  // Each positive token must match at least one column (prefix match)
+  const posClause = tokens.map(t => `"${escapeFts(t)}"*`).join(' AND ');
+  const notClause = negativeTerms.map(t => ` NOT "${escapeFts(t)}"`).join('');
+  const ftsQuery = posClause + notClause;
 
-  let sql = `SELECT rowid AS id, * FROM files WHERE ${vIn.sql}${ep.sql} AND ${tokenClauses.join(' AND ')}`;
+  const params = [...vIn.params, ...ep.params, ftsQuery];
+  let sql = `SELECT f.rowid AS id, f.* FROM files f
+    JOIN fts_files ft ON f.rowid = ft.rowid
+    WHERE ${vIn.sql.replace(/\bvpath\b/g, 'f.vpath')}${ep.sql.replace(/\bvpath\b/g, 'f.vpath').replace(/\bfilepath\b/g, 'f.filepath')}
+    AND ft.fts_files MATCH ?
+    ORDER BY bm25(fts_files)`;
   if (filepathPrefix && typeof filepathPrefix === 'string') {
-    sql += " AND filepath LIKE ? ESCAPE '\\'";
+    sql += " AND f.filepath LIKE ? ESCAPE '\\'";
     params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
   }
   const rows = db.prepare(sql).all(...params);

@@ -167,18 +167,21 @@ export function setup(mstream) {
     });
     joiValidate(schema, req.body);
 
-    const artists = req.body.noArtists === true ? [] : searchByX(req, 'artist');
-    const albums = req.body.noAlbums === true ? [] : searchByX(req, 'album');
-    const files = req.body.noFiles === true ? [] : searchByX(req, 'filepath');
-    const title = req.body.noTitles === true ? [] : searchByX(req, 'title', 'filepath');
+    const { positiveTerms, negativeTerms } = parseSearchQuery(req.body.search);
+    if (!positiveTerms.length) { res.json({ artists: [], albums: [], files: [], title: [] }); return; }
+    const posSearch = positiveTerms.join(' ');
 
-    // Multi-word smart search: if the query has >1 word, also search across all
-    // fields simultaneously so "chaka khan fate" finds songs where the artist
-    // matches some tokens and the title matches others.
-    const tokens = req.body.search.trim().split(/\s+/).filter(t => t.length > 0);
-    if (tokens.length > 1) {
+    const artists = req.body.noArtists === true ? [] : searchByX(req, 'artist',   undefined, posSearch, negativeTerms);
+    const albums  = req.body.noAlbums  === true ? [] : searchByX(req, 'album',    undefined, posSearch, negativeTerms);
+    const files   = req.body.noFiles   === true ? [] : searchByX(req, 'filepath', undefined, posSearch, negativeTerms);
+    const title   = req.body.noTitles  === true ? [] : searchByX(req, 'title', 'filepath',   posSearch, negativeTerms);
+
+    // Multi-word smart search: if there are >1 positive tokens, also run a
+    // cross-field FTS query so "chaka khan fate" finds songs where artist words
+    // and title words are spread across separate columns.
+    if (positiveTerms.length > 1) {
       const seenPaths = new Set(title.map(t => t.filepath));
-    const crossRows = db.searchFilesAllWords(tokens, req.user.vpaths, req.body.ignoreVPaths, req.body.filepathPrefix || null, req.body.excludeFilepathPrefixes);
+      const crossRows = db.searchFilesAllWords(positiveTerms, req.user.vpaths, req.body.ignoreVPaths, req.body.filepathPrefix || null, req.body.excludeFilepathPrefixes, negativeTerms);
       for (const row of crossRows) {
         const fp = path.join(row.vpath, row.filepath).replace(/\\/g, '/');
         if (!seenPaths.has(fp)) {
@@ -192,15 +195,15 @@ export function setup(mstream) {
       }
     }
 
-    res.json({artists, albums, files, title });
+    res.json({ artists, albums, files, title });
   });
 
-  function searchByX(req, searchCol, resCol) {
+  function searchByX(req, searchCol, resCol, posSearch, negativeTerms = []) {
     if (!resCol) {
       resCol = searchCol;
     }
 
-    const results = db.searchFiles(searchCol, req.body.search, req.user.vpaths, req.body.ignoreVPaths, req.body.filepathPrefix || null, req.body.excludeFilepathPrefixes);
+    const results = db.searchFiles(searchCol, posSearch, req.user.vpaths, req.body.ignoreVPaths, req.body.filepathPrefix || null, req.body.excludeFilepathPrefixes, negativeTerms);
 
     const returnThis = [];
     const store = {};
@@ -227,6 +230,27 @@ export function setup(mstream) {
     }
 
     return returnThis;
+  }
+
+  // Parse raw search input into positive and negative term lists.
+  // Supports: "-word" and "NOT word" syntax to exclude results.
+  function parseSearchQuery(raw) {
+    const parts = raw.trim().split(/\s+/);
+    const positiveTerms = [], negativeTerms = [];
+    let skipNext = false;
+    for (let i = 0; i < parts.length; i++) {
+      if (skipNext) { skipNext = false; continue; }
+      const t = parts[i];
+      if (t.toLowerCase() === 'not' && i + 1 < parts.length) {
+        negativeTerms.push(parts[i + 1]);
+        skipNext = true;
+      } else if (t.startsWith('-') && t.length > 1) {
+        negativeTerms.push(t.slice(1));
+      } else {
+        positiveTerms.push(t);
+      }
+    }
+    return { positiveTerms, negativeTerms };
   }
 
   // legacy endpoint, moved to POST
