@@ -5,13 +5,13 @@
 The easiest way. No build step required.
 
 ```shell
-docker pull ghcr.io/aroundmyroom/mstream:latest
+docker pull ghcr.io/aroundmyroom/mstream-velvet:latest
 ```
 
 Or pin to a specific release:
 
 ```shell
-docker pull ghcr.io/aroundmyroom/mstream:v5.16.30-velvet
+docker pull ghcr.io/aroundmyroom/mstream-velvet:v5.16.30-velvet
 ```
 
 ### compose.yaml (ghcr.io — recommended)
@@ -19,7 +19,7 @@ docker pull ghcr.io/aroundmyroom/mstream:v5.16.30-velvet
 ```yaml
 services:
   mstream:
-    image: ghcr.io/aroundmyroom/mstream:latest
+    image: ghcr.io/aroundmyroom/mstream-velvet:latest
     container_name: mstream-velvet
     restart: unless-stopped
     ports:
