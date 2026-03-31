@@ -53,8 +53,8 @@ const rpnOptions = Joi.object({
 
 const lastFMOptions = Joi.object({
   enabled:   Joi.boolean().default(true),
-  apiKey:    Joi.string().default('33098eb88840fdded379a7e5a7da67dd'),
-  apiSecret: Joi.string().default('ffa27b8912cd04050e1fa14e9ced58a4')
+  apiKey:    Joi.string().allow('').default(''),
+  apiSecret: Joi.string().allow('').default('')
 });
 
 const listenBrainzOptions = Joi.object({
