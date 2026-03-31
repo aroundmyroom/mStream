@@ -4,6 +4,32 @@
 
 ## NOW — In Progress / Remaining
 
+### Per-user File Upload Permission — PLANNED
+
+Currently upload is gated only by the server-wide `config.program.noUpload` flag. No per-user toggle exists.
+Model: admin always has upload; regular users need explicit `allowUpload` permission (default: true, consistent with `allow-radio-recording` pattern).
+
+- [ ] `src/state/config.js` — add `allowUpload: Joi.boolean().default(true)` to user schema
+- [ ] `src/util/admin.js` — `addUser()` / `editUserAccess()` save `allowUpload`
+- [ ] `src/api/file-explorer.js` — upload endpoint checks `req.user.allowUpload === false` → 403
+- [ ] Admin UI (`webapp/admin/index.js`) — toggle button per user (same pattern as allow-radio-recording button)
+- [ ] `GET /api/v1/ping` — expose `noUpload` per user so client can hide the upload button
+- [ ] Docs: update `docs/API/file-explorer.md` if it exists; update `changes-fork-velvet.md`
+
+> Note: ytdl download is a **separate** endpoint and permission — do NOT gate it with `allowUpload`.
+
+---
+
+### yt-dlp year from `release_year` — LOW PRIORITY / OPTIONAL
+
+Currently we read `info.upload_date` (always present). Upstream uses `info.release_year || info.release_date?.substring(0,4)`.
+`release_year` is only populated for officially tagged YouTube Music videos — 95%+ of regular uploads leave it null.
+Only matters for old tracks officially re-uploaded years later (e.g. 1985 song uploaded in 2020).
+
+- [ ] (Optional) In `src/api/ytdl.js` line ~299: `const year = info.release_year || (info.release_date ? info.release_date.substring(0,4) : null) || (info.upload_date ? info.upload_date.slice(0,4) : '');`
+
+---
+
 ### 🎙 Podcasts — ✅ DONE (2026-03-21); Save to Library ✅ DONE (2026-03-24)
 
 > See [`docs/podcasts.md`](docs/podcasts.md) for full documentation.

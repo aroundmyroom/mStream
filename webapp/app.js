@@ -16,9 +16,11 @@ const S = {
   discogsAllowUpdate: false,
   allowId3Edit:   false,
   allowRadioRecording: false,   // per-user: can record radio streams
+  allowYoutubeDownload: false,  // per-user: can download from YouTube
   recordingActive: false,       // is a recording currently in progress?
   recordingId: null,            // active recording id (from server)
   recordingElapsedSec: 0,       // elapsed seconds
+  recordingMeta: null,          // { vpath, art, title } saved at record start
   _recordingTimer: null,        // setInterval handle
   lastfmEnabled: false,
   listenbrainzEnabled: false,
@@ -741,6 +743,31 @@ const Player = {
       ? `<img src="${u}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`
       : noArtHtml();
     VU_NEEDLE.setArt(u || '');
+
+    // On-demand art: if the file has no album-art yet (not scanned), ask the
+    // server to extract it from the file's embedded tags and patch it in-place.
+    if (!s['album-art'] && !s.isRadio && !s.isPodcast && s.filepath) {
+      api('GET', `api/v1/files/art?fp=${encodeURIComponent(s.filepath)}`)
+        .then(d => {
+          if (!d.aaFile) return;
+          // Only patch if this song is still the one playing
+          if (S.queue[S.idx] !== s) return;
+          s['album-art'] = d.aaFile;
+          const nu = artUrl(d.aaFile, 'l');
+          thumb.innerHTML = `<img src="${nu}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`;
+          VU_NEEDLE.setArt(nu);
+          _applyAlbumArtTheme(nu);
+          _TabFav.setSong(s, !audioEl.paused);
+          // Refresh queue panel art for this song
+          document.querySelectorAll(`[data-qidx]`).forEach(el => {
+            if (S.queue[parseInt(el.dataset.qidx)] === s) {
+              const qi = el.querySelector('.q-art');
+              if (qi) qi.innerHTML = `<img src="${artUrl(d.aaFile,'s')}" alt="" loading="lazy">`;
+            }
+          });
+        })
+        .catch(() => {});
+    }
     // update player stars — always show 5 stars; yellow = rated, dim = unrated
     const starsEl = document.getElementById('player-stars');
     if (s.isRadio) {
@@ -1097,6 +1124,38 @@ function setAutoDJ(on, skipAutoStart) {
   }
 }
 
+// ── ON-DEMAND ART FETCH ───────────────────────────────────────────────────────
+// For songs that have no album-art (not yet scanned), request extraction from
+// the server and patch the art immediately in both the songs array and the DOM.
+// songs   — array of song objects (queue or file-list)
+// container — DOM element that holds the rendered rows (.q-art or .row-art divs)
+// selector  — CSS selector for the art container within each row
+// rowAttr   — data attribute on each row that holds the index into songs[]
+function _fetchMissingArt(songs, container, selector, rowAttr) {
+  if (!songs || !container) return;
+  songs.forEach((s, i) => {
+    if (s['album-art'] || s.isRadio || s.isPodcast || !s.filepath) return;
+    api('GET', `api/v1/files/art?fp=${encodeURIComponent(s.filepath)}`)
+      .then(d => {
+        if (!d || !d.aaFile) return;
+        s['album-art'] = d.aaFile;
+        // Patch every matching row in this container
+        container.querySelectorAll(`[${rowAttr}="${i}"]`).forEach(row => {
+          const artDiv = row.querySelector(selector);
+          if (!artDiv) return;
+          const u = artUrl(d.aaFile, 's');
+          artDiv.innerHTML = `<img src="${u}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml(' no-art-sm')">`;
+        });
+        // Also patch the Now-Playing card if this is the current song
+        if (S.queue[S.idx] === s) {
+          const npArt = document.querySelector('.qp-np-art');
+          if (npArt) npArt.innerHTML = `<img src="${artUrl(d.aaFile,'m')}" alt="" loading="lazy">`;
+        }
+      })
+      .catch(() => {});
+  });
+}
+
 // ── QUEUE UI ─────────────────────────────────────────────────
 function refreshQueueUI() {
   const list   = document.getElementById('queue-list');
@@ -1177,6 +1236,9 @@ function refreshQueueUI() {
   const active = list.querySelector('.q-active');
   if (active) active.scrollIntoView({ block: 'center', behavior: 'smooth' });
   _syncQueueLabel();
+
+  // Fetch art for any queued songs not yet scanned
+  _fetchMissingArt(S.queue, list, '.q-art', 'data-qi');
 }
 
 // ── One-time queue event-listener setup ──────────────────────────────────────
@@ -1530,6 +1592,9 @@ function showSongs(songs, title, zipFilename) {
   body.innerHTML = `<div class="song-list">${renderSongRows(songs)}</div>`;
   attachSongListEvents(body, songs);
   highlightRow();
+
+  // Fetch art for unscanned files (e.g. fresh recordings/downloads)
+  _fetchMissingArt(songs, body.querySelector('.song-list'), '.row-art', 'data-ci');
 }
 
 // ── CONTEXT MENU ─────────────────────────────────────────────
@@ -1543,7 +1608,7 @@ function showCtxMenu(x, y) {
   const song = S.ctxSong;
   const songVpath = song?.filepath?.split('/')[0];
   const canDelete = songVpath &&
-    S.vpathMeta?.[songVpath]?.type === 'recordings' &&
+    (S.vpathMeta?.[songVpath]?.type === 'recordings' || S.vpathMeta?.[songVpath]?.type === 'youtube') &&
     S.vpathMeta?.[songVpath]?.allowRecordDelete === true;
   menu.querySelector('.ctx-delete-rec').classList.toggle('hidden', !canDelete);
   menu.querySelector('.ctx-delete-rec-divider').classList.toggle('hidden', !canDelete);
@@ -5037,6 +5102,7 @@ function viewSearch() {
   const input = document.getElementById('search-input');
   // Vpath pill toggles — only wired when there are multiple vpaths.
   if (S.vpaths.length > 1) {
+    let _vpathSearchTimer;
     document.getElementById('search-vpaths').addEventListener('click', e => {
       const pill = e.target.closest('.dj-vpath-pill');
       if (!pill) return;
@@ -5051,7 +5117,13 @@ function viewSearch() {
         p.classList.toggle('on', S.searchVpaths.includes(p.dataset.vpath));
       });
       const q = input.value.trim();
-      if (q && q.length >= 2) doSearch(q);
+      if (q && q.length >= 2) {
+        // Debounce: rapid vpath toggles queue up multiple synchronous SQLite
+        // searches on the server, blocking its event loop. Wait 300 ms so
+        // fast toggling collapses into a single request.
+        clearTimeout(_vpathSearchTimer);
+        _vpathSearchTimer = setTimeout(() => doSearch(q), 300);
+      }
     });
   }
   // Restore previous query if returning from a drill-down (artist → back).
@@ -5593,7 +5665,7 @@ function renderFileExplorer(d) {
 
   const feVpath = parts[0] || '';
   const canDelete = feVpath &&
-    S.vpathMeta?.[feVpath]?.type === 'recordings' &&
+    (S.vpathMeta?.[feVpath]?.type === 'recordings' || S.vpathMeta?.[feVpath]?.type === 'youtube') &&
     S.vpathMeta?.[feVpath]?.allowRecordDelete === true;
 
   const dirs = (d.directories || []).map(dir => `
@@ -5778,6 +5850,30 @@ function renderFileExplorer(d) {
       );
     });
   });
+
+  // On-demand art for files not yet scanned / no embedded art cached
+  const _feMissing = dirSongs.filter(s => !s['album-art'] && !s.isRadio && !s.isPodcast && s.filepath);
+  if (_feMissing.length) {
+    _feMissing.forEach(s => {
+      api('GET', `api/v1/files/art?fp=${encodeURIComponent(s.filepath)}`)
+        .then(d => {
+          if (!d?.aaFile) return;
+          s['album-art'] = d.aaFile;
+          const fileEl = body.querySelector(`.fe-file[data-fp="${CSS.escape(s.filepath)}"]`);
+          if (!fileEl) return;
+          const svgIcon = fileEl.querySelector('svg.fe-icon');
+          if (!svgIcon) return;
+          const img = document.createElement('img');
+          img.className = 'fe-thumb';
+          img.alt = '';
+          img.loading = 'lazy';
+          img.src = artUrl(d.aaFile, 's');
+          img.onerror = function() { this.outerHTML = '<svg class="fe-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>'; };
+          svgIcon.replaceWith(img);
+        })
+        .catch(() => {});
+    });
+  }
 }
 
 // ── AUTO-DJ VIEW ──────────────────────────────────────────────
@@ -6297,6 +6393,19 @@ function _mountSongVScroll(allSongs, container) {
   if (playBtn) playBtn.onclick = () => { if (_songs.length) { Player.setQueue(_songs, 0); toast(`Playing ${_songs.length} songs`); } };
   if (addBtn)  addBtn.onclick  = () => { if (_songs.length) { Player.addAll(_songs); } };
   requestAnimationFrame(() => render(true));
+
+  // Fetch art for unscanned files in the background; re-render each time a batch resolves
+  const _missing = _songs.filter(s => !s['album-art'] && !s.isRadio && !s.isPodcast && s.filepath);
+  if (_missing.length) {
+    let _dirty = false;
+    const _flushRender = () => { if (_dirty) { _dirty = false; fRow = -1; lRow = -1; render(true); } };
+    _missing.forEach(s => {
+      api('GET', `api/v1/files/art?fp=${encodeURIComponent(s.filepath)}`)
+        .then(d => { if (d && d.aaFile) { s['album-art'] = d.aaFile; _dirty = true; } })
+        .catch(() => {})
+        .finally(_flushRender);
+    });
+  }
 }
 
 function _showSongsIn(songs, container) {
@@ -7957,6 +8066,174 @@ function _attachRadioFormHandlers() {
   });
 }
 
+// ── YOUTUBE DOWNLOAD VIEW ─────────────────────────────────────────────────────
+function viewYoutube() {
+  setTitle('YouTube Download'); setBack(null); setNavActive('youtube'); S.view = 'youtube';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+
+  if (!S.allowYoutubeDownload) {
+    setBody(`
+      <div class="info-panel">
+        <div class="info-panel-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+        </div>
+        <h2>YouTube Download</h2>
+        <p class="info-hint">YouTube downloading is not enabled for your account. Ask your server admin to enable it.</p>
+      </div>`);
+    return;
+  }
+
+  const savedFormat = localStorage.getItem(_uKey('ytdl_format')) || 'opus';
+  setBody(`
+    <div class="playback-panel">
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg></div>
+          <div>
+            <div class="playback-section-title">YouTube Download</div>
+            <div class="playback-section-desc">Download audio from YouTube. Files are saved to your YouTube downloads folder and can be played immediately.</div>
+          </div>
+        </div>
+
+        <div class="playback-row" style="flex-direction:column;align-items:stretch;gap:.5rem;">
+          <div style="display:flex;gap:.6rem;align-items:center;">
+            <input type="text" id="yt-url-input" class="settings-select" style="flex:1;font-family:monospace;font-size:.82rem;" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off" spellcheck="false">
+            <button id="yt-preview-btn" class="btn-sm btn-primary" style="white-space:nowrap;flex-shrink:0;">Preview</button>
+          </div>
+        </div>
+
+        <div id="yt-preview-area" class="hidden" style="margin-top:.9rem;padding-bottom:1rem;">
+          <div style="display:flex;gap:.9rem;align-items:flex-start;margin-bottom:.75rem;padding:0 18px;">
+            <img id="yt-thumb" src="" alt="" style="width:auto;height:88px;object-fit:cover;border-radius:4px;flex-shrink:0;background:var(--raised);">
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:.35rem;">
+              <div style="font-size:.78rem;color:var(--t2);margin-bottom:.1rem;">Edit tags before downloading:</div>
+              <div style="display:flex;align-items:center;gap:.5rem;">
+                <label class="playback-row-name" style="min-width:52px;font-size:.8rem;">Title</label>
+                <input type="text" id="yt-title" class="settings-select" style="flex:1;" maxlength="200">
+              </div>
+              <div style="display:flex;align-items:center;gap:.5rem;">
+                <label class="playback-row-name" style="min-width:52px;font-size:.8rem;">Artist</label>
+                <input type="text" id="yt-artist" class="settings-select" style="flex:1;" maxlength="200">
+              </div>
+              <div style="display:flex;align-items:center;gap:.5rem;">
+                <label class="playback-row-name" style="min-width:52px;font-size:.8rem;">Album</label>
+                <input type="text" id="yt-album" class="settings-select" style="flex:1;" maxlength="200">
+              </div>
+            </div>
+          </div>
+
+          <div class="playback-row" style="margin-bottom:.6rem;">
+            <div class="playback-row-label">
+              <div class="playback-row-name">Format</div>
+              <div class="playback-row-hint">Opus = native stream · MP3 = converted via ffmpeg</div>
+            </div>
+            <select id="yt-format" class="settings-select">
+              <option value="opus" ${savedFormat === 'opus' ? 'selected' : ''}>Opus (original quality)</option>
+              <option value="mp3"  ${savedFormat === 'mp3'  ? 'selected' : ''}>MP3 (universal, re-encoded)</option>
+            </select>
+          </div>
+
+          <div style="display:flex;justify-content:flex-end;gap:.6rem;align-items:center;padding:0 18px;">
+            <span id="yt-status" style="flex:1;font-size:.83rem;color:var(--t2);"></span>
+            <button id="yt-dl-btn" class="btn-sm btn-primary">Download</button>
+          </div>
+          <div id="yt-post-actions" class="hidden" style="display:flex;gap:.5rem;margin-top:.5rem;justify-content:flex-end;padding:0 18px;"></div>
+        </div>
+
+      </div>
+    </div>`);
+
+  const urlInput   = document.getElementById('yt-url-input');
+  const previewBtn = document.getElementById('yt-preview-btn');
+  const previewArea = document.getElementById('yt-preview-area');
+  const statusEl   = document.getElementById('yt-status');
+  let thumbUrl = null;
+
+  previewBtn.addEventListener('click', async () => {
+    const url = urlInput.value.trim();
+    if (!url) { toast('Enter a YouTube URL'); return; }
+    previewBtn.disabled = true;
+    previewBtn.textContent = 'Loading…';
+    statusEl.textContent = '';
+    const actionsArea = document.getElementById('yt-post-actions');
+    if (actionsArea) { actionsArea.classList.add('hidden'); actionsArea.innerHTML = ''; }
+    try {
+      const info = await api('GET', `api/v1/ytdl/info?url=${encodeURIComponent(url)}`);
+      document.getElementById('yt-title').value  = info.title  || '';
+      document.getElementById('yt-artist').value = info.artist || '';
+      document.getElementById('yt-album').value  = info.album  || '';
+      thumbUrl = info.thumb || null;
+      const thumb = document.getElementById('yt-thumb');
+      if (info.thumb) { thumb.src = info.thumb; thumb.style.display = ''; }
+      else thumb.style.display = 'none';
+      previewArea.classList.remove('hidden');
+    } catch (err) {
+      toast(err.message || 'Failed to fetch video info');
+    } finally {
+      previewBtn.disabled = false;
+      previewBtn.textContent = 'Preview';
+    }
+  });
+
+  // Save format preference on change
+  document.getElementById('yt-format').addEventListener('change', e => {
+    e.target.value === 'mp3'
+      ? localStorage.setItem(_uKey('ytdl_format'), 'mp3')
+      : localStorage.removeItem(_uKey('ytdl_format'));
+  });
+
+  document.getElementById('yt-dl-btn').addEventListener('click', async () => {
+    const url    = urlInput.value.trim();
+    const dlBtn  = document.getElementById('yt-dl-btn');
+    const title  = document.getElementById('yt-title').value.trim();
+    const artist = document.getElementById('yt-artist').value.trim();
+    const album  = document.getElementById('yt-album').value.trim();
+    dlBtn.disabled = true;
+    dlBtn.textContent = 'Downloading…';
+    statusEl.textContent = 'Downloading — this may take a moment…';
+    try {
+      const result = await api('POST', 'api/v1/ytdl/download', {
+        url, title, artist, album,
+        format: document.getElementById('yt-format').value,
+      });
+      statusEl.innerHTML =
+        `<span style="color:var(--primary);">✓ Saved: ${esc(result.filePath)}</span>`;
+      toast('Download complete');
+
+      // Build a minimal song object and show inline play controls
+      const song = {
+        filepath: result.vpath + '/' + result.filePath,
+        title:  title  || result.filePath,
+        artist: artist || '',
+        album:  album  || '',
+        'album-art': thumbUrl || null,
+      };
+      const actionsArea = document.getElementById('yt-post-actions');
+      if (actionsArea) {
+        actionsArea.innerHTML =
+          `<button id="yt-play-btn"  class="btn-sm btn-primary" style="flex-shrink:0;">▶ Play now</button>` +
+          `<button id="yt-queue-btn" class="btn-sm btn-primary" style="flex-shrink:0;">+ Add to queue</button>`;
+        actionsArea.classList.remove('hidden');
+        document.getElementById('yt-play-btn').addEventListener('click', () => {
+          Player.playSingle(song);
+          toast('Playing: ' + esc(song.title));
+        });
+        document.getElementById('yt-queue-btn').addEventListener('click', () => {
+          Player.queueAndPlay(song);
+        });
+      }
+    } catch (err) {
+      statusEl.textContent = `Error: ${esc(err.message || 'Download failed')}`;
+      toast(err.message || 'Download failed');
+    } finally {
+      dlBtn.disabled = false;
+      dlBtn.textContent = 'Download';
+    }
+  });
+}
+
 // ── AUDIO CONTENT VIEW (audio-books + recordings) ───────────────────────────
 function viewPodcasts() {
   setTitle('Audio Content'); setBack(null); setNavActive('podcasts'); S.view = 'podcasts';
@@ -7965,7 +8242,7 @@ function viewPodcasts() {
   document.getElementById('add-all-btn').onclick  = null;
   const meta = S.vpathMeta || {};
   const abVpaths  = S.vpaths.filter(v => meta[v]?.type === 'audio-books');
-  const recVpaths = S.vpaths.filter(v => meta[v]?.type === 'recordings');
+  const recVpaths = S.vpaths.filter(v => meta[v]?.type === 'recordings' || meta[v]?.type === 'youtube');
   _renderPodcastsView(abVpaths, recVpaths);
 }
 
@@ -8638,6 +8915,28 @@ function viewPlayback() {
         </div>
       </div>
 
+      ${S.allowYoutubeDownload ? `
+      <!-- ── YOUTUBE DOWNLOAD ── -->
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg></div>
+          <div>
+            <div class="playback-section-title">YouTube Download</div>
+            <div class="playback-section-desc">Default audio format when downloading from YouTube. Saved to your recordings folder alongside radio recordings.</div>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Download format</div>
+            <div class="playback-row-hint">Opus = original stream, no re-encoding · MP3 = universal, requires ffmpeg</div>
+          </div>
+          <select class="settings-select" id="ytdl-format-sel">
+            <option value="opus" ${(localStorage.getItem(_uKey('ytdl_format')) || 'opus') === 'opus' ? 'selected' : ''}>Opus (original quality)</option>
+            <option value="mp3"  ${localStorage.getItem(_uKey('ytdl_format')) === 'mp3' ? 'selected' : ''}>MP3 (universal, re-encoded)</option>
+          </select>
+        </div>
+      </div>` : ''}
+
     </div>`)
 
   // Crossfade slider
@@ -8735,6 +9034,18 @@ function viewPlayback() {
     _syncPrefs();
     toast(S.showDecades ? 'Decades: visible' : 'Decades: hidden');
   });
+
+  // YouTube download format preference
+  const ytdlFmtSel = document.getElementById('ytdl-format-sel');
+  if (ytdlFmtSel) {
+    ytdlFmtSel.addEventListener('change', e => {
+      e.target.value === 'mp3'
+        ? localStorage.setItem(_uKey('ytdl_format'), 'mp3')
+        : localStorage.removeItem(_uKey('ytdl_format'));
+      _syncPrefs();
+      toast(e.target.value === 'mp3' ? 'YouTube format: MP3' : 'YouTube format: Opus');
+    });
+  }
 }
 
 // ── SLEEP TIMER LOGIC ─────────────────────────────────────────
@@ -8981,6 +9292,7 @@ function _initRecordingModal() {
       S.recordingActive = true;
       S.recordingId = d.id;
       S.recordingElapsedSec = 0;
+      S.recordingMeta = { vpath, art: s['album-art'] || null, title: s.title || s.artist || 'Radio' };
       S._recordingTimer = setInterval(() => {
         S.recordingElapsedSec++;
         const elEl = document.getElementById('radio-rec-elapsed');
@@ -9047,15 +9359,17 @@ async function _stopRecording() {
   if (!S.recordingId) return;
   clearInterval(S._recordingTimer);
   S._recordingTimer = null;
+  const meta = S.recordingMeta || {};
   try {
     const d = await api('POST', 'api/v1/radio/record/stop', { id: S.recordingId });
     const dur = d.durationMs ? _recElapsedStr(Math.round(d.durationMs / 1000)) : '';
     const kb  = d.bytesWritten ? ` (${(d.bytesWritten / 1024).toFixed(0)} KB)` : '';
-    _showInfoStrip('', `<span>Recording saved — ${dur}${kb}</span>`, 6000, true);
+    _showInfoStrip('', `<span>&#9679; Recording saved — ${dur}${kb}</span>`, 6000, true);
   } catch (_) {}
   S.recordingActive = false;
   S.recordingId = null;
   S.recordingElapsedSec = 0;
+  S.recordingMeta = null;
   const elEl = document.getElementById('radio-rec-elapsed');
   if (elEl) { elEl.textContent = ''; elEl.classList.add('hidden'); }
   _updateRecordBtn();
@@ -10496,7 +10810,7 @@ function showApp() {
       }
       // Show podcasts section if this user has any audio-books or recordings vpaths
       const abVpaths  = S.vpaths.filter(v => S.vpathMeta[v]?.type === 'audio-books');
-      const recVpaths = S.vpaths.filter(v => S.vpathMeta[v]?.type === 'recordings');
+      const recVpaths = S.vpaths.filter(v => S.vpathMeta[v]?.type === 'recordings' || S.vpathMeta[v]?.type === 'youtube');
       S.audiobooksEnabled = abVpaths.length > 0 || recVpaths.length > 0;
       _updateListenSection();
     }
@@ -10506,6 +10820,11 @@ function showApp() {
     // Per-user permission to record radio streams
     S.allowRadioRecording = d.allowRadioRecording === true;
     _updateRecordBtn();
+    // Per-user permission to download from YouTube
+    S.allowYoutubeDownload = d.allowYoutubeDownload === true;
+    const ytBtn = document.getElementById('youtube-nav-btn');
+    if (ytBtn) ytBtn.classList.toggle('hidden', !S.allowYoutubeDownload);
+    _updateListenSection();
   }).catch(() => { S.transInfo = { serverEnabled: false }; });
 
   // Register Media Session action handlers (OS lock-screen controls)
@@ -10570,6 +10889,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'radio')        viewRadio();
     else if (v === 'podcasts')        viewPodcasts();
     else if (v === 'podcast-feeds')  viewPodcastFeeds();
+    else if (v === 'youtube')        viewYoutube();
     else if (v === 'smart-playlists') { _splEditId = null; _splEditName = null; _splFilters = { genres: [], yearFrom: null, yearTo: null, minRating: 0, playedStatus: 'any', minPlayCount: 0, starred: false, artistSearch: '' }; _splSort = 'random'; _splLimit = 100; viewSmartPlaylists(); }
   });
 });
@@ -12068,8 +12388,8 @@ function applyBarPos(top) {
 function _updateListenSection() {
   const section = document.getElementById('podcasts-section');
   if (!section) return;
-  const recVpaths = S.vpathMeta ? S.vpaths.filter(v => S.vpathMeta[v]?.type === 'recordings') : [];
-  const show = S.radioEnabled || S.feedsEnabled || S.audiobooksEnabled || recVpaths.length > 0;
+  const recVpaths = S.vpathMeta ? S.vpaths.filter(v => S.vpathMeta[v]?.type === 'recordings' || S.vpathMeta[v]?.type === 'youtube') : [];
+  const show = S.radioEnabled || S.feedsEnabled || S.audiobooksEnabled || recVpaths.length > 0 || S.allowYoutubeDownload;
   section.classList.toggle('hidden', !show);
 }
 

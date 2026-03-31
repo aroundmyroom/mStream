@@ -1,19 +1,10 @@
 # mStream Velvet Fork — Combined Change Log
 
-## Unreleased — Three-entity search: Folders, Artists (normalized), Songs
+## v5.16.32 — FTS5 search, three-entity search, ffmpeg bootstrap, YouTube, on-demand album art
 
-- **Search now returns three separate sections:** Folders, Artists, Songs+Albums
-- **Folder search:** unique directory paths extracted from the library and indexed in `fts_folders` (FTS5 trigram tokenizer); clicking a folder result opens the file browser at that location; back button returns to search results
-- **Artist normalization:** raw artist tags normalized at index-build time — strips any 2+ digit leading number (`01 `, `28 `, `68 `, etc.) and leading symbols, so all numbered variants group under the clean name; all raw variants stored so album queries find files regardless of how they were tagged
-- Normalized artists stored in `artists_normalized` + `fts_artists` (FTS5 trigram), rebuilt after every scan
-- `vpaths_json` column on `artists_normalized` stores which vpaths each artist appears in; artist search filters by the user's selected vpath(s)
-- **Artist → albums: single SQL query** — `getArtistAlbumsMulti(artists[])` uses `WHERE artist IN (...)` for all variants in one call; previously fired up to 68 parallel requests which overloaded SQLite and returned empty results
-- New `POST /api/v1/db/artists-albums-multi` endpoint accepts `artists[]` array
-- **Back button from folder results:** uses `S.feSearchReturn` slot so `renderFileExplorer` preserves it; pressing ← returns to search with previous query intact
-- Both indexes rebuilt automatically after each scan; also built once on first start if empty
-- No schema changes to the `files` table
+**Files:** `src/db/sqlite-backend.js`, `src/server.js`, `src/api/ytdl.js`, `src/util/ffmpeg-bootstrap.js`, `src/api/radio-recorder.js`, `src/api/download.js`, `webapp/app.js`
 
-## Unreleased — FTS5 full-text search + exclusion queries
+### FTS5 full-text search + exclusion queries
 
 - **SQLite FTS5 index** (`fts_files`) replaces `LIKE '%…%'` full-table-scans for all music search queries
 - Index covers `title`, `artist`, `album`, `filepath`; tokenizer `unicode61 remove_diacritics 1` (diacritic-folding, case-insensitive)
@@ -22,9 +13,77 @@
 - **Exclusion search:** `-word` or `NOT word` syntax excludes results containing that word (e.g. `talking -heads`, `chaka khan NOT remix`)
 - Index kept in sync on insert, delete, tag-edit, vpath-removal, and post-scan stale-file cleanup
 - On first start after upgrade the index is auto-rebuilt from the existing `files` table
-- Bug fix: initial rebuild condition checks `fts_files_data` row count (< 5 = empty) rather than `COUNT(*) FROM fts_files` which always equals the files table on external-content tables
 - Node.js upgraded to v24.14.1 (was v22.22.0) — matches Docker image (`node:24-alpine`)
-- Docker GitHub Actions updated to Node 24 native versions: `actions/checkout@v6`, `docker/*@v4–v7`; `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` env var added
+- Docker GitHub Actions updated to Node 24 native versions
+
+### Three-entity search: Folders, Artists (normalized), Songs
+
+- **Search now returns three separate sections:** Folders, Artists, Songs+Albums
+- **Folder search:** unique directory paths extracted from the library and indexed in `fts_folders` (FTS5 trigram tokenizer); clicking a folder result opens the file browser at that location; back button returns to search results
+- **Artist normalization:** raw artist tags normalized at index-build time — strips any 2+ digit leading number (`01 `, `28 `, `68 `, etc.) and leading symbols, so all numbered variants group under the clean name
+- Normalized artists stored in `artists_normalized` + `fts_artists` (FTS5 trigram), rebuilt after every scan
+- **Artist → albums: single SQL query** — `getArtistAlbumsMulti(artists[])` uses `WHERE artist IN (...)` for all variants in one call; previously fired up to 68 parallel requests which overloaded SQLite and returned empty results
+- New `POST /api/v1/db/artists-albums-multi` endpoint accepts `artists[]` array
+- Back button from folder results preserved via `S.feSearchReturn` slot
+
+
+
+### ffmpeg self-contained bootstrap
+
+**File:** `src/util/ffmpeg-bootstrap.js`
+
+- `MIN_FFMPEG_MAJOR = 6` constant; `_getFfmpegVersion(binPath)` runs `ffmpeg -version`, parses the major version number
+- `ensureFfmpeg()`: on startup checks `bin/ffmpeg/ffmpeg`:
+  - Missing → downloads latest static build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) for the current platform/arch
+  - Present but `major < 6` → logs warning (`ffmpeg vX is outdated — replacing`) and replaces it with a fresh download
+  - Present and current → logs `ffmpeg ready: <versionLine>` and continues
+- All four consumers (`ytdl.js`, `radio-recorder.js`, `transcode.js`, `discogs.js`) import `ffmpegBin()` / `ffprobeBin()` from this module — no consumer reaches for the system PATH
+
+### YouTube download — temp file isolation
+
+**File:** `src/api/ytdl.js`
+
+- `_ytdlpDownload()` now writes all intermediate files (raw audio stream, thumbnail JPEG) to a **private temp directory** created with `fsp.mkdtemp(path.join(os.tmpdir(), 'mstream-ytdl-'))`.
+- The temp dir is unconditionally deleted in a `finally` block after every download — regardless of success or failure.
+- The music folder is never touched until the final tagged file is moved into place; no hidden `._ytdl-*` files or stray thumbnails can appear there.
+
+### YouTube & radio — Opus / OGG album art fix (error 234)
+
+**File:** `src/api/ytdl.js`
+
+- Opus containers reject video stream mapping (`-map 1:v`). The old code produced `ffmpeg error 234 — Unsupported codec id in stream 1` for any Opus output.
+- New `_buildMetadataBlockPicture(jpegPath)` function: reads the JPEG, builds a FLAC/Vorbis compliant binary picture block (MIME-type string, width/height/depth/indexed as 4-byte BE integers, raw image bytes), base64-encodes it, and returns the string.
+- `_ffmpegTag()` now branches on format:
+  - **MP3:** `-map 0:a -map 1:v -c:a copy -c:v mjpeg -id3v2_version 3 -disposition:v:0 attached_pic` (unchanged)
+  - **Opus/OGG:** `-map 0:a -c:a copy -metadata METADATA_BLOCK_PICTURE=<base64>` — no video stream mapping
+
+### Radio recording fixes
+
+**File:** `src/api/radio-recorder.js`
+
+- **Non-MP3 art embed fixed:** the ffmpeg command for non-MP3 outputs was using an incorrect stream mapping. Fixed to: `-map 0:a -map 1:v -c:a copy -c:v copy -disposition:v:0 attached_pic`
+- **Stop API response enriched:** `POST /api/v1/radio/recording/stop` now returns `relPath` (`vpath/basename`), `vpath`, `stationName`, and `artFile` alongside the existing `filePath`/`bytesWritten`/`durationMs`
+
+### On-demand album art extraction
+
+**File:** `src/api/download.js`
+
+- New `GET /api/v1/files/art?fp=<filepath>` endpoint: reads embedded picture from any audio file using `music-metadata`, MD5-hashes the image bytes, writes the result to `albumArtDirectory` if not already cached, returns `{ aaFile: "<hash>.jpg" }` or `{ aaFile: null }`.
+- Path traversal guarded — `fp` must resolve inside a configured vpath root.
+- Idempotent — safe to call multiple times for the same file.
+
+**File:** `webapp/app.js`
+
+- `_fetchMissingArt(songs, container, selector, rowAttr)` — new helper; fires parallel `GET /api/v1/files/art` calls for every song with no `album-art`, patches song objects and DOM thumbnails in-place.
+- `updateBar()` — if the now-playing song has no art, fires the API and patches the player thumb, VU artwork, dynamic theme colours, and queue card.
+- `refreshQueueUI()` — calls `_fetchMissingArt` after rendering the queue panel (`.q-art` divs).
+- `setSongs()` — calls `_fetchMissingArt` after rendering the standard file list (`.row-art` divs).
+- `_mountSongVScroll()` — pre-fetches missing art into the `_songs` array and forces a virtual-scroll re-render when any art arrives.
+- `renderFileExplorer()` — on-demand art fetch for `.fe-file` rows in the file explorer (Recordings, YouTube folders, any browsed folder); replaces the SVG music-note placeholder with a real thumbnail in-place.
+
+**Docs:** `docs/API/files_art.md` (new), `docs/API.md` (index updated), `docs/youtube-download.md` (ffmpeg dependency + art embedding + temp isolation sections added), `docs/API/ytdl.md` (new full endpoint reference)
+
+---
 
 ## v5.16.31 — Admin UI, settings persistence, Docker publish
 

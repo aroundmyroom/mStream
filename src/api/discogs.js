@@ -10,6 +10,7 @@ import * as config from '../state/config.js';
 import * as dbManager from '../db/manager.js';
 import { getVPathInfo } from '../util/vpath.js';
 import { joiValidate } from '../util/validation.js';
+import { ffmpegBin } from '../util/ffmpeg-bootstrap.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -469,10 +470,7 @@ export function setup(mstream) {
 
       if (!cacheOnly) {
         // ffmpeg: embed cover art — works for mp3, flac, ogg, m4a, opus
-        const ffmpegDir = config.program.transcode?.ffmpegDirectory;
-        const ffmpegBin = ffmpegDir
-          ? path.join(ffmpegDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')
-          : 'ffmpeg';
+        const ffmpegBinPath = ffmpegBin();
         // Always map only the audio from the source ('-map 0:a') so any
         // pre-existing embedded-art stream is dropped and replaced cleanly.
         // CRITICAL: use '-c:v mjpeg' (re-encode through ffmpeg's JPEG encoder)
@@ -481,7 +479,7 @@ export function setup(mstream) {
         // demuxer emit "PTS is not defined" and refuse to play the file.
         // Re-encoding through mjpeg costs ~50ms but gives the stream proper
         // timing metadata that every browser/decoder expects.
-        await execFileAsync(ffmpegBin, [
+        await execFileAsync(ffmpegBinPath, [
           '-y',
           '-i', absPath,
           '-i', tmpCover,
@@ -505,7 +503,7 @@ export function setup(mstream) {
         // to guarantee proper PTS is written into the new stream.
         let _probeStderr = '';
         try {
-          const pr = await execFileAsync(ffmpegBin, [
+          const pr = await execFileAsync(ffmpegBinPath, [
             '-v', 'error', '-i', absPath, '-f', 'null', '-',
           ]);
           _probeStderr = pr.stderr || '';
@@ -518,11 +516,11 @@ export function setup(mstream) {
           const tmpReembed = path.join(path.dirname(absPath), `.mstream-reembed-${_ts}${extLower}`);
           try {
             // Step 1: extract clean audio-only copy
-            await execFileAsync(ffmpegBin, [
+            await execFileAsync(ffmpegBinPath, [
               '-y', '-i', absPath, '-map', '0:a', '-c:a', 'copy', tmpRecover,
             ]);
             // Step 2: re-embed art with explicit -r 1 to force PTS
-            await execFileAsync(ffmpegBin, [
+            await execFileAsync(ffmpegBinPath, [
               '-y',
               '-i', tmpRecover,
               '-i', tmpCover,

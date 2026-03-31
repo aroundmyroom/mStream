@@ -1,12 +1,10 @@
 import path from 'path';
-import fs from 'fs';
 import ffmpeg from 'fluent-ffmpeg';
 import winston from 'winston';
 import * as vpath from '../util/vpath.js';
 import * as config from '../state/config.js';
 import { Readable } from 'stream';
-
-const binaryExt = process.platform === 'win32' ? '.exe' : '';
+import { ensureFfmpeg, ffmpegBin, ffprobeBin } from '../util/ffmpeg-bootstrap.js';
 
 const codecMap = {
   'mp3': { codec: 'libmp3lame', contentType: 'audio/mpeg' },
@@ -39,32 +37,26 @@ function initHeaders(res, audioTypeId, contentLength) {
 }
 
 let lockInit = false;
-let isDownloading = false;
 
-function init() {
-  return new Promise((resolve, reject) => {
-    if (isDownloading === true) { reject('Download In Progress'); }
-    isDownloading = true;
+async function init() {
+  // Ensure binaries are present (auto-downloads on first run if needed)
+  await ensureFfmpeg();
 
-    const ffmpegPath = path.join(config.program.transcode.ffmpegDirectory, `ffmpeg${binaryExt}`);
-    const ffprobePath = path.join(config.program.transcode.ffmpegDirectory, `ffprobe${binaryExt}`);
+  const bin   = ffmpegBin();
+  const probe = ffprobeBin();
 
-    isDownloading = false;
+  // Verify the executables are actually accessible now
+  const { access } = await import('node:fs/promises');
+  try {
+    await Promise.all([access(bin), access(probe)]);
+  } catch {
+    throw new Error(`FFmpeg binaries not found — check${bin} or wait for auto-download to complete`);
+  }
 
-    if (!fs.existsSync(ffmpegPath) || !fs.existsSync(ffprobePath)) {
-      return reject(new Error(`FFmpeg binaries not found in ${config.program.transcode.ffmpegDirectory}`));
-    }
-
-    try {
-      winston.info('FFmpeg OK!');
-      ffmpeg.setFfmpegPath(ffmpegPath);
-      ffmpeg.setFfprobePath(ffprobePath);
-      lockInit = true;
-      resolve();
-    } catch (innerErr) {
-      reject(innerErr);
-    }
-  });
+  ffmpeg.setFfmpegPath(bin);
+  ffmpeg.setFfprobePath(probe);
+  lockInit = true;
+  winston.info('FFmpeg OK!');
 }
 
 export function reset() {
@@ -72,11 +64,7 @@ export function reset() {
 }
 
 export function isEnabled() {
-  if (lockInit === true && config.program.transcode.enabled === true) {
-    return true;
-  }
-
-  return false;
+  return lockInit === true && config.program.transcode.enabled === true;
 }
 
 export function isDownloaded() {
@@ -106,7 +94,7 @@ function ffmpegIt(pathInfo, codec, bitrate) {
 export function setup(mstream) {
   if (config.program.transcode.enabled === true) {
     init().catch(err => {
-      winston.error('Failed to download FFmpeg', { stack: err })
+      winston.error('FFmpeg init failed — transcoding disabled', { stack: err });
     });
   }
 

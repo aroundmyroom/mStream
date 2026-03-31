@@ -1,6 +1,9 @@
 import archiver from 'archiver';
 import path from 'path';
 import fs from 'fs/promises';
+import fsSync from 'fs';
+import crypto from 'crypto';
+import { parseFile } from 'music-metadata';
 import Joi from 'joi';
 import winston from 'winston';
 import * as config from '../state/config.js';
@@ -165,6 +168,43 @@ export function setup(mstream) {
       if (e.code === 'ENOENT') return res.status(404).json({ error: 'File not found' });
       winston.error('Failed to delete recording', { stack: e });
       res.status(500).json({ error: 'Failed to delete file' });
+    }
+  });
+
+  // ── GET /api/v1/files/art?fp=<vpath/filename> ─────────────────────────────
+  // Extracts embedded cover art from an audio file without waiting for a scan.
+  // Returns { aaFile: "md5hash.jpg" } which the client can pass to /album-art/.
+  // The result is written to the album-art cache directory so subsequent requests
+  // (and the scanner) reuse the same cached file — no duplicate writes.
+  mstream.get('/api/v1/files/art', async (req, res) => {
+    if (!req.query.fp) return res.status(400).json({ error: 'fp required' });
+
+    let pathInfo;
+    try {
+      pathInfo = vpath.getVPathInfo(req.query.fp, req.user);
+    } catch (e) {
+      return res.status(403).json({ error: e.message });
+    }
+
+    try {
+      const meta = await parseFile(pathInfo.fullPath, { skipCovers: false, duration: false });
+      const pic  = meta.common?.picture?.[0];
+      if (!pic) return res.json({ aaFile: null });
+
+      const ext     = pic.format === 'image/png' ? 'png' : 'jpg';
+      const hash    = crypto.createHash('md5').update(pic.data).digest('hex');
+      const aaFile  = `${hash}.${ext}`;
+      const artDir  = config.program.storage.albumArtDirectory;
+      const artPath = path.join(artDir, aaFile);
+
+      if (!fsSync.existsSync(artPath)) {
+        await fs.mkdir(artDir, { recursive: true });
+        await fs.writeFile(artPath, pic.data);
+      }
+
+      res.json({ aaFile });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
     }
   });
 }

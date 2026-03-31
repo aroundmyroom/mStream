@@ -849,9 +849,40 @@ const foldersView = Vue.component('folders-view', {
       dirName: '',
       folder: ADMINDATA.sharedSelect,
       foldersTS: ADMINDATA.foldersUpdated,
+      usersTS: ADMINDATA.usersUpdated,
       folders: ADMINDATA.folders,
-      submitPending: false
+      users: ADMINDATA.users,
+      submitPending: false,
+      editingFolder: null,
+      editForm: { root: '', type: 'music', users: [] }
     };
+  },
+  computed: {
+    directories_users() {
+      // Depend on usersTS.ts so Vue re-evaluates when users load
+      void this.usersTS.ts;
+      // Returns { vpath: [username, ...] } — only non-admin users explicitly assigned
+      const map = {};
+      Object.keys(this.folders).forEach(vp => { map[vp] = []; });
+      Object.entries(this.users).forEach(([uname, u]) => {
+        if (u.admin) return; // admins shown separately
+        (u.vpaths || []).forEach(vp => {
+          if (!map[vp]) map[vp] = [];
+          map[vp].push(uname);
+        });
+      });
+      return map;
+    },
+    admin_users() {
+      void this.usersTS.ts;
+      return Object.entries(this.users)
+        .filter(([, u]) => u.admin)
+        .map(([uname]) => uname);
+    },
+    non_admin_count() {
+      void this.usersTS.ts;
+      return Object.values(this.users).filter(u => !u.admin).length;
+    }
   },
   template: `
     <div class="container">
@@ -909,18 +940,33 @@ const foldersView = Vue.component('folders-view', {
 
               <label style="display:flex;align-items:flex-start;gap:.6rem;cursor:pointer;">
                 <input id="folder-is-recordings" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;"
-                  @change="document.getElementById('folder-allow-record-delete-row').style.display = $event.target.checked ? 'flex' : 'none'; if(!$event.target.checked) document.getElementById('folder-allow-record-delete').checked=false;" />
+                  @change="
+                    const any = $event.target.checked || document.getElementById('folder-is-youtube').checked;
+                    document.getElementById('folder-allow-record-delete-row').style.display = any ? 'flex' : 'none';
+                    if (!any) document.getElementById('folder-allow-record-delete').checked = false;" />
                 <span>
                   <span style="color:var(--t1);font-weight:600;">Radio Recordings folder</span><br>
-                  <small style="color:var(--t2);font-size:.82rem;">Designate this directory as the target for radio stream recordings. It will <strong>not</strong> be scanned into the music library. Users with recording permission can save streams here.</small>
+                  <small style="color:var(--t2);font-size:.82rem;">Target folder for radio stream recordings. Not scanned into the music library. Can be combined with YouTube Downloads below.</small>
                 </span>
               </label>
 
-              <label id="folder-allow-record-delete-row" style="display:none;align-items:flex-start;gap:.6rem;cursor:pointer;margin-left:1.6rem;border-left:2px solid var(--border);padding-left:.8rem;">
+              <label style="display:flex;align-items:flex-start;gap:.6rem;cursor:pointer;">
+                <input id="folder-is-youtube" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;"
+                  @change="
+                    const any = $event.target.checked || document.getElementById('folder-is-recordings').checked;
+                    document.getElementById('folder-allow-record-delete-row').style.display = any ? 'flex' : 'none';
+                    if (!any) document.getElementById('folder-allow-record-delete').checked = false;" />
+                <span>
+                  <span style="color:var(--t1);font-weight:600;">YouTube Downloads folder</span><br>
+                  <small style="color:var(--t2);font-size:.82rem;">Target folder for YouTube audio downloads. Not scanned into the music library. Can be combined with Radio Recordings above.</small>
+                </span>
+              </label>
+
+              <label id="folder-allow-record-delete-row" style="display:none;align-items:flex-start;gap:.6rem;cursor:pointer;">
                 <input id="folder-allow-record-delete" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;" />
                 <span>
-                  <span style="color:var(--t1);font-weight:600;">Allow users to delete their own recordings</span><br>
-                  <small style="color:var(--t2);font-size:.82rem;">When enabled, a <strong>Delete</strong> option appears in the song context menu for files stored in this folder. Users can only delete recordings they can access — a confirmation prompt is always shown before deletion.</small>
+                  <span style="color:var(--t1);font-weight:600;">Allow users to delete files</span><br>
+                  <small style="color:var(--t2);font-size:.82rem;">When enabled, a <strong>Delete</strong> option appears in the context menu for files in this folder. A confirmation prompt is always shown before deletion.</small>
                 </span>
               </label>
 
@@ -945,38 +991,125 @@ const foldersView = Vue.component('folders-view', {
             <button class="btn-small" type="button" @click="testAccess" title="Check read / write access for all configured directories">Test Access</button>
           </div>
           <div v-if="Object.keys(folders).length === 0" style="color:var(--t2);padding:.5rem 0;">No directories added yet.</div>
-          <table v-else>
-            <thead>
-              <tr>
-                <th style="width:160px;">Path Alias (vPath)</th>
-                <th>Directory</th>
-                <th style="width:90px;">Type</th>
-                <th style="width:130px;">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(v, k) in folders">
-                <td><code style="color:var(--accent);">{{k}}</code></td>
-                <td style="word-break:break-all;color:var(--t2);">{{v.root}}</td>
-                <td style="color:var(--t2);font-size:12px;">{{v.type || 'music'}}</td>
-                <td style="display:flex;gap:6px;flex-wrap:wrap;">
-                  <button v-if="v.type === 'recordings'" class="btn-small" type="button"
-                    :style="v.allowRecordDelete ? 'background:var(--primary);color:#fff;' : ''"
-                    :title="v.allowRecordDelete ? 'Users can delete own recordings — click to disable' : 'Users cannot delete recordings — click to enable'"
-                    @click="toggleRecordDelete(k)">
-                    {{v.allowRecordDelete ? 'Del: On' : 'Del: Off'}}
+          <div v-else style="display:flex;flex-direction:column;gap:10px;">
+            <div v-for="(v, k) in folders" :key="k"
+                 style="border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;background:var(--raised);display:flex;flex-direction:column;gap:8px;">
+
+              <!-- Row 1: vpath + type badge + actions -->
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <code style="font-size:1rem;color:var(--accent);font-weight:700;">{{k}}</code>
+                <span :style="'display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;' +
+                  (v.type === 'recordings' ? 'background:rgba(99,102,241,.15);color:#818cf8;' :
+                   v.type === 'youtube'    ? 'background:rgba(220,50,50,.12);color:#e05555;' :
+                   v.type === 'audio-books'? 'background:rgba(245,158,11,.12);color:#f59e0b;' :
+                                            'background:rgba(16,185,129,.12);color:#10b981;')">
+                  {{ v.type === 'recordings' ? '⏺ Radio Recordings' :
+                     v.type === 'youtube'    ? '▶ YouTube Downloads' :
+                     v.type === 'audio-books'? '📖 Audiobooks' : '🎵 Music' }}
+                </span>
+                <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;">
+                  <button class="btn-small" type="button" @click="toggleEditFolder(k)">
+                    {{ editingFolder === k ? 'Cancel' : 'Edit' }}
                   </button>
-                  <button v-if="v.type !== 'recordings'" class="btn-small" type="button"
+                  <button v-if="v.type === 'recordings' || v.type === 'youtube'" class="btn-small" type="button"
+                    :style="v.allowRecordDelete ? 'background:var(--primary);color:#fff;' : ''"
+                    :title="v.allowRecordDelete ? 'Users can delete files — click to disable' : 'Users cannot delete files — click to enable'"
+                    @click="toggleRecordDelete(k)">
+                    {{v.allowRecordDelete ? 'Delete: On' : 'Delete: Off'}}
+                  </button>
+                  <button v-if="v.type !== 'recordings' && v.type !== 'youtube'" class="btn-small" type="button"
                     :style="v.albumsOnly ? 'background:var(--primary);color:#fff;' : ''"
-                    :title="v.albumsOnly ? 'Albums Only is ON — the Albums view only shows albums from this folder (and its child sub-folders). All other folders are hidden from Albums as long as at least one folder has this enabled. Click to disable.' : 'Albums Only is OFF — this folder has no restriction on the Albums view. Enable to restrict the Albums view to only show albums from this folder.'"
+                    :title="v.albumsOnly ? 'Albums Only ON — click to disable' : 'Albums Only OFF — click to enable'"
                     @click="toggleAlbumsOnly(k)">
-                    {{v.albumsOnly ? 'Alb: On' : 'Alb: Off'}}
+                    {{v.albumsOnly ? 'Albums Only: On' : 'Albums Only: Off'}}
                   </button>
                   <button class="btn-small red" type="button" @click="removeFolder(k, v.root)">Remove</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                </div>
+              </div>
+
+              <!-- Row 2: directory path -->
+              <div style="display:flex;align-items:baseline;gap:8px;">
+                <span style="font-size:11px;color:var(--t3);flex-shrink:0;min-width:60px;">Path</span>
+                <span style="font-size:12px;color:var(--t2);word-break:break-all;font-family:monospace;">{{v.root}}</span>
+              </div>
+
+              <!-- Row 3: user access -->
+              <div style="display:flex;align-items:flex-start;gap:8px;">
+                <span style="font-size:11px;color:var(--t3);flex-shrink:0;min-width:60px;padding-top:2px;">Access</span>
+                <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+                  <span v-for="uname in admin_users" :key="'admin-'+uname"
+                        title="Admin — always has full access to all folders"
+                        style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:11px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:#f59e0b;font-weight:600;">
+                    ★ {{uname}}
+                  </span>
+                  <span v-if="(directories_users[k] || []).length >= non_admin_count && non_admin_count > 0"
+                        style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:11px;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.3);color:#10b981;font-weight:600;">All users</span>
+                  <template v-else-if="(directories_users[k] || []).length > 0">
+                    <span v-for="uname in (directories_users[k] || [])" :key="uname"
+                          style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:11px;background:var(--card);border:1px solid var(--border);color:var(--t2);">
+                      {{uname}}
+                    </span>
+                  </template>
+                  <span v-else-if="non_admin_count > 0"
+                        style="font-size:12px;color:var(--t3);">No regular users assigned</span>
+                </div>
+              </div>
+
+              <!-- Edit panel (inline, expands when Edit is clicked) -->
+              <div v-if="editingFolder === k"
+                   style="margin-top:6px;padding:14px;border-radius:var(--r);background:var(--card);border:1px solid var(--border);display:flex;flex-direction:column;gap:12px;">
+
+                <!-- Path -->
+                <div>
+                  <label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px;">Directory Path</label>
+                  <div style="display:flex;gap:6px;">
+                    <input v-model="editForm.root" type="text" class="settings-select" style="flex:1;font-family:monospace;font-size:.82rem;" />
+                    <button class="btn-small" type="button" @click="pickEditFolder(k)" title="Browse">…</button>
+                  </div>
+                  <small style="color:var(--t3);font-size:.78rem;">Changing the path requires a server restart to take effect for media serving.</small>
+                </div>
+
+                <!-- Type (checkboxes for radio/youtube, like add form) -->
+                <div>
+                  <label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:6px;">Folder Type</label>
+                  <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;">
+                    <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--t1);">
+                      <input type="checkbox" v-model="editForm.isRecording" style="width:auto;" />
+                      ⏺ Radio Recordings
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--t1);">
+                      <input type="checkbox" v-model="editForm.isYoutube" style="width:auto;" />
+                      ▶ YouTube Downloads
+                    </label>
+                    <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--t1);">
+                      <input type="checkbox" v-model="editForm.isAudioBooks" style="width:auto;" />
+                      📖 Audiobooks
+                    </label>
+                  </div>
+                  <small style="color:var(--t3);font-size:.78rem;">Check one or both. Both checked = Radio+YouTube combined folder.</small>
+                </div>
+
+                <!-- User access (non-admin users only) -->
+                <div v-if="non_admin_count > 0">
+                  <label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:6px;">User Access</label>
+                  <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                    <label v-for="(u, uname) in users" :key="uname" v-if="!u.admin"
+                           style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--t1);">
+                      <input type="checkbox" :value="uname" v-model="editForm.users" style="width:auto;" />
+                      {{uname}}
+                    </label>
+                  </div>
+                </div>
+
+                <!-- Save -->
+                <div style="display:flex;gap:8px;justify-content:flex-end;">
+                  <button class="btn-small" type="button" @click="editingFolder = null">Cancel</button>
+                  <button class="btn-small btn-primary" type="button" @click="saveEditFolder(k)">Save changes</button>
+                </div>
+              </div>
+
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1030,6 +1163,7 @@ const foldersView = Vue.component('folders-view', {
               autoAccess: document.getElementById('folder-auto-access').checked,
               isAudioBooks: document.getElementById('folder-is-audiobooks').checked,
               isRecording: document.getElementById('folder-is-recordings').checked,
+              isYoutube: document.getElementById('folder-is-youtube').checked,
               allowRecordDelete: document.getElementById('folder-allow-record-delete').checked
             }
           });
@@ -1093,6 +1227,113 @@ const foldersView = Vue.component('folders-view', {
           });
         } catch (_e) {
           iziToast.error({ title: 'Failed to update setting', position: 'topCenter', timeout: 3000 });
+        }
+      },
+      toggleEditFolder: function(vpath) {
+        if (this.editingFolder === vpath) {
+          this.editingFolder = null;
+          return;
+        }
+        const folder = ADMINDATA.folders[vpath];
+        const currentUsers = (this.directories_users[vpath] || []).slice();
+        this.editForm = {
+          root: folder.root || '',
+          isRecording: folder.type === 'recordings' || (folder.type === 'youtube' && folder.allowRecordDelete),
+          isYoutube: folder.type === 'youtube' || (folder.type === 'recordings' && folder.allowRecordDelete),
+          isAudioBooks: folder.type === 'audio-books',
+          users: currentUsers
+        };
+        this.editingFolder = vpath;
+      },
+      pickEditFolder: function() {
+        modVM.currentViewModal = 'file-explorer-modal';
+        ADMINDATA.sharedSelect._editTarget = 'editForm';
+        ADMINDATA.sharedSelect._editRef = this;
+        modVM.openModal();
+      },
+      saveEditFolder: async function(vpath) {
+        const folder = ADMINDATA.folders[vpath];
+        const errors = [];
+
+        // 1. Save type if changed (checkbox logic)
+        let newType = 'music';
+        if (this.editForm.isAudioBooks) {
+          newType = 'audio-books';
+        } else if (this.editForm.isRecording && this.editForm.isYoutube) {
+          newType = 'recordings';
+        } else if (this.editForm.isYoutube) {
+          newType = 'youtube';
+        } else if (this.editForm.isRecording) {
+          newType = 'recordings';
+        }
+        if (newType !== (folder.type || 'music')) {
+          try {
+            await API.axios({
+              method: 'PATCH',
+              url: `${API.url()}/api/v1/admin/directory/type`,
+              data: { vpath, type: newType }
+            });
+            Vue.set(ADMINDATA.folders[vpath], 'type', newType);
+            // Clear flags incompatible with new type
+            const isRecordLike = newType === 'recordings' || newType === 'youtube';
+            if (!isRecordLike) Vue.delete(ADMINDATA.folders[vpath], 'allowRecordDelete');
+            if (isRecordLike) Vue.delete(ADMINDATA.folders[vpath], 'albumsOnly');
+          } catch (_e) {
+            errors.push('type');
+          }
+        }
+
+        // 2. Save path if changed
+        if (this.editForm.root.trim() && this.editForm.root.trim() !== folder.root) {
+          try {
+            await API.axios({
+              method: 'PATCH',
+              url: `${API.url()}/api/v1/admin/directory/root`,
+              data: { vpath, root: this.editForm.root.trim() }
+            });
+            Vue.set(ADMINDATA.folders[vpath], 'root', this.editForm.root.trim());
+            iziToast.warning({
+              title: 'Path changed — server restart recommended for media serving to update',
+              position: 'topCenter', timeout: 5000
+            });
+          } catch (err) {
+            errors.push('path');
+            iziToast.error({
+              title: 'Invalid path: ' + (err?.response?.data?.error || 'not a valid directory'),
+              position: 'topCenter', timeout: 4000
+            });
+          }
+        }
+
+        // 3. Save user access if changed
+        const prevUsers = (this.directories_users[vpath] || []).slice().sort().join(',');
+        const nextUsers = this.editForm.users.slice().sort().join(',');
+        if (prevUsers !== nextUsers) {
+          try {
+            await API.axios({
+              method: 'PATCH',
+              url: `${API.url()}/api/v1/admin/directory/users`,
+              data: { vpath, users: this.editForm.users }
+            });
+            // Update in-memory user vpaths so directories_users recomputes
+            Object.entries(ADMINDATA.users).forEach(([uname, u]) => {
+              if (u.admin) return;
+              const hasAccess = this.editForm.users.includes(uname);
+              const vpaths = (u.vpaths || []).filter(vp => vp !== vpath);
+              if (hasAccess) vpaths.push(vpath);
+              Vue.set(ADMINDATA.users[uname], 'vpaths', vpaths);
+            });
+            ADMINDATA.usersUpdated.ts = Date.now();
+          } catch (_e) {
+            errors.push('users');
+          }
+        }
+
+        if (errors.length === 0) {
+          iziToast.success({ title: 'Folder updated', position: 'topCenter', timeout: 2500 });
+          this.editingFolder = null;
+        } else if (errors.length < 3) {
+          iziToast.warning({ title: `Some changes failed: ${errors.join(', ')}`, position: 'topCenter', timeout: 4000 });
         }
       },
       removeFolder: async function(vpath, folder) {
@@ -1209,7 +1450,8 @@ const usersView = Vue.component('users-view', {
                 <th style="width:140px;">Username</th>
                 <th>Folders</th>
                 <th style="width:70px;">Role</th>
-                <th style="text-align:right;">Actions</th>
+                <th style="width:130px;">Permissions</th>
+                <th style="text-align:right;white-space:nowrap;">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1221,11 +1463,28 @@ const usersView = Vue.component('users-view', {
                   <span v-else style="background:var(--raised);color:var(--t2);font-size:.75rem;padding:.15rem .45rem;border-radius:4px;">User</span>
                 </td>
                 <td>
+                  <div style="display:flex;flex-direction:column;gap:.3rem;">
+                    <button type="button" class="btn-small btn-flat"
+                      :title="v['allow-radio-recording'] ? 'Click to disable radio recording' : 'Click to enable radio recording'"
+                      :style="v['allow-radio-recording'] ? 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);font-weight:600;' : ''"
+                      style="text-align:left;width:100%;"
+                      @click="toggleRadioRecording(k, v)">
+                      &#9679;&nbsp;Record&nbsp;<span style="opacity:.6;font-size:.68rem;">{{v['allow-radio-recording'] ? 'ON' : 'off'}}</span>
+                    </button>
+                    <button type="button" class="btn-small btn-flat"
+                      :title="v['allow-youtube-download'] ? 'Click to disable YouTube download' : 'Click to enable YouTube download'"
+                      :style="v['allow-youtube-download'] ? 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);font-weight:600;' : ''"
+                      style="text-align:left;width:100%;"
+                      @click="toggleYoutubeDownload(k, v)">
+                      &#9654;&nbsp;YouTube&nbsp;<span style="opacity:.6;font-size:.68rem;">{{v['allow-youtube-download'] ? 'ON' : 'off'}}</span>
+                    </button>
+                  </div>
+                </td>
+                <td>
                   <div style="display:flex;gap:.4rem;justify-content:flex-end;flex-wrap:wrap;">
                     <button class="btn-small btn-flat" type="button" @click="changePassword(k)">Password</button>
                     <button class="btn-small btn-flat" type="button" @click="changeVPaths(k)">Folders</button>
                     <button class="btn-small btn-flat" type="button" @click="changeAccess(k)">Access</button>
-                    <button class="btn-small btn-flat" type="button" :title="v['allow-radio-recording'] ? 'Disable radio recording for this user' : 'Enable radio recording for this user'" :style="v['allow-radio-recording'] ? 'color:var(--red);border-color:var(--red);' : ''" @click="toggleRadioRecording(k, v)">&#9679; Record</button>
                     <button class="btn-small" type="button" style="background:var(--red);border-color:var(--red);" @click="deleteUser(k)">Delete</button>
                   </div>
                 </td>
@@ -1339,6 +1598,20 @@ const usersView = Vue.component('users-view', {
           });
           Vue.set(ADMINDATA.users[username], 'allow-radio-recording', newVal);
           iziToast.success({ title: newVal ? 'Radio recording enabled' : 'Radio recording disabled', position: 'topCenter', timeout: 3000 });
+        } catch (err) {
+          iziToast.error({ title: 'Failed to update', position: 'topCenter', timeout: 3500 });
+        }
+      },
+      toggleYoutubeDownload: async function (username, user) {
+        const newVal = !user['allow-youtube-download'];
+        try {
+          await API.axios({
+            method: 'POST',
+            url: `${API.url()}/api/v1/admin/users/allow-youtube-download`,
+            data: { username, allow: newVal }
+          });
+          Vue.set(ADMINDATA.users[username], 'allow-youtube-download', newVal);
+          iziToast.success({ title: newVal ? 'YouTube download enabled' : 'YouTube download disabled', position: 'topCenter', timeout: 3000 });
         } catch (err) {
           iziToast.error({ title: 'Failed to update', position: 'topCenter', timeout: 3500 });
         }

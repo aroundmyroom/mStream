@@ -8,6 +8,7 @@ import { nanoid } from 'nanoid';
 import Joi from 'joi';
 import * as config from '../state/config.js';
 import { joiValidate } from '../util/validation.js';
+import { ffmpegBin } from '../util/ffmpeg-bootstrap.js';
 
 // ── SSRF guard (mirrors radio.js) ─────────────────────────────────────────────
 function _ssrfCheck(hostname) {
@@ -87,10 +88,7 @@ async function _remuxAacToM4a(aacPath) {
   const ext = path.extname(aacPath).toLowerCase();
   if (ext !== '.aac') return aacPath;
 
-  const binaryExt  = process.platform === 'win32' ? '.exe' : '';
-  const ffmpegDir  = config.program.transcode?.ffmpegDirectory;
-  const ffmpegPath = ffmpegDir ? path.join(ffmpegDir, `ffmpeg${binaryExt}`) : null;
-  if (!ffmpegPath) return aacPath;
+  const ffmpegPath = ffmpegBin();
   try { await fsp.access(ffmpegPath); } catch { return aacPath; }
 
   const m4aPath = aacPath.slice(0, -4) + '.m4a';
@@ -127,8 +125,7 @@ async function _embedCoverArt(audioPath, artFilename) {
   try { await fsp.access(artPath); } catch { return audioPath; }  // art file missing
 
   const binaryExt  = process.platform === 'win32' ? '.exe' : '';
-  const ffmpegDir  = config.program.transcode?.ffmpegDirectory;
-  const ffmpegPath = ffmpegDir ? path.join(ffmpegDir, `ffmpeg${binaryExt}`) : null;
+  const ffmpegPath = ffmpegBin();
   if (!ffmpegPath) return audioPath;
   try { await fsp.access(ffmpegPath); } catch { return audioPath; }  // ffmpeg not present
 
@@ -143,9 +140,9 @@ async function _embedCoverArt(audioPath, artFilename) {
        '-metadata:s:v', 'comment=Cover (front)',
        tmpPath]
     : ['-y', '-i', audioPath, '-i', artPath,
-       '-map', '0', '-map', '1',
-       '-c', 'copy',
-       '-disposition:v', 'attached_pic',
+       '-map', '0:a', '-map', '1:v',
+       '-c:a', 'copy', '-c:v', 'copy',
+       '-disposition:v:0', 'attached_pic',
        tmpPath];
 
   try {
@@ -358,8 +355,12 @@ export function setup(mstream) {
 
     res.json({
       filePath:     rec.filePath,
+      relPath:      `${rec.vpath}/${path.basename(rec.filePath)}`,
       bytesWritten: rec.bytesWritten,
       durationMs,
+      vpath:        rec.vpath,
+      stationName:  rec.stationName,
+      artFile:      rec.artFile || null,
     });
   });
 }

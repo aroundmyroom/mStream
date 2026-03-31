@@ -21,7 +21,7 @@ export function saveFile(saveData, file) {
   return fs.writeFile(file, JSON.stringify(saveData, null, 2), 'utf8');
 }
 
-export async function addDirectory(directory, vpath, autoAccess, isAudioBooks, mstream, isRecording = false, allowRecordDelete = false) {
+export async function addDirectory(directory, vpath, autoAccess, isAudioBooks, mstream, isRecording = false, allowRecordDelete = false, isYoutube = false) {
   // confirm directory is real
   const stat = await fs.stat(directory);
   if (!stat.isDirectory()) { throw new Error(`${directory} is not a directory`); }
@@ -36,7 +36,13 @@ export async function addDirectory(directory, vpath, autoAccess, isAudioBooks, m
   if (isAudioBooks) { memClone[vpath].type = 'audio-books'; }
   if (isRecording) {
     memClone[vpath].type = 'recordings';
-    if (allowRecordDelete) memClone[vpath].allowRecordDelete = true;
+  }
+  // Only use 'youtube' type when youtube-only (not combined with radio recordings)
+  if (isYoutube && !isRecording) {
+    memClone[vpath].type = 'youtube';
+  }
+  if ((isRecording || isYoutube) && allowRecordDelete) {
+    memClone[vpath].allowRecordDelete = true;
   }
 
   // add directory to config file
@@ -368,6 +374,15 @@ export async function editAllowRadioRecording(username, val) {
   await saveFile(loadConfig, config.configFile);
 
   config.program.users[username]['allow-radio-recording'] = val;
+}
+
+export async function editAllowYoutubeDownload(username, val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.users || !loadConfig.users[username]) { throw new Error(`User '${username}' not found`); }
+  loadConfig.users[username]['allow-youtube-download'] = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.users[username]['allow-youtube-download'] = val;
 }
 
 export async function editScanErrorRetention(hours) {

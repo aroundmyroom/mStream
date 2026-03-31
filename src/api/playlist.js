@@ -54,6 +54,7 @@ export function setup(mstream) {
     });
 
     returnThis.allowRadioRecording = req.user['allow-radio-recording'] === true;
+    returnThis.allowYoutubeDownload = req.user['allow-youtube-download'] === true;
 
     res.json(returnThis);
   });

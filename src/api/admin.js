@@ -260,6 +260,7 @@ export function setup(mstream) {
       autoAccess: Joi.boolean().default(false),
       isAudioBooks: Joi.boolean().default(false),
       isRecording: Joi.boolean().default(false),
+      isYoutube: Joi.boolean().default(false),
       allowRecordDelete: Joi.boolean().default(false)
     });
     const input = joiValidate(schema, req.body);
@@ -271,16 +272,14 @@ export function setup(mstream) {
       input.value.isAudioBooks,
       mstream,
       input.value.isRecording,
-      input.value.allowRecordDelete);
+      input.value.allowRecordDelete,
+      input.value.isYoutube);
     res.json({});
 
     try {
-      // Skip scan for recordings folders — they must not be indexed in the music library.
-      // Only scan this vpath if it is NOT a child of another configured vpath.
-      // Child folders (e.g. /media/music/Disco inside /media/music) are already
-      // covered by their parent vpath scan — scanning them separately creates duplicates.
+      // Skip scan for recordings/youtube folders — must not be indexed in the music library.
       const folderType = config.program.folders[input.value.vpath]?.type || 'music';
-      if (folderType !== 'recordings') {
+      if (folderType !== 'recordings' && folderType !== 'youtube') {
         const isChild = Object.keys(config.program.folders).some(
           other => other !== input.value.vpath && dbQueue.isChildOf(other, input.value.vpath)
         );
@@ -294,7 +293,7 @@ export function setup(mstream) {
   });
 
   // PATCH /api/v1/admin/directory/flags — update per-folder flags on an existing folder
-  // Supports: allowRecordDelete (recordings folders only), albumsOnly (music/audio-books only)
+  // Supports: allowRecordDelete (recordings/youtube folders), albumsOnly (music/audio-books only)
   mstream.patch("/api/v1/admin/directory/flags", async (req, res) => {
     const schema = Joi.object({
       vpath: Joi.string().pattern(/[a-zA-Z0-9-]+/).required(),
@@ -307,21 +306,17 @@ export function setup(mstream) {
     if (!folder) return res.status(404).json({ error: 'vpath not found' });
 
     if (allowRecordDelete !== undefined) {
-      if (folder.type !== 'recordings') return res.status(400).json({ error: 'only recordings folders support allowRecordDelete' });
-      if (allowRecordDelete) {
-        config.program.folders[vpath].allowRecordDelete = true;
-      } else {
-        delete config.program.folders[vpath].allowRecordDelete;
-      }
+      const isRecordingType = folder.type === 'recordings' || folder.type === 'youtube';
+      if (!isRecordingType) return res.status(400).json({ error: 'only recordings/youtube folders support allowRecordDelete' });
+      if (allowRecordDelete) config.program.folders[vpath].allowRecordDelete = true;
+      else delete config.program.folders[vpath].allowRecordDelete;
     }
 
     if (albumsOnly !== undefined) {
-      if (folder.type === 'recordings') return res.status(400).json({ error: 'recordings folders are not included in the albums view' });
-      if (albumsOnly) {
-        config.program.folders[vpath].albumsOnly = true;
-      } else {
-        delete config.program.folders[vpath].albumsOnly;
-      }
+      const isRecordingType = folder.type === 'recordings' || folder.type === 'youtube';
+      if (isRecordingType) return res.status(400).json({ error: 'recordings/youtube folders are not included in the albums view' });
+      if (albumsOnly) config.program.folders[vpath].albumsOnly = true;
+      else delete config.program.folders[vpath].albumsOnly;
     }
 
     // Persist to config file
@@ -330,21 +325,86 @@ export function setup(mstream) {
     if (!loadConfig.folders[vpath]) loadConfig.folders[vpath] = {};
 
     if (allowRecordDelete !== undefined) {
-      if (allowRecordDelete) {
-        loadConfig.folders[vpath].allowRecordDelete = true;
-      } else {
-        delete loadConfig.folders[vpath].allowRecordDelete;
-      }
+      if (allowRecordDelete) loadConfig.folders[vpath].allowRecordDelete = true;
+      else delete loadConfig.folders[vpath].allowRecordDelete;
     }
-
     if (albumsOnly !== undefined) {
-      if (albumsOnly) {
-        loadConfig.folders[vpath].albumsOnly = true;
-      } else {
-        delete loadConfig.folders[vpath].albumsOnly;
-      }
+      if (albumsOnly) loadConfig.folders[vpath].albumsOnly = true;
+      else delete loadConfig.folders[vpath].albumsOnly;
     }
 
+    await admin.saveFile(loadConfig, config.configFile);
+    res.json({});
+  });
+
+  // PATCH /api/v1/admin/directory/type — change the type of an existing folder
+  mstream.patch("/api/v1/admin/directory/type", async (req, res) => {
+    const schema = Joi.object({
+      vpath: Joi.string().pattern(/[a-zA-Z0-9-]+/).required(),
+      type: Joi.string().valid('music', 'audio-books', 'recordings', 'youtube').required(),
+    });
+    const input = joiValidate(schema, req.body);
+    const { vpath, type } = input.value;
+    const folder = config.program.folders[vpath];
+    if (!folder) return res.status(404).json({ error: 'vpath not found' });
+
+    config.program.folders[vpath].type = type;
+    // Clear flags that are incompatible with the new type
+    if (type !== 'recordings' && type !== 'youtube') delete config.program.folders[vpath].allowRecordDelete;
+    if (type === 'recordings' || type === 'youtube') delete config.program.folders[vpath].albumsOnly;
+
+    const loadConfig = await admin.loadFile(config.configFile);
+    if (!loadConfig.folders?.[vpath]) return res.status(404).json({ error: 'vpath not in config' });
+    loadConfig.folders[vpath].type = type;
+    if (type !== 'recordings' && type !== 'youtube') delete loadConfig.folders[vpath].allowRecordDelete;
+    if (type === 'recordings' || type === 'youtube') delete loadConfig.folders[vpath].albumsOnly;
+    await admin.saveFile(loadConfig, config.configFile);
+    res.json({});
+  });
+
+  // PATCH /api/v1/admin/directory/root — change filesystem path of an existing folder
+  mstream.patch("/api/v1/admin/directory/root", async (req, res) => {
+    const schema = Joi.object({
+      vpath: Joi.string().pattern(/[a-zA-Z0-9-]+/).required(),
+      root: Joi.string().required(),
+    });
+    const input = joiValidate(schema, req.body);
+    const { vpath, root } = input.value;
+    if (!config.program.folders[vpath]) return res.status(404).json({ error: 'vpath not found' });
+
+    const stat = await fs.promises.stat(root).catch(() => null);
+    if (!stat?.isDirectory()) return res.status(400).json({ error: `${root} is not a valid directory` });
+
+    config.program.folders[vpath].root = root;
+    const loadConfig = await admin.loadFile(config.configFile);
+    if (loadConfig.folders?.[vpath]) loadConfig.folders[vpath].root = root;
+    await admin.saveFile(loadConfig, config.configFile);
+    res.json({ restartRequired: true });
+  });
+
+  // PATCH /api/v1/admin/directory/users — set which users have access to a folder
+  mstream.patch("/api/v1/admin/directory/users", async (req, res) => {
+    const schema = Joi.object({
+      vpath: Joi.string().pattern(/[a-zA-Z0-9-]+/).required(),
+      users: Joi.array().items(Joi.string()).required(),
+    });
+    const input = joiValidate(schema, req.body);
+    const { vpath, users: newUsers } = input.value;
+    if (!config.program.folders[vpath]) return res.status(404).json({ error: 'vpath not found' });
+
+    // Update each user's vpaths list
+    const loadConfig = await admin.loadFile(config.configFile);
+    Object.entries(config.program.users).forEach(([uname, u]) => {
+      const shouldHave = newUsers.includes(uname);
+      const has = (u.vpaths || []).includes(vpath);
+      if (shouldHave && !has) {
+        u.vpaths.push(vpath);
+        if (loadConfig.users?.[uname]) loadConfig.users[uname].vpaths = u.vpaths;
+      } else if (!shouldHave && has) {
+        u.vpaths.splice(u.vpaths.indexOf(vpath), 1);
+        if (loadConfig.users?.[uname]) loadConfig.users[uname].vpaths = u.vpaths;
+      }
+    });
     await admin.saveFile(loadConfig, config.configFile);
     res.json({});
   });
@@ -636,6 +696,17 @@ export function setup(mstream) {
     });
     joiValidate(schema, req.body);
     await admin.editAllowRadioRecording(req.body.username, req.body.allow);
+    res.json({});
+  });
+
+  mstream.post("/api/v1/admin/users/allow-youtube-download", async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const schema = Joi.object({
+      username: Joi.string().required(),
+      allow: Joi.boolean().required()
+    });
+    joiValidate(schema, req.body);
+    await admin.editAllowYoutubeDownload(req.body.username, req.body.allow);
     res.json({});
   });
 
