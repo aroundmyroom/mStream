@@ -234,9 +234,11 @@ const mapOfDirectoryAlbumArt = {};
 function checkDirectoryForAlbumArt(songInfo) {
   const directory = path.join(loadJson.directory, path.dirname(songInfo.filePath));
 
-  // album art has already been found
+  // album art has already been found — set aaFile and return nothing
+  // (returning the filename string here would be passed as a Buffer to compressAlbumArt)
   if (mapOfDirectoryAlbumArt[directory]) {
-    return songInfo.aaFile = mapOfDirectoryAlbumArt[directory];
+    songInfo.aaFile = mapOfDirectoryAlbumArt[directory];
+    return;
   }
 
   // directory was already scanned and nothing was found

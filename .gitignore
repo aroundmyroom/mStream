@@ -19,6 +19,10 @@ save/sync-cdn/*
 bin/ffmpeg/*
 !bin/ffmpeg/README.md
 
+bin/rust-parser/*
+!bin/rust-parser/README.md
+!bin/rust-parser/rust-parser-*
+
 save/*.json
 
 .DS_Store
@@ -31,3 +35,5 @@ frp/*.ini
 dist/*
 
 .env
+
+rust-parser/target/

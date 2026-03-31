@@ -16,7 +16,8 @@
     "dist": "electron-builder",
     "wizard": "npm install --only=prod && node cli-boot-wrapper.js",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "build-rust": "cd rust-parser && cargo build --release"
   },
   "repository": {
     "type": "git",
@@ -46,7 +47,8 @@
     ],
     "mac": {
       "files": [
-        "bin/syncthing/syncthing-osx"
+        "bin/syncthing/syncthing-osx",
+        "bin/rust-parser/rust-parser-darwin-*"
       ],
       "category": "public.app-category.music",
       "binaries": [
@@ -55,7 +57,8 @@
     },
     "win": {
       "files": [
-        "bin/syncthing/syncthing.exe"
+        "bin/syncthing/syncthing.exe",
+        "bin/rust-parser/rust-parser-win32-*"
       ],
       "target": [
         {
@@ -68,7 +71,8 @@
     },
     "linux": {
       "files": [
-        "bin/syncthng/syncthing-linux"
+        "bin/syncthng/syncthing-linux",
+        "bin/rust-parser/rust-parser-linux-*"
       ],
       "target": [
         {

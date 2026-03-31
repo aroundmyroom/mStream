@@ -1017,6 +1017,12 @@ const dbView = Vue.component('db-view', {
                       </td>
                     </tr>
                     <tr>
+                      <td><b>Use Rust Parser:</b> {{dbParams.rustParser}}</td>
+                      <td>
+                        [<a v-on:click="toggleRustParser()">edit</a>]
+                      </td>
+                    </tr>
+                    <tr>
                       <td><b>Max Concurrent Scans:</b> {{dbParams.maxConcurrentTasks}}</td>
                       <td>
                         [<a v-on:click="openModal('edit-max-scan-modal')">edit</a>]
@@ -1343,6 +1349,45 @@ const dbView = Vue.component('db-view', {
             }).then(() => {
               // update fronted data
               Vue.set(ADMINDATA.dbParams, 'skipImg', !this.dbParams.skipImg);
+
+              iziToast.success({
+                title: 'Updated Successfully',
+                position: 'topCenter',
+                timeout: 3500
+              });
+            }).catch(() => {
+              iziToast.error({
+                title: 'Failed',
+                position: 'topCenter',
+                timeout: 3500
+              });
+            });
+          }, true],
+          ['<button>Go Back</button>', (instance, toast) => {
+            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
+          }],
+        ]
+      });
+    },
+    toggleRustParser: function() {
+      iziToast.question({
+        displayMode: 'once',
+        id: 'question',
+        zindex: 99999,
+        layout: 2,
+        maxWidth: 600,
+        title: `<b>${this.dbParams.rustParser === true ? 'Disable' : 'Enable'} Rust Parser?</b>`,
+        position: 'center',
+        buttons: [
+          [`<button><b>${this.dbParams.rustParser === true ? 'Disable' : 'Enable'}</b></button>`, (instance, toast) => {
+            instance.hide({ transitionOut: 'fadeOut' }, toast, 'button');
+            API.axios({
+              method: 'POST',
+              url: `${API.url()}/api/v1/admin/db/params/rust-parser`,
+              data: { rustParser: !this.dbParams.rustParser }
+            }).then(() => {
+              // update frontend data
+              Vue.set(ADMINDATA.dbParams, 'rustParser', !this.dbParams.rustParser);
 
               iziToast.success({
                 title: 'Updated Successfully',

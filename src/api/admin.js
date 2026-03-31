@@ -148,6 +148,16 @@ export function setup(mstream) {
     res.json({});
   });
 
+  mstream.post("/api/v1/admin/db/params/rust-parser", async (req, res) => {
+    const schema = Joi.object({
+      rustParser: Joi.boolean().required()
+    });
+    joiValidate(schema, req.body);
+
+    await admin.editRustParser(req.body.rustParser);
+    res.json({});
+  });
+
   mstream.get("/api/v1/admin/users", (req, res) => {
     // Scrub passwords
     const memClone = JSON.parse(JSON.stringify(config.program.users));

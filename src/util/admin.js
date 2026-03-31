@@ -307,6 +307,15 @@ export async function editCompressImages(val) {
   config.program.scanOptions.compressImage = val;
 }
 
+export async function editRustParser(val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
+  loadConfig.scanOptions.rustParser = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.scanOptions.rustParser = val;
+}
+
 export async function editWriteLogs(val) {
   const loadConfig = await loadFile(config.configFile);
   loadConfig.writeLogs = val;

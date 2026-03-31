@@ -1,4 +1,5 @@
 import child from 'child_process';
+import fs from 'fs';
 import path from 'path';
 import winston from 'winston';
 import { nanoid } from 'nanoid';
@@ -12,6 +13,7 @@ const taskQueue = [];
 const runningTasks = new Set();
 const vpathLimiter = new Set();
 let scanIntervalTimer = null; // This gets set after the server boots
+let rustBinaryReady = false; // tracks whether the rust binary is available
 
 function addScanTask(vpath) {
   const scanObj = { task: 'scan', vpath: vpath, id: nanoid(8) };
@@ -38,6 +40,45 @@ function nextTask() {
   }
 }
 
+const rustParserDir = path.join(__dirname, '../../rust-parser');
+const ext = process.platform === 'win32' ? '.exe' : '';
+const prebuiltBin = path.join(__dirname, `../../bin/rust-parser/rust-parser-${process.platform}-${process.arch}${ext}`);
+const localBuildBin = path.join(rustParserDir, `target/release/rust-parser${ext}`);
+let rustParserBin = null;
+
+function buildRustParser() {
+  if (rustBinaryReady) { return true; }
+
+  // 1. Check for pre-built binary shipped with the project
+  if (fs.existsSync(prebuiltBin)) {
+    rustParserBin = prebuiltBin;
+    rustBinaryReady = true;
+    return true;
+  }
+
+  // 2. Check for locally compiled binary
+  if (fs.existsSync(localBuildBin)) {
+    rustParserBin = localBuildBin;
+    rustBinaryReady = true;
+    return true;
+  }
+
+  // 3. Try to build from source
+  winston.info('Rust parser binary not found — building from source...');
+  try {
+    child.execSync('cargo build --release', { cwd: rustParserDir, stdio: 'pipe', timeout: 300000 });
+    if (fs.existsSync(localBuildBin)) {
+      rustParserBin = localBuildBin;
+      rustBinaryReady = true;
+      winston.info('Rust parser built successfully');
+      return true;
+    }
+  } catch (err) {
+    winston.warn(`Failed to build Rust parser: ${err.message}. Falling back to JS parser.`);
+  }
+  return false;
+}
+
 function runScan(scanObj) {
   const jsonLoad = {
     directory: config.program.folders[scanObj.vpath].root,
@@ -53,8 +94,22 @@ function runScan(scanObj) {
     compressImage: config.program.scanOptions.compressImage
   };
 
-  const forkedScan = child.fork(path.join(__dirname, './scanner.mjs'), [JSON.stringify(jsonLoad)], { silent: true });
-  winston.info(`File scan started on ${jsonLoad.directory}`);
+  let forkedScan;
+  const useRust = config.program.scanOptions.rustParser && buildRustParser();
+  if (useRust) {
+    forkedScan = child.spawn(rustParserBin, [JSON.stringify(jsonLoad)], { stdio: ['ignore', 'pipe', 'pipe'] });
+    winston.info(`File scan started (Rust) on ${jsonLoad.directory}`);
+    forkedScan.on('error', (err) => {
+      winston.error(`Rust parser failed to start: ${err.message}`);
+      runningTasks.delete(forkedScan);
+      vpathLimiter.delete(scanObj.vpath);
+      nextTask();
+    });
+  } else {
+    forkedScan = child.fork(path.join(__dirname, './scanner.mjs'), [JSON.stringify(jsonLoad)], { silent: true });
+    winston.info(`File scan started on ${jsonLoad.directory}`);
+  }
+
   runningTasks.add(forkedScan);
   vpathLimiter.add(scanObj.vpath);
 
