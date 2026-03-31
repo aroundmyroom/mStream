@@ -119,9 +119,13 @@ export function setup(mstream) {
     const downloadDir = path.join(pathInfo.fullPath, `%(title)s.%(ext)s`);
     const formatMap = { 'ogg': 'vorbis', 'm4b': 'm4a' };
     const ytdlAudioFormat = formatMap[value.outputCodec] || value.outputCodec;
-    const ytdl = spawn('yt-dlp', ['-f', "ba", "-x", value.url, '-o', downloadDir,
-      "--ffmpeg-location", ffmpegPath, "--audio-format", ytdlAudioFormat,
-      "--embed-thumbnail", "--convert-thumbnails", "jpg", "--embed-metadata"]);
+    const ytdlArgs = ['-f', "ba", "-x", value.url, '-o', downloadDir,
+      "--ffmpeg-location", ffmpegPath, "--audio-format", ytdlAudioFormat, "--embed-metadata"];
+    const noEmbedThumbnail = ['wav', 'opus', 'ogg'];
+    if (!noEmbedThumbnail.includes(value.outputCodec)) {
+      ytdlArgs.push("--embed-thumbnail", "--convert-thumbnails", "jpg");
+    }
+    const ytdl = spawn('yt-dlp', ytdlArgs);
     
     downloadTracker.set(ytdl.pid, {
       process: ytdl,
@@ -151,11 +155,14 @@ export function setup(mstream) {
 
       try {
         // Find the downloaded file by scanning for new files matching the output codec
+        // Some formats produce a different file extension than the codec name
+        const extMap = { 'aac': 'm4a' };
+        const expectedExt = extMap[value.outputCodec] || value.outputCodec;
         const dirFiles = await fs.readdir(pathInfo.fullPath);
         let downloadedFile = null;
         let downloadedStat = null;
         for (const file of dirFiles) {
-          if (!file.endsWith('.' + value.outputCodec)) continue;
+          if (!file.endsWith('.' + expectedExt)) continue;
           const filePath = path.join(pathInfo.fullPath, file);
           const stat = await fs.stat(filePath);
           if (stat.mtime.getTime() >= entry.startTime) {
@@ -174,9 +181,9 @@ export function setup(mstream) {
           return;
         }
 
-        // For FLAC files, yt-dlp often fails to embed the thumbnail.
-        // Download it separately and embed via ffmpeg using METADATA_BLOCK_PICTURE.
-        if (value.outputCodec === 'flac') {
+        // For FLAC/Opus/OGG files, yt-dlp often fails to embed the thumbnail.
+        // Download it separately and embed via ffmpeg.
+        if (value.outputCodec === 'flac' || value.outputCodec === 'opus' || value.outputCodec === 'ogg') {
           try {
             // Check if the file already has an embedded picture
             const checkMeta = await parseFile(downloadedFile, { skipCovers: false });
@@ -187,7 +194,7 @@ export function setup(mstream) {
                 // Download thumbnail to a temp file
                 const thumbPath = downloadedFile + '.thumb.jpg';
                 const thumbProc = spawn('yt-dlp', ['--no-download', '--write-thumbnail', '--convert-thumbnails', 'jpg',
-                  '-o', downloadedFile + '.thumb', value.url]);
+                  '--ffmpeg-location', ffmpegPath, '-o', downloadedFile + '.thumb', value.url]);
                 await new Promise((resolve, reject) => {
                   thumbProc.on('close', (c) => c === 0 ? resolve() : reject(new Error('thumbnail download failed')));
                   thumbProc.on('error', reject);
@@ -195,31 +202,74 @@ export function setup(mstream) {
 
                 try {
                   await fs.access(thumbPath);
-                  // Embed the thumbnail into the FLAC file
-                  const tmpFlac = downloadedFile + '.tmp.flac';
-                  await new Promise((resolve, reject) => {
-                    const proc = spawn(ffmpegPath, [
-                      '-i', downloadedFile, '-i', thumbPath,
-                      '-map', '0:a', '-map', '1:0',
-                      '-c', 'copy', '-disposition:v', 'attached_pic',
-                      '-y', tmpFlac
-                    ]);
-                    proc.on('close', (c) => c === 0 ? resolve() : reject(new Error('ffmpeg thumbnail embed failed')));
-                    proc.on('error', reject);
-                  });
+                  const tmpEmbed = downloadedFile + '.tmp.' + expectedExt;
 
-                  await fs.unlink(downloadedFile);
-                  await fs.rename(tmpFlac, downloadedFile);
+                  if (value.outputCodec === 'flac') {
+                    // FLAC supports attached_pic via ffmpeg directly
+                    await new Promise((resolve, reject) => {
+                      const proc = spawn(ffmpegPath, [
+                        '-i', downloadedFile, '-i', thumbPath,
+                        '-map', '0:a', '-map', '1:0',
+                        '-c', 'copy', '-disposition:v', 'attached_pic',
+                        '-y', tmpEmbed
+                      ]);
+                      proc.on('close', (c) => c === 0 ? resolve() : reject(new Error('ffmpeg thumbnail embed failed')));
+                      proc.on('error', reject);
+                    });
+                  } else {
+                    // OGG/Opus need METADATA_BLOCK_PICTURE encoded in Vorbis comments
+                    const imgData = await fs.readFile(thumbPath);
+                    const mimeStr = 'image/jpeg';
+                    // Build METADATA_BLOCK_PICTURE binary: type(4) + mime_len(4) + mime + desc_len(4) + desc + width(4) + height(4) + depth(4) + colors(4) + data_len(4) + data
+                    const header = Buffer.alloc(32 + mimeStr.length);
+                    let offset = 0;
+                    header.writeUInt32BE(3, offset); offset += 4;              // picture type: front cover
+                    header.writeUInt32BE(mimeStr.length, offset); offset += 4; // MIME length
+                    header.write(mimeStr, offset); offset += mimeStr.length;   // MIME string
+                    header.writeUInt32BE(0, offset); offset += 4;              // description length
+                    header.writeUInt32BE(0, offset); offset += 4;              // width (0 = unknown)
+                    header.writeUInt32BE(0, offset); offset += 4;              // height (0 = unknown)
+                    header.writeUInt32BE(0, offset); offset += 4;              // color depth
+                    header.writeUInt32BE(0, offset); offset += 4;              // indexed colors
+                    header.writeUInt32BE(imgData.length, offset);              // data length
+                    const pictureBlock = Buffer.concat([header, imgData]);
+                    const b64 = pictureBlock.toString('base64');
+
+                    // Write to temp file to avoid OS command-line length limits
+                    const metaFilePath = downloadedFile + '.ffmeta';
+                    await new Promise((resolve, reject) => {
+                      const proc = spawn(ffmpegPath, [
+                        '-y', '-i', downloadedFile,
+                        '-f', 'ffmetadata', metaFilePath
+                      ]);
+                      proc.on('close', (c) => c === 0 ? resolve() : reject(new Error('metadata extraction failed')));
+                      proc.on('error', reject);
+                    });
+                    await fs.appendFile(metaFilePath, `METADATA_BLOCK_PICTURE=${b64}\n`);
+                    await new Promise((resolve, reject) => {
+                      const proc = spawn(ffmpegPath, [
+                        '-y', '-i', downloadedFile,
+                        '-f', 'ffmetadata', '-i', metaFilePath,
+                        '-map', '0:a', '-map_metadata', '1',
+                        '-c:a', 'copy', tmpEmbed
+                      ]);
+                      proc.on('close', (c) => c === 0 ? resolve() : reject(new Error('ffmpeg thumbnail embed failed')));
+                      proc.on('error', reject);
+                    });
+                    try { await fs.unlink(metaFilePath); } catch { /* ignore */ }
+                  }
+
+                  await fs.rename(tmpEmbed, downloadedFile);
                   downloadedStat = await fs.stat(downloadedFile);
-                  winston.info('yt-dlp: embedded thumbnail into FLAC file');
+                  winston.info('yt-dlp: embedded thumbnail into ' + value.outputCodec + ' file');
                 } finally {
-                  // Clean up thumbnail file
-                  try { await fs.unlink(thumbPath); } catch { /* ignore cleanup errors */ }
+                  try { await fs.unlink(thumbPath); } catch { /* ignore */ }
+                  try { await fs.unlink(downloadedFile + '.tmp.' + expectedExt); } catch { /* ignore */ }
                 }
               }
             }
           } catch (thumbErr) {
-            winston.warn('yt-dlp: failed to embed FLAC thumbnail', { stack: thumbErr });
+            winston.warn('yt-dlp: failed to embed thumbnail into ' + value.outputCodec, { stack: thumbErr });
           }
         }
 
@@ -227,7 +277,7 @@ export function setup(mstream) {
         const userMeta = entry.metadata || {};
         if (userMeta.title || userMeta.artist || userMeta.album || userMeta.year) {
           try {
-            const tmpFile = downloadedFile + '.tmp.' + value.outputCodec;
+            const tmpFile = downloadedFile + '.tmp.' + expectedExt;
             const ffmpegArgs = ['-i', downloadedFile, '-c', 'copy'];
             if (userMeta.title) { ffmpegArgs.push('-metadata', `title=${userMeta.title}`); }
             if (userMeta.artist) { ffmpegArgs.push('-metadata', `artist=${userMeta.artist}`); }
@@ -244,12 +294,12 @@ export function setup(mstream) {
               proc.on('error', reject);
             });
 
-            await fs.unlink(downloadedFile);
             await fs.rename(tmpFile, downloadedFile);
             downloadedStat = await fs.stat(downloadedFile);
             winston.info('yt-dlp: wrote user metadata tags to file');
           } catch (tagErr) {
             winston.error('yt-dlp: failed to write metadata tags', { stack: tagErr });
+            try { await fs.unlink(downloadedFile + '.tmp.' + expectedExt); } catch { /* ignore */ }
           }
         }
 
@@ -276,7 +326,7 @@ export function setup(mstream) {
           year: userMeta.year ? Number(userMeta.year) : (metadata.year || null),
           album: userMeta.album || (metadata.album ? String(metadata.album) : null),
           filepath: relativePath,
-          format: value.outputCodec,
+          format: expectedExt,
           track: metadata.track?.no || null,
           disk: metadata.disk?.no || null,
           modified: downloadedStat.mtime.getTime(),
