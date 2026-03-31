@@ -230,7 +230,7 @@ function setBrowserRootPanel(panelName, showBar) {
   document.getElementById('localSearchBar').value = "";
   document.getElementById('directoryName').innerHTML = '';
   document.getElementById('local_search_btn').style.display = '';
-  document.getElementById('ytdl_btn').classList.add('super-hide');
+  document.getElementById('upload_btn').classList.add('super-hide');
   document.getElementById('mkdir_btn').classList.add('super-hide');
 
   ([...document.getElementsByClassName('panel_one_name')]).forEach(el => {
@@ -269,18 +269,18 @@ async function senddir(root) {
       });
     }
 
-    // Show ytdl and mkdir buttons only when inside a vpath (not at root)
-    const ytdlBtn = document.getElementById('ytdl_btn');
+    // Show upload and mkdir buttons only when inside a vpath (not at root)
+    const uploadBtn = document.getElementById('upload_btn');
     const mkdirBtn = document.getElementById('mkdir_btn');
     if (fileExplorerArray.length > 0) {
-      ytdlBtn.classList.remove('super-hide');
+      uploadBtn.classList.remove('super-hide');
       if (MSTREAMAPI.currentServer.noMkdir === true) {
         mkdirBtn.classList.add('super-hide');
       } else {
         mkdirBtn.classList.remove('super-hide');
       }
     } else {
-      ytdlBtn.classList.add('super-hide');
+      uploadBtn.classList.add('super-hide');
       mkdirBtn.classList.add('super-hide');
     }
 
@@ -597,7 +597,44 @@ function openPlaybackModal() {
   myModal.open('#speedModal');
 }
 
-function openYtdlModal() {
+function switchUploadTab(tab) {
+  const uploadTab = document.getElementById('tab_upload');
+  const ytdlTab = document.getElementById('tab_ytdl');
+  const uploadContent = document.getElementById('tab_content_upload');
+  const ytdlContent = document.getElementById('tab_content_ytdl');
+
+  if (tab === 'upload') {
+    uploadTab.style.borderBottomColor = '#fff';
+    ytdlTab.style.borderBottomColor = 'transparent';
+    uploadContent.classList.remove('super-hide');
+    ytdlContent.classList.add('super-hide');
+  } else {
+    ytdlTab.style.borderBottomColor = '#fff';
+    uploadTab.style.borderBottomColor = 'transparent';
+    ytdlContent.classList.remove('super-hide');
+    uploadContent.classList.add('super-hide');
+    document.getElementById('ytdl_url').focus();
+  }
+}
+
+function handleFileUpload(files) {
+  if (!files || files.length === 0) { return; }
+  for (var i = 0; i < files.length; i++) {
+    var file = files[i];
+    file.directory = getFileExplorerPath();
+    myDropzone.addFile(file);
+  }
+  document.getElementById('upload_file_input').value = '';
+  myModal.close();
+}
+
+function openUploadModal() {
+  document.getElementById('upload_filepath').textContent = getFileExplorerPath();
+
+  // Reset upload tab
+  document.getElementById('upload_file_input').value = '';
+
+  // Reset ytdl tab
   if (!MSTREAMPLAYER.transcodeOptions.serverEnabled) {
     document.getElementById('ytdl_transcode_warning').classList.remove('super-hide');
     document.getElementById('ytdl_submit').disabled = true;
@@ -605,14 +642,16 @@ function openYtdlModal() {
     document.getElementById('ytdl_transcode_warning').classList.add('super-hide');
     document.getElementById('ytdl_submit').disabled = false;
   }
-  document.getElementById('ytdl_filepath').textContent = getFileExplorerPath();
   document.getElementById('ytdl_meta_loading').classList.add('super-hide');
   document.getElementById('ytdl_metadata').classList.add('super-hide');
   document.getElementById('ytdl_meta_title').textContent = '';
   document.getElementById('ytdl_meta_artist').textContent = '';
   document.getElementById('ytdl_meta_album').textContent = '';
   document.getElementById('ytdl_meta_year').textContent = '';
-  myModal.open('#ytdlModal');
+
+  // Default to upload tab
+  switchUploadTab('upload');
+  myModal.open('#uploadModal');
 }
 
 function openMkdirModal() {
@@ -698,7 +737,7 @@ document.getElementById('ytdl_url').addEventListener('input', function() {
 async function submitYtdl() {
   const url = document.getElementById('ytdl_url').value;
   const outputCodec = document.getElementById('ytdl_codec').value;
-  const filepath = document.getElementById('ytdl_filepath').textContent;
+  const filepath = document.getElementById('upload_filepath').textContent;
 
   try {
     const parsed = new URL(url);
