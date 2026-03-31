@@ -117,7 +117,8 @@ export function setup(mstream) {
     }
 
     const downloadDir = path.join(pathInfo.fullPath, `%(title)s.%(ext)s`);
-    const ytdlAudioFormat = value.outputCodec === 'ogg' ? 'vorbis' : value.outputCodec;
+    const formatMap = { 'ogg': 'vorbis', 'm4b': 'm4a' };
+    const ytdlAudioFormat = formatMap[value.outputCodec] || value.outputCodec;
     const ytdl = spawn('yt-dlp', ['-f', "ba", "-x", value.url, '-o', downloadDir,
       "--ffmpeg-location", ffmpegPath, "--audio-format", ytdlAudioFormat,
       "--embed-thumbnail", "--convert-thumbnails", "jpg", "--embed-metadata"]);
