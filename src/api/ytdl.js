@@ -193,12 +193,16 @@ export function setup(mstream) {
               if (metaInfo.thumbnail) {
                 // Download thumbnail to a temp file
                 const thumbPath = downloadedFile + '.thumb.jpg';
-                const thumbProc = spawn('yt-dlp', ['--no-download', '--write-thumbnail', '--convert-thumbnails', 'jpg',
-                  '--ffmpeg-location', ffmpegPath, '-o', downloadedFile + '.thumb', value.url]);
+                const rawThumbPath = thumbPath + '.tmp';
+                const thumbResponse = await fetch(metaInfo.thumbnail);
+                if (!thumbResponse.ok) throw new Error('thumbnail download failed');
+                await fs.writeFile(rawThumbPath, Buffer.from(await thumbResponse.arrayBuffer()));
                 await new Promise((resolve, reject) => {
-                  thumbProc.on('close', (c) => c === 0 ? resolve() : reject(new Error('thumbnail download failed')));
-                  thumbProc.on('error', reject);
+                  const proc = spawn(ffmpegPath, ['-y', '-i', rawThumbPath, thumbPath]);
+                  proc.on('close', (c) => c === 0 ? resolve() : reject(new Error('thumbnail conversion failed')));
+                  proc.on('error', reject);
                 });
+                try { await fs.unlink(rawThumbPath); } catch { /* ignore */ }
 
                 try {
                   await fs.access(thumbPath);
@@ -264,6 +268,7 @@ export function setup(mstream) {
                   winston.info('yt-dlp: embedded thumbnail into ' + value.outputCodec + ' file');
                 } finally {
                   try { await fs.unlink(thumbPath); } catch { /* ignore */ }
+                  try { await fs.unlink(thumbPath + '.tmp'); } catch { /* ignore */ }
                   try { await fs.unlink(downloadedFile + '.tmp.' + expectedExt); } catch { /* ignore */ }
                 }
               }
