@@ -144,13 +144,9 @@ export function setup(mstream) {
 
     ytdl.on('close', async (code) => {
       const entry = downloadTracker.get(ytdl.pid);
-      if (entry) {
-        entry.status = code === 0 ? 'complete' : 'error';
-        setTimeout(() => downloadTracker.delete(ytdl.pid), 30000);
-      }
+
       if (code !== 0) {
-        winston.error(`yt-dlp process exited with code ${code}`);
-        return;
+        winston.warn(`yt-dlp process exited with code ${code}, checking for downloaded file anyway`);
       }
 
       try {
@@ -170,8 +166,61 @@ export function setup(mstream) {
         }
 
         if (!downloadedFile) {
+          if (entry) {
+            entry.status = 'error';
+            setTimeout(() => downloadTracker.delete(ytdl.pid), 30000);
+          }
           winston.error('yt-dlp: could not find downloaded file in ' + pathInfo.fullPath);
           return;
+        }
+
+        // For FLAC files, yt-dlp often fails to embed the thumbnail.
+        // Download it separately and embed via ffmpeg using METADATA_BLOCK_PICTURE.
+        if (value.outputCodec === 'flac') {
+          try {
+            // Check if the file already has an embedded picture
+            const checkMeta = await parseFile(downloadedFile, { skipCovers: false });
+            if (!checkMeta.common.picture || checkMeta.common.picture.length === 0) {
+              // Fetch thumbnail URL from yt-dlp metadata
+              const metaInfo = await lookupMetadata(value.url);
+              if (metaInfo.thumbnail) {
+                // Download thumbnail to a temp file
+                const thumbPath = downloadedFile + '.thumb.jpg';
+                const thumbProc = spawn('yt-dlp', ['--no-download', '--write-thumbnail', '--convert-thumbnails', 'jpg',
+                  '-o', downloadedFile + '.thumb', value.url]);
+                await new Promise((resolve, reject) => {
+                  thumbProc.on('close', (c) => c === 0 ? resolve() : reject(new Error('thumbnail download failed')));
+                  thumbProc.on('error', reject);
+                });
+
+                try {
+                  await fs.access(thumbPath);
+                  // Embed the thumbnail into the FLAC file
+                  const tmpFlac = downloadedFile + '.tmp.flac';
+                  await new Promise((resolve, reject) => {
+                    const proc = spawn(ffmpegPath, [
+                      '-i', downloadedFile, '-i', thumbPath,
+                      '-map', '0:a', '-map', '1:0',
+                      '-c', 'copy', '-disposition:v', 'attached_pic',
+                      '-y', tmpFlac
+                    ]);
+                    proc.on('close', (c) => c === 0 ? resolve() : reject(new Error('ffmpeg thumbnail embed failed')));
+                    proc.on('error', reject);
+                  });
+
+                  await fs.unlink(downloadedFile);
+                  await fs.rename(tmpFlac, downloadedFile);
+                  downloadedStat = await fs.stat(downloadedFile);
+                  winston.info('yt-dlp: embedded thumbnail into FLAC file');
+                } finally {
+                  // Clean up thumbnail file
+                  try { await fs.unlink(thumbPath); } catch { /* ignore cleanup errors */ }
+                }
+              }
+            }
+          } catch (thumbErr) {
+            winston.warn('yt-dlp: failed to embed FLAC thumbnail', { stack: thumbErr });
+          }
         }
 
         // Write user-submitted metadata to the file's ID3 tags via ffmpeg
@@ -275,8 +324,17 @@ export function setup(mstream) {
         db.getFileCollection().insert(data);
         db.saveFilesDB();
         winston.info(`yt-dlp: added ${relativePath} to database`);
+
+        if (entry) {
+          entry.status = 'complete';
+          setTimeout(() => downloadTracker.delete(ytdl.pid), 30000);
+        }
       } catch (err) {
         winston.error('yt-dlp: failed to add file to database', { stack: err });
+        if (entry) {
+          entry.status = 'error';
+          setTimeout(() => downloadTracker.delete(ytdl.pid), 30000);
+        }
       }
     });
 
