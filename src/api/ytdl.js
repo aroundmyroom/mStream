@@ -126,6 +126,7 @@ export function setup(mstream) {
     downloadTracker.set(ytdl.pid, {
       process: ytdl,
       url: value.url,
+      directory: value.directory,
       outputCodec: value.outputCodec,
       metadata: value.metadata,
       status: 'downloading',
@@ -303,6 +304,7 @@ export function setup(mstream) {
       downloads.push({
         pid,
         url: entry.url,
+        directory: entry.directory,
         outputCodec: entry.outputCodec,
         status: entry.status,
         startTime: entry.startTime,

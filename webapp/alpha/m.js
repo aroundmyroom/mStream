@@ -771,10 +771,54 @@ async function submitYtdl() {
       position: 'topCenter',
       timeout: 3000
     });
+    startYtdlPolling();
   } catch(err) {
     boilerplateFailure(err);
   } finally {
     document.getElementById('ytdl_submit').disabled = false;
+  }
+}
+
+var ytdlPollInterval = null;
+function startYtdlPolling() {
+  if (ytdlPollInterval) { return; }
+  updateYtdlIndicator();
+  ytdlPollInterval = setInterval(updateYtdlIndicator, 3000);
+}
+
+async function updateYtdlIndicator() {
+  try {
+    var res = await MSTREAMAPI.ytdlDownloads();
+    var downloads = (res.data || res).downloads || [];
+    var active = downloads.filter(function(d) { return d.status === 'downloading'; });
+    var completed = downloads.filter(function(d) { return d.status === 'complete'; });
+
+    var indicator = document.getElementById('ytdl_download_indicator');
+    var textEl = document.getElementById('ytdl_download_text');
+
+    if (active.length > 0) {
+      indicator.classList.remove('super-hide');
+      textEl.textContent = active.length === 1 ? 'Downloading audio...' : 'Downloading ' + active.length + ' files...';
+    } else {
+      indicator.classList.add('super-hide');
+
+      // Stop polling when nothing is active
+      clearInterval(ytdlPollInterval);
+      ytdlPollInterval = null;
+    }
+
+    // Refresh the file list if a download completed in the current directory
+    if (completed.length > 0 && programState[0].state === 'fileExplorer' && fileExplorerArray.length > 0) {
+      var currentDir = getFileExplorerPath();
+      for (var i = 0; i < completed.length; i++) {
+        if (completed[i].directory === currentDir) {
+          senddir();
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    // silently ignore polling errors
   }
 }
 
