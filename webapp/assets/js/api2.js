@@ -65,6 +65,10 @@ var MSTREAMAPI = (function () {
     makePOSTRequest('api/v1/file-explorer/m3u', { path }, callback);
   }
 
+  mstreamModule.mkdir = function (directory, callback) {
+    makePOSTRequest('api/v1/file-explorer/mkdir', { directory: directory }, callback);
+  }
+
   mstreamModule.recursiveScan = function (directory, callback) {
     makePOSTRequest('api/v1/file-explorer/recursive', { directory: directory }, callback);
   }

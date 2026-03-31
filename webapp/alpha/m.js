@@ -230,6 +230,8 @@ function setBrowserRootPanel(panelName, showBar) {
   document.getElementById('localSearchBar').value = "";
   document.getElementById('directoryName').innerHTML = '';
   document.getElementById('local_search_btn').style.display = '';
+  document.getElementById('upload_btn').classList.add('super-hide');
+  document.getElementById('mkdir_btn').classList.add('super-hide');
 
   ([...document.getElementsByClassName('panel_one_name')]).forEach(el => {
     el.innerHTML = panelName;
@@ -266,6 +268,22 @@ async function senddir(root) {
         previousSearch: ''
       });
     }
+
+    // Show upload and mkdir buttons only when inside a vpath (not at root)
+    const uploadBtn = document.getElementById('upload_btn');
+    const mkdirBtn = document.getElementById('mkdir_btn');
+    if (fileExplorerArray.length > 0) {
+      uploadBtn.classList.remove('super-hide');
+      if (MSTREAMAPI.currentServer.noMkdir === true) {
+        mkdirBtn.classList.add('super-hide');
+      } else {
+        mkdirBtn.classList.remove('super-hide');
+      }
+    } else {
+      uploadBtn.classList.add('super-hide');
+      mkdirBtn.classList.add('super-hide');
+    }
+
     printdir(response);
   } catch(err) {
     boilerplateFailure(err);
@@ -426,6 +444,21 @@ async function init() {
       document.getElementById('live-playlist-select').innerHTML += `<option value="${p.name}">${p.name}</option>`;
     });
 
+    if (response.supportedAudioFiles) {
+      const codecSelect = document.getElementById('ytdl_codec');
+      codecSelect.innerHTML = '';
+      Object.keys(response.supportedAudioFiles).forEach(format => {
+        if (response.supportedAudioFiles[format] === true) {
+          const option = document.createElement('option');
+          option.value = format;
+          option.textContent = format.toUpperCase();
+          codecSelect.appendChild(option);
+        }
+      });
+    }
+
+    MSTREAMAPI.currentServer.noMkdir = response.noMkdir === true;
+
     if (response.transcode) {
       MSTREAMPLAYER.transcodeOptions.serverEnabled = true;
       MSTREAMPLAYER.transcodeOptions.defaultCodec = response.transcode.defaultCodec;
@@ -562,6 +595,231 @@ function openNewPlaylistModal() {
 
 function openPlaybackModal() {
   myModal.open('#speedModal');
+}
+
+function switchUploadTab(tab) {
+  const uploadTab = document.getElementById('tab_upload');
+  const ytdlTab = document.getElementById('tab_ytdl');
+  const uploadContent = document.getElementById('tab_content_upload');
+  const ytdlContent = document.getElementById('tab_content_ytdl');
+
+  if (tab === 'upload') {
+    uploadTab.style.borderBottomColor = '#fff';
+    ytdlTab.style.borderBottomColor = 'transparent';
+    uploadContent.classList.remove('super-hide');
+    ytdlContent.classList.add('super-hide');
+  } else {
+    ytdlTab.style.borderBottomColor = '#fff';
+    uploadTab.style.borderBottomColor = 'transparent';
+    ytdlContent.classList.remove('super-hide');
+    uploadContent.classList.add('super-hide');
+    document.getElementById('ytdl_url').focus();
+  }
+}
+
+function handleFileUpload(files) {
+  if (!files || files.length === 0) { return; }
+  for (var i = 0; i < files.length; i++) {
+    var file = files[i];
+    file.directory = getFileExplorerPath();
+    myDropzone.addFile(file);
+  }
+  document.getElementById('upload_file_input').value = '';
+  myModal.close();
+}
+
+function openUploadModal() {
+  document.getElementById('upload_filepath').textContent = getFileExplorerPath();
+
+  // Reset upload tab
+  document.getElementById('upload_file_input').value = '';
+
+  // Reset ytdl tab
+  if (!MSTREAMPLAYER.transcodeOptions.serverEnabled) {
+    document.getElementById('ytdl_transcode_warning').classList.remove('super-hide');
+    document.getElementById('ytdl_submit').disabled = true;
+  } else {
+    document.getElementById('ytdl_transcode_warning').classList.add('super-hide');
+    document.getElementById('ytdl_submit').disabled = false;
+  }
+  document.getElementById('ytdl_meta_loading').classList.add('super-hide');
+  document.getElementById('ytdl_metadata').classList.add('super-hide');
+  document.getElementById('ytdl_meta_title').textContent = '';
+  document.getElementById('ytdl_meta_artist').textContent = '';
+  document.getElementById('ytdl_meta_album').textContent = '';
+  document.getElementById('ytdl_meta_year').textContent = '';
+
+  // Default to upload tab
+  switchUploadTab('upload');
+  myModal.open('#uploadModal');
+}
+
+function openMkdirModal() {
+  document.getElementById('mkdir_filepath').textContent = getFileExplorerPath();
+  document.getElementById('mkdir_name').value = '';
+  myModal.open('#mkdirModal');
+}
+
+async function submitMkdir() {
+  const folderName = document.getElementById('mkdir_name').value.trim();
+  if (!folderName) { return; }
+
+  const directory = getFileExplorerPath() + folderName;
+  document.getElementById('mkdir_submit').disabled = true;
+
+  try {
+    await MSTREAMAPI.mkdir(directory);
+    iziToast.success({
+      title: 'Folder Created',
+      position: 'topCenter',
+      timeout: 3500
+    });
+    myModal.close();
+    senddir();
+  } catch (err) {
+    iziToast.error({
+      title: 'Failed to create folder',
+      position: 'topCenter',
+      timeout: 3500
+    });
+  } finally {
+    document.getElementById('mkdir_submit').disabled = false;
+  }
+}
+
+function isYoutubeUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname === 'youtube.com' || parsed.hostname.endsWith('.youtube.com') || parsed.hostname === 'youtu.be';
+  } catch (e) {
+    return false;
+  }
+}
+
+var ytdlMetaTimeout = null;
+document.getElementById('ytdl_url').addEventListener('input', function() {
+  clearTimeout(ytdlMetaTimeout);
+  var url = this.value.trim();
+
+  document.getElementById('ytdl_metadata').classList.add('super-hide');
+  document.getElementById('ytdl_meta_loading').classList.add('super-hide');
+
+  if (!isYoutubeUrl(url)) { return; }
+
+  document.getElementById('ytdl_meta_loading').classList.remove('super-hide');
+
+  ytdlMetaTimeout = setTimeout(async function() {
+    try {
+      var res = await MSTREAMAPI.ytdlMetadata(url);
+      document.getElementById('ytdl_meta_loading').classList.add('super-hide');
+
+      var meta = res.data || res;
+      document.getElementById('ytdl_meta_title').textContent = meta.title || '';
+      document.getElementById('ytdl_meta_artist').textContent = meta.artist || '';
+      document.getElementById('ytdl_meta_album').textContent = meta.album || '';
+      document.getElementById('ytdl_meta_year').textContent = meta.year || '';
+
+      var thumb = document.getElementById('ytdl_meta_thumb');
+      if (meta.thumbnail) {
+        thumb.src = meta.thumbnail;
+        thumb.style.display = '';
+      } else {
+        thumb.style.display = 'none';
+      }
+
+      document.getElementById('ytdl_metadata').classList.remove('super-hide');
+    } catch(err) {
+      document.getElementById('ytdl_meta_loading').classList.add('super-hide');
+    }
+  }, 500);
+});
+
+async function submitYtdl() {
+  const url = document.getElementById('ytdl_url').value;
+  const outputCodec = document.getElementById('ytdl_codec').value;
+  const filepath = document.getElementById('upload_filepath').textContent;
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== 'youtube.com' && !parsed.hostname.endsWith('.youtube.com') && parsed.hostname !== 'youtu.be') {
+      return iziToast.warning({ title: 'URL must be a YouTube link', position: 'topCenter', timeout: 3500 });
+    }
+  } catch (e) {
+    return iziToast.warning({ title: 'Invalid URL', position: 'topCenter', timeout: 3500 });
+  }
+
+  // Collect user-edited metadata overrides
+  const metadata = {};
+  const metaTitle = document.getElementById('ytdl_meta_title').textContent.trim();
+  const metaArtist = document.getElementById('ytdl_meta_artist').textContent.trim();
+  const metaAlbum = document.getElementById('ytdl_meta_album').textContent.trim();
+  const metaYear = document.getElementById('ytdl_meta_year').textContent.trim();
+  if (metaTitle) { metadata.title = metaTitle; }
+  if (metaArtist) { metadata.artist = metaArtist; }
+  if (metaAlbum) { metadata.album = metaAlbum; }
+  if (metaYear) { metadata.year = metaYear; }
+
+  document.getElementById('ytdl_submit').disabled = true;
+
+  try {
+    await MSTREAMAPI.ytdl(url, outputCodec, filepath, metadata);
+    myModal.close();
+    document.getElementById('ytdl_url').value = '';
+    document.getElementById('ytdl_metadata').classList.add('super-hide');
+    iziToast.success({
+      title: 'Download Started',
+      position: 'topCenter',
+      timeout: 3000
+    });
+    startYtdlPolling();
+  } catch(err) {
+    boilerplateFailure(err);
+  } finally {
+    document.getElementById('ytdl_submit').disabled = false;
+  }
+}
+
+var ytdlPollInterval = null;
+function startYtdlPolling() {
+  if (ytdlPollInterval) { return; }
+  updateYtdlIndicator();
+  ytdlPollInterval = setInterval(updateYtdlIndicator, 3000);
+}
+
+async function updateYtdlIndicator() {
+  try {
+    var res = await MSTREAMAPI.ytdlDownloads();
+    var downloads = (res.data || res).downloads || [];
+    var active = downloads.filter(function(d) { return d.status === 'downloading'; });
+    var completed = downloads.filter(function(d) { return d.status === 'complete'; });
+
+    var indicator = document.getElementById('ytdl_download_indicator');
+    var textEl = document.getElementById('ytdl_download_text');
+
+    if (active.length > 0) {
+      indicator.classList.remove('super-hide');
+      textEl.textContent = active.length === 1 ? 'Downloading audio...' : 'Downloading ' + active.length + ' files...';
+    } else {
+      indicator.classList.add('super-hide');
+
+      // Stop polling when nothing is active
+      clearInterval(ytdlPollInterval);
+      ytdlPollInterval = null;
+    }
+
+    // Refresh the file list if a download completed in the current directory
+    if (completed.length > 0 && programState[0].state === 'fileExplorer' && fileExplorerArray.length > 0) {
+      var currentDir = getFileExplorerPath();
+      for (var i = 0; i < completed.length; i++) {
+        if (completed[i].directory === currentDir) {
+          senddir();
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    // silently ignore polling errors
+  }
 }
 
 function openMetadataModal(metadata, fp) {

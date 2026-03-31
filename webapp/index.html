@@ -239,6 +239,72 @@
     </div> 
   </div>
 
+  <!-- Download Modal -->
+  <div class="hystmodal" id="uploadModal" aria-hidden="true">
+    <div class="hystmodal__wrap">
+      <div class="hystmodal__window" role="dialog" aria-modal="true">
+        <a data-hystclose class="hystmodal__close">Close</a>
+        <div class="hystmodal__styled">
+          <div style="display:flex; gap:0; margin-bottom:16px; border-bottom:1px solid rgba(255,255,255,0.2);">
+            <button id="tab_upload" onclick="switchUploadTab('upload')" style="flex:1; padding:10px; background:none; border:none; color:#fff; cursor:pointer; font-size:14px; font-weight:bold; border-bottom:2px solid transparent;">Upload Files</button>
+            <button id="tab_ytdl" onclick="switchUploadTab('ytdl')" style="flex:1; padding:10px; background:none; border:none; color:#fff; cursor:pointer; font-size:14px; font-weight:bold; border-bottom:2px solid transparent;">Youtube DL</button>
+          </div>
+          <p style="color:#fff; margin: 0 0 12px; opacity: 0.7;"><b>Location: </b><span id="upload_filepath"></span></p>
+
+          <!-- Upload Tab -->
+          <div id="tab_content_upload">
+            <div id="upload_drop_area" style="border:2px dashed rgba(255,255,255,0.4); border-radius:8px; padding:32px 16px; text-align:center; color:rgba(255,255,255,0.6); margin-bottom:16px; cursor:default;">
+              <p style="margin:0 0 8px; font-size:16px;">Drag & drop files anywhere on the page</p>
+              <p style="margin:0; font-size:13px; opacity:0.7;">or use the button below to select files</p>
+            </div>
+            <label class="btn green" style="display:inline-block; cursor:pointer;">
+              Choose Files
+              <input id="upload_file_input" type="file" multiple style="display:none;" onchange="handleFileUpload(this.files)">
+            </label>
+          </div>
+
+          <!-- Youtube DL Tab -->
+          <div id="tab_content_ytdl" class="super-hide">
+            <p>Download youtube videos to your server. <b>You must have yt-dlp installed for this to work!</b></p>
+            <p id="ytdl_transcode_warning" class="super-hide" style="color:#e57373;">Transcoding needs to be enabled for this feature</p>
+            <form action="javascript:submitYtdl()">
+              <input id="ytdl_url" autocomplete="off" type="url" required placeholder="Enter URL" style="color:#fff;">
+              <select id="ytdl_codec"></select>
+              <div id="ytdl_metadata" class="super-hide" style="display:flex; align-items:flex-start; gap:14px; margin:12px 0; color:#fff;">
+                <img id="ytdl_meta_thumb" src="" style="width:80px; height:80px; object-fit:cover; border-radius:4px; flex-shrink:0;">
+                <div style="flex:1; line-height:1.6;">
+                  <div><b>Title:</b> <span id="ytdl_meta_title" contenteditable="true" style="display:inline-block; min-width:120px; border-bottom:1px solid rgba(255,255,255,0.3);"></span></div>
+                  <div><b>Artist:</b> <span id="ytdl_meta_artist" contenteditable="true" style="display:inline-block; min-width:120px; border-bottom:1px solid rgba(255,255,255,0.3);"></span></div>
+                  <div><b>Album:</b> <span id="ytdl_meta_album" contenteditable="true" style="display:inline-block; min-width:120px; border-bottom:1px solid rgba(255,255,255,0.3);"></span></div>
+                  <div><b>Year:</b> <span id="ytdl_meta_year" contenteditable="true" style="display:inline-block; min-width:60px; border-bottom:1px solid rgba(255,255,255,0.3);"></span></div>
+                </div>
+              </div>
+              <div id="ytdl_meta_loading" class="super-hide" style="color:#fff; opacity:0.5; margin:12px 0;">Loading metadata...</div>
+              <input id="ytdl_submit" type="submit" class="btn green" value="Download">
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Folder Modal -->
+  <div class="hystmodal" id="mkdirModal" aria-hidden="true">
+    <div class="hystmodal__wrap">
+      <div class="hystmodal__window" role="dialog" aria-modal="true">
+        <a data-hystclose class="hystmodal__close">Close</a>
+        <div class="hystmodal__styled">
+          <h5>Create Folder</h5>
+          <form action="javascript:submitMkdir()">
+            <p style="color:#fff; margin: 0 0 12px; opacity: 0.7;"><b>Location: </b><span id="mkdir_filepath"></span></p>
+            <input id="mkdir_name" autocomplete="off" type="text" required placeholder="Folder name" pattern="[a-zA-Z0-9 _\-\.]+" style="color:#fff;">
+            <input id="mkdir_submit" type="submit" class="btn green" value="Create Folder">
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Metadata Model -->
   <div class="hystmodal" id="metadataModel" aria-hidden="true">
     <div class="hystmodal__wrap">
@@ -507,10 +573,17 @@
           <div id="search_folders" class="super-hide">
             <input id="localSearchBar" onkeyup="runLocalSearch(this)" type="text" placeholder="Search List" autocomplete="off">
           </div>
+          <svg id="mkdir_btn" onclick="openMkdirModal();" title="Create Folder" class="pointer super-hide" xmlns="http://www.w3.org/2000/svg" height="24" width="24"><path d="M0 0h24v24H0z" fill="none"/><path d="M20 6h-8l-2-2H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-1 8h-3v3h-2v-3h-3v-2h3V9h2v3h3v2z"/></svg>
+          <svg id="upload_btn" onclick="openUploadModal();" title="Upload" class="pointer super-hide" xmlns="http://www.w3.org/2000/svg" height="24" width="24"><path d="M0 0h24v24H0z" fill="none"/><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
           <svg onclick="addAll();" class="pointer" xmlns="http://www.w3.org/2000/svg" height="24" width="24"><path d="M0 0h24v24H0V0z" fill="none"/><path d="M21 3H3c-1.11 0-2 .89-2 2v12a2 2 0 0 0 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5a2 2 0 0 0-2-2zm0 14H3V5h18v12zm-5-7v2h-3v3h-2v-3H8v-2h3V7h2v3h3z"/></svg>
         </div>
         <div class="upload-progress-bar">
           <div style="width:0%" id="upload-progress-inner" class="upload-progress-inner"></div>
+        </div>
+        <div id="ytdl_download_indicator" class="super-hide" style="display:flex; align-items:center; gap:8px; padding:8px 14px; background:rgba(76,175,80,0.15); border-left:3px solid #4CAF50; color:#fff; font-size:13px;">
+          <svg class="spinner" style="width:18px; height:18px;" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
+          <span id="ytdl_download_text" style="flex:1;">Downloading...</span>
+          <a href="/downloads" style="color:#4CAF50; white-space:nowrap;">view downloads</a>
         </div>
         <div id="filelist">
           <h4>Welcome To mStream!</h4>

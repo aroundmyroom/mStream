@@ -127,6 +127,22 @@ const MSTREAMAPI = (() => {
     return req('POST', mstreamModule.currentServer.host + "api/v1/db/random-songs", postObject);
   }
 
+  mstreamModule.mkdir = (directory) => {
+    return req('POST', mstreamModule.currentServer.host + "api/v1/file-explorer/mkdir", { directory: directory });
+  }
+
+  mstreamModule.ytdl = (url, outputCodec, directory, metadata) => {
+    return req('POST', mstreamModule.currentServer.host + "api/v1/ytdl/", { url: url, outputCodec: outputCodec, directory: directory, metadata: metadata });
+  }
+
+  mstreamModule.ytdlMetadata = (url) => {
+    return req('GET', mstreamModule.currentServer.host + "api/v1/ytdl/metadata?url=" + encodeURIComponent(url));
+  }
+
+  mstreamModule.ytdlDownloads = () => {
+    return req('GET', mstreamModule.currentServer.host + "api/v1/ytdl/downloads");
+  }
+
   // Scrobble
   mstreamModule.scrobbleByMetadata =  (artist, album, trackName) => {
     return req('POST', mstreamModule.currentServer.host +  "api/v1/lastfm/scrobble-by-metadata", { artist: artist, album: album, track: trackName });
