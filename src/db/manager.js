@@ -43,6 +43,7 @@ export function updateFileScanId(file, scanId) { return backend.updateFileScanId
 export function insertFile(fileData) { return backend.insertFile(fileData); }
 export function beginTransaction() { if (backend.beginTransaction) backend.beginTransaction(); }
 export function commitTransaction() { if (backend.commitTransaction) backend.commitTransaction(); }
+export function vacuumInto(destPath) { if (backend.vacuumInto) backend.vacuumInto(destPath); }
 export function removeFileByPath(filepath, vpath) { return backend.removeFileByPath(filepath, vpath); }
 export function getLiveArtFilenames() { return backend.getLiveArtFilenames(); }
 export function getLiveHashes() { return backend.getLiveHashes(); }

@@ -103,7 +103,7 @@ const schema = Joi.object({
     Joi.string(),
     Joi.object({
       root: Joi.string().required(),
-      type: Joi.string().valid('music', 'audio-books', 'recordings').default('music'),
+      type: Joi.string().valid('music', 'audio-books', 'recordings', 'youtube').default('music'),
       allowRecordDelete: Joi.boolean().default(false),
       albumsOnly: Joi.boolean().default(false),
     })
@@ -120,6 +120,7 @@ const schema = Joi.object({
       'lastfm-session': Joi.string().optional(),
       'listenbrainz-token': Joi.string().allow('').optional(),
       'allow-radio-recording': Joi.boolean().optional(),
+      'allow-youtube-download': Joi.boolean().optional(),
     })
   ).default({}),
   ssl: Joi.object({

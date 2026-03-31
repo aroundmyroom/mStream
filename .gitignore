@@ -25,7 +25,16 @@ save/sync-cdn/*
 bin/ffmpeg/*
 !bin/ffmpeg/README.md
 
+bin/yt-dlp/*
+!bin/yt-dlp/README.md
+
 save/*.json
+
+save/backups/*
+!save/backups/.gitkeep
+
+# ytdl-core player script cache files
+*-player-script.js
 
 .DS_Store
 .vscode/*

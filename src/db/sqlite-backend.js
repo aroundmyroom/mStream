@@ -81,7 +81,10 @@ export function init(dbDirectory) {
       stack      TEXT,
       first_seen INTEGER NOT NULL,
       last_seen  INTEGER NOT NULL,
-      count      INTEGER NOT NULL DEFAULT 1
+      count      INTEGER NOT NULL DEFAULT 1,
+      fixed_at   INTEGER,
+      fix_action TEXT,
+      confirmed_at INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_se_last_seen ON scan_errors(last_seen);
     CREATE INDEX IF NOT EXISTS idx_se_vpath    ON scan_errors(vpath);
@@ -302,6 +305,13 @@ export function init(dbDirectory) {
 
 export function close() {
   if (db) { db.close(); }
+}
+
+// Produce a clean, fully-checkpointed, WAL-free snapshot of the database at
+// destPath. Uses SQLite's built-in VACUUM INTO which is safe to run while the
+// database is live (no external lock required).
+export function vacuumInto(destPath) {
+  db.exec(`VACUUM INTO '${destPath.replace(/'/g, "''")}'`);
 }
 
 // Save operations (no-ops for SQLite - writes are immediate)
@@ -927,12 +937,12 @@ export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepat
   let sql = `SELECT f.rowid AS id, f.* FROM files f
     JOIN fts_files ft ON f.rowid = ft.rowid
     WHERE ${vIn.sql.replace(/\bvpath\b/g, 'f.vpath')}${ep.sql.replace(/\bvpath\b/g, 'f.vpath').replace(/\bfilepath\b/g, 'f.filepath')}
-    AND ft.fts_files MATCH ?
-    ORDER BY bm25(fts_files)`;
+    AND ft.fts_files MATCH ?`;
   if (filepathPrefix && typeof filepathPrefix === 'string') {
     sql += " AND f.filepath LIKE ? ESCAPE '\\'";
     params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
   }
+  sql += ' ORDER BY bm25(fts_files) LIMIT 500';
   const rows = db.prepare(sql).all(...params);
   return rows.map(mapFileRow);
 }
@@ -956,12 +966,12 @@ export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix
   let sql = `SELECT f.rowid AS id, f.* FROM files f
     JOIN fts_files ft ON f.rowid = ft.rowid
     WHERE ${vIn.sql.replace(/\bvpath\b/g, 'f.vpath')}${ep.sql.replace(/\bvpath\b/g, 'f.vpath').replace(/\bfilepath\b/g, 'f.filepath')}
-    AND ft.fts_files MATCH ?
-    ORDER BY bm25(fts_files)`;
+    AND ft.fts_files MATCH ?`;
   if (filepathPrefix && typeof filepathPrefix === 'string') {
     sql += " AND f.filepath LIKE ? ESCAPE '\\'";
     params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
   }
+  sql += ' ORDER BY bm25(fts_files) LIMIT 500';
   const rows = db.prepare(sql).all(...params);
   return rows.map(mapFileRow);
 }

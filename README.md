@@ -2,7 +2,7 @@
 
 > **A heavily extended fork of [mStream](https://github.com/IrosTheBeggar/mStream) by [aroundmyroom](https://github.com/aroundmyroom).**
 
-**Current version: [5.16.31-velvet](releases/v5.16.31-velvet.md)** — March 2026
+**Current version: [5.16.32-velvet](releases/v5.16.32-velvet.md)** — March 2026
 
 [![Discord](https://img.shields.io/badge/Discord-mStream%20Velvet-5865F2?logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/KfsTCYrTkS)
 
@@ -44,15 +44,17 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 | Track duration | ❌ | ✅ Stored in DB, returned by all track endpoints |
 | Play history reset | ❌ | ✅ Per-user reset for Most Played and Recently Played |
 | Cross-device sync | localStorage only — lost on new browser | ✅ All prefs and queue persisted to DB; any device/browser resumes where you left off |
-| Multi-word search | Single-field only | ✅ Tokens matched across title, artist, album, and filepath simultaneously |
+| Search | Single-field LIKE scan | ✅ FTS5 full-text index; BM25 relevance ranking; prefix (`talk*`), exclusion (`-word / NOT word`), diacritic folding; results split into Folders / Artists / Songs sections |
 | Full-screen visualizer | ❌ | ✅ Milkdrop/Butterchurn, Custom Spectrum (7 modes), AudioMotion-analyzer (6 presets) |
 | Scan error repair | ❌ | ✅ Fix button re-muxes corrupt FLAC/MP3/WAV in-place; unrecoverable files flagged |
-| Internet radio | ❌ | ✅ Stream stations via proxy; station logos cached; drag-to-reorder; ICY now-playing metadata + kbps badge; scheduled & on-demand recording |
+| Internet radio | ❌ | ✅ Stream stations via proxy; station logos cached; drag-to-reorder; ICY now-playing metadata + kbps badge; scheduled & on-demand recording; **station logo embedded in all recorded formats** |
+| YouTube download | ❌ | ✅ Save any YouTube video as tagged MP3/Opus to your library via yt-dlp; album art embedded; temp files fully isolated from music folder |
 | Podcasts | ❌ | ✅ RSS subscribe, episode browse & play, progress tracking, feed refresh, drag-to-reorder, RSS URL editing, save episode to server |
 | Genre Groups | ❌ | ✅ Admin panel to define named genre buckets used across genre browsing and smart playlist filtering; drag-to-reorder, auto-seeded defaults |
 | Smart Playlists | ❌ | ✅ Rule-based playlists: genre group, year range, min rating, play status, artist search, library (vpath) filters; Fresh Picks daily-shuffle mode |
 | ZIP download | ❌ | ✅ Download current album or playlist as a ZIP with configurable server-side size guard |
 | ListenBrainz | ❌ | ✅ Scrobbling + instant "listening now" ping; runs alongside Last.fm |
+| On-demand album art | ❌ | ✅ Art extracted from embedded tags for unscanned files — shown in player bar, queue, file list, and recordings view without needing a scan |
 
 ---
 
@@ -71,7 +73,7 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 - **Sleep timer** — Presets with 40-step volume fade-out
 - **Full-screen visualizer** — Milkdrop/Butterchurn (preset cycling), Custom Spectrum (7 modes), AudioMotion-analyzer (6 curated presets: Mirror Peaks, LED Dual, Radial, Octave Reflex, Velvet, Line Stereo)
 - **Cross-device sync** — All preferences and queue saved to DB; any device/browser resumes where you left off
-- **Multi-word search** — Query tokens matched across title, artist, album, and filepath simultaneously
+- **FTS5 search** — Full-text index across title, artist, album, filepath; BM25 relevance ranking; prefix matching (`talk*`); exclusion queries (`talking -heads`); diacritic folding; results split into Folders, Artists, and Songs sections
 - **Navigation customisation** — Show/hide Genres and Decades nav buttons per user
 - **Queue drag-and-drop reordering** — With persistent localStorage state
 - **CUE sheet markers** — Tick marks on seek bar with seek-on-click and tooltips
@@ -191,7 +193,7 @@ Open **http://localhost:3000** — on a fresh install with no users the admin pa
 Or pin to a specific release:
 
 ```shell
-docker pull ghcr.io/aroundmyroom/mstream-velvet:v5.16.31-velvet
+docker pull ghcr.io/aroundmyroom/mstream-velvet:v5.16.32-velvet
 ```
 
 **Build from source** (optional):
@@ -267,7 +269,7 @@ The built-in Subsonic REST API also lets you use any Subsonic-compatible app:
 - **Database:** SQLite via Node.js built-in `node:sqlite` (`DatabaseSync`) — default engine
 - **Docker base image:** `node:24-alpine`
 - **Supported audio formats:** flac, mp3, mp4, wav, ogg, opus, aac, m4a, w64, aiff
-- **Waveform generation:** requires `ffmpeg` in `bin/ffmpeg/` (bare-metal) or pre-installed in Docker
+- **ffmpeg:** auto-downloaded to `bin/ffmpeg/` at startup if missing or below v6 (bare-metal and Docker); waveform generation, radio recording, YouTube tagging, and transcoding all use this bundled binary
 - **Cross-platform:** Linux, macOS, Windows, FreeBSD, ARM (Raspberry Pi)
 
 ---

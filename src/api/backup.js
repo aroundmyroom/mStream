@@ -1,9 +1,11 @@
 import fsp from 'node:fs/promises';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import archiver from 'archiver';
 import winston from 'winston';
 import * as config from '../state/config.js';
+import * as dbManager from '../db/manager.js';
 
 const MAX_BACKUPS = 4;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -29,18 +31,20 @@ async function createBackup() {
   // Always include any db files that exist on disk — covers cases where the
   // engine was switched (e.g. loki → sqlite) and both sets of files are present.
 
-  // SQLite — main file + WAL/SHM if present
+  // SQLite — use VACUUM INTO for a safe hot-backup: produces a clean,
+  // fully-checkpointed, WAL-free snapshot without needing an exclusive lock.
+  // Raw file copy of a live WAL-mode database is unsafe: restoring the main
+  // file without a matching WAL silently rolls back all un-checkpointed data.
   const dbFile = path.join(dbDir, 'mstream.sqlite');
+  let sqliteTmp = null;
   try {
     await fsp.access(dbFile);
-    filesToInclude.push({ src: dbFile, name: 'mstream.sqlite' });
-    for (const ext of ['-wal', '-shm']) {
-      try {
-        await fsp.access(dbFile + ext);
-        filesToInclude.push({ src: dbFile + ext, name: 'mstream.sqlite' + ext });
-      } catch (_) {}
-    }
-  } catch (_) {}
+    sqliteTmp = path.join(os.tmpdir(), `mstream-backup-${ts}.sqlite`);
+    dbManager.vacuumInto(sqliteTmp);
+    filesToInclude.push({ src: sqliteTmp, name: 'mstream.sqlite' });
+  } catch (_) {
+    sqliteTmp = null; // DB not open yet (loki engine) — skip
+  }
 
   // Loki — three separate .db files
   for (const name of ['user-data.loki-v1.db', 'files.loki-v3.db', 'shared.loki-v1.db']) {
@@ -48,17 +52,22 @@ async function createBackup() {
     try { await fsp.access(src); filesToInclude.push({ src, name }); } catch (_) {}
   }
 
-  await new Promise((resolve, reject) => {
-    const output = fs.createWriteStream(filepath);
-    const archive = archiver('zip', { zlib: { level: 6 } });
-    output.on('close', resolve);
-    archive.on('error', reject);
-    archive.pipe(output);
-    for (const { src, name } of filesToInclude) {
-      archive.file(src, { name });
-    }
-    archive.finalize();
-  });
+  try {
+    await new Promise((resolve, reject) => {
+      const output = fs.createWriteStream(filepath);
+      const archive = archiver('zip', { zlib: { level: 6 } });
+      output.on('close', resolve);
+      archive.on('error', reject);
+      archive.pipe(output);
+      for (const { src, name } of filesToInclude) {
+        archive.file(src, { name });
+      }
+      archive.finalize();
+    });
+  } finally {
+    // Always clean up the temp VACUUM file even if archiver fails
+    if (sqliteTmp) fsp.unlink(sqliteTmp).catch(() => {});
+  }
 
   await pruneOldBackups();
   winston.info(`Backup created: ${filename}`);

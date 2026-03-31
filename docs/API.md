@@ -40,6 +40,8 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [/upload](API/upload.md) — audio-only file type restriction enforced *(GitHub Copilot, 2026-02-27)*
 
+[/api/v1/files/art — on-demand embedded album art extraction for unscanned files](API/files_art.md) *(v5.16.32)*
+
 ## Playlists
 
 [/playlist/getall](API/playlist_getall.md)
@@ -116,7 +118,7 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 ## Radio *(GitHub Copilot, 2026-03-20)*
 
-[/radio — stations CRUD, reorder, stream proxy, ICY now-playing, logo caching, admin config](API/radio.md)
+[/radio — stations CRUD, reorder, stream proxy, ICY now-playing, logo caching, admin config; recording stop returns `relPath`, `vpath`, `stationName`, `artFile`](API/radio.md) *(stop response enriched v5.16.32)*
 
 ## Podcasts *(GitHub Copilot, 2026-03-21)*
 
@@ -141,6 +143,10 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 ## JukeBox
 
 [/jukebox/sessions](API/jukebox_sessions.md) *(admin)*
+
+## YouTube Download *(v5.16.32)*
+
+[/api/v1/ytdl — preview metadata, download & tag to YouTube folder; Opus METADATA_BLOCK_PICTURE art; temp-isolated; auto-managed yt-dlp + ffmpeg](API/ytdl.md)
 
 ## Download
 
