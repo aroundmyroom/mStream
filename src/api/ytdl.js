@@ -171,6 +171,36 @@ export function setup(mstream) {
           return;
         }
 
+        // Write user-submitted metadata to the file's ID3 tags via ffmpeg
+        const userMeta = entry.metadata || {};
+        if (userMeta.title || userMeta.artist || userMeta.album || userMeta.year) {
+          try {
+            const tmpFile = downloadedFile + '.tmp.' + value.outputCodec;
+            const ffmpegArgs = ['-i', downloadedFile, '-c', 'copy'];
+            if (userMeta.title) { ffmpegArgs.push('-metadata', `title=${userMeta.title}`); }
+            if (userMeta.artist) { ffmpegArgs.push('-metadata', `artist=${userMeta.artist}`); }
+            if (userMeta.album) { ffmpegArgs.push('-metadata', `album=${userMeta.album}`); }
+            if (userMeta.year) { ffmpegArgs.push('-metadata', `date=${userMeta.year}`); }
+            ffmpegArgs.push('-y', tmpFile);
+
+            await new Promise((resolve, reject) => {
+              const proc = spawn(ffmpegPath, ffmpegArgs);
+              proc.on('close', (ffCode) => {
+                if (ffCode !== 0) { return reject(new Error(`ffmpeg exited with code ${ffCode}`)); }
+                resolve();
+              });
+              proc.on('error', reject);
+            });
+
+            await fs.unlink(downloadedFile);
+            await fs.rename(tmpFile, downloadedFile);
+            downloadedStat = await fs.stat(downloadedFile);
+            winston.info('yt-dlp: wrote user metadata tags to file');
+          } catch (tagErr) {
+            winston.error('yt-dlp: failed to write metadata tags', { stack: tagErr });
+          }
+        }
+
         // Parse metadata from the downloaded file (include covers for album art)
         const skipImg = config.program.scanOptions.skipImg === true;
         let metadata;
@@ -187,7 +217,6 @@ export function setup(mstream) {
 
         // Build DB record matching the scanner schema
         // User-submitted metadata overrides take priority over parsed file metadata
-        const userMeta = entry.metadata || {};
         const relativePath = path.relative(pathInfo.basePath, downloadedFile);
         const data = {
           title: userMeta.title || (metadata.title ? String(metadata.title) : null),
