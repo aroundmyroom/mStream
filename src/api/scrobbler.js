@@ -116,9 +116,14 @@ export function setup(mstream) {
 
   mstream.get('/api/v1/lastfm/similar-artists', (req, res) => {
     if (!req.query.artist) return res.json({ artists: [] });
+    if (!Scrobbler.apiKey) {
+      console.warn('[lastfm] similar-artists: no API key configured — set lastFM.apiKey in config');
+      return res.json({ artists: [] });
+    }
     Scrobbler.GetSimilarArtists(
       String(req.query.artist),
       (data) => {
+        if (!data) return res.json({ artists: [] });
         try {
           const artists = (data?.similarartists?.artist || [])
             .slice(0, 20)
@@ -156,6 +161,7 @@ export function setup(mstream) {
   mstream.get('/api/v1/lastfm/status', (req, res) => {
     res.json({
       serverEnabled: config.program.lastFM?.enabled !== false,
+      hasApiKey: !!(config.program.lastFM?.apiKey),
       linkedUser: req.user['lastfm-user'] || null,
     });
   });

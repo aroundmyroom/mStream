@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import Joi from 'joi';
-import { Jimp } from 'jimp';
+import sharp from 'sharp';
 import mime from 'mime-types';
 import axios from 'axios';
 import https from 'https';
@@ -505,7 +505,7 @@ async function getAlbumArt(songInfo) {
     try {
       await compressAlbumArt(originalFileBuffer, songInfo.aaFile);
     } catch (err) {
-      // Jimp couldn't decode the image (e.g. corrupted embedded PNG/JPEG).
+      // sharp couldn't decode the image (e.g. corrupted embedded PNG/JPEG).
       // The original is already on disk; copy it as a fallback thumbnail so
       // art still displays. Don't report a scan error — the user can't fix a
       // corrupted embedded image and the error would persist every rescan.
@@ -524,9 +524,8 @@ async function compressAlbumArt(buff, imgName) {
   if (loadJson.compressImage === false) { return; }
   if (buff.length < 100) { return; } // guard against malformed micro-buffers (file-type CVE workaround)
 
-  const img = await Jimp.fromBuffer(buff);
-  await img.scaleToFit({w:256, h:256}).write(path.join(loadJson.albumArtDirectory, 'zl-' + imgName));
-  await img.scaleToFit({w:92, h:92}).write(path.join(loadJson.albumArtDirectory, 'zs-' + imgName));
+  await sharp(buff).resize(256, 256, { fit: 'inside', withoutEnlargement: true }).toFile(path.join(loadJson.albumArtDirectory, 'zl-' + imgName));
+  await sharp(buff).resize(92, 92, { fit: 'inside', withoutEnlargement: true }).toFile(path.join(loadJson.albumArtDirectory, 'zs-' + imgName));
 }
 
 const mapOfDirectoryAlbumArt = {};

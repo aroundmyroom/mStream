@@ -595,11 +595,14 @@ export function removeFileByPath(filepath, vpath) {
 
 export function getLiveArtFilenames() {
   const musicArt = _s.liveArt.all().map(r => r.aaFile);
-  // Also protect locally-cached radio station logos from post-scan orphan cleanup
+  // Protect locally-cached radio station logos — only for stations that still exist in the DB.
+  // If a station is deleted, its img ref is gone from this query and the cached file
+  // will be removed by runOrphanCleanup() after the next completed scan.
   const radioArt = db.prepare(
     "SELECT DISTINCT img FROM radio_stations WHERE img IS NOT NULL AND img NOT LIKE 'http%'"
   ).all().map(r => r.img);
-  // Also protect locally-cached podcast feed artwork from post-scan orphan cleanup
+  // Same logic for podcast feed artwork — art for deleted feeds is not protected
+  // and will be cleaned up by runOrphanCleanup() after the next completed scan.
   const podcastArt = db.prepare(
     "SELECT DISTINCT img FROM podcast_feeds WHERE img IS NOT NULL AND img NOT LIKE 'http%'"
   ).all().map(r => r.img);

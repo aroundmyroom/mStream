@@ -32,7 +32,7 @@ if (process.versions["electron"]) {
   console.log(`v${program.version()}`);
   console.log();
   console.log('Check out our Discord server:');
-  console.log('https://discord.gg/AM896Rr');
+  console.log('https://discord.gg/KfsTCYrTkS');
   console.log();
 
   // Boot the server
