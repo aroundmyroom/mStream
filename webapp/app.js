@@ -5073,8 +5073,11 @@ async function viewAlbumSongs(albumName, artist, backFn) {
   const sig = _navCancel();
   setBody('<div class="loading-state"></div>');
   try {
+    const aoF = _albumsOnlyFilter();
     const body = { album: albumName };
     if (artist) body.artist = artist;
+    if (aoF.ignoreVPaths?.length)             body.ignoreVPaths             = aoF.ignoreVPaths;
+    if (aoF.includeFilepathPrefixes?.length)  body.includeFilepathPrefixes  = aoF.includeFilepathPrefixes;
     const d = await api('POST', 'api/v1/db/album-songs', body, sig);
     showSongs(d.map(norm), null, albumName || 'album');
   } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }

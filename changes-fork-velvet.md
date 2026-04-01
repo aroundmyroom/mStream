@@ -1,6 +1,18 @@
 # mStream Velvet Fork — Combined Change Log
 
-## v5.16.33-velvet — April 2026
+## Unreleased
+
+### fix: album browsing — songs from wrong vpath loaded when clicking an album
+- `viewAlbumSongs` in `webapp/app.js` sent no vpath/prefix filter → clicking any album loaded songs from ALL vpaths, including 12-inch and vinyl folders that should never appear in Albums view
+- Fixed: `viewAlbumSongs` now calls `_albumsOnlyFilter()` and forwards `ignoreVPaths` + `includeFilepathPrefixes` to the API
+- Fixed: `album-songs` endpoint in `src/api/db.js` now passes `includeFilepathPrefixes` through to `getAlbumSongs`
+- Fixed: `getAlbumSongs` in `src/db/sqlite-backend.js` now applies `includePrefixClauses` so the SQL itself enforces the filter
+
+### fix: duplicate albums — pressings with same name+year were collapsed into one entry
+- `getAlbums`, `getArtistAlbums`, and `getArtistAlbumsMulti` all deduped by `album+year`, causing multiple physical pressings of the same title (e.g. original vs. remaster vs. Japan press) to appear as a single album
+- Fixed: SQL now groups by `album + physical directory` using `rtrim(filepath, replace(filepath,'/','))` — each unique folder is a separate entry
+- Multi-disc folders (`/CD1`, `/CD2`, `/Disc 1`, etc.) are collapsed into their parent album in JS via `_normaliseAlbumDir()`, preserving correct multi-disc display
+
 
 ### chore: image processing migrated from jimp to sharp
 - Album art compression now uses **sharp** (libvips) instead of jimp across all three code paths: scanner, image-compress-script, and Discogs/Deezer art embedding
