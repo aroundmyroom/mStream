@@ -1,5 +1,14 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Unreleased
+
+### docs: Rust parser compatibility analysis
+- Added `docs/rust-parser-compatibility.md` documenting upstream's experimental Rust scanner (`98619f4`)
+- Explains why it cannot be adopted as-is: 6 missing DB fields (`duration`, `cuepoints`, `artist_id`, `album_id`, `art_source`, `trackOf`), 6 missing behaviours (`otherRoots` guard, `_needs*` repair loop, error reporting, prune-errors, scanStartTs, sidecar .cue support)
+- Includes a 10-step adoption checklist for future reference
+
+---
+
 ## v5.16.32 — FTS5 search, three-entity search, ffmpeg bootstrap, YouTube, on-demand album art
 
 **Files:** `src/db/sqlite-backend.js`, `src/server.js`, `src/api/ytdl.js`, `src/util/ffmpeg-bootstrap.js`, `src/api/radio-recorder.js`, `src/api/download.js`, `webapp/app.js`
