@@ -21,7 +21,8 @@ const _s = {}; // cached prepared statements — populated in init(), reused on 
 
 export function init(dbDirectory) {
   mkdirSync(dbDirectory, { recursive: true });
-  db = new DatabaseSync(path.join(dbDirectory, 'mstream.sqlite'));
+  const dbPath = path.join(dbDirectory, 'mstream.sqlite');
+  db = new DatabaseSync(dbPath);
   db.exec('PRAGMA journal_mode=WAL');
   // NORMAL skips per-write fsync (safe with WAL); prevents 50-200ms event-loop
   // stalls on slow storage (SD card, HDD) that would interrupt audio streaming.
@@ -34,6 +35,17 @@ export function init(dbDirectory) {
   db.exec('PRAGMA cache_size = -32000');
   // Keep sort/temp B-trees in memory instead of spilling to disk.
   db.exec('PRAGMA temp_store = MEMORY');
+  // Migrate to 8 KB pages if still on the SQLite default 4 KB.
+  // Larger pages = shallower B-trees = fewer reads per query on a 167 MB+ DB.
+  // PRAGMA page_size + VACUUM rebuilds the file in-place with the new page size.
+  // Runs once on first boot after this change (~3–5 s for 167 MB); skipped on
+  // all subsequent boots because page_size is already 8192.
+  const currentPageSize = db.prepare('PRAGMA page_size').get().page_size;
+  if (currentPageSize !== 8192) {
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    db.exec('PRAGMA page_size = 8192');
+    db.exec('VACUUM');
+  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS files (

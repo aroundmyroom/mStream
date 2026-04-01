@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### SQLite scan performance tuning
+- `TX_BATCH_SIZE` raised from 50 → 500: reduces scan write transactions from ~2760 to ~276 for a 138K-song library, fewer WAL fsyncs during scan
+- Automatic one-time page size migration from 4 KB → 8 KB on first boot: shallower B-trees, fewer disk reads per search/browse query on large databases (~3–5 s migration, never repeats)
+
 ### docs: Rust parser compatibility analysis
 - Added `docs/rust-parser-compatibility.md` documenting upstream's experimental Rust scanner (`98619f4`)
 - Explains why it cannot be adopted as-is: 6 missing DB fields (`duration`, `cuepoints`, `artist_id`, `album_id`, `art_source`, `trackOf`), 6 missing behaviours (`otherRoots` guard, `_needs*` repair loop, error reporting, prune-errors, scanStartTs, sidecar .cue support)

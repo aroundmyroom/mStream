@@ -114,13 +114,14 @@ export function setup(mstream) {
     res.json({});
   });
 
-  // Batch scan inserts into explicit SQLite transactions (50 at a time).
+  // Batch scan inserts into explicit SQLite transactions (500 at a time).
   // Without batching, every insertFile() is its own auto-commit which causes
   // an fsync/WAL flush per file.  On HDD/SD that takes 20-200 ms each,
   // blocking the Node.js event loop and starving the audio stream of bytes
   // — causing the browser to pause playback mid-song.
+  // 500 batches = ~276 commits for 138K files instead of 2760 — fewer WAL fsyncs.
   let _txBatch = 0;
-  const TX_BATCH_SIZE = 50;
+  const TX_BATCH_SIZE = 500;
 
   mstream.post('/api/v1/scanner/add-file', (req, res) => {
     if (_txBatch === 0) db.beginTransaction();
