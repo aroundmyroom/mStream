@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### fix: --t3 text color too dark in Velvet and Dark themes
+- Velvet `--t3`: `#6070a0` → `#7e8ec0` — readable muted text on navy background
+- Dark `--t3`: `#4a4a5a` → `#707082` — readable muted text on near-black background
+- Light `--t3` unchanged (`#7878a0` was already correct)
+- Applied in both `webapp/style.css` (main player + login screen overrides) and `webapp/admin/index.css`
+
 ### fix: ffmpeg re-downloaded on every restart for BtbN git snapshot builds
 - `_getFfmpegVersion()` regex only matched stable releases (`ffmpeg version 7.1.1`) — BtbN snapshot builds (`ffmpeg version N-123777-g<hash>-<date>`) returned `major: 0`, triggering a fresh download every boot
 - Added explicit `N-\d+` pattern detection; snapshot builds are treated as `major: 99` (always valid)
