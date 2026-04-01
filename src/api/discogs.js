@@ -564,14 +564,9 @@ export function setup(mstream) {
       // Write compressed variants used by the player UI
       try {
         if (imgBuf.length < 100) throw new Error('image buffer too small');
-        const { Jimp } = await import('jimp');
-        const jimg = await Jimp.fromBuffer(imgBuf);
-        const jl   = jimg.clone();
-        const js   = jimg.clone();
-        jl.scaleToFit({ w: 256, h: 256 });
-        await jl.write(/** @type {any} */(path.join(artDir, `zl-${aaFile}`)));
-        js.scaleToFit({ w: 92,  h: 92  });
-        await js.write(/** @type {any} */(path.join(artDir, `zs-${aaFile}`)));
+        const { default: sharp } = await import('sharp');
+        await sharp(imgBuf).resize(256, 256, { fit: 'inside', withoutEnlargement: true }).toFile(path.join(artDir, `zl-${aaFile}`));
+        await sharp(imgBuf).resize(92, 92, { fit: 'inside', withoutEnlargement: true }).toFile(path.join(artDir, `zs-${aaFile}`));
       } catch (_) { /* compression optional */ }
 
       // Commit any open scanner batch transaction before writing art, so this

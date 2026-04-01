@@ -233,27 +233,29 @@
       if (nav.classList.contains('open')) toggleSideMenu();
     }
     function gotoPlayer() {
-      // window.open('', name) returns the existing named tab without navigating it,
-      // and .focus() from a click handler is allowed by the browser.
       var playerOrigin = window.location.origin + '/';
+      // window.open('', name) reuses an existing named tab without navigating it.
+      // If no tab with that name exists the browser opens a new blank one.
+      // If popups are blocked it may return null or the current window.
       var w = window.open('', 'mStream-Velvet');
-      if (w && w !== window) {
-        try {
-          if (!w.location.href || w.location.href === 'about:blank') {
-            // No player tab with that name — open one
-            w.location.href = playerOrigin;
-          }
-          w.focus();
-          window.close();
-        } catch(e) {
-          // Cross-origin fallback (shouldn't happen same-origin)
-          w.focus();
-          window.close();
-        }
-      } else {
-        // No named player window found — navigate this tab there
-        window.location.href = playerOrigin;
+      if (!w || w === window) {
+        // Popup blocked or browser returned current window — open a new named tab directly.
+        window.open(playerOrigin, 'mStream-Velvet');
+        return;
       }
+      // Got a reference to a tab — check whether it already has the player loaded.
+      try {
+        var href = w.location.href;
+        if (!href || href === 'about:blank') {
+          // Newly created blank tab (player tab was closed) — navigate it to the player.
+          w.location.href = playerOrigin;
+        }
+        // Tab already has the player loaded — just bring it to the front.
+      } catch(e) {
+        // Cross-origin error (shouldn't happen same-origin) — navigate anyway.
+        w.location.href = playerOrigin;
+      }
+      w.focus();
     }
   </script>
 

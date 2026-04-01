@@ -1,0 +1,116 @@
+{
+  "scanOptions": {
+    "pause": 5,
+    "skipImg": false,
+    "scanInterval": "12",
+    "bootScanDelay": 3,
+    "noUpload": false,
+    "saveInterval": 5,
+    "newScan": true,
+    "allowId3Edit": true,
+    "maxZipMb": 1024
+  },
+  "folders": {
+    "Music": {
+      "root": "/media/music",
+      "type": "music",
+      "allowRecordDelete": false,
+      "albumsOnly": false
+    },
+    "12-inches": {
+      "root": "/media/music/12 inches A-Z",
+      "type": "music",
+      "allowRecordDelete": false,
+      "albumsOnly": false
+    },
+    "Top-40": {
+      "root": "/media/music/TOP40",
+      "type": "music",
+      "allowRecordDelete": false,
+      "albumsOnly": false
+    },
+    "Disco": {
+      "root": "/media/music/Disco",
+      "type": "music",
+      "allowRecordDelete": false,
+      "albumsOnly": false
+    },
+    "Unidisc 12-inch classics": {
+      "root": "/media/music/12 inches/12 Inch Classics on CD (Unidisc Series)",
+      "type": "music",
+      "allowRecordDelete": false,
+      "albumsOnly": false
+    },
+    "AudioBooks-Podcasts": {
+      "root": "/media/music/Audiobooks & Podcasts",
+      "type": "audio-books",
+      "allowRecordDelete": false,
+      "albumsOnly": false
+    },
+    "Albums": {
+      "root": "/media/music/Albums",
+      "albumsOnly": true,
+      "type": "music",
+      "allowRecordDelete": false
+    },
+    "Recordings": {
+      "root": "/media/music/Recordings",
+      "type": "recordings",
+      "allowRecordDelete": true
+    }
+  },
+  "users": {
+    "dennis": {
+      "vpaths": [
+        "Music",
+        "12-inches",
+        "Top-40",
+        "Disco",
+        "Unidisc 12-inch classics",
+        "AudioBooks-Podcasts",
+        "Albums",
+        "Recordings"
+      ],
+      "username": "dennis",
+      "password": "aOTOqy3GyHP5VskqUEUb6lm97MNcyYnLyc5AkVAABzI=",
+      "salt": "7IuoW7Wh0TSnJda77NSAVA==",
+      "admin": true,
+      "guest": false,
+      "editFilePrivileges": false,
+      "lastfm-user": "aroundmyroom",
+      "lastfm-session": "6YlYQjc8O2bI3ZkEuc6nUpF7gd7wLa1O",
+      "subsonic-password": "frdijj12",
+      "listenbrainz-token": "39dccaad-1178-4b39-9949-ad5fd4c811a4",
+      "allow-radio-recording": true,
+      "allow-youtube-download": true
+    }
+  },
+  "secret": "meb2mU6m3TP1V4Cx+3enCAp+bXHWfxN+NY7w0jsmkjdeu0EAwBxyg2wCY7LWPxxjIRCAUqq0GwR/WAqqI6SFFw==",
+  "writeLogs": true,
+  "ssl": {
+    "key": "/etc/pve/nodes/nucsrv2304/pveproxy-ssl.key",
+    "cert": "/etc/pve/nodes/nucsrv2304/pveproxy-ssl.pem"
+  },
+  "transcode": {
+    "enabled": false,
+    "defaultCodec": "mp3",
+    "defaultBitrate": "192k"
+  },
+  "maxRequestSize": "500MB",
+  "db": {
+    "engine": "sqlite"
+  },
+  "discogs": {
+    "enabled": true,
+    "apiKey": "gUPTWtrnjAdIAgruOUAc",
+    "apiSecret": "JkygASiPoqpOeqyYNPuzBXMZDtzDDDNT",
+    "userAgentTag": "amr",
+    "allowArtUpdate": true
+  },
+  "radio": {
+    "enabled": true
+  },
+  "listenBrainz": {
+    "enabled": true
+  }
+}

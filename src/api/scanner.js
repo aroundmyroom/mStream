@@ -32,7 +32,14 @@ export function setup(mstream) {
 
     const flags = {};
     // signal art-only update if aaFile is missing (null = never attempted; '' = checked, none found)
-    if (dbFileInfo.aaFile === null || dbFileInfo.aaFile === undefined) { flags._needsArt = true; }
+    // OR if aaFile is set but the cached file no longer exists on disk (e.g. image-cache was cleared)
+    if (dbFileInfo.aaFile === null || dbFileInfo.aaFile === undefined) {
+      flags._needsArt = true;
+    } else if (dbFileInfo.aaFile && !fs.existsSync(path.join(config.program.storage.albumArtDirectory, dbFileInfo.aaFile))) {
+      flags._needsArt = true;
+      // Clear the stale aaFile ref so the scanner inserts the freshly-extracted filename
+      db.updateFileArt(dbFileInfo.filepath, dbFileInfo.vpath, null, req.body.scanId, null);
+    }
     // signal cue-only update if cuepoints has never been checked (NULL)
     if (dbFileInfo.cuepoints === null || dbFileInfo.cuepoints === undefined) { flags._needsCue = true; }
     // signal duration-only update if duration was never stored (NULL)

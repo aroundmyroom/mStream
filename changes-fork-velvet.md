@@ -1,6 +1,30 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v5.16.33-velvet — April 2026
+
+### chore: image processing migrated from jimp to sharp
+- Album art compression now uses **sharp** (libvips) instead of jimp across all three code paths: scanner, image-compress-script, and Discogs art embedding
+- Fixes incorrect/corrupted thumbnails for embedded art in FLAC and WAV files — jimp occasionally failed to decode images extracted from these containers
+- Removed the 8 MB bail-out workaround in `compressAlbumArt()` — sharp handles large images via streaming so there is no memory ceiling
+- sharp is ~5–10× faster than jimp for typical cover sizes
+- `package.json`: `jimp` removed, `sharp ^0.34.5` added
+
 ## Unreleased
+
+### fix: Last.fm similar-artists (and scrobbling) broken — HTTP vs HTTPS
+- `src/state/lastfm.js` was using plain HTTP (`http` module, port 80) for all Last.fm API calls
+- Last.fm's API now requires HTTPS; HTTP requests returned error JSON (`{"error":3,...}`) with no `similarartists` field → Auto-DJ similar-artists mode always fell back to "playing random"
+- Scrobbling (POST) was also broken for the same reason
+- Fixed: switched to `https` module throughout `sendGet` and `sendPost`
+- Fixed: `sendGet`/`sendPost` now call `callback(null)` on network error or JSON parse failure instead of silently swallowing the error and leaving the Express response hanging
+- Fixed: `GET /api/v1/lastfm/similar-artists` route now guards against `data === null` with an early `return res.json({ artists: [] })`
+- `sendPost` now uses `Buffer.byteLength(data)` for Content-Length (correct for multi-byte characters)
+
+### fix: "Go to Player" in admin panel fails when player tab is closed
+- `window.open('', 'mStream-Velvet')` returns `null` or the current window when the player tab was closed, causing the admin tab to navigate away or do nothing
+- Fixed: when `w` is `null` or `w === window`, now uses `window.open(playerOrigin, 'mStream-Velvet')` which reliably opens a new named tab
+- Removed `window.close()` calls — they silently fail on user-opened tabs and caused confusing behaviour
+- Result: player tab exists → focus it; player tab closed → open new one; admin tab always stays open
 
 ### fix: --t3 text color too dark in Velvet and Dark themes
 - Velvet `--t3`: `#6070a0` → `#7e8ec0` — readable muted text on navy background
@@ -15,6 +39,10 @@
 ### SQLite scan performance tuning
 - `TX_BATCH_SIZE` raised from 50 → 500: reduces scan write transactions from ~2760 to ~276 for a 138K-song library, fewer WAL fsyncs during scan
 - Automatic one-time page size migration from 4 KB → 8 KB on first boot: shallower B-trees, fewer disk reads per search/browse query on large databases (~3–5 s migration, never repeats)
+
+### fix: Discord URL in startup banner pointed to upstream server
+- `cli-boot-wrapper.js` printed `https://discord.gg/AM896Rr` (upstream mStream) on startup
+- Fixed: now prints `https://discord.gg/KfsTCYrTkS` (mStream Velvet community)
 
 ### docs: Rust parser compatibility analysis
 - Added `docs/rust-parser-compatibility.md` documenting upstream's experimental Rust scanner (`98619f4`)

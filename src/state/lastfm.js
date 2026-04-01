@@ -1,7 +1,7 @@
 // Scrobbler code shamelessly stolen from
 // https://github.com/dittodhole/node-scribble-js
 
-import http from 'http';
+import https from 'https';
 import crypto from 'crypto';
 import querystring from 'querystring';
 
@@ -219,10 +219,10 @@ function sendPost(data, callback) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
-      'Content-Length': data.length
+      'Content-Length': Buffer.byteLength(data)
     }
   }
-    , doPOST = http.request(options, function (request) {
+    , doPOST = https.request(options, function (request) {
       let reqReturn = ''
       request.setEncoding('utf8')
       request.on('data', function (chunk) {
@@ -233,7 +233,7 @@ function sendPost(data, callback) {
           {callback(reqReturn)}
       })
     }).on('error', function (_err) {
-      // TODO
+      if (typeof (callback) === 'function') { callback(null); }
     })
   doPOST.write(data)
   doPOST.end()
@@ -243,31 +243,24 @@ function sendGet(path, callback) {
   let response = '';
   const apiCall = {
       host: 'ws.audioscrobbler.com',
-      port: 80,
       path: path
     }
-  http.get(apiCall, function (res) {
+  https.get(apiCall, function (res) {
     res.on('data', function (chunk) {
-      try {
-        response += chunk
-      } catch (_err) {
-        // TODO
-      }
+      response += chunk;
     })
     res.on('end', function () {
       try {
         const ret = JSON.parse(response)
-        //var ret = response
-        if (typeof (callback) === 'function')
-          {callback(ret)}
-      } catch (err) {
-        // TODO
-        console.log(err)
-        console.log('[INVALID RETURN] the return was invalid JSON: ' + err)
+        if (typeof (callback) === 'function') { callback(ret); }
+      } catch (_err) {
+        console.warn('[lastfm] non-JSON response from Last.fm API');
+        if (typeof (callback) === 'function') { callback(null); }
       }
     })
   }).on('error', function (err) {
-    console.log(err.message)
+    console.warn('[lastfm] network error:', err.message);
+    if (typeof (callback) === 'function') { callback(null); }
   })
 }
 
