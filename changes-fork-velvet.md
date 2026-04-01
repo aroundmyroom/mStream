@@ -3,13 +3,11 @@
 ## v5.16.33-velvet — April 2026
 
 ### chore: image processing migrated from jimp to sharp
-- Album art compression now uses **sharp** (libvips) instead of jimp across all three code paths: scanner, image-compress-script, and Discogs art embedding
+- Album art compression now uses **sharp** (libvips) instead of jimp across all three code paths: scanner, image-compress-script, and Discogs/Deezer art embedding
 - Fixes incorrect/corrupted thumbnails for embedded art in FLAC and WAV files — jimp occasionally failed to decode images extracted from these containers
 - Removed the 8 MB bail-out workaround in `compressAlbumArt()` — sharp handles large images via streaming so there is no memory ceiling
 - sharp is ~5–10× faster than jimp for typical cover sizes
 - `package.json`: `jimp` removed, `sharp ^0.34.5` added
-
-## Unreleased
 
 ### fix: Last.fm similar-artists (and scrobbling) broken — HTTP vs HTTPS
 - `src/state/lastfm.js` was using plain HTTP (`http` module, port 80) for all Last.fm API calls
