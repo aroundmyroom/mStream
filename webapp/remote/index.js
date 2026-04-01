@@ -1,112 +1,76 @@
 const MSTREAMAPI = (() => {
-  const mstreamModule = {};
+  const m = {};
 
-  mstreamModule.listOfServers = [];
-  mstreamModule.currentServer = {
-    host: "",
-    username: "",
-    password: "",
-    token: "",
-    vPath: ""
-  }
+  m.fileExplorerArray = [{ name: '/', position: 0 }];
 
-  mstreamModule.currentProperties = {
-    currentList: false
-    // Can be anything in the title array
-  }
-  var currentListTypes = [
-    'filebrowser',
-    'albums',
-    'artists',
-    'search',
-    'playlists'
-  ];
-
-  mstreamModule.dataList = [];
-
-
-  function clearAndSetDataList(type) {
-    if (!(type in currentListTypes) || type !== false) {
-      // TODO: Throw Error
-    }
-
-    mstreamModule.currentProperties.currentList = type;
-
-    while (mstreamModule.dataList.length > 0) {
-      mstreamModule.dataList.pop();
-    }
-  }
-
-  mstreamModule.fileExplorerArray = [
-    { name: '/', position: 0 }
-  ];
-
-  async function getDirectoryContents() {
-    // Construct the directory string
-    var directoryString = "";
-    for (var i = 0; i < mstreamModule.fileExplorerArray.length; i++) {
-      // Ignore root directory
-      if (mstreamModule.fileExplorerArray[i].name !== '/') {
-        directoryString += mstreamModule.fileExplorerArray[i].name + "/";
-      }
-    }
-
-
-    // Send out AJAX request to start building the DB
-    const res = await axios({
+  function apiPost(url, data) {
+    return axios({
       method: 'POST',
-      url: `/api/v1/file-explorer`,
-      headers: { 'x-access-token': remoteProperties.token },
-      data: { directory: directoryString }
-    });
-
-    clearAndSetDataList('filebrowser');
-
-    res.data.files.forEach(f => {
-      mstreamModule.dataList.push({
-        type: "file",
-        path: res.data.path + f.name,
-        name: f.name,
-        artist: false,
-        title: false
-      });
-    });
-
-    res.data.directories.forEach(d => {
-      mstreamModule.dataList.push({
-        type: 'directory',
-        path: res.data.path + d.name,
-        name: d.name,
-        artist: false,
-        title: false
-      });
+      url: url,
+      headers: { 'x-access-token': window.remoteProperties.token },
+      data: data
     });
   }
 
+  // ── File Explorer ─────────────────────────────────────────────────────────────
 
-  mstreamModule.getCurrentDirectoryContents = function () {
-    getDirectoryContents();
-  }
+  m.getCurrentDirectoryContents = function () {
+    var directoryString = m.fileExplorerArray
+      .filter(function(e) { return e.name !== '/'; })
+      .map(function(e) { return e.name + '/'; })
+      .join('');
 
-  mstreamModule.goToNextDirectory = function (folder, currentScrollPosition = 0) {
-    if (currentScrollPosition != 0) {
-      // TODO: Save Scroll Position
+    return apiPost('/api/v1/file-explorer', { directory: directoryString });
+  };
+
+  m.goToNextDirectory = function (folder) {
+    m.fileExplorerArray.push({ name: folder, position: 0 });
+  };
+
+  m.goBackDirectory = function () {
+    if (m.fileExplorerArray.length > 1) {
+      m.fileExplorerArray.pop();
     }
+  };
 
-    mstreamModule.fileExplorerArray.push({ name: folder, position: 0 });
-    getDirectoryContents();
-  }
+  // ── Albums ────────────────────────────────────────────────────────────────────
 
-  mstreamModule.goBackDirectory = function () {
-    // Make sure it's not the root directory
-    if (mstreamModule.dataList[mstreamModule.dataList.length - 1].name === '/') {
-      return false;
-    }
+  m.getAlbums = function () {
+    return apiPost('/api/v1/db/albums', {});
+  };
 
-    mstreamModule.fileExplorerArray.pop();
-    getDirectoryContents();
-  }
+  m.getAlbumSongs = function (album, artist, year) {
+    var data = { album: album };
+    if (artist) { data.artist = artist; }
+    if (year)   { data.year = year; }
+    return apiPost('/api/v1/db/album-songs', data);
+  };
 
-  // Return an object that is assigned to Module
-  return mstreamModule;
+  // ── Artists ───────────────────────────────────────────────────────────────────
+
+  m.getArtists = function () {
+    return apiPost('/api/v1/db/artists', {});
+  };
+
+  m.getArtistAlbums = function (artist) {
+    return apiPost('/api/v1/db/artists-albums', { artist: artist });
+  };
+
+  // ── Search ────────────────────────────────────────────────────────────────────
+
+  m.search = function (query) {
+    return apiPost('/api/v1/db/search', { search: query });
+  };
+
+  // ── Playlist ──────────────────────────────────────────────────────────────────
+
+  m.fetchPlaylist = function (code) {
+    return axios.get('/api/v1/jukebox/get-playlist?code=' + code);
+  };
+
+  m.fetchNowPlaying = function (code) {
+    return axios.get('/api/v1/jukebox/get-now-playing?code=' + code);
+  };
+
+  return m;
 })();

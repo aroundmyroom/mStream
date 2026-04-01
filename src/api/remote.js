@@ -13,12 +13,19 @@ import { joiValidate } from '../util/validation.js';
 const clients = {};
 // Map code to JWT
 const codeTokenMap = {};
+// Cache of playlist data pushed from the browser
+const playlistCache = {};
+// Cache of now-playing state pushed from the browser
+const nowPlayingCache = {};
+
 const allowedCommands = [
   'next',
   'previous',
   'playPause',
   'addSong',
   'getPlaylist',
+  'getNowPlaying',
+  'goToSong',
   'removeSong',
 ];
 
@@ -55,23 +62,24 @@ export function setupAfterAuth(mstream, server) {
 
     connection.send(JSON.stringify({ code: code, token: req.jwt ? req.jwt : false }));
 
-    // user sent  message
+    // user sent message
     connection.on('message', (_message) => {
       connection.send(JSON.stringify({ code: code }));
     });
 
     connection.on('close', (_connection) => {
       delete clients[code];
-      if (codeTokenMap[code]) {delete codeTokenMap[code];}
+      if (codeTokenMap[code]) { delete codeTokenMap[code]; }
+      if (playlistCache[code]) { delete playlistCache[code]; }
+      if (nowPlayingCache[code]) { delete nowPlayingCache[code]; }
     });
   });
-
 
   mstream.post('/api/v1/jukebox/push-to-client', (req, res) => {
     const schema = Joi.object({
       code: Joi.string().required(),
       command: Joi.string().required(),
-      file: Joi.string().optional()
+      file: Joi.string().optional().allow('')
     });
     joiValidate(schema, req.body);
 
@@ -84,10 +92,56 @@ export function setupAfterAuth(mstream, server) {
     }
 
     // Push commands to client
-    clients[req.body.code].send(JSON.stringify({ command: req.body.command, file: req.body.file ? req.body.file : '' }));
+    const msg = { command: req.body.command };
+    if (req.body.file !== undefined && req.body.file !== '') {
+      msg.file = req.body.file;
+    }
+    clients[req.body.code].send(JSON.stringify(msg));
 
     // Send confirmation back to user
     res.json({ });
+  });
+
+  // Browser posts its current playlist here so remotes can fetch it
+  mstream.post('/api/v1/jukebox/update-playlist', (req, res) => {
+    const schema = Joi.object({
+      code: Joi.string().required(),
+      playlist: Joi.array().required()
+    });
+    joiValidate(schema, req.body);
+
+    if (!(req.body.code in clients)) {
+      throw new Error('Code Not Found');
+    }
+
+    playlistCache[req.body.code] = req.body.playlist;
+    res.json({});
+  });
+
+  // Browser posts its current now-playing state here so remotes can fetch it
+  mstream.post('/api/v1/jukebox/update-now-playing', (req, res) => {
+    const schema = Joi.object({
+      code: Joi.string().required(),
+      nowPlaying: Joi.object({
+        title: Joi.string().allow('').optional(),
+        artist: Joi.string().allow('').optional(),
+        album: Joi.string().allow('').optional(),
+        albumArt: Joi.string().allow('').optional(),
+        filepath: Joi.string().allow('').optional(),
+        playing: Joi.boolean().optional(),
+        index: Joi.number().integer().optional(),
+        currentTime: Joi.number().optional(),
+        duration: Joi.number().optional()
+      }).required()
+    });
+    joiValidate(schema, req.body);
+
+    if (!(req.body.code in clients)) {
+      throw new Error('Code Not Found');
+    }
+
+    nowPlayingCache[req.body.code] = req.body.nowPlaying;
+    res.json({});
   });
 }
 
@@ -102,6 +156,24 @@ export function setupBeforeAuth(mstream) {
     }
 
     res.json({ status: true, token: codeTokenMap[clientCode] });
+  });
+
+  // Remote fetches the playlist that the browser last pushed
+  mstream.get('/api/v1/jukebox/get-playlist', (req, res) => {
+    const code = req.query.code;
+    if (!code || !(code in clients)) {
+      return res.json({ playlist: [] });
+    }
+    res.json({ playlist: playlistCache[code] || [] });
+  });
+
+  // Remote fetches the now-playing state that the browser last pushed
+  mstream.get('/api/v1/jukebox/get-now-playing', (req, res) => {
+    const code = req.query.code;
+    if (!code || !(code in clients)) {
+      return res.json({ nowPlaying: null });
+    }
+    res.json({ nowPlaying: nowPlayingCache[code] || null });
   });
 
   mstream.get('/remote/:remoteId', async (req, res) => {
