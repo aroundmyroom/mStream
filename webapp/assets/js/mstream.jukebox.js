@@ -114,6 +114,72 @@ var JUKEBOX = (function () {
       }
       if( json.command === 'addSong' && json.file){
         VUEPLAYERCORE.addSongWizard(json.file, {}, true);
+        return;
+      }
+
+      if (json.command === 'getPlaylist') {
+        var playlist = MSTREAMPLAYER.playlist.map(function(song, index) {
+          return {
+            index: index,
+            filepath: song.rawFilePath || song.filepath || '',
+            title: song.metadata ? song.metadata.title : null,
+            artist: song.metadata ? song.metadata.artist : null,
+            album: song.metadata ? song.metadata.album : null,
+            albumArt: song.metadata ? song.metadata['album-art'] : null
+          };
+        });
+        fetch('/api/v1/jukebox/update-playlist', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-access-token': MSTREAMAPI.currentServer.token
+          },
+          body: JSON.stringify({ code: mstreamModule.stats.adminCode, playlist: playlist })
+        }).catch(function(e) { console.error('update-playlist failed:', e); });
+        return;
+      }
+
+      if (json.command === 'getNowPlaying') {
+        var meta = MSTREAMPLAYER.playerStats.metadata;
+        var currentSong = MSTREAMPLAYER.playlist[MSTREAMPLAYER.positionCache.val];
+        var ct = MSTREAMPLAYER.playerStats.currentTime;
+        var dur = MSTREAMPLAYER.playerStats.duration;
+        var nowPlaying = {
+          title: meta.title || '',
+          artist: meta.artist || '',
+          album: meta.album || '',
+          albumArt: meta['album-art'] || '',
+          filepath: currentSong ? (currentSong.filepath || currentSong.url || '') : '',
+          playing: MSTREAMPLAYER.playerStats.playing,
+          index: MSTREAMPLAYER.positionCache.val,
+          currentTime: (ct && isFinite(ct)) ? ct : 0,
+          duration: (dur && isFinite(dur)) ? dur : 0
+        };
+        fetch('/api/v1/jukebox/update-now-playing', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-access-token': MSTREAMAPI.currentServer.token
+          },
+          body: JSON.stringify({ code: mstreamModule.stats.adminCode, nowPlaying: nowPlaying })
+        }).catch(function(e) { console.error('update-now-playing failed:', e); });
+        return;
+      }
+
+      if (json.command === 'goToSong') {
+        var goIdx = parseInt(json.file);
+        if (!isNaN(goIdx)) {
+          MSTREAMPLAYER.goToSongAtPosition(goIdx);
+        }
+        return;
+      }
+
+      if (json.command === 'removeSong') {
+        var removeIdx = parseInt(json.file);
+        if (!isNaN(removeIdx)) {
+          MSTREAMPLAYER.removeSongAtPosition(removeIdx);
+        }
+        return;
       }
     };
   }

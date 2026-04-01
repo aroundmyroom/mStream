@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8" />
   <title>mStream Remote</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 
   <link rel="apple-touch-icon" sizes="180x180" href="../assets/fav/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="32x32" href="../assets/fav/favicon-32x32.png">
@@ -14,203 +14,689 @@
   <link rel="shortcut icon" href="../assets/fav/favicon.ico">
   <meta name="msapplication-TileColor" content="#da532c">
   <meta name="msapplication-config" content="../assets/fav/browserconfig.xml">
-  <meta name="theme-color" content="#ffffff">
+  <meta name="theme-color" content="#264679">
 
-  <!-- This empty script tag gets replaced with a preloaded variable 'sharedPlaylist' -->
+  <!-- This empty script tag gets replaced with a preloaded variable 'remoteProperties' -->
   <script></script>
 
+  <!-- Apply saved theme before first paint to prevent flash of unstyled content -->
+  <script>
+    (function () {
+      var t = localStorage.getItem('mstream-remote-theme');
+      document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+    })();
+  </script>
+
   <link rel="stylesheet" href="./index.css">
-  <link rel="stylesheet" href="../assets/css/materialize.css">
 
   <script src="../assets/js/lib/axios.js"></script>
   <script src="../assets/js/lib/vue2.js"></script>
   <script src="./index.js"></script>
-
-  <script>
-    if (typeof remoteProperties === 'undefined') {
-      var remoteProperties = {
-        code: 0,
-        error: false,
-        token: false
-      };
-    } else {
-      MSTREAMAPI.getCurrentDirectoryContents();
-    }
-
-    // Function to send commands to server
-    async function sendCommandToServer(command, file = false) {
-      try {
-        const postData = {
-          code: remoteProperties.code,
-          command: command
-        }
-
-        if (file) { postData.file = file; }
-
-        await axios({
-          method: 'POST',
-          url: '/api/v1/jukebox/push-to-client',
-          headers: { 'x-access-token': remoteProperties.token },
-          data: postData
-        });
-      } catch (err) {
-        console.log(err)
-      }
-    }
-
-
-    // Auto Focus
-    Vue.directive('focus', {
-      // When the bound element is inserted into the DOM...
-      inserted: function (el) {
-        // Focus the element
-        el.focus()
-      }
-    })
-
-    window.onload = function () {
-      // Prompt user for code
-      // Check code against server
-      // Store code
-
-
-
-      var loginPanel = new Vue({
-        el: '#login-overlay',
-        data: {
-          remote: remoteProperties,
-        },
-        methods: {
-          submitCode: async function () {
-            try {
-              const loginCode = document.getElementById('login-code').value;
-              const res = await axios.post('/api/v1/jukebox/does-code-exist', { code: loginCode });
-              if (res.data.status !== true) { throw 'Failed to Connect'; }
-
-              // Initialize
-              remoteProperties.error = false;
-              remoteProperties.code = loginCode;
-              remoteProperties.token = res.data.token;
-              MSTREAMAPI.getCurrentDirectoryContents();
-            }catch (err) {
-              console.log(err)
-              remoteProperties.error = 'Code Not Found';
-            }
-          }
-        }
-      });
-
-
-      // Template for data items
-      Vue.component('browser-item', {
-        data: function () {
-          return { }
-        },
-        template: '<div v-on:click="handleClick($event)" class="browser-item">{{displayText}}</div>',
-        props: ['type', 'item'],
-        methods: {
-          handleClick: function (event) {
-            // get data type
-            var thisType = this.type;
-            // do something based on data type
-            if (this.type === 'file') {
-              sendCommandToServer('addSong', this.item.path);
-            } else if (this.type === 'directory') {
-              MSTREAMAPI.goToNextDirectory(this.item.name);
-            }
-          },
-        },
-        computed: {
-          displayText: function () {
-            return this.item.name;
-          }
-        }
-      });
-
-      var browserPanel = new Vue({
-        el: '#browser-container',
-        data: {
-          dataList: MSTREAMAPI.dataList,
-          currentProperties: MSTREAMAPI.currentProperties,
-          fileExplorer: MSTREAMAPI.fileExplorerArray
-        },
-        methods: {
-          goBack: function() {
-            MSTREAMAPI.goBackDirectory();
-          }
-        },
-        computed: {
-          titleText: function () {
-            return 'File Explorer';
-          },
-
-          filepath: function () {
-            if (this.fileExplorer.length === 1) {
-              return '/';
-            }
-
-            var directoryString = '';
-            for (var i = 0; i < this.fileExplorer.length; i++) {
-              // Ignore root directory
-              if (this.fileExplorer[i].name !== '/') {
-                directoryString += "/" + this.fileExplorer[i].name;
-              }
-            }
-
-            return directoryString;
-          }
-        }
-      });
-    }
-  </script>
 </head>
 
 <body>
-  <div v-if="remote.code === 0" id="login-overlay" class="login-overlay">
-    <div class="container">
-    <svg version="1.1" xmlns="http://www.w3.org/2000/svg" x="0" y="0" viewBox="0 0 612 153" xml:space="preserve"><style>.st0,.st1{fill-rule:evenodd;clip-rule:evenodd;fill:#264679}.st1{fill:#6684b2}</style><path class="st0" d="M179.9 45.5c-6.2 0-11.5 1.7-15.9 5s-6.5 8.1-6.5 14.4c0 4.9 1.3 9.1 3.8 12.4 2.5 3.4 5.7 5.8 9.3 7.3 3.7 1.5 7.3 2.8 11 3.8s6.8 2.3 9.3 3.9c2.5 1.5 3.8 3.5 3.8 5.8 0 4.8-4.4 7.2-13.1 7.2h-24.1V118h24.1c17.1 0 25.6-6.7 25.6-20.2 0-1.9-.2-3.8-.6-5.8-.4-2-1.2-4-2.6-6-1.3-2.1-3.3-3.7-5.8-4.9-2.5-1.2-6.4-2.7-11.5-4.5l-8.8-3.1c-.7-.2-1.7-.7-2.9-1.3-1.3-.7-2.2-1.3-2.8-1.9-.6-.6-1.1-1.4-1.6-2.3-.5-.9-.7-2-.7-3.2 0-2 1-3.5 2.9-4.6 1.9-1.1 4.3-1.6 7-1.6h24.6V45.5h-24.5zM226.4 58.3v31c0 10.2 2.5 17.6 7.6 22 5.1 4.4 13 6.6 23.7 6.6v-12.8c-2.7 0-4.9-.2-6.8-.4-1.8-.3-3.7-.9-5.8-1.9-2-.9-3.6-2.6-4.7-4.9-1.1-2.3-1.6-5.2-1.6-8.7V58.3h18.8V45.5h-18.8V31.6L214 58.3h12.4zM281.1 118V76.8c0-7.2.9-12 2.6-14.5 1-1.3 2.2-2.2 3.6-2.8 1.4-.6 2.6-1 3.6-1.1 1-.1 2.5-.1 4.3-.1H310V45.5h-12.2c-3.6 0-6.5.1-8.6.3-2.1.2-4.5.9-7.3 2s-5.1 2.8-7.1 5c-4 4.4-6 12.4-6 24V118h12.3zM326.2 53.8c-6.2 7.4-9.3 17-9.3 28.9 0 10.7 3.2 19.4 9.5 26.2s14.7 10.1 25.3 10.1c8.7 0 16.3-2.7 22.7-8.1L366 102c-3.7 2.1-8.5 3.2-14.3 3.2-6.5 0-11.8-2.3-15.8-6.9-4-4.6-6-10.5-6-17.9 0-7 1.9-12.9 5.6-17.9 3.8-5 8.9-7.5 15.5-7.5 3.3 0 6.1.8 8.2 2.4 2.1 1.6 3.2 4 3.2 7.2 0 5-1.2 8.5-3.6 10.6-2.4 2.1-6.7 3.2-12.9 3.2h-6.7v11.7h5.7c20.3 0 30.5-8.5 30.5-25.4 0-13.6-7.9-20.7-23.7-21.5-10.8-.2-19.3 3.3-25.5 10.6zM412.3 73.2c-7.4 0-13.6 1.9-18.5 5.7-4.9 3.8-7.4 9.4-7.4 16.7 0 7.3 2.3 12.9 7 16.7 4.6 3.8 10.9 5.7 18.8 5.7h31V73.6c0-9.1-2.4-16-7.2-20.8-4.8-4.8-11.7-7.2-20.7-7.2h-22.9v12.8h22.3c10.9 0 16.4 6.1 16.4 18.2v28.7h-18.4c-9.1 0-13.6-3.2-13.6-9.8 0-3.3 1.2-5.9 3.6-7.8 2.4-1.8 5.8-2.7 10.2-2.7 5.1 0 9.4 1.4 12.9 4.3v-14c-4.9-1.4-9.3-2.1-13.5-2.1zM458.8 118H471V58.3h24.4V118h12.2V58.3h5.7c6.8 0 11.3.7 13.5 2 4.3 2.5 6.5 7.7 6.5 15.5V118h12.2V75.7c0-6-.6-11.2-1.9-15.5-1.2-4.3-3.9-7.8-7.9-10.6-3.9-2.7-9.1-4.1-15.7-4.1h-61.4V118z"/><path class="st1" d="M75 118.5v-83l21 13v70z"/><path fill-rule="evenodd" clip-rule="evenodd" fill="#26477b" d="M99 118.5v-69l11.5 7 10.5-7v69z"/><path class="st1" d="M124 118.5v-70l21-13v83z"/></svg>
+<div id="app">
 
-      
-      <form class="login-form" v-on:submit.prevent="submitCode($event)">
-        <div>
-          <label>Code</label>
-          <input v-focus required type="text" class="form-control" id="login-code">
-        </div>
-        <button type="submit" class="btn">Login</button>
+  <!-- ── Login Overlay ──────────────────────────────────────────────────────── -->
+  <div v-if="!loggedIn" class="login-overlay">
+    <div class="login-box">
+      <svg version="1.1" xmlns="http://www.w3.org/2000/svg" x="0" y="0" viewBox="0 0 612 153" xml:space="preserve" class="login-logo"><style>.st0,.st1{fill-rule:evenodd;clip-rule:evenodd;fill:#264679}.st1{fill:#6684b2}</style><path class="st0" d="M179.9 45.5c-6.2 0-11.5 1.7-15.9 5s-6.5 8.1-6.5 14.4c0 4.9 1.3 9.1 3.8 12.4 2.5 3.4 5.7 5.8 9.3 7.3 3.7 1.5 7.3 2.8 11 3.8s6.8 2.3 9.3 3.9c2.5 1.5 3.8 3.5 3.8 5.8 0 4.8-4.4 7.2-13.1 7.2h-24.1V118h24.1c17.1 0 25.6-6.7 25.6-20.2 0-1.9-.2-3.8-.6-5.8-.4-2-1.2-4-2.6-6-1.3-2.1-3.3-3.7-5.8-4.9-2.5-1.2-6.4-2.7-11.5-4.5l-8.8-3.1c-.7-.2-1.7-.7-2.9-1.3-1.3-.7-2.2-1.3-2.8-1.9-.6-.6-1.1-1.4-1.6-2.3-.5-.9-.7-2-.7-3.2 0-2 1-3.5 2.9-4.6 1.9-1.1 4.3-1.6 7-1.6h24.6V45.5h-24.5zM226.4 58.3v31c0 10.2 2.5 17.6 7.6 22 5.1 4.4 13 6.6 23.7 6.6v-12.8c-2.7 0-4.9-.2-6.8-.4-1.8-.3-3.7-.9-5.8-1.9-2-.9-3.6-2.6-4.7-4.9-1.1-2.3-1.6-5.2-1.6-8.7V58.3h18.8V45.5h-18.8V31.6L214 58.3h12.4zM281.1 118V76.8c0-7.2.9-12 2.6-14.5 1-1.3 2.2-2.2 3.6-2.8 1.4-.6 2.6-1 3.6-1.1 1-.1 2.5-.1 4.3-.1H310V45.5h-12.2c-3.6 0-6.5.1-8.6.3-2.1.2-4.5.9-7.3 2s-5.1 2.8-7.1 5c-4 4.4-6 12.4-6 24V118h12.3zM326.2 53.8c-6.2 7.4-9.3 17-9.3 28.9 0 10.7 3.2 19.4 9.5 26.2s14.7 10.1 25.3 10.1c8.7 0 16.3-2.7 22.7-8.1L366 102c-3.7 2.1-8.5 3.2-14.3 3.2-6.5 0-11.8-2.3-15.8-6.9-4-4.6-6-10.5-6-17.9 0-7 1.9-12.9 5.6-17.9 3.8-5 8.9-7.5 15.5-7.5 3.3 0 6.1.8 8.2 2.4 2.1 1.6 3.2 4 3.2 7.2 0 5-1.2 8.5-3.6 10.6-2.4 2.1-6.7 3.2-12.9 3.2h-6.7v11.7h5.7c20.3 0 30.5-8.5 30.5-25.4 0-13.6-7.9-20.7-23.7-21.5-10.8-.2-19.3 3.3-25.5 10.6zM412.3 73.2c-7.4 0-13.6 1.9-18.5 5.7-4.9 3.8-7.4 9.4-7.4 16.7 0 7.3 2.3 12.9 7 16.7 4.6 3.8 10.9 5.7 18.8 5.7h31V73.6c0-9.1-2.4-16-7.2-20.8-4.8-4.8-11.7-7.2-20.7-7.2h-22.9v12.8h22.3c10.9 0 16.4 6.1 16.4 18.2v28.7h-18.4c-9.1 0-13.6-3.2-13.6-9.8 0-3.3 1.2-5.9 3.6-7.8 2.4-1.8 5.8-2.7 10.2-2.7 5.1 0 9.4 1.4 12.9 4.3v-14c-4.9-1.4-9.3-2.1-13.5-2.1zM458.8 118H471V58.3h24.4V118h12.2V58.3h5.7c6.8 0 11.3.7 13.5 2 4.3 2.5 6.5 7.7 6.5 15.5V118h12.2V75.7c0-6-.6-11.2-1.9-15.5-1.2-4.3-3.9-7.8-7.9-10.6-3.9-2.7-9.1-4.1-15.7-4.1h-61.4V118z"/><path class="st1" d="M75 118.5v-83l21 13v70z"/><path fill-rule="evenodd" clip-rule="evenodd" fill="#26477b" d="M99 118.5v-69l11.5 7 10.5-7v69z"/><path class="st1" d="M124 118.5v-70l21-13v83z"/></svg>
+
+      <form class="login-form" v-on:submit.prevent="submitCode">
+        <label>Enter Remote Code</label>
+        <input v-focus v-model="loginCode" required type="text" class="login-input" placeholder="8-character code" autocomplete="off" autocapitalize="none">
+        <div v-if="loginError" class="login-error">{{ loginError }}</div>
+        <button type="submit" class="login-btn">Connect</button>
       </form>
     </div>
   </div>
 
-  <!-- Browser -->
-  <div id="browser-container" class="container">
-    <!-- Controls -->
-    <div class="row">
-      <div class="col s4 pointer" onclick="sendCommandToServer('previous')">
-        <svg xmlns="http://www.w3.org/2000/svg" height="32" width="100%" viewBox="0 0 24 24"><path d="M0 0h24v24H0z" fill="none"/><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
-      </div>
-      <div onclick="sendCommandToServer('playPause')" class="col s4 pointer" >
-        <svg xmlns="http://www.w3.org/2000/svg" height="32" width="100%" viewBox="0 0 24 24" ><path d="M0 0h24v24H0z" fill="none"/><path d="M8 5v14l11-7z"/></svg>
-      </div>
-      <div onclick="sendCommandToServer('next')" class="col s4 pointer" >
-        <svg xmlns="http://www.w3.org/2000/svg" height="32" width="100%" viewBox="0 0 24 24"><path d="M0 0h24v24H0z" fill="none"/><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
-      </div>
+  <!-- ── Main App ───────────────────────────────────────────────────────────── -->
+  <div v-if="loggedIn" class="main-app">
+
+    <!-- Top Bar (logo + theme toggle) -->
+    <div class="top-bar">
+      <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 612 153" class="top-logo"><path fill="#fff" d="M179.9 45.5c-6.2 0-11.5 1.7-15.9 5s-6.5 8.1-6.5 14.4c0 4.9 1.3 9.1 3.8 12.4 2.5 3.4 5.7 5.8 9.3 7.3 3.7 1.5 7.3 2.8 11 3.8s6.8 2.3 9.3 3.9c2.5 1.5 3.8 3.5 3.8 5.8 0 4.8-4.4 7.2-13.1 7.2h-24.1V118h24.1c17.1 0 25.6-6.7 25.6-20.2 0-1.9-.2-3.8-.6-5.8-.4-2-1.2-4-2.6-6-1.3-2.1-3.3-3.7-5.8-4.9-2.5-1.2-6.4-2.7-11.5-4.5l-8.8-3.1c-.7-.2-1.7-.7-2.9-1.3-1.3-.7-2.2-1.3-2.8-1.9-.6-.6-1.1-1.4-1.6-2.3-.5-.9-.7-2-.7-3.2 0-2 1-3.5 2.9-4.6 1.9-1.1 4.3-1.6 7-1.6h24.6V45.5h-24.5zM226.4 58.3v31c0 10.2 2.5 17.6 7.6 22 5.1 4.4 13 6.6 23.7 6.6v-12.8c-2.7 0-4.9-.2-6.8-.4-1.8-.3-3.7-.9-5.8-1.9-2-.9-3.6-2.6-4.7-4.9-1.1-2.3-1.6-5.2-1.6-8.7V58.3h18.8V45.5h-18.8V31.6L214 58.3h12.4zM281.1 118V76.8c0-7.2.9-12 2.6-14.5 1-1.3 2.2-2.2 3.6-2.8 1.4-.6 2.6-1 3.6-1.1 1-.1 2.5-.1 4.3-.1H310V45.5h-12.2c-3.6 0-6.5.1-8.6.3-2.1.2-4.5.9-7.3 2s-5.1 2.8-7.1 5c-4 4.4-6 12.4-6 24V118h12.3zM326.2 53.8c-6.2 7.4-9.3 17-9.3 28.9 0 10.7 3.2 19.4 9.5 26.2s14.7 10.1 25.3 10.1c8.7 0 16.3-2.7 22.7-8.1L366 102c-3.7 2.1-8.5 3.2-14.3 3.2-6.5 0-11.8-2.3-15.8-6.9-4-4.6-6-10.5-6-17.9 0-7 1.9-12.9 5.6-17.9 3.8-5 8.9-7.5 15.5-7.5 3.3 0 6.1.8 8.2 2.4 2.1 1.6 3.2 4 3.2 7.2 0 5-1.2 8.5-3.6 10.6-2.4 2.1-6.7 3.2-12.9 3.2h-6.7v11.7h5.7c20.3 0 30.5-8.5 30.5-25.4 0-13.6-7.9-20.7-23.7-21.5-10.8-.2-19.3 3.3-25.5 10.6zM412.3 73.2c-7.4 0-13.6 1.9-18.5 5.7-4.9 3.8-7.4 9.4-7.4 16.7 0 7.3 2.3 12.9 7 16.7 4.6 3.8 10.9 5.7 18.8 5.7h31V73.6c0-9.1-2.4-16-7.2-20.8-4.8-4.8-11.7-7.2-20.7-7.2h-22.9v12.8h22.3c10.9 0 16.4 6.1 16.4 18.2v28.7h-18.4c-9.1 0-13.6-3.2-13.6-9.8 0-3.3 1.2-5.9 3.6-7.8 2.4-1.8 5.8-2.7 10.2-2.7 5.1 0 9.4 1.4 12.9 4.3v-14c-4.9-1.4-9.3-2.1-13.5-2.1zM458.8 118H471V58.3h24.4V118h12.2V58.3h5.7c6.8 0 11.3.7 13.5 2 4.3 2.5 6.5 7.7 6.5 15.5V118h12.2V75.7c0-6-.6-11.2-1.9-15.5-1.2-4.3-3.9-7.8-7.9-10.6-3.9-2.7-9.1-4.1-15.7-4.1h-61.4V118z"/><path fill="rgba(255,255,255,.7)" d="M75 118.5v-83l21 13v70z"/><path fill="rgba(255,255,255,.85)" d="M99 118.5v-69l11.5 7 10.5-7v69z"/><path fill="rgba(255,255,255,.7)" d="M124 118.5v-70l21-13v83z"/></svg>
+      <button class="theme-toggle" v-on:click="toggleTheme" :title="darkMode ? 'Switch to light mode' : 'Switch to dark mode'">
+        <svg v-if="darkMode" xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 0 24 24"><path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"/></svg>
+        <svg v-else xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
+      </button>
     </div>
 
-    <!-- Browser Header -->
-    <h5>{{titleText}}</h5>
-
-    <!-- ToolBar -->
-    <div class="row">
-      <div v-on:click="goBack()" class="back-button">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="25" height="25"><path d="M13.281 6.781l-8.5 8.5-.687.719.687.719 8.5 8.5 1.438-1.438L7.938 17H28v-2H7.937l6.782-6.781L13.28 6.78z" color="#000" overflow="visible"/></svg>
-      </div>
-      <div class="filepath">{{filepath}}</div>
+    <!-- Navigation Tabs -->
+    <div class="nav-tabs">
+      <div v-on:click="goToView('files')"    :class="['tab', {active: activeTab==='files'}]">Files</div>
+      <div v-on:click="goToView('albums')"   :class="['tab', {active: activeTab==='albums'}]">Albums</div>
+      <div v-on:click="goToView('artists')"  :class="['tab', {active: activeTab==='artists'}]">Artists</div>
+      <div v-on:click="goToView('search')"   :class="['tab', {active: activeTab==='search'}]">Search</div>
+      <div v-on:click="goToView('playlist')" :class="['tab', {active: activeTab==='playlist'}]">Queue</div>
     </div>
 
-    <!-- List Area -->
-    <div id="browser" class="browser row">
-      <div v-for="(item, index) in dataList" :item="item" :type="item.type" is="browser-item" :key="index">
+    <!-- Content Area -->
+    <div class="content-area">
+
+      <!-- Content Header (back + title) — shown for file explorer and drill-down views -->
+      <div class="content-header" v-if="view === 'files' || canGoBack">
+        <div v-on:click="goBack" class="back-btn" v-if="canGoBack">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="20" height="20"><path d="M13.281 6.781l-8.5 8.5-.687.719.687.719 8.5 8.5 1.438-1.438L7.938 17H28v-2H7.937l6.782-6.781L13.28 6.78z" color="#000" overflow="visible"/></svg>
+        </div>
+        <div class="view-title">{{ viewTitle }}</div>
       </div>
-    </div>
-  </div>
+
+      <!-- Loading Spinner -->
+      <div v-if="loading" class="loading">
+        <div class="spinner"></div>
+      </div>
+
+      <!-- ── Files View ──────────────────────────────────────────────────────── -->
+      <div v-if="!loading && view === 'files'">
+        <div v-for="(item, i) in items" :key="i" v-on:click="handleFile(item)" class="list-item">
+          <span class="item-icon" v-if="item.type === 'directory'">
+            <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 0 24 24" fill="#888"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+          </span>
+          <span class="item-icon" v-else>
+            <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 0 24 24" fill="#888"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+          </span>
+          <span class="item-name">{{ item.name }}</span>
+        </div>
+      </div>
+
+      <!-- ── Albums View ─────────────────────────────────────────────────────── -->
+      <div v-if="!loading && view === 'albums'" class="album-grid">
+        <div
+          v-for="(album, i) in items"
+          :key="i"
+          v-on:click="loadAlbumSongs(album.name, null, album.year)"
+          class="album-card"
+        >
+          <img v-if="album.album_art_file" :src="albumArtUrl(album.album_art_file)" class="album-art" loading="lazy">
+          <div v-else class="album-art-placeholder">
+            <svg xmlns="http://www.w3.org/2000/svg" height="40" viewBox="0 0 24 24" fill="#aaa"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+          </div>
+          <div class="album-info">
+            <div class="album-name">{{ album.name }}</div>
+            <div class="album-year" v-if="album.year">{{ album.year }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Album Songs View ────────────────────────────────────────────────── -->
+      <div v-if="!loading && view === 'albumSongs'">
+        <div
+          v-for="(song, i) in items"
+          :key="i"
+          v-on:click="sendCommand('addSong', song.filepath)"
+          class="list-item song-item"
+        >
+          <div class="song-track" v-if="song.metadata && song.metadata.track">{{ song.metadata.track }}</div>
+          <div class="song-details">
+            <div class="song-title">{{ song.metadata && song.metadata.title ? song.metadata.title : song.filepath.split('/').pop() }}</div>
+            <div class="song-meta" v-if="song.metadata && song.metadata.artist">{{ song.metadata.artist }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Artists View ────────────────────────────────────────────────────── -->
+      <div v-if="!loading && view === 'artists'">
+        <div
+          v-for="(artist, i) in items"
+          :key="i"
+          v-on:click="loadArtistAlbums(artist)"
+          class="list-item"
+        >
+          <span class="item-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 0 24 24" fill="#888"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+          </span>
+          <span class="item-name">{{ artist }}</span>
+        </div>
+      </div>
+
+      <!-- ── Artist Albums View ──────────────────────────────────────────────── -->
+      <div v-if="!loading && view === 'artistAlbums'" class="album-grid">
+        <div
+          v-for="(album, i) in items"
+          :key="i"
+          v-on:click="loadAlbumSongs(album.name, artistContext && artistContext.artist, album.year)"
+          class="album-card"
+        >
+          <img v-if="album.album_art_file" :src="albumArtUrl(album.album_art_file)" class="album-art" loading="lazy">
+          <div v-else class="album-art-placeholder">
+            <svg xmlns="http://www.w3.org/2000/svg" height="40" viewBox="0 0 24 24" fill="#aaa"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+          </div>
+          <div class="album-info">
+            <div class="album-name">{{ album.name }}</div>
+            <div class="album-year" v-if="album.year">{{ album.year }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Search View ─────────────────────────────────────────────────────── -->
+      <div v-if="view === 'search'" class="search-view">
+        <div class="search-bar">
+          <input
+            v-model="searchQuery"
+            v-on:keyup.enter="doSearch"
+            type="search"
+            placeholder="Search music..."
+            class="search-input"
+          >
+          <button v-on:click="doSearch" class="search-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 0 24 24" fill="white"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+          </button>
+        </div>
+
+        <div v-if="loading" class="loading"><div class="spinner"></div></div>
+
+        <div v-if="!loading && searchResults">
+          <div v-if="searchResults.artists && searchResults.artists.length">
+            <div class="section-header">Artists</div>
+            <div
+              v-for="(artist, i) in searchResults.artists"
+              :key="'a'+i"
+              v-on:click="drillArtist(artist)"
+              class="list-item"
+            >
+              <span class="item-icon"><svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 0 24 24" fill="#888"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg></span>
+              <span class="item-name">{{ artist }}</span>
+            </div>
+          </div>
+
+          <div v-if="searchResults.albums && searchResults.albums.length">
+            <div class="section-header">Albums</div>
+            <div
+              v-for="(album, i) in searchResults.albums"
+              :key="'b'+i"
+              v-on:click="drillAlbum(album)"
+              class="list-item"
+            >
+              <span class="item-icon"><svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 0 24 24" fill="#888"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z"/></svg></span>
+              <span class="item-name">{{ album }}</span>
+            </div>
+          </div>
+
+          <div v-if="searchResults.title && searchResults.title.length">
+            <div class="section-header">Songs</div>
+            <div
+              v-for="(fp, i) in searchResults.title"
+              :key="'t'+i"
+              v-on:click="sendCommand('addSong', fp)"
+              class="list-item song-item"
+            >
+              <span class="item-icon"><svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 0 24 24" fill="#888"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg></span>
+              <span class="item-name">{{ fp.split('/').pop() }}</span>
+            </div>
+          </div>
+
+          <div v-if="searchResults.files && searchResults.files.length">
+            <div class="section-header">Files</div>
+            <div
+              v-for="(fp, i) in searchResults.files"
+              :key="'f'+i"
+              v-on:click="sendCommand('addSong', fp)"
+              class="list-item song-item"
+            >
+              <span class="item-icon"><svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 0 24 24" fill="#888"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg></span>
+              <span class="item-name">{{ fp.split('/').pop() }}</span>
+            </div>
+          </div>
+
+          <div
+            v-if="searchResults.artists.length === 0 && searchResults.albums.length === 0 && searchResults.title.length === 0 && searchResults.files.length === 0"
+            class="empty-msg"
+          >No results found.</div>
+        </div>
+      </div>
+
+      <!-- ── Queue (Playlist) View ───────────────────────────────────────────── -->
+      <div v-if="view === 'playlist'" class="playlist-view">
+        <div class="playlist-header">
+          <div class="view-title">Current Queue</div>
+          <button v-on:click="loadPlaylist" class="refresh-btn" :disabled="playlistLoading">
+            <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+            {{ playlistLoading ? 'Loading...' : 'Refresh' }}
+          </button>
+        </div>
+
+        <div v-if="playlistLoading" class="loading"><div class="spinner"></div></div>
+
+        <div v-if="!playlistLoading && playlist.length === 0" class="empty-msg">
+          Queue is empty or not loaded yet.<br>Press Refresh to fetch from the browser.
+        </div>
+
+        <div
+          v-for="(song, i) in playlist"
+          :key="i"
+          :class="['playlist-item', { 'playlist-item-active': nowPlaying && song.index === nowPlaying.index }]"
+          v-on:click="playSong(song.index)"
+        >
+          <img v-if="song.albumArt" :src="albumArtUrl(song.albumArt)" class="queue-art">
+          <div v-else class="queue-art-placeholder">
+            <svg xmlns="http://www.w3.org/2000/svg" height="16" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+          </div>
+          <div class="playlist-item-info">
+            <div class="song-title">{{ song.title || song.filepath.split('/').pop() }}</div>
+            <div class="song-meta" v-if="song.artist || song.album">{{ [song.artist, song.album].filter(Boolean).join(' — ') }}</div>
+          </div>
+          <button v-on:click.stop="removeSong(song.index)" class="remove-btn" title="Remove from queue">✕</button>
+        </div>
+      </div>
+
+    </div><!-- /content-area -->
+
+    <!-- ── Bottom Player ─────────────────────────────────────────────────────── -->
+    <div class="bottom-player">
+
+      <!-- Now Playing Info -->
+      <div class="np-section" v-if="nowPlaying && nowPlaying.index >= 0">
+        <div class="np-row">
+          <img v-if="nowPlaying.albumArt" :src="albumArtUrl(nowPlaying.albumArt)" class="np-art">
+          <div v-else class="np-art-placeholder">
+            <svg xmlns="http://www.w3.org/2000/svg" height="22" viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+          </div>
+          <div class="np-info">
+            <div class="np-title">{{ nowPlaying.title || (nowPlaying.filepath ? nowPlaying.filepath.split('/').pop() : 'Unknown Title') }}</div>
+            <div class="np-artist" v-if="nowPlaying.artist || nowPlaying.album">{{ [nowPlaying.artist, nowPlaying.album].filter(Boolean).join(' \u2014 ') }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Progress Bar -->
+      <div class="progress-section">
+        <div class="progress-bar">
+          <div class="progress-bar-fill" :style="progressStyle"></div>
+        </div>
+        <div class="progress-times" v-if="localDuration > 0">
+          <span>{{ formatTime(localCurrentTime) }}</span>
+          <span>{{ formatTime(localDuration) }}</span>
+        </div>
+      </div>
+
+      <!-- Player Controls -->
+      <div class="player-bar">
+        <div class="ctrl-btn" v-on:click="previousAction()">
+          <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        </div>
+        <div class="play-btn" v-on:click="playPauseAction()">
+          <svg v-if="nowPlaying && nowPlaying.playing" xmlns="http://www.w3.org/2000/svg" height="30" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          <svg v-else xmlns="http://www.w3.org/2000/svg" height="30" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        </div>
+        <div class="ctrl-btn" v-on:click="nextAction()">
+          <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+        </div>
+      </div>
+
+    </div><!-- /bottom-player -->
+
+  </div><!-- /main-app -->
+
+</div><!-- /app -->
+
+<script>
+  if (typeof remoteProperties === 'undefined') {
+    var remoteProperties = { code: 0, error: false, token: false };
+  }
+
+  Vue.directive('focus', {
+    inserted: function (el) { el.focus(); }
+  });
+
+  window.onload = function () {
+    new Vue({
+      el: '#app',
+
+      data: {
+        // Theme
+        darkMode: localStorage.getItem('mstream-remote-theme') !== 'light',
+
+        // Auth
+        loggedIn: remoteProperties.code !== 0,
+        loginCode: '',
+        loginError: '',
+
+        // Navigation
+        view: 'files',
+        history: [],
+        items: [],
+        loading: false,
+
+        // Drill-down context
+        albumContext: null,
+        artistContext: null,
+
+        // Search
+        searchQuery: '',
+        searchResults: null,
+
+        // Playlist / queue
+        playlist: [],
+        playlistLoading: false,
+
+        // Now playing
+        nowPlaying: null,
+        localCurrentTime: 0,
+        localDuration: 0,
+        progressTimer: null,
+
+        // File explorer path (shared with MSTREAMAPI module)
+        fileExplorerPath: MSTREAMAPI.fileExplorerArray,
+      },
+
+      computed: {
+        canGoBack: function () {
+          return this.history.length > 0 ||
+            (this.view === 'files' && this.fileExplorerPath.length > 1);
+        },
+        viewTitle: function () {
+          switch (this.view) {
+            case 'files':        return 'File Explorer';
+            case 'albums':       return 'Albums';
+            case 'albumSongs':   return this.albumContext ? (this.albumContext.album || 'Unknown Album') : 'Songs';
+            case 'artists':      return 'Artists';
+            case 'artistAlbums': return this.artistContext ? this.artistContext.artist : 'Albums';
+            default: return '';
+          }
+        },
+        activeTab: function () {
+          if (this.view === 'albums' || this.view === 'albumSongs')    return 'albums';
+          if (this.view === 'artists' || this.view === 'artistAlbums') return 'artists';
+          return this.view;
+        },
+        progressStyle: function () {
+          if (!this.localDuration || this.localDuration <= 0) {
+            return { width: '0%' };
+          }
+          var pct = Math.min((this.localCurrentTime / this.localDuration) * 100, 100);
+          return { width: pct + '%' };
+        }
+      },
+
+      methods: {
+
+        // ── Auth ────────────────────────────────────────────────────────────────
+        submitCode: async function () {
+          try {
+            var res = await axios.post('/api/v1/jukebox/does-code-exist', { code: this.loginCode });
+            if (res.data.status !== true) { throw new Error('Not found'); }
+            remoteProperties.code  = this.loginCode;
+            remoteProperties.token = res.data.token;
+            this.loggedIn    = true;
+            this.loginError  = '';
+            this.loadFiles();
+            this.loadNowPlaying();
+          } catch (e) {
+            this.loginError = 'Code not found. Please try again.';
+          }
+        },
+
+        // ── Commands ────────────────────────────────────────────────────────────
+        sendCommand: async function (command, file) {
+          try {
+            var data = { code: remoteProperties.code, command: command };
+            if (file !== undefined && file !== false) { data.file = String(file); }
+            await axios({
+              method: 'POST',
+              url: '/api/v1/jukebox/push-to-client',
+              headers: { 'x-access-token': remoteProperties.token },
+              data: data
+            });
+          } catch (e) {
+            console.error('Command failed:', e);
+          }
+        },
+
+        // ── Tab Navigation ──────────────────────────────────────────────────────
+        goToView: function (view) {
+          this.history = [];
+          this.items   = [];
+          this.searchResults = null;
+          this.view = view;
+          if (view === 'files')    { this.loadFiles(); }
+          else if (view === 'albums')   { this.loadAlbums(); }
+          else if (view === 'artists')  { this.loadArtists(); }
+          else if (view === 'playlist') { this.loadPlaylist(); }
+        },
+
+        goBack: function () {
+          if (this.view === 'files' && this.fileExplorerPath.length > 1) {
+            MSTREAMAPI.goBackDirectory();
+            this.loadFiles();
+            return;
+          }
+          if (this.history.length > 0) {
+            var prev = this.history.pop();
+            this.view          = prev.view;
+            this.items         = prev.items;
+            this.albumContext  = prev.albumContext  || null;
+            this.artistContext = prev.artistContext || null;
+          }
+        },
+
+        pushHistory: function () {
+          this.history.push({
+            view:          this.view,
+            items:         this.items.slice(),
+            albumContext:  this.albumContext,
+            artistContext: this.artistContext
+          });
+        },
+
+        // ── File Explorer ───────────────────────────────────────────────────────
+        loadFiles: async function () {
+          this.loading = true;
+          try {
+            var res = await MSTREAMAPI.getCurrentDirectoryContents();
+            this.items = [].concat(
+              res.data.directories.map(function(d) {
+                return { type: 'directory', name: d.name, path: res.data.path + d.name };
+              }),
+              res.data.files.map(function(f) {
+                return { type: 'file', name: f.name, path: res.data.path + f.name };
+              })
+            );
+          } catch (e) { console.error(e); }
+          finally { this.loading = false; }
+        },
+
+        handleFile: async function (item) {
+          if (item.type === 'directory') {
+            MSTREAMAPI.goToNextDirectory(item.name);
+            await this.loadFiles();
+          } else {
+            await this.sendCommand('addSong', item.path);
+          }
+        },
+
+        // ── Albums ──────────────────────────────────────────────────────────────
+        loadAlbums: async function () {
+          this.loading = true;
+          try {
+            var res = await MSTREAMAPI.getAlbums();
+            this.items = res.data.albums;
+            this.view  = 'albums';
+          } catch (e) { console.error(e); }
+          finally { this.loading = false; }
+        },
+
+        loadAlbumSongs: async function (album, artist, year) {
+          this.loading = true;
+          this.pushHistory();
+          try {
+            var res = await MSTREAMAPI.getAlbumSongs(album, artist, year);
+            this.items        = res.data;
+            this.albumContext = { album: album, artist: artist, year: year };
+            this.view         = 'albumSongs';
+          } catch (e) { console.error(e); }
+          finally { this.loading = false; }
+        },
+
+        // ── Artists ─────────────────────────────────────────────────────────────
+        loadArtists: async function () {
+          this.loading = true;
+          try {
+            var res = await MSTREAMAPI.getArtists();
+            this.items = res.data.artists;
+            this.view  = 'artists';
+          } catch (e) { console.error(e); }
+          finally { this.loading = false; }
+        },
+
+        loadArtistAlbums: async function (artist) {
+          this.loading = true;
+          this.pushHistory();
+          try {
+            var res = await MSTREAMAPI.getArtistAlbums(artist);
+            this.items         = res.data.albums;
+            this.artistContext = { artist: artist };
+            this.view          = 'artistAlbums';
+          } catch (e) { console.error(e); }
+          finally { this.loading = false; }
+        },
+
+        // ── Search ──────────────────────────────────────────────────────────────
+        doSearch: async function () {
+          if (!this.searchQuery.trim()) { return; }
+          this.loading = true;
+          try {
+            var res = await MSTREAMAPI.search(this.searchQuery.trim());
+            this.searchResults = res.data;
+          } catch (e) { console.error(e); }
+          finally { this.loading = false; }
+        },
+
+        drillArtist: async function (artist) {
+          this.pushHistory();
+          await this.loadArtistAlbums(artist);
+        },
+
+        drillAlbum: async function (album) {
+          this.pushHistory();
+          await this.loadAlbumSongs(album, null, null);
+        },
+
+        // ── Now Playing ────────────────────────────────────────────────────────
+        loadNowPlaying: async function () {
+          await this.sendCommand('getNowPlaying');
+          await new Promise(function(r) { setTimeout(r, 800); });
+          try {
+            var res = await MSTREAMAPI.fetchNowPlaying(remoteProperties.code);
+            this.nowPlaying = res.data.nowPlaying || null;
+            if (this.nowPlaying) {
+              this.localCurrentTime = this.nowPlaying.currentTime || 0;
+              this.localDuration = this.nowPlaying.duration || 0;
+            } else {
+              this.localCurrentTime = 0;
+              this.localDuration = 0;
+            }
+          } catch (e) { console.error(e); }
+        },
+
+        formatTime: function (seconds) {
+          if (!seconds || seconds <= 0) { return '0:00'; }
+          var mins = Math.floor(seconds / 60);
+          var secs = Math.floor(seconds % 60);
+          return mins + ':' + (secs < 10 ? '0' : '') + secs;
+        },
+
+        startProgressTimer: function () {
+          this.stopProgressTimer();
+          var self = this;
+          var lastTick = Date.now();
+          this.progressTimer = setInterval(function () {
+            if (self.nowPlaying && self.nowPlaying.playing && self.localDuration > 0) {
+              var now = Date.now();
+              var elapsed = (now - lastTick) / 1000;
+              lastTick = now;
+              self.localCurrentTime = Math.min(self.localCurrentTime + elapsed, self.localDuration);
+            } else {
+              lastTick = Date.now();
+            }
+          }, 250);
+        },
+
+        stopProgressTimer: function () {
+          if (this.progressTimer) {
+            clearInterval(this.progressTimer);
+            this.progressTimer = null;
+          }
+        },
+
+        playPauseAction: async function () {
+          await this.sendCommand('playPause');
+          if (this.nowPlaying) {
+            this.nowPlaying.playing = !this.nowPlaying.playing;
+          }
+          this.loadNowPlaying();
+        },
+
+        previousAction: async function () {
+          await this.sendCommand('previous');
+          this.loadNowPlaying();
+        },
+
+        nextAction: async function () {
+          await this.sendCommand('next');
+          this.loadNowPlaying();
+        },
+
+        // ── Queue / Playlist ────────────────────────────────────────────────────
+        loadPlaylist: async function () {
+          this.playlistLoading = true;
+          await this.sendCommand('getPlaylist');
+          // Give the browser ~800ms to respond and POST the playlist back
+          await new Promise(function(r) { setTimeout(r, 800); });
+          try {
+            var res = await MSTREAMAPI.fetchPlaylist(remoteProperties.code);
+            this.playlist = res.data.playlist || [];
+          } catch (e) { console.error(e); }
+          finally { this.playlistLoading = false; }
+          this.loadNowPlaying();
+        },
+
+        playSong: async function (index) {
+          await this.sendCommand('goToSong', index);
+          this.loadNowPlaying();
+        },
+
+        removeSong: async function (index) {
+          await this.sendCommand('removeSong', index);
+          // Optimistically remove from view and re-index
+          this.playlist.splice(
+            this.playlist.findIndex(function(s) { return s.index === index; }), 1
+          );
+          this.playlist = this.playlist.map(function(s, i) {
+            return Object.assign({}, s, { index: i });
+          });
+        },
+
+        // ── Theme ───────────────────────────────────────────────────────────────
+        toggleTheme: function () {
+          this.darkMode = !this.darkMode;
+          var theme = this.darkMode ? 'dark' : 'light';
+          document.documentElement.setAttribute('data-theme', theme);
+          localStorage.setItem('mstream-remote-theme', theme);
+        },
+
+        // ── Helpers ─────────────────────────────────────────────────────────────
+        albumArtUrl: function (aaFile) {
+          if (!aaFile) { return null; }
+          return '/album-art/' + aaFile + '?compress=s&token=' + remoteProperties.token;
+        }
+      },
+
+      mounted: function () {
+        if (this.loggedIn) {
+          this.loadFiles();
+          this.loadNowPlaying();
+        }
+        this.startProgressTimer();
+      },
+
+      beforeDestroy: function () {
+        this.stopProgressTimer();
+      }
+    });
+  };
+</script>
+
 </body>
+</html>
