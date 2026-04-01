@@ -33,6 +33,9 @@ save/*.json
 save/backups/*
 !save/backups/.gitkeep
 
+save/db/*.zip
+save/db/*.db
+
 # ytdl-core player script cache files
 *-player-script.js
 
