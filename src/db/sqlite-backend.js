@@ -739,6 +739,12 @@ export function getArtists(vpaths, ignoreVPaths, excludeFilepathPrefixes) {
 // Multi-artist variant of getArtistAlbums — accepts an array of raw artist
 // tag values and fetches all albums in a single SQL query using artist IN (...).
 // Used from the normalized-artist search path to avoid N parallel HTTP calls.
+// Strip trailing /CD1, /Disc 2, /Side A etc. so multi-disc albums group as one.
+// rtrim() in SQL produces a trailing slash on the dir value, so strip that too.
+function _normaliseAlbumDir(dir) {
+  return (dir || '').replace(/[\/\\]$/, '').replace(/[\/\\](cd|disc|disk|side)\s*\d+\s*$/i, '');
+}
+
 export function getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) {
   if (!Array.isArray(artists) || artists.length === 0) return [];
   const filtered = vpathFilter(vpaths, ignoreVPaths);
@@ -747,19 +753,27 @@ export function getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilep
   const ep  = excludePrefixClauses(excludeFilepathPrefixes);
   const ip  = includePrefixClauses(includeFilepathPrefixes);
   const aIn = inClause('artist', artists.map(String));
+  // GROUP BY album + physical dir so different pressings of the same album
+  // each get their own entry. CD1/CD2 grouping is handled in JS via _normaliseAlbumDir.
   const rows = db.prepare(`
-    SELECT DISTINCT album AS name, year, aaFile AS album_art_file
+    SELECT album AS name, year, aaFile AS album_art_file,
+      rtrim(filepath, replace(filepath, '/', '')) AS dir
     FROM files
     WHERE ${vIn.sql}${ep.sql}${ip.sql} AND ${aIn.sql}
+    GROUP BY album, rtrim(filepath, replace(filepath, '/', ''))
     ORDER BY year DESC
   `).all(...vIn.params, ...ep.params, ...ip.params, ...aIn.params);
   const albums = [], store = {};
   for (const row of rows) {
     if (row.name === null) {
-      if (!store[null]) { albums.push({ name: null, year: null, album_art_file: row.album_art_file || null }); store[null] = true; }
-    } else if (!store[`${row.name}${row.year}`]) {
-      albums.push({ name: row.name, year: row.year, album_art_file: row.album_art_file || null });
-      store[`${row.name}${row.year}`] = true;
+      const key = 'null\x00' + _normaliseAlbumDir(row.dir);
+      if (!store[key]) { albums.push({ name: null, year: null, album_art_file: row.album_art_file || null }); store[key] = true; }
+    } else {
+      const key = row.name + '\x00' + _normaliseAlbumDir(row.dir);
+      if (!store[key]) {
+        albums.push({ name: row.name, year: row.year, album_art_file: row.album_art_file || null });
+        store[key] = true;
+      }
     }
   }
   return albums;
@@ -772,24 +786,26 @@ export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPre
   const ep = excludePrefixClauses(excludeFilepathPrefixes);
   const ip = includePrefixClauses(includeFilepathPrefixes);
   const rows = db.prepare(`
-    SELECT DISTINCT album AS name, year, aaFile AS album_art_file
+    SELECT album AS name, year, aaFile AS album_art_file,
+      rtrim(filepath, replace(filepath, '/', '')) AS dir
     FROM files
     WHERE ${vIn.sql}${ep.sql}${ip.sql} AND artist = ?
+    GROUP BY album, rtrim(filepath, replace(filepath, '/', ''))
     ORDER BY year DESC
   `).all(...vIn.params, ...ep.params, ...ip.params, String(artist));
 
-  // Deduplicate like Loki backend does (by album+year combo)
   const albums = [];
   const store = {};
   for (const row of rows) {
     if (row.name === null) {
-      if (!store[null]) {
-        albums.push({ name: null, year: null, album_art_file: row.album_art_file || null });
-        store[null] = true;
+      const key = 'null\x00' + _normaliseAlbumDir(row.dir);
+      if (!store[key]) { albums.push({ name: null, year: null, album_art_file: row.album_art_file || null }); store[key] = true; }
+    } else {
+      const key = row.name + '\x00' + _normaliseAlbumDir(row.dir);
+      if (!store[key]) {
+        albums.push({ name: row.name, year: row.year, album_art_file: row.album_art_file || null });
+        store[key] = true;
       }
-    } else if (!store[`${row.name}${row.year}`]) {
-      albums.push({ name: row.name, year: row.year, album_art_file: row.album_art_file || null });
-      store[`${row.name}${row.year}`] = true;
     }
   }
   return albums;
@@ -802,18 +818,21 @@ export function getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, include
   const ep = excludePrefixClauses(excludeFilepathPrefixes);
   const ip = includePrefixClauses(includeFilepathPrefixes);
   const rows = db.prepare(`
-    SELECT DISTINCT album AS name, aaFile AS album_art_file, year
+    SELECT album AS name, aaFile AS album_art_file, year,
+      rtrim(filepath, replace(filepath, '/', '')) AS dir
     FROM files
     WHERE ${vIn.sql}${ep.sql}${ip.sql} AND album IS NOT NULL
+    GROUP BY album, rtrim(filepath, replace(filepath, '/', ''))
     ORDER BY album COLLATE NOCASE
   `).all(...vIn.params, ...ep.params, ...ip.params);
 
   const albums = [];
   const store = {};
   for (const row of rows) {
-    if (!store[`${row.name}${row.year}`]) {
+    const key = row.name + '\x00' + _normaliseAlbumDir(row.dir);
+    if (!store[key]) {
       albums.push({ name: row.name, album_art_file: row.album_art_file, year: row.year });
-      store[`${row.name}${row.year}`] = true;
+      store[key] = true;
     }
   }
   return albums;
@@ -823,15 +842,16 @@ export function getAlbumSongs(album, vpaths, username, opts) {
   const filtered = vpathFilter(vpaths, opts.ignoreVPaths);
   if (filtered.length === 0) { return []; }
   const vIn = inClause('f.vpath', filtered);
-  const ep = excludePrefixClauses(opts.excludeFilepathPrefixes, 'f.vpath', 'f.filepath');
+  const ep  = excludePrefixClauses(opts.excludeFilepathPrefixes, 'f.vpath', 'f.filepath');
+  const ip  = includePrefixClauses(opts.includeFilepathPrefixes, 'f.vpath', 'f.filepath');
 
   let sql = `
     SELECT f.rowid AS id, f.*, um.rating
     FROM files f
     LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
-    WHERE ${vIn.sql}${ep.sql}
+    WHERE ${vIn.sql}${ep.sql}${ip.sql}
   `;
-  const params = [username, ...vIn.params, ...ep.params];
+  const params = [username, ...vIn.params, ...ep.params, ...ip.params];
 
   if (album === null) {
     sql += ' AND f.album IS NULL';

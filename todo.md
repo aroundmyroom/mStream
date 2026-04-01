@@ -1,5 +1,7 @@
 # mStream v2 TODO
 
+> **Note:** This file is being phased out. Task tracking is moving to a proper issue tracker (GitHub Issues). New items should be filed there; this file is kept for reference only.
+
 ---
 
 ## NOW — In Progress / Remaining

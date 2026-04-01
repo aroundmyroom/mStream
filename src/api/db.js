@@ -156,7 +156,7 @@ export function setup(mstream) {
       req.body.album ? String(req.body.album) : null,
       req.user.vpaths,
       req.user.username,
-      { ignoreVPaths: req.body.ignoreVPaths, artist: req.body.artist, year: req.body.year, excludeFilepathPrefixes: req.body.excludeFilepathPrefixes }
+      { ignoreVPaths: req.body.ignoreVPaths, artist: req.body.artist, year: req.body.year, excludeFilepathPrefixes: req.body.excludeFilepathPrefixes, includeFilepathPrefixes: req.body.includeFilepathPrefixes }
     );
 
     const songs = [];
