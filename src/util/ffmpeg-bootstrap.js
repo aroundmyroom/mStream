@@ -130,6 +130,9 @@ const MIN_FFMPEG_MAJOR = 6;
 
 // Run `ffmpeg -version` and return { major, versionLine }.
 // Returns { major: 0, versionLine: '' } on any failure.
+// Handles both stable releases ("ffmpeg version 7.1.1") and BtbN git snapshot
+// builds ("ffmpeg version N-123777-g53537f6cf5-20260331").  Git snapshot
+// builds always have a major version > 6 so we treat them as major = 99.
 function _getFfmpegVersion(binPath) {
   return new Promise(resolve => {
     const p = spawn(binPath, ['-version'], { stdio: ['ignore', 'pipe', 'ignore'] });
@@ -137,8 +140,17 @@ function _getFfmpegVersion(binPath) {
     p.stdout.on('data', d => { o += d; });
     p.on('close', () => {
       const line = o.split('\n')[0] || '';
-      const m = line.match(/ffmpeg version (\d+)/);
-      resolve({ major: m ? parseInt(m[1], 10) : 0, versionLine: line });
+      // Stable release: "ffmpeg version 7.1.1 ..."
+      const stableMatch = line.match(/ffmpeg version (\d+)/);
+      if (stableMatch) {
+        return resolve({ major: parseInt(stableMatch[1], 10), versionLine: line });
+      }
+      // BtbN git snapshot: "ffmpeg version N-123777-g<hash>-<date> ..."
+      // These are always cutting-edge builds, always valid.
+      if (/ffmpeg version N-\d+/.test(line)) {
+        return resolve({ major: 99, versionLine: line });
+      }
+      resolve({ major: 0, versionLine: line });
     });
     p.on('error', () => resolve({ major: 0, versionLine: '' }));
   });

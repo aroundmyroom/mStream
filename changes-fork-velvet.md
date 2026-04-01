@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### fix: ffmpeg re-downloaded on every restart for BtbN git snapshot builds
+- `_getFfmpegVersion()` regex only matched stable releases (`ffmpeg version 7.1.1`) — BtbN snapshot builds (`ffmpeg version N-123777-g<hash>-<date>`) returned `major: 0`, triggering a fresh download every boot
+- Added explicit `N-\d+` pattern detection; snapshot builds are treated as `major: 99` (always valid)
+
 ### SQLite scan performance tuning
 - `TX_BATCH_SIZE` raised from 50 → 500: reduces scan write transactions from ~2760 to ~276 for a 138K-song library, fewer WAL fsyncs during scan
 - Automatic one-time page size migration from 4 KB → 8 KB on first boot: shallower B-trees, fewer disk reads per search/browse query on large databases (~3–5 s migration, never repeats)
