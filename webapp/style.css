@@ -9,7 +9,7 @@
   --primary:#8b5cf6; --primary-h:#7c3aed;
   --primary-d:rgba(139,92,246,.15); --primary-g:rgba(139,92,246,.4);
   --accent:#60a5fa; --green:#34d399; --red:#f87171; --yellow:#fbbf24;
-  --t1:#eeeeff; --t2:#8888b0; --t3:#6070a0; --t4:#2a3a5e;
+  --t1:#eeeeff; --t2:#8888b0; --t3:#7e8ec0; --t4:#2a3a5e;
   --sidebar:236px; --player:210px; --r:7px; --r2:12px; --qp-width:488px;
 }
 
@@ -21,7 +21,7 @@
   --primary:#a78bfa; --primary-h:#9061f9;
   --primary-d:rgba(167,139,250,.14); --primary-g:rgba(167,139,250,.38);
   --accent:#60a5fa; --green:#34d399; --red:#f87171; --yellow:#fbbf24;
-  --t1:#f1f1f1; --t2:#8a8a9a; --t3:#4a4a5a; --t4:#252530;
+  --t1:#f1f1f1; --t2:#8a8a9a; --t3:#707082; --t4:#252530;
   --sidebar:236px; --player:210px; --r:7px; --r2:12px; --qp-width:488px;
 }
 
@@ -65,7 +65,7 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
   z-index:200;
   /* Scope remote-page solid colors so card/inputs are clearly visible */
   --surface:#16213e;--raised:#0f3460;--border:#2a3a5e;
-  --t1:#e0e0f0;--t2:#a0a8c0;--t3:#6070a0;
+  --t1:#e0e0f0;--t2:#a0a8c0;--t3:#7e8ec0;
 }
 :root.light #login-screen{
   background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(109,60,230,.10),transparent),#f0f2f7;
@@ -75,7 +75,7 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 :root.dark #login-screen{
   background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(167,139,250,.12),transparent),#000000;
   --surface:#0d0d0d;--raised:#1c1c1e;--border:rgba(255,255,255,.09);
-  --t1:#f1f1f1;--t2:#8a8a9a;--t3:#4a4a5a;
+  --t1:#f1f1f1;--t2:#8a8a9a;--t3:#707082;
 }
 .login-card{
   width:100%;max-width:375px;padding:36px 28px;
