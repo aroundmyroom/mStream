@@ -11,7 +11,7 @@ docker pull ghcr.io/aroundmyroom/mstream-velvet:latest
 Or pin to a specific release:
 
 ```shell
-docker pull ghcr.io/aroundmyroom/mstream-velvet:v5.16.33-velvet
+docker pull ghcr.io/aroundmyroom/mstream-velvet:v5.16.34-velvet
 ```
 
 ### compose.yaml (ghcr.io — recommended)
@@ -75,8 +75,34 @@ No manual steps are needed — tagging a release is enough.
 
 ## First run — adding your music library
 
-On first start mStream creates a blank config at `save/conf/default.json`.  
-Edit the file to point at your music volume:
+On first start mStream creates a blank config at `save/conf/default.json`.
+
+### Option 1 — environment variables (simple single-library setup)
+
+Add an `environment:` block to `compose.yaml`. mStream will write the initial config automatically on the very first start and skip this step on every subsequent restart.
+
+```yaml
+environment:
+  MSTREAM_MUSIC_DIR: /music          # path inside the container — matches your volume
+
+  # Optional admin account. If omitted, the server starts in open mode (no login).
+  # MSTREAM_ADMIN_USER: admin
+  # MSTREAM_ADMIN_PASS: changeme
+
+  # Optional extra vpaths — uncomment to enable:
+  # MSTREAM_ENABLE_AUDIOBOOKS: "true"   # sub-folder: Audiobooks
+  # MSTREAM_ENABLE_RECORDINGS: "true"   # sub-folder: Recordings  (also enables radio)
+  # MSTREAM_ENABLE_YOUTUBE: "true"      # sub-folder: YouTube
+```
+
+Sub-folder names can be overridden with `MSTREAM_AUDIOBOOKS_SUBDIR`, `MSTREAM_RECORDINGS_SUBDIR`, `MSTREAM_YOUTUBE_SUBDIR`.
+
+> **When env vars are NOT sufficient** — use Option 2 instead if you need:
+> multiple mount points, child-vpaths, `albumsOnly`/`filepathPrefix` filtering, or any advanced folder layout.
+
+### Option 2 — edit the config file directly
+
+Edit `save/conf/default.json` to point at your music volume:
 
 ```json
 {
