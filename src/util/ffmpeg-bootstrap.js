@@ -208,7 +208,11 @@ export async function ensureFfmpeg() {
       return dir;
     }
 
-    const url = `https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/${asset}`;
+    // Use the stable "latest" tag URL, not the /releases/latest/download/ convenience
+    // redirect — the latter can land on a brand-new timestamped release whose assets
+    // are still uploading, causing a 404.  The "latest" tag is what BtbN maintains as
+    // their stable pointer.
+    const url = `https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/${asset}`;
     winston.info(`[ffmpeg-bootstrap] Downloading ${asset} — this may take a minute…`);
 
     await fsp.mkdir(dir, { recursive: true });

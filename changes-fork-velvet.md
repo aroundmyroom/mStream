@@ -4,6 +4,14 @@
 
 ---
 
+## v5.16.43-velvet — April 2026
+
+### fix: ffmpeg download 404 — use BtbN stable `latest` tag URL
+- The ffmpeg bootstrap used `releases/latest/download/` which GitHub resolves by redirecting to the most-recently-published release — sometimes a brand-new timestamped autobuild whose assets are still uploading, causing HTTP 404
+- Fixed: use `releases/download/latest/` directly, which points to the `latest` tag that BtbN maintains as their stable pointer — never 404s mid-upload
+
+---
+
 ## v5.16.42-velvet — April 2026
 
 ### fix: transcoding route crashes with `url.charAt is not a function`
