@@ -28,7 +28,7 @@ docker pull ghcr.io/aroundmyroom/mstream-velvet:latest
 Or pin to a specific release:
 
 ```shell
-docker pull ghcr.io/aroundmyroom/mstream-velvet:v5.16.37-velvet
+docker pull ghcr.io/aroundmyroom/mstream-velvet:v5.16.37a-velvet
 ```
 
 ### compose.yaml (ghcr.io — recommended)

@@ -4,6 +4,14 @@
 
 ---
 
+## v5.16.37a-velvet — April 2026
+
+### docs: Docker update guide and *_SUBDIR inline examples
+- Added **"Updating to the latest release"** section to `docs/docker.md` — covers `compose pull` + `up -d` workflow for both `latest` and pinned-tag users
+- Added per-type `*_SUBDIR` inline examples to `compose.yaml`, `docs/docker.md`, and `README.md` so users can see exactly how to route each folder type into a sub-folder of `/music`
+
+---
+
 ## v5.16.37-velvet — April 2026
 
 ### fix: Dockerfile baked in non-empty SUBDIR defaults causing unwanted sub-folders
