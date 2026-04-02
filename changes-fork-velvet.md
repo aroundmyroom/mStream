@@ -4,6 +4,16 @@
 
 ---
 
+## v5.16.37-velvet — April 2026
+
+### fix: Dockerfile baked in non-empty SUBDIR defaults causing unwanted sub-folders
+- `MSTREAM_AUDIOBOOKS_SUBDIR`, `MSTREAM_RECORDINGS_SUBDIR`, `MSTREAM_YOUTUBE_SUBDIR` were set to `"Audiobooks"`, `"Recordings"`, `"YouTube"` in the Dockerfile `ENV` declarations
+- This meant `process.env.MSTREAM_*_SUBDIR` was always non-empty inside the container even when the user set nothing, so the bootstrap always created sub-folders inside `/music` instead of applying the type to `/music` itself
+- All three `*_SUBDIR` ENV defaults are now empty strings — the folder type is applied to `MSTREAM_MUSIC_DIR` directly unless the user explicitly sets a `*_SUBDIR` variable
+- Also fixed JSDoc comment in `cli-boot-wrapper.js` to reflect correct "no default" behaviour
+
+---
+
 ## v5.16.36-velvet — April 2026
 
 ### fix: ffmpeg auto-download fails on Alpine (Docker) — tar `--wildcards` not supported by BusyBox

@@ -27,9 +27,12 @@ const version = require('./package.json').version;
  *   MSTREAM_ENABLE_RECORDINGS  Set to "true" to add a Recordings folder (type: recordings) and enable radio.
  *   MSTREAM_ENABLE_YOUTUBE     Set to "true" to add a YouTube downloads folder (type: youtube).
  *
- *   MSTREAM_AUDIOBOOKS_SUBDIR  Sub-folder name inside MSTREAM_MUSIC_DIR (default: Audiobooks).
- *   MSTREAM_RECORDINGS_SUBDIR  Sub-folder name inside MSTREAM_MUSIC_DIR (default: Recordings).
- *   MSTREAM_YOUTUBE_SUBDIR     Sub-folder name inside MSTREAM_MUSIC_DIR (default: YouTube).
+ *   MSTREAM_AUDIOBOOKS_SUBDIR  Optional sub-folder name inside MSTREAM_MUSIC_DIR.
+ *                              If omitted, the folder type is applied to MSTREAM_MUSIC_DIR itself.
+ *   MSTREAM_RECORDINGS_SUBDIR  Optional sub-folder name inside MSTREAM_MUSIC_DIR.
+ *                              If omitted, the folder type is applied to MSTREAM_MUSIC_DIR itself.
+ *   MSTREAM_YOUTUBE_SUBDIR     Optional sub-folder name inside MSTREAM_MUSIC_DIR.
+ *                              If omitted, the folder type is applied to MSTREAM_MUSIC_DIR itself.
  *
  * Auto-config runs in two independent phases, each only once:
  *   1. Folder phase  — runs when no folders are configured yet.
