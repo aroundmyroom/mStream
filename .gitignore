@@ -37,3 +37,4 @@ dist/*
 .env
 
 rust-parser/target/
+rust-server-audio/target/
