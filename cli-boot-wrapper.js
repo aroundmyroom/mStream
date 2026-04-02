@@ -23,9 +23,9 @@ const version = require('./package.json').version;
  *                              If both are omitted the server starts without any users —
  *                              all library access is open to anyone (no login required).
  *
- *   MSTREAM_ENABLE_AUDIOBOOKS  Set to "true" to create an AudioBooks/Podcasts vpath.
- *   MSTREAM_ENABLE_RECORDINGS  Set to "true" to create a Recordings vpath (radio recording).
- *   MSTREAM_ENABLE_YOUTUBE     Set to "true" to create a YouTube downloads vpath.
+ *   MSTREAM_ENABLE_AUDIOBOOKS  Set to "true" to add an AudioBooks folder (type: audio-books).
+ *   MSTREAM_ENABLE_RECORDINGS  Set to "true" to add a Recordings folder (type: recordings) and enable radio.
+ *   MSTREAM_ENABLE_YOUTUBE     Set to "true" to add a YouTube downloads folder (type: youtube).
  *
  *   MSTREAM_AUDIOBOOKS_SUBDIR  Sub-folder name inside MSTREAM_MUSIC_DIR (default: Audiobooks).
  *   MSTREAM_RECORDINGS_SUBDIR  Sub-folder name inside MSTREAM_MUSIC_DIR (default: Recordings).
