@@ -36,6 +36,10 @@ save/backups/*
 save/db/*.zip
 save/db/*.db
 
+# temporary query/debug scripts
+check-*.cjs
+check-*.mjs
+
 # ytdl-core player script cache files
 *-player-script.js
 
