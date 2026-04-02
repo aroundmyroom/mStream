@@ -58,21 +58,17 @@ services:
       # MSTREAM_ADMIN_USER: admin
       # MSTREAM_ADMIN_PASS: changeme
 
-      # Extra feature folders — uncomment each to enable.
-      # Each creates a sub-folder inside MSTREAM_MUSIC_DIR and adds a folder
-      # entry to the config with the correct type (audio-books / recordings / youtube).
-      # These types are PROPERTIES set on a folder — not independent vpaths.
-      # Override the sub-folder name with the matching *_SUBDIR variable.
-      # For more control (child-vpaths, albumsOnly, etc.) edit the config directly.
+      # Extra feature folders — uncomment to enable.
+      # Each marks MSTREAM_MUSIC_DIR as the given folder type.
+      # To point at a sub-folder instead, add the matching *_SUBDIR variable
+      # set to the sub-folder name (e.g. MSTREAM_YOUTUBE_SUBDIR: YouTube).
+      # For full control, skip env vars and edit save/conf/default.json directly.
 
-      # AudioBooks & Podcasts folder  (type: audio-books, default sub-folder: Audiobooks)
+      # AudioBooks & Podcasts  (type: audio-books)
       # MSTREAM_ENABLE_AUDIOBOOKS: "true"
-      # MSTREAM_AUDIOBOOKS_SUBDIR: Audiobooks
 
-      # Radio Recordings folder  (type: recordings, also enables radio, default sub-folder: Recordings)
+      # Radio Recordings  (type: recordings — also enables the radio feature)
       # MSTREAM_ENABLE_RECORDINGS: "true"
-      # MSTREAM_RECORDINGS_SUBDIR: Recordings
 
-      # YouTube Downloads folder  (type: youtube, default sub-folder: YouTube)
+      # YouTube Downloads  (type: youtube)
       # MSTREAM_ENABLE_YOUTUBE: "true"
-      # MSTREAM_YOUTUBE_SUBDIR: YouTube
