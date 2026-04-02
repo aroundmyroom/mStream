@@ -2,7 +2,7 @@
 
 > **A heavily extended fork of [mStream](https://github.com/IrosTheBeggar/mStream) by [aroundmyroom](https://github.com/aroundmyroom).**
 
-**Current version: [5.16.46-velvet](releases/v5.16.46-velvet.md)** — April 2026
+**Current version: [5.16.47-velvet](releases/v5.16.47-velvet.md)** — April 2026
 
 [![Discord](https://img.shields.io/badge/Discord-mStream%20Velvet-5865F2?logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/KfsTCYrTkS)
 
@@ -223,7 +223,7 @@ Open **http://localhost:3000** — on a fresh install with no users the admin pa
 Or pin to a specific release:
 
 ```shell
-docker pull ghcr.io/aroundmyroom/mstream-velvet:v5.16.46-velvet
+docker pull ghcr.io/aroundmyroom/mstream-velvet:v5.16.47-velvet
 ```
 
 **Build from source** (optional):

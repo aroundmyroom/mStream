@@ -509,13 +509,17 @@ export function findFileByPath(filepath, vpath) {
 export function findFilesByPaths(filepaths, vpath) {
   const map = new Map();
   if (!filepaths.length) return map;
-  const tx = db.transaction(fps => {
-    for (const fp of fps) {
+  db.exec('BEGIN');
+  try {
+    for (const fp of filepaths) {
       const row = _s.findFile.get(fp, vpath);
       if (row) map.set(fp, row);
     }
-  });
-  tx(filepaths);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
   return map;
 }
 
@@ -526,10 +530,14 @@ export function updateFileScanId(file, scanId) {
 // Batch scanId update: wraps all individual UPDATEs in a single transaction.
 // Reduces 200 auto-commit transactions to 1, giving ~200x write throughput.
 export function batchUpdateScanIds(filepaths, vpath, scanId) {
-  const tx = db.transaction(fps => {
-    for (const fp of fps) _s.updateScanId.run(scanId, fp, vpath);
-  });
-  tx(filepaths);
+  db.exec('BEGIN');
+  try {
+    for (const fp of filepaths) _s.updateScanId.run(scanId, fp, vpath);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
 }
 
 export function updateFileArt(filepath, vpath, aaFile, scanId, artSource = null) {

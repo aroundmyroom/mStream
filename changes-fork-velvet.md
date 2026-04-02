@@ -4,6 +4,20 @@
 
 ---
 
+## v5.16.47-velvet — April 2026
+
+### fix: scanner batch — use `db.exec('BEGIN/COMMIT')` instead of nonexistent `db.transaction()`
+- `findFilesByPaths()` and `batchUpdateScanIds()` in `sqlite-backend.js` were calling `db.transaction()` (a `better-sqlite3` API) on `node:sqlite` `DatabaseSync`, which has no such method → `TypeError: db.transaction is not a function` → every batch call returned HTTP 500 → 82,000 "Batch lookup failed" entries accumulated in `scan_errors`
+- Fixed: replaced both `db.transaction()` wrappers with `db.exec('BEGIN')` / `db.exec('COMMIT')` / `db.exec('ROLLBACK')` — the correct pattern for `node:sqlite` DatabaseSync already used throughout the file
+- Cleared the 82,000 accumulated stale errors from `scan_errors` table
+
+### fix: initial scan no longer stalls 10+ minutes before processing files
+- `countValidFiles()` was a separate full directory walk that ran *before* scanning started; for a 138K-file library this took 10+ minutes duplicating all I/O with no actual scan progress
+- Eliminated the pre-count pass entirely; a `_totalSeen` counter is now incremented inside `recursiveScan` and a single `set-expected` ping fires after the walk completes — no double-traverse, scanning starts immediately
+- UI shows an indeterminate progress bar with growing file count during the tree walk; percentage appears once the final total is set
+
+---
+
 ## v5.16.46-velvet — April 2026
 
 ### fix: scanner batch endpoint 500 errors — avoid dynamic SQL in `findFilesByPaths`

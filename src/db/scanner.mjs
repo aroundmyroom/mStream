@@ -142,49 +142,10 @@ async function confirmOk(absoluteFilepath) {
   }
 }
 
-// Running total used by countValidFiles to send incremental counting-update pings.
-let _countingFound = 0;
-
-/**
- * First-scan pre-count pass — walks disk once (no tag reads) to give the
- * progress bar an accurate expected total.  Only runs when there is no DB
- * baseline (i.e. a brand-new library with 0 indexed files).  For rescans
- * the DB count is already a good estimate so we skip this entirely and
- * start scanning immediately.
- *
- * Sends incremental counting-update pings every 5 000 files so the UI shows
- * a growing count rather than a blank progress bar.
- */
-async function countValidFiles(dir) {
-  let count = 0;
-  let entries;
-  try { entries = await fsp.readdir(dir); } catch (_e) { return 0; }
-  for (const entry of entries) {
-    const full = path.join(dir, entry);
-    let stat;
-    try { stat = fs.statSync(full); } catch (_e) { continue; }
-    if (stat.isDirectory()) {
-      if (loadJson.otherRoots.includes(full)) { continue; }
-      count += await countValidFiles(full);
-    } else if (stat.isFile()) {
-      if (loadJson.supportedFiles[getFileType(entry).toLowerCase()]) {
-        count++;
-        _countingFound++;
-        // Every 5 000 files found, ping the UI so the user sees activity.
-        if (_countingFound % 5000 === 0) {
-          ax({
-            method: 'POST',
-            url: `http${loadJson.isHttps === true ? 's' : ''}://localhost:${loadJson.port}/api/v1/scanner/counting-update`,
-            headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
-            responseType: 'json',
-            data: { scanId: loadJson.scanId, found: _countingFound }
-          }).catch(() => {});
-        }
-      }
-    }
-  }
-  return count;
-}
+// Running total of valid files discovered during recursiveScan.
+// Updated as directories are walked so set-expected pings reflect the
+// current tree-walk progress rather than requiring a separate pre-count pass.
+let _totalSeen = 0;
 
 run();
 async function run() {
@@ -200,32 +161,32 @@ async function run() {
       });
     } catch (_e) { /* non-critical — prune fail should not abort scan */ }
 
-    // Pre-count strategy:
-    //  - Rescan (hasBaseline=true): DB count is already a good estimate; skip
-    //    pre-count entirely so 100% of I/O bandwidth goes to the actual scan.
-    //    pct is capped at 99 in scan-progress.js until finish-scan is called,
-    //    so an interrupted-scan (DB=20K, disk=138K) never shows false 100%.
-    //  - First scan (hasBaseline=false): run pre-count SEQUENTIALLY first so
-    //    the progress bar gets an accurate total before scanning begins.
-    //    The user sees a "Counting…" counter growing, then the real scan starts.
-    if (!loadJson.hasBaseline) {
-      try {
-        _countingFound = 0;
-        const total = await countValidFiles(loadJson.directory);
-        if (total > 0) {
-          await ax({
-            method: 'POST',
-            url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/set-expected`,
-            headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
-            responseType: 'json',
-            data: { scanId: loadJson.scanId, expected: total }
-          });
-        }
-      } catch (_e) { /* non-critical */ }
-    }
+    // Progress strategy (both first scans and rescans):
+    //  - Rescan (hasBaseline=true): expected is already set from DB count; no
+    //    change needed. pct is capped at 99 until finish-scan fires.
+    //  - First scan (hasBaseline=false): no pre-count pass — scanning starts
+    //    immediately. _totalSeen is incremented per file in recursiveScan.
+    //    After the full tree walk a single set-expected ping sends the true
+    //    total. The UI shows an indeterminate bar + growing file count with no
+    //    double-traverse and no 10+ min pre-scan delay.
 
     const scanStartTs = Math.floor(Date.now() / 1000);
     await recursiveScan(loadJson.directory);
+
+    // Final set-expected: after the full tree walk, _totalSeen is the true total.
+    // For rescans the DB count is already set; this is only meaningful for first scans.
+    if (!loadJson.hasBaseline && _totalSeen > 0) {
+      try {
+        await ax({
+          method: 'POST',
+          url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/set-expected`,
+          headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+          responseType: 'json',
+          data: { scanId: loadJson.scanId, expected: _totalSeen }
+        });
+      } catch (_e) { /* non-critical */ }
+    }
+
     await flushBatch();
 
     await ax({
@@ -428,6 +389,7 @@ async function recursiveScan(dir) {
     } else if (stat.isFile()) {
       if (!loadJson.supportedFiles[getFileType(file).toLowerCase()]) { continue; }
       _pendingBatch.push({ absPath: filepath, relPath: path.relative(loadJson.directory, filepath), modTime: stat.mtime.getTime() });
+      _totalSeen++;
       if (_pendingBatch.length >= SCAN_BATCH_SIZE) await flushBatch();
     }
   }
