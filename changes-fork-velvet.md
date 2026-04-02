@@ -4,6 +4,17 @@
 
 ---
 
+## v5.16.39-velvet — April 2026
+
+### fix: switch Docker base image from Alpine to Debian slim
+- `node:24-alpine` (musl libc) cannot run BtbN ffmpeg binaries — they dynamically link against glibc's `libmvec.so.1` (SIMD vector math) and other glibc-only symbols that musl does not provide
+- `libc6-compat` only creates the ELF interpreter symlink; it cannot supply the missing glibc shared libraries
+- Switched base image to `node:24-slim` (Debian Bookworm) where glibc is native — BtbN ffmpeg runs without any compatibility shims
+- Added `wget` and `xz-utils` to the `apt-get` install step (needed for yt-dlp download and ffmpeg tar extraction; were pre-installed in Alpine's BusyBox)
+- This permanently fixes ffmpeg on Docker: waveform generation, transcoding, radio recording, YouTube downloads all work correctly
+
+---
+
 ## v5.16.38-velvet — April 2026
 
 ### fix: ffmpeg "not found" on Alpine Docker (missing glibc ELF interpreter)

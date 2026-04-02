@@ -1,8 +1,7 @@
-FROM node:24-alpine
+FROM node:24-slim
 
-# libc6-compat provides /lib64/ld-linux-x86-64.so.2 (symlink to musl) so that
-# glibc-built static binaries (ffmpeg from BtbN) can execute on Alpine.
-RUN apk add --no-cache libc6-compat
+# Build tools needed for npm native modules on Debian slim
+RUN apt-get update && apt-get install -y --no-install-recommends wget xz-utils && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
