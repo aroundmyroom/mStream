@@ -1931,9 +1931,12 @@ const dbView = Vue.component('db-view', {
                     </div>
                     <div class="sp-counts">
                       <span v-if="sp.countingFound > 0 && sp.scanned === 0">{{sp.countingFound.toLocaleString()}} files found&hellip;</span>
-                      <span v-else-if="sp.expected">{{sp.scanned.toLocaleString()}} / {{sp.expected.toLocaleString()}} files</span>
+                      <span v-else-if="sp.expected">{{sp.scanned.toLocaleString()}} / {{sp.expected.toLocaleString()}} files checked</span>
                       <span v-else>{{sp.scanned.toLocaleString()}} files checked</span>
                       <span class="sp-elapsed">elapsed: {{formatElapsed(sp.elapsedSec)}}</span>
+                    </div>
+                    <div v-if="sp.added > 0" class="sp-counts" style="margin-top:.2rem;color:var(--accent,#26a69a)">
+                      <span>{{sp.added.toLocaleString()}} added to DB</span>
                     </div>
                     <div v-if="sp.currentFile" class="sp-current-file">
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>

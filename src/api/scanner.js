@@ -213,6 +213,7 @@ export function setup(mstream) {
   mstream.post('/api/v1/scanner/add-file', (req, res) => {
     if (_txBatch === 0) db.beginTransaction();
     db.insertFile(req.body);
+    scanProgress.tickInsert(req.body.sID);
     _txBatch++;
     if (_txBatch >= TX_BATCH_SIZE) {
       db.commitTransaction();

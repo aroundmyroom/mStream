@@ -4,6 +4,20 @@
 
 ---
 
+## v5.16.50-velvet — April 2026
+
+### fix: scanner no longer stalls after first batch of 200 files
+- `findFilesByPaths()` called `db.exec('BEGIN')` while the `add-file` endpoint had already opened a transaction — SQLite raised "cannot start a transaction within a transaction" → HTTP 500 → "Batch lookup failed" → scanner stopped dead after exactly 200 files (one batch)
+- `findFilesByPaths()`: removed unnecessary `BEGIN/COMMIT` (reads don't need a transaction)
+- `batchUpdateScanIds()`: switched from `BEGIN/COMMIT` to `SAVEPOINT` (nestable inside any open transaction)
+
+### feat: scan card now shows "added to DB" counter
+- During a scan the progress card now shows a second line in green: `N added to DB`, incrementing in real time as files are inserted
+- Previously only "files checked" was visible; the insertion phase was invisible
+- Existing label updated from "files" to "files checked" for clarity
+
+---
+
 ## v5.16.49-velvet — April 2026
 
 ### fix: Scan Error Audit page no longer crashes when thousands of errors are present

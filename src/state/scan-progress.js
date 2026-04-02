@@ -14,6 +14,7 @@ export function startScan(scanId, vpath, expected) {
     vpath,
     expected,           // null means no baseline (first scan)
     scanned: 0,
+    added: 0,           // files actually inserted into the DB
     countingFound: 0,   // grows during pre-count walk (first scans only)
     currentFile: null,
     startedAt: Date.now(),
@@ -40,6 +41,16 @@ export function tick(scanId, filepath) {
     s._rateBase = s.scanned;
     s._rateTs = Date.now();
   }
+}
+
+/**
+ * Called when a new file is inserted into the DB.
+ * @param {string} scanId
+ */
+export function tickInsert(scanId) {
+  const s = _scans.get(scanId);
+  if (!s) return;
+  s.added++;
 }
 
 /**
@@ -95,6 +106,7 @@ export function getAll() {
       scanId: s.scanId,
       vpath: s.vpath,
       scanned: s.scanned,
+      added: s.added,
       expected: s.expected,
       countingFound: s.countingFound || 0,
       pct,
