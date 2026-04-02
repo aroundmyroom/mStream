@@ -100,19 +100,21 @@ function _downloadFile(url, destPath) {
 }
 
 // Extract ffmpeg and ffprobe from a .tar.xz archive using system tar.
-// GNU tar --wildcards strips the leading directory so only the bare binaries
-// end up in destDir:
+// Uses explicit paths derived from the asset name (no --wildcards) so this
+// works with both GNU tar (bare-metal) and BusyBox tar (Alpine / Docker).
 //   ffmpeg-master-latest-linux64-gpl/bin/ffmpeg  →  destDir/ffmpeg
 //   ffmpeg-master-latest-linux64-gpl/bin/ffprobe →  destDir/ffprobe
-function _extractTarXz(tarPath, destDir) {
+function _extractTarXz(tarPath, destDir, asset) {
+  // Derive the top-level directory name inside the archive from the asset name.
+  // e.g. "ffmpeg-master-latest-linux64-gpl.tar.xz" → "ffmpeg-master-latest-linux64-gpl"
+  const prefix = asset.replace(/\.tar\.xz$/, '');
   return new Promise((resolve, reject) => {
     const proc = spawn('tar', [
       '-xJf', tarPath,
       '-C', destDir,
       '--strip-components=2',
-      '--wildcards',
-      '*/bin/ffmpeg',
-      '*/bin/ffprobe',
+      `${prefix}/bin/ffmpeg`,
+      `${prefix}/bin/ffprobe`,
     ], { stdio: ['ignore', 'ignore', 'pipe'] });
     let errOut = '';
     proc.stderr.on('data', d => { errOut += d; });
@@ -214,7 +216,7 @@ export async function ensureFfmpeg() {
 
     try {
       await _downloadFile(url, tarPath);
-      await _extractTarXz(tarPath, dir);
+      await _extractTarXz(tarPath, dir, asset);
       // Make both executables
       await fsp.chmod(dest, 0o755).catch(() => {});
       await fsp.chmod(probe, 0o755).catch(() => {});

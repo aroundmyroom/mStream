@@ -2632,7 +2632,7 @@ const infoView = Vue.component('info-view', {
               <span class="card-title">Anonymous Telemetry</span>
               <p style="color:var(--t2);margin-bottom:.75rem;">mStream Velvet sends a small anonymous ping once at startup and then every 24 hours. This helps us understand how many instances are running and which versions are in use.</p>
               <p style="color:var(--t2);margin-bottom:.5rem;font-size:.85rem;"><strong style="color:var(--t1);">Exactly this data is sent — nothing more:</strong></p>
-              <pre style="background:var(--raised);border:1px solid var(--border);border-radius:6px;padding:.65rem .9rem;font-size:.78rem;color:var(--t2);margin:0 0 1rem;overflow-x:auto;">{"id":"&lt;random UUID, generated once on first boot&gt;","version":"5.16.28-velvet","platform":"linux","lastSeen":1774595289943}</pre>
+              <pre style="background:var(--raised);border:1px solid var(--border);border-radius:6px;padding:.65rem .9rem;font-size:.78rem;color:var(--t2);margin:0 0 1rem;overflow-x:auto;">{"id":"&lt;random UUID, generated once on first boot&gt;","version":"&lt;current version&gt;","platform":"linux","lastSeen":1774595289943}</pre>
               <p style="color:var(--t2);font-size:.85rem;margin-bottom:0;">No IP addresses, usernames, file paths, or any personal data is ever collected. The UUID is stored in <code style="color:var(--accent);background:var(--raised);padding:.1rem .3rem;border-radius:3px;">save/conf/instance-id</code> and never changes unless you delete it. To opt out permanently, add <code style="color:var(--accent);background:var(--raised);padding:.1rem .3rem;border-radius:3px;">"telemetry": false</code> to your config file and restart mStream.</p>
             </div>
           </div>

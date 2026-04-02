@@ -4,6 +4,17 @@
 
 ---
 
+## v5.16.36-velvet — April 2026
+
+### fix: ffmpeg auto-download fails on Alpine (Docker) — tar `--wildcards` not supported by BusyBox
+- `src/util/ffmpeg-bootstrap.js`: replaced `--wildcards '*/bin/ffmpeg'` with explicit derived paths (`<archive-prefix>/bin/ffmpeg`), removing the GNU-only `--wildcards` flag that BusyBox tar rejects with `code 1`
+- ffmpeg auto-download now works correctly on both Alpine (Docker) and GNU/Linux (bare-metal)
+
+### fix: bootstrap config write silently failed — server started with no folders
+- Wrapped `bootstrapFromEnv()` call in a `try/catch` in `cli-boot-wrapper.js`; any bootstrap failure now logs a clear `[bootstrap] Failed to write initial config:` error instead of crashing silently before `writeFile`, which previously caused `config.setup()` to start from scratch (only `{secret}` in `default.json`)
+
+---
+
 ## v5.16.35-velvet — April 2026
 
 ### fix: Docker bootstrap — admin user created even when folders already exist
