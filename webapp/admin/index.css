@@ -62,6 +62,7 @@ p { margin: 0 0 .75rem; color: var(--t2); }
   padding: 3px; gap: 2px; overflow: hidden;
   background: var(--border); border-radius: calc(var(--r) + 4px);
   margin: .55rem .75rem 0;
+  flex-shrink: 0; /* prevent flex column parent from squeezing height and clipping buttons */
 }
 .theme-seg-btn {
   flex: 1 1 0; width: 0; display: flex; align-items: center; justify-content: center; gap: 4px;

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+---
+
+## v5.16.34-velvet — April 2026
+
+### feat: Docker first-run auto-config via environment variables
+- New bootstrap in `cli-boot-wrapper.js`: if `MSTREAM_MUSIC_DIR` is set and the config file has no folders yet, an initial `save/conf/default.json` is generated automatically on first start
+- **Environment variables are completely optional.** The server works without them; edit `save/conf/default.json` (or use the admin UI) for full control. Env vars are only a convenience for simple single-library setups.
+- **When env vars are NOT sufficient** (edit config directly instead): multiple mount points, child-vpaths, `albumsOnly`/`filepathPrefix` rules, or any advanced folder layout
+- Always creates a `Music` vpath pointing at `MSTREAM_MUSIC_DIR`
+- Optional vpaths via flags: `MSTREAM_ENABLE_AUDIOBOOKS`, `MSTREAM_ENABLE_RECORDINGS`, `MSTREAM_ENABLE_YOUTUBE` — each creates the sub-folder and registers the correct vpath type; sub-folder names overridable via `*_SUBDIR` variables
+- Optional admin account: set both `MSTREAM_ADMIN_USER` and `MSTREAM_ADMIN_PASS`. **If omitted, the server starts in open mode (no login required)**
+- `compose.yaml` updated: all env vars documented with inline "when to use / when not to use" guidance
+- `Dockerfile` updated: all env vars declared as `ENV` with safe empty defaults
+- `docs/docker.md` updated: new "First run" section covers both env var and manual config approaches
+
 ### fix: album browsing — songs from wrong vpath loaded when clicking an album
 - `viewAlbumSongs` in `webapp/app.js` sent no vpath/prefix filter → clicking any album loaded songs from ALL vpaths, including 12-inch and vinyl folders that should never appear in Albums view
 - Fixed: `viewAlbumSongs` now calls `_albumsOnlyFilter()` and forwards `ignoreVPaths` + `includeFilepathPrefixes` to the API
@@ -12,6 +27,11 @@
 - `getAlbums`, `getArtistAlbums`, and `getArtistAlbumsMulti` all deduped by `album+year`, causing multiple physical pressings of the same title (e.g. original vs. remaster vs. Japan press) to appear as a single album
 - Fixed: SQL now groups by `album + physical directory` using `rtrim(filepath, replace(filepath,'/','))` — each unique folder is a separate entry
 - Multi-disc folders (`/CD1`, `/CD2`, `/Disc 1`, etc.) are collapsed into their parent album in JS via `_normaliseAlbumDir()`, preserving correct multi-disc display
+
+### fix: admin panel theme switcher clipped when sidebar has a scrollbar
+- When the sidebar content was tall enough to trigger a scrollbar, the three theme pills (Velvet / Dark / Light) were horizontally sliced through the middle
+- Root cause: `#sidenav` is `flex-direction: column`; `.theme-seg` had no `flex-shrink: 0`, so flex was compressing its height; combined with `overflow: hidden` the buttons were clipped
+- Fixed: added `flex-shrink: 0` to `.theme-seg` in `webapp/admin/index.css`
 
 
 ### chore: image processing migrated from jimp to sharp
