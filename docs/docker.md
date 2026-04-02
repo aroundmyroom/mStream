@@ -26,9 +26,11 @@ services:
       - "3000:3000"
     volumes:
       - ./save:/app/save
-      - /media/music:/music
+      - /media/music:/music         # adjust host path to your library
       - ./waveform-cache:/app/waveform-cache
       - ./image-cache:/app/image-cache
+    environment:
+      MSTREAM_MUSIC_DIR: /music     # triggers first-run auto-config (optional, see below)
 ```
 
 ```shell
@@ -79,23 +81,54 @@ On first start mStream creates a blank config at `save/conf/default.json`.
 
 ### Option 1 — environment variables (simple single-library setup)
 
-Add an `environment:` block to `compose.yaml`. mStream will write the initial config automatically on the very first start and skip this step on every subsequent restart.
+Add an `environment:` block to your `compose.yaml`. mStream will write the initial config automatically on the very first start and skip this step on every subsequent restart.
+
+Complete copy-paste example:
 
 ```yaml
-environment:
-  MSTREAM_MUSIC_DIR: /music          # path inside the container — matches your volume
+services:
+  mstream:
+    image: ghcr.io/aroundmyroom/mstream-velvet:latest
+    container_name: mstream-velvet
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./save:/app/save            # config, database, logs
+      - /media/music:/music         # your music library (adjust host path)
+      - ./waveform-cache:/app/waveform-cache
+      - ./image-cache:/app/image-cache
+    environment:
+      MSTREAM_MUSIC_DIR: /music     # must match the volume target above
 
-  # Optional admin account. If omitted, the server starts in open mode (no login).
-  # MSTREAM_ADMIN_USER: admin
-  # MSTREAM_ADMIN_PASS: changeme
+      # Admin account (optional).
+      # If omitted the server starts in open mode — no login required.
+      # MSTREAM_ADMIN_USER: admin
+      # MSTREAM_ADMIN_PASS: changeme
 
-  # Optional extra vpaths — uncomment to enable:
-  # MSTREAM_ENABLE_AUDIOBOOKS: "true"   # sub-folder: Audiobooks
-  # MSTREAM_ENABLE_RECORDINGS: "true"   # sub-folder: Recordings  (also enables radio)
-  # MSTREAM_ENABLE_YOUTUBE: "true"      # sub-folder: YouTube
+      # Extra feature folders — uncomment each to enable.
+      # Each creates a sub-folder inside /music and adds a folder entry with the
+      # correct type (audio-books / recordings / youtube) set on it.
+      # These are folder types, not independent vpaths.
+
+      # AudioBooks & Podcasts  (type: audio-books, sub-folder: Audiobooks)
+      # MSTREAM_ENABLE_AUDIOBOOKS: "true"
+      # MSTREAM_AUDIOBOOKS_SUBDIR: Audiobooks
+
+      # Radio Recordings  (type: recordings, sub-folder: Recordings, also enables the radio feature)
+      # MSTREAM_ENABLE_RECORDINGS: "true"
+      # MSTREAM_RECORDINGS_SUBDIR: Recordings
+
+      # YouTube Downloads  (type: youtube, sub-folder: YouTube)
+      # MSTREAM_ENABLE_YOUTUBE: "true"
+      # MSTREAM_YOUTUBE_SUBDIR: YouTube
 ```
 
-Sub-folder names can be overridden with `MSTREAM_AUDIOBOOKS_SUBDIR`, `MSTREAM_RECORDINGS_SUBDIR`, `MSTREAM_YOUTUBE_SUBDIR`.
+```shell
+docker compose up -d
+```
+
+Open **http://localhost:3000** (or the admin panel at **/admin** to start a scan).
 
 > **When env vars are NOT sufficient** — use Option 2 instead if you need:
 > multiple mount points, child-vpaths, `albumsOnly`/`filepathPrefix` filtering, or any advanced folder layout.

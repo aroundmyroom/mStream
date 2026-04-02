@@ -178,10 +178,33 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./save:/app/save          # config, database, logs
-      - /media/music:/music       # your music library
+      - ./save:/app/save            # config, database, logs
+      - /media/music:/music         # your music library (adjust host path)
       - ./waveform-cache:/app/waveform-cache
       - ./image-cache:/app/image-cache
+    environment:
+      MSTREAM_MUSIC_DIR: /music     # must match the volume target above
+
+      # Admin account (optional).
+      # If omitted the server starts in open mode — no login required.
+      # MSTREAM_ADMIN_USER: admin
+      # MSTREAM_ADMIN_PASS: changeme
+
+      # Extra feature folders — uncomment each to enable.
+      # Each creates a sub-folder inside /music and adds a folder entry with the
+      # correct type (audio-books / recordings / youtube) set on it.
+
+      # AudioBooks & Podcasts  (type: audio-books, sub-folder: Audiobooks)
+      # MSTREAM_ENABLE_AUDIOBOOKS: "true"
+      # MSTREAM_AUDIOBOOKS_SUBDIR: Audiobooks
+
+      # Radio Recordings  (type: recordings, sub-folder: Recordings, also enables radio)
+      # MSTREAM_ENABLE_RECORDINGS: "true"
+      # MSTREAM_RECORDINGS_SUBDIR: Recordings
+
+      # YouTube Downloads  (type: youtube, sub-folder: YouTube)
+      # MSTREAM_ENABLE_YOUTUBE: "true"
+      # MSTREAM_YOUTUBE_SUBDIR: YouTube
 ```
 
 ```shell
@@ -190,10 +213,13 @@ docker compose up -d
 
 Open **http://localhost:3000** — on a fresh install with no users the admin panel is accessible without login.
 
+> The `environment:` block is optional — env vars only apply on the **first boot** when no config exists yet.
+> For multiple mount points, child-vpaths, `albumsOnly`, or any advanced layout, skip the env vars and edit `save/conf/default.json` directly instead. See [docs/docker.md](docs/docker.md).
+
 Or pin to a specific release:
 
 ```shell
-docker pull ghcr.io/aroundmyroom/mstream-velvet:v5.16.33-velvet
+docker pull ghcr.io/aroundmyroom/mstream-velvet:v5.16.34-velvet
 ```
 
 **Build from source** (optional):
