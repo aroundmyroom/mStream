@@ -194,6 +194,7 @@ services:
       # Each marks MSTREAM_MUSIC_DIR as the given folder type.
       # To point at a sub-folder instead, set the matching *_SUBDIR variable
       # to the sub-folder name (e.g. MSTREAM_YOUTUBE_SUBDIR: YouTube).
+      # You can also add, change or remove folders at any time in the Admin panel.
       # For full control, skip env vars and edit save/conf/default.json directly.
 
       # AudioBooks & Podcasts  (type: audio-books)
