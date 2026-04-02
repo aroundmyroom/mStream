@@ -76,57 +76,60 @@ export function setup(mstream) {
     if (!Array.isArray(items) || !items.length || !vpath || !scanId) {
       return res.status(400).json({ error: 'Invalid batch request' });
     }
+    try {
+      const filepaths = items.map(i => i.filepath);
+      const dbMap = db.findFilesByPaths(filepaths, vpath);
+      const results = {};
+      const batchScanIdUpdates = []; // filepaths for fully-up-to-date files
 
-    const filepaths = items.map(i => i.filepath);
-    const dbMap = db.findFilesByPaths(filepaths, vpath);
-    const results = {};
-    const batchScanIdUpdates = []; // filepaths for fully-up-to-date files
+      for (const item of items) {
+        scanProgress.tick(scanId, item.filepath);
+        const dbFileInfo = dbMap.get(item.filepath);
 
-    for (const item of items) {
-      scanProgress.tick(scanId, item.filepath);
-      const dbFileInfo = dbMap.get(item.filepath);
+        if (!dbFileInfo) {
+          results[item.filepath] = {};
+          continue;
+        }
 
-      if (!dbFileInfo) {
-        results[item.filepath] = {};
-        continue;
+        if (item.modTime !== dbFileInfo.modified) {
+          const preserveAaFile = dbFileInfo.aaFile || null;
+          const preserveArtSource = dbFileInfo.art_source || null;
+          db.removeFileByPath(item.filepath, vpath);
+          results[item.filepath] = { _stale: true, _preserveAaFile: preserveAaFile, _preserveArtSource: preserveArtSource, _preserveTs: dbFileInfo.ts || null };
+          continue;
+        }
+
+        // Same mtime — check flags (same logic as get-file)
+        const flags = {};
+        if (dbFileInfo.aaFile === null || dbFileInfo.aaFile === undefined) {
+          flags._needsArt = true;
+        } else if (dbFileInfo.aaFile && !fs.existsSync(path.join(config.program.storage.albumArtDirectory, dbFileInfo.aaFile))) {
+          flags._needsArt = true;
+          db.updateFileArt(dbFileInfo.filepath, dbFileInfo.vpath, null, scanId, null);
+        }
+        if (dbFileInfo.cuepoints === null || dbFileInfo.cuepoints === undefined) { flags._needsCue = true; }
+        if (dbFileInfo.duration === null || dbFileInfo.duration === undefined) { flags._needsDuration = true; }
+
+        if (flags._needsArt || flags._needsCue || flags._needsDuration) {
+          // Needs work — update scanId now so it survives finish-scan pruning
+          db.updateFileScanId(dbFileInfo, scanId);
+          results[item.filepath] = { ...flags, filepath: dbFileInfo.filepath, vpath: dbFileInfo.vpath };
+        } else {
+          // Completely clean — collect for single-transaction batch update
+          batchScanIdUpdates.push(item.filepath);
+          results[item.filepath] = dbFileInfo;
+        }
       }
 
-      if (item.modTime !== dbFileInfo.modified) {
-        const preserveAaFile = dbFileInfo.aaFile || null;
-        const preserveArtSource = dbFileInfo.art_source || null;
-        db.removeFileByPath(item.filepath, vpath);
-        results[item.filepath] = { _stale: true, _preserveAaFile: preserveAaFile, _preserveArtSource: preserveArtSource, _preserveTs: dbFileInfo.ts || null };
-        continue;
+      // All clean-file scanId updates in one transaction
+      if (batchScanIdUpdates.length > 0) {
+        db.batchUpdateScanIds(batchScanIdUpdates, vpath, scanId);
       }
 
-      // Same mtime — check flags (same logic as get-file)
-      const flags = {};
-      if (dbFileInfo.aaFile === null || dbFileInfo.aaFile === undefined) {
-        flags._needsArt = true;
-      } else if (dbFileInfo.aaFile && !fs.existsSync(path.join(config.program.storage.albumArtDirectory, dbFileInfo.aaFile))) {
-        flags._needsArt = true;
-        db.updateFileArt(dbFileInfo.filepath, dbFileInfo.vpath, null, scanId, null);
-      }
-      if (dbFileInfo.cuepoints === null || dbFileInfo.cuepoints === undefined) { flags._needsCue = true; }
-      if (dbFileInfo.duration === null || dbFileInfo.duration === undefined) { flags._needsDuration = true; }
-
-      if (flags._needsArt || flags._needsCue || flags._needsDuration) {
-        // Needs work — update scanId now so it survives finish-scan pruning
-        db.updateFileScanId(dbFileInfo, scanId);
-        results[item.filepath] = { ...flags, filepath: dbFileInfo.filepath, vpath: dbFileInfo.vpath };
-      } else {
-        // Completely clean — collect for single-transaction batch update
-        batchScanIdUpdates.push(item.filepath);
-        results[item.filepath] = dbFileInfo;
-      }
+      res.json(results);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
-
-    // All clean-file scanId updates in one transaction
-    if (batchScanIdUpdates.length > 0) {
-      db.batchUpdateScanIds(batchScanIdUpdates, vpath, scanId);
-    }
-
-    res.json(results);
   });
 
   mstream.post('/api/v1/scanner/update-art', (req, res) => {

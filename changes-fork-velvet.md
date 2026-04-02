@@ -4,6 +4,15 @@
 
 ---
 
+## v5.16.46-velvet — April 2026
+
+### fix: scanner batch endpoint 500 errors — avoid dynamic SQL in `findFilesByPaths`
+- `findFilesByPaths()` was calling `db.prepare()` inside the request handler with a runtime-constructed `IN (?,?,?…200 placeholders)` SQL string; `node:sqlite` `DatabaseSync` throws when preparing statements this way, producing a bare HTTP 500 that reported as "Batch lookup failed" in scan error audit
+- Fixed: use the cached `_s.findFile` prepared statement inside a read transaction loop — same batched-read behaviour with no dynamic SQL and no variable-number limit
+- Wrapped `get-files-batch` endpoint in try/catch so any future DB error surfaces a proper JSON `{ error }` response instead of a bare 500
+
+---
+
 ## v5.16.45-velvet — April 2026
 
 ### perf: scanner batch mode — rescan 10–30x faster for unchanged files

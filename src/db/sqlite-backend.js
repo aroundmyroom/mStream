@@ -502,16 +502,20 @@ export function findFileByPath(filepath, vpath) {
   return row || null;
 }
 
-// Batch lookup: returns a Map<filepath, row> for all matching filepaths in one query.
-// Much faster than calling findFileByPath() individually for large rescans.
+// Batch lookup: returns a Map<filepath, row> for all matching filepaths.
+// Uses the cached _s.findFile prepared statement in a read transaction —
+// avoids building dynamic SQL with variable-length IN clauses, which can
+// trigger SQLITE_MAX_VARIABLE_NUMBER errors in node:sqlite's DatabaseSync.
 export function findFilesByPaths(filepaths, vpath) {
-  if (!filepaths.length) return new Map();
-  const placeholders = filepaths.map(() => '?').join(',');
-  const rows = db.prepare(
-    `SELECT rowid AS id, * FROM files WHERE vpath = ? AND filepath IN (${placeholders})`
-  ).all(vpath, ...filepaths);
   const map = new Map();
-  for (const row of rows) map.set(row.filepath, row);
+  if (!filepaths.length) return map;
+  const tx = db.transaction(fps => {
+    for (const fp of fps) {
+      const row = _s.findFile.get(fp, vpath);
+      if (row) map.set(fp, row);
+    }
+  });
+  tx(filepaths);
   return map;
 }
 
