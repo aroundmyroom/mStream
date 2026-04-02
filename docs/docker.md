@@ -1,5 +1,22 @@
 # Running mStream Velvet with Docker
 
+## Updating to the latest release
+
+If you installed via `compose.yaml` with `image: ghcr.io/aroundmyroom/mstream-velvet:latest`:
+
+```shell
+docker compose pull          # fetch the new image
+docker compose down
+docker compose up -d         # recreate the container
+```
+
+That's it — your `save/` folder (config, database, logs) and music volume are mounted from the host, so no data is lost.
+
+> **Pinned to a specific version?** Update the tag in `compose.yaml` (e.g. `v5.16.37-velvet`), then run the same three commands.
+> Check [releases/](../releases/) or the [GitHub releases page](https://github.com/aroundmyroom/mStream/releases) for the latest tag.
+
+---
+
 ## Quick start — pull from GitHub Container Registry
 
 The easiest way. No build step required.
@@ -11,7 +28,7 @@ docker pull ghcr.io/aroundmyroom/mstream-velvet:latest
 Or pin to a specific release:
 
 ```shell
-docker pull ghcr.io/aroundmyroom/mstream-velvet:v5.16.34-velvet
+docker pull ghcr.io/aroundmyroom/mstream-velvet:v5.16.37-velvet
 ```
 
 ### compose.yaml (ghcr.io — recommended)
