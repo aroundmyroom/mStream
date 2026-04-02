@@ -31,8 +31,14 @@ const version = require('./package.json').version;
  *   MSTREAM_RECORDINGS_SUBDIR  Sub-folder name inside MSTREAM_MUSIC_DIR (default: Recordings).
  *   MSTREAM_YOUTUBE_SUBDIR     Sub-folder name inside MSTREAM_MUSIC_DIR (default: YouTube).
  *
- * Auto-config only runs when the config file has no folders configured yet,
- * so it is safe to leave these variables set on subsequent container restarts.
+ * Auto-config runs in two independent phases, each only once:
+ *   1. Folder phase  — runs when no folders are configured yet.
+ *   2. User phase    — runs when no users exist yet and both MSTREAM_ADMIN_USER
+ *                      and MSTREAM_ADMIN_PASS are set.
+ *
+ * This means you can set up folders on first boot (without admin vars) and then
+ * add MSTREAM_ADMIN_USER/PASS on a later restart to create the admin account.
+ * Once users exist the user phase is skipped on all subsequent restarts.
  */
 async function bootstrapFromEnv(configPath) {
   const musicDir = process.env.MSTREAM_MUSIC_DIR;
@@ -48,63 +54,76 @@ async function bootstrapFromEnv(configPath) {
     existing = JSON.parse(await fsp.readFile(configPath, 'utf8'));
   } catch (_) { /* file missing or empty — start fresh */ }
 
-  // Skip if folders already configured
-  if (existing.folders && Object.keys(existing.folders).length > 0) return;
+  const hasFolders = existing.folders && Object.keys(existing.folders).length > 0;
+  const hasUsers   = existing.users   && Object.keys(existing.users).length   > 0;
 
-  const folders = {};
-  const vpaths = [];
+  // Nothing left to do
+  if (hasFolders && hasUsers) return;
 
-  // Main music vpath
-  folders['Music'] = { root: musicDir, type: 'music', allowRecordDelete: false, albumsOnly: false };
-  vpaths.push('Music');
-
-  // AudioBooks / Podcasts
-  if (process.env.MSTREAM_ENABLE_AUDIOBOOKS === 'true') {
-    const dir = pathMod.join(musicDir, process.env.MSTREAM_AUDIOBOOKS_SUBDIR || 'Audiobooks');
-    await fsp.mkdir(dir, { recursive: true });
-    folders['AudioBooks'] = { root: dir, type: 'audio-books', allowRecordDelete: false, albumsOnly: false };
-    vpaths.push('AudioBooks');
-  }
-
-  // Radio Recordings
-  if (process.env.MSTREAM_ENABLE_RECORDINGS === 'true') {
-    const dir = pathMod.join(musicDir, process.env.MSTREAM_RECORDINGS_SUBDIR || 'Recordings');
-    await fsp.mkdir(dir, { recursive: true });
-    folders['Recordings'] = { root: dir, type: 'recordings', allowRecordDelete: true };
-    vpaths.push('Recordings');
-  }
-
-  // YouTube downloads
-  if (process.env.MSTREAM_ENABLE_YOUTUBE === 'true') {
-    const dir = pathMod.join(musicDir, process.env.MSTREAM_YOUTUBE_SUBDIR || 'YouTube');
-    await fsp.mkdir(dir, { recursive: true });
-    folders['YouTube'] = { root: dir, type: 'youtube', allowRecordDelete: true };
-    vpaths.push('YouTube');
-  }
-
-  const cfg = { ...existing, folders };
-
-  // Optional admin user — if omitted the server runs without authentication
   const adminUser = process.env.MSTREAM_ADMIN_USER;
   const adminPass = process.env.MSTREAM_ADMIN_PASS;
-  if (adminUser && adminPass) {
+
+  const cfg = { ...existing };
+
+  // ── Folder bootstrap (first run only) ──────────────────────────────────────
+  if (!hasFolders) {
+    const folders = {};
+    const vpaths  = [];
+
+    // Main music folder
+    folders['Music'] = { root: musicDir, type: 'music', allowRecordDelete: false, albumsOnly: false };
+    vpaths.push('Music');
+
+    // AudioBooks / Podcasts
+    if (process.env.MSTREAM_ENABLE_AUDIOBOOKS === 'true') {
+      const dir = process.env.MSTREAM_AUDIOBOOKS_SUBDIR
+        ? pathMod.join(musicDir, process.env.MSTREAM_AUDIOBOOKS_SUBDIR)
+        : musicDir;
+      if (process.env.MSTREAM_AUDIOBOOKS_SUBDIR) await fsp.mkdir(dir, { recursive: true });
+      folders['AudioBooks'] = { root: dir, type: 'audio-books', allowRecordDelete: false, albumsOnly: false };
+      vpaths.push('AudioBooks');
+    }
+
+    // Radio Recordings
+    if (process.env.MSTREAM_ENABLE_RECORDINGS === 'true') {
+      const dir = process.env.MSTREAM_RECORDINGS_SUBDIR
+        ? pathMod.join(musicDir, process.env.MSTREAM_RECORDINGS_SUBDIR)
+        : musicDir;
+      if (process.env.MSTREAM_RECORDINGS_SUBDIR) await fsp.mkdir(dir, { recursive: true });
+      folders['Recordings'] = { root: dir, type: 'recordings', allowRecordDelete: true };
+      vpaths.push('Recordings');
+      cfg.radio = { enabled: true };
+    }
+
+    // YouTube downloads
+    if (process.env.MSTREAM_ENABLE_YOUTUBE === 'true') {
+      const dir = process.env.MSTREAM_YOUTUBE_SUBDIR
+        ? pathMod.join(musicDir, process.env.MSTREAM_YOUTUBE_SUBDIR)
+        : musicDir;
+      if (process.env.MSTREAM_YOUTUBE_SUBDIR) await fsp.mkdir(dir, { recursive: true });
+      folders['YouTube'] = { root: dir, type: 'youtube', allowRecordDelete: true };
+      vpaths.push('YouTube');
+    }
+
+    cfg.folders = folders;
+  }
+
+  // ── User bootstrap (runs when no users exist yet) ──────────────────────────
+  if (!hasUsers && adminUser && adminPass) {
     const { hashPassword } = await import('./src/util/auth.js');
-    const hashed = await hashPassword(adminPass);
+    const hashed  = await hashPassword(adminPass);
+    // Grant access to all currently-configured folders
+    const vpaths  = Object.keys(cfg.folders || {});
     cfg.users = {
       [adminUser]: {
         password: hashed.hashPassword,
-        salt: hashed.salt,
-        admin: true,
+        salt:     hashed.salt,
+        admin:    true,
         vpaths,
-        'allow-radio-recording': true,
+        'allow-radio-recording':  true,
         'allow-youtube-download': true,
       }
     };
-  }
-
-  // Enable radio if recordings vpath is configured
-  if (process.env.MSTREAM_ENABLE_RECORDINGS === 'true') {
-    cfg.radio = { enabled: true };
   }
 
   await fsp.mkdir(pathMod.dirname(configPath), { recursive: true });
