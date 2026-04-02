@@ -12,7 +12,7 @@ RUN npm install --production
 COPY . .
 
 # Pre-download yt-dlp so it's ready immediately on container start.
-# The server also auto-downloads it at runtime if missing (e.g. offline builds).
+# The server also auto-downloads it at runtime if missing or empty.
 RUN arch="$(uname -m)"; \
     case "$arch" in \
       x86_64)  url="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux" ;; \
@@ -22,8 +22,11 @@ RUN arch="$(uname -m)"; \
     esac; \
     if [ -n "$url" ]; then \
       mkdir -p bin/yt-dlp && \
-      wget -q -O bin/yt-dlp/yt-dlp "$url" && \
-      chmod +x bin/yt-dlp/yt-dlp || echo "yt-dlp pre-download failed (will auto-download at runtime)"; \
+      if wget -q -O bin/yt-dlp/yt-dlp "$url" && [ -s bin/yt-dlp/yt-dlp ]; then \
+        chmod +x bin/yt-dlp/yt-dlp && echo "yt-dlp pre-download OK"; \
+      else \
+        rm -f bin/yt-dlp/yt-dlp && echo "yt-dlp pre-download failed (will auto-download at runtime)"; \
+      fi; \
     fi
 
 # Pre-create runtime directories so SQLite and the config writer

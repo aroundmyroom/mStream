@@ -4,6 +4,17 @@
 
 ---
 
+## v5.16.41-velvet — April 2026
+
+### fix: yt-dlp 0-byte binary causes silent failure
+- Dockerfile `wget` could silently produce a 0-byte file (rate limit, redirect failure) — `chmod +x` then ran on it, leaving an empty executable in the image
+- `_ensureYtdlp()` saw the file as present+executable and skipped re-download, so yt-dlp never worked
+- Fixed Dockerfile: use `[ -s bin/yt-dlp/yt-dlp ]` to verify the downloaded file is non-empty; if empty, `rm -f` it so the runtime auto-download kicks in cleanly
+- Fixed `_ensureYtdlp()`: after `X_OK` check passes, also verify `stat.size > 0`; if 0-byte, delete and re-download
+- Fixed `_ytdlpReady` promise: reset to `null` on failure so the next call can retry
+
+---
+
 ## v5.16.40-velvet — April 2026
 
 ### fix: yt-dlp EACCES on Docker — chmod after download and on startup
