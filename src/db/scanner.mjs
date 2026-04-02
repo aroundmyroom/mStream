@@ -443,10 +443,26 @@ function parseSidecarCue(audioFilePath) {
   return tracks.length > 1 ? tracks : null;
 }
 
+// Returns a promise that rejects after `ms` milliseconds with a timeout error.
+function withTimeout(promise, ms) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms);
+    })
+  ]).finally(() => clearTimeout(timer));
+}
+
+const PARSE_TIMEOUT_MS = 30000; // 30 s — enough for any normal file; hangs abort cleanly
+
 async function parseMyFile(thisSong, modified) {
   let songInfo, fmtInfo = {};
   try {
-    const parsed = await parseFile(thisSong, { skipCovers: loadJson.skipImg });
+    const parsed = await withTimeout(
+      parseFile(thisSong, { skipCovers: loadJson.skipImg }),
+      PARSE_TIMEOUT_MS
+    );
     songInfo = parsed.common;
     fmtInfo = parsed.format || {};
   } catch (err) {
@@ -458,11 +474,18 @@ async function parseMyFile(thisSong, modified) {
   songInfo.modified = modified;
   songInfo.filePath = path.relative(loadJson.directory, thisSong);
   songInfo.format = getFileType(thisSong);
-  songInfo.hash = await calculateHash(thisSong);
   // duration from format block (seconds, float) — e.g. 237.43
   songInfo._duration = (fmtInfo.duration != null && isFinite(fmtInfo.duration))
     ? Math.round(fmtInfo.duration * 1000) / 1000
     : null;
+
+  try {
+    songInfo.hash = await withTimeout(calculateHash(thisSong), PARSE_TIMEOUT_MS);
+  } catch (err) {
+    console.error(`Warning: hash failed on ${thisSong}: ${err.message}`);
+    await reportError(thisSong, 'parse', `Hash failed: ${err.message}`, err.stack);
+    songInfo.hash = null;
+  }
 
   // Extract embedded cue sheet (present in single-file FLAC/WAV album rips)
   try {

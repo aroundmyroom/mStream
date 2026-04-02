@@ -4,6 +4,15 @@
 
 ---
 
+## v5.16.48-velvet — April 2026
+
+### fix: scanner no longer hangs indefinitely on corrupt/unreadable files
+- `parseFile()` (music-metadata) and `calculateHash()` could hang forever on a corrupt, malformed, or NFS-stalled file — the scanner child process was stuck waiting with no timeout, stalling all subsequent files
+- Added `withTimeout(promise, 30000)` helper that races any async operation against a 30 s deadline; both `parseFile` and `calculateHash` are now wrapped
+- A file that times out or errors is logged as a `parse` scan error and skipped; scanning continues with the next file
+
+---
+
 ## v5.16.47-velvet — April 2026
 
 ### fix: scanner batch — use `db.exec('BEGIN/COMMIT')` instead of nonexistent `db.transaction()`
