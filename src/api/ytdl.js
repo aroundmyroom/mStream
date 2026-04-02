@@ -63,15 +63,23 @@ async function _ensureYtdlp() {
   if (_ytdlpReady) return _ytdlpReady;
   _ytdlpReady = (async () => {
     try {
-      await fsp.access(BUNDLED_YTDLP);
-      return BUNDLED_YTDLP; // already exists
-    } catch {}
+      await fsp.access(BUNDLED_YTDLP, fs.constants.X_OK);
+      return BUNDLED_YTDLP; // already exists and is executable
+    } catch (e) {
+      // File exists but not executable — chmod it and return
+      if (e.code === 'EACCES') {
+        await fsp.chmod(BUNDLED_YTDLP, 0o755);
+        return BUNDLED_YTDLP;
+      }
+      // File missing — fall through to download
+    }
 
     const asset = _ytdlpReleaseAsset();
     const url   = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${asset}`;
     winston.info(`yt-dlp not found — downloading ${asset}…`);
     await fsp.mkdir(path.dirname(BUNDLED_YTDLP), { recursive: true });
     await _downloadFile(url, BUNDLED_YTDLP);
+    await fsp.chmod(BUNDLED_YTDLP, 0o755);
     winston.info('yt-dlp downloaded successfully');
     return BUNDLED_YTDLP;
   })();

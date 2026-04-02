@@ -4,6 +4,16 @@
 
 ---
 
+## v5.16.40-velvet — April 2026
+
+### fix: yt-dlp EACCES on Docker — chmod after download and on startup
+- `_ensureYtdlp()` checked file existence with `fsp.access()` but never verified execute permission
+- A binary present but not executable (e.g. written by a previous container run without `+x`) was returned as-is, causing `spawn EACCES` on every yt-dlp call
+- Fixed: check `fs.constants.X_OK`; if file exists but isn’t executable, `chmod 0o755` it and return
+- Also `chmod 0o755` after any fresh download (previously missing)
+
+---
+
 ## v5.16.39-velvet — April 2026
 
 ### fix: switch Docker base image from Alpine to Debian slim
