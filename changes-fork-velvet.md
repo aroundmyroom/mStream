@@ -4,6 +4,17 @@
 
 ---
 
+## v5.16.38-velvet — April 2026
+
+### fix: ffmpeg "not found" on Alpine Docker (missing glibc ELF interpreter)
+- BtbN static ffmpeg binaries have `/lib64/ld-linux-x86-64.so.2` in their ELF PT_INTERP header
+- Alpine Linux uses musl and does not ship this path, so the kernel returned ENOENT ("not found") when executing the binary despite correct permissions
+- Fixed by adding `apk add --no-cache libc6-compat` to the Dockerfile, which creates `/lib64/ld-linux-x86-64.so.2` as a symlink to musl's loader
+- The BtbN binary is fully statically compiled (all glibc code baked in), so musl's loader can start it without any glibc runtime dependency
+- This fixes waveform generation, transcoding, radio recording, and YouTube downloads in the Docker container
+
+---
+
 ## v5.16.37a-velvet — April 2026
 
 ### docs: Docker update guide and *_SUBDIR inline examples

@@ -1,5 +1,9 @@
 FROM node:24-alpine
 
+# libc6-compat provides /lib64/ld-linux-x86-64.so.2 (symlink to musl) so that
+# glibc-built static binaries (ffmpeg from BtbN) can execute on Alpine.
+RUN apk add --no-cache libc6-compat
+
 WORKDIR /app
 
 COPY package*.json ./
