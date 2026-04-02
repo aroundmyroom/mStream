@@ -77,6 +77,7 @@ function runScan(scanObj) {
   };
 
   const baseline = db.countFilesByVpath(scanObj.vpath) || 0;
+  jsonLoad.hasBaseline = baseline > 0;
   scanProgress.startScan(scanObj.id, scanObj.vpath, baseline > 0 ? baseline : null);
 
   const forkedScan = child.fork(path.join(__dirname, './scanner.mjs'), [JSON.stringify(jsonLoad)], { silent: true });

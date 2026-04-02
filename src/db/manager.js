@@ -39,7 +39,9 @@ export function saveShareDB() { backend.saveShareDB(); }
 
 // File Operations
 export function findFileByPath(filepath, vpath) { return backend.findFileByPath(filepath, vpath); }
+export function findFilesByPaths(filepaths, vpath) { return backend.findFilesByPaths(filepaths, vpath); }
 export function updateFileScanId(file, scanId) { return backend.updateFileScanId(file, scanId); }
+export function batchUpdateScanIds(filepaths, vpath, scanId) { return backend.batchUpdateScanIds(filepaths, vpath, scanId); }
 export function insertFile(fileData) { return backend.insertFile(fileData); }
 export function beginTransaction() { if (backend.beginTransaction) backend.beginTransaction(); }
 export function commitTransaction() { if (backend.commitTransaction) backend.commitTransaction(); }

@@ -4,6 +4,31 @@
 
 ---
 
+## v5.16.45-velvet — April 2026
+
+### perf: scanner batch mode — rescan 10–30x faster for unchanged files
+- Root cause: each of 138K unchanged files triggered its own HTTP call to `GET /api/v1/scanner/get-file` + an individual SQLite `UPDATE` transaction — ~60 ms/file → 2+ hours for a full rescan
+- New `POST /api/v1/scanner/get-files-batch` endpoint: accepts up to 200 files per call, does a single SQL `IN (...)` lookup, and wraps all unchanged-file scanId UPDATEs in one transaction
+- Scanner child (`scanner.mjs`) now accumulates files into a pending batch (`SCAN_BATCH_SIZE = 200`) and flushes via the batch endpoint — 138K calls → ~700 calls
+- Added `findFilesByPaths()` (bulk SELECT) and `batchUpdateScanIds()` (single transaction UPDATE) to `sqlite-backend.js` and `loki-backend.js`; exported from `manager.js`
+
+### fix: scan progress shows accurate total + no more 2-min dead wait
+- Rescans (DB has files): pre-count walk is **skipped** — DB count is used as the initial estimate, scan starts immediately at full I/O speed; `pct` is capped at 99% until `finish-scan` fires so the bar never falsely shows 100% when the DB count is stale (e.g. after a previously interrupted scan)
+- First scans (empty DB): pre-count walk runs **sequentially** before scanning begins, sending incremental "Counting…" pings every 5 000 files so the UI shows activity
+- Removed `~` tilde prefix from both progress displays — count is now exact or clearly labelled
+
+### feat: scan progress "Counting…" state in UI
+- During first-scan pre-count walk both the player-bar badge and admin panel show an amber **"Counting…"** badge with a growing "N files found…" counter instead of a blank bar
+- `countingFound` added to scan-progress state and returned in `/api/v1/admin/db/scan/progress` response
+- New `POST /api/v1/scanner/counting-update` endpoint receives incremental counts from the child process
+
+### feat: Last.fm API key gate on Similar Artists (Auto-DJ)
+- Similar Artists toggle in the DJ panel is disabled (dimmed + hint text) when no Last.fm API key is configured
+- `S.lastfmHasApiKey` state populated from `hasApiKey` field of `/api/v1/lastfm/status` at login and session refresh
+- `djSimilar` preference cleared from localStorage at login if no API key is present
+
+---
+
 ## v5.16.43-velvet — April 2026
 
 ### fix: ffmpeg download 404 — use BtbN stable `latest` tag URL

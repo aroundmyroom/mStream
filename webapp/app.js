@@ -23,6 +23,7 @@ const S = {
   recordingMeta: null,          // { vpath, art, title } saved at record start
   _recordingTimer: null,        // setInterval handle
   lastfmEnabled: false,
+  lastfmHasApiKey: false,
   listenbrainzEnabled: false,
   listenbrainzLinked: false,
   vpaths:   [],
@@ -5939,10 +5940,10 @@ async function viewAutoDJ() {
         <div class="autodj-opt-row">
           <div>
             <div class="autodj-opt-label">Similar Artists Mode</div>
-            <div class="autodj-opt-hint">Use Last.fm to bias AutoDJ towards artists similar to what's playing</div>
+            <div class="autodj-opt-hint">Use Last.fm to bias AutoDJ towards artists similar to what's playing${S.lastfmHasApiKey ? '' : ' <em>(requires Last.fm API key — configure in Admin → Last.fm)</em>'}</div>
           </div>
-          <label class="toggle-sw">
-            <input type="checkbox" id="dj-similar" ${S.djSimilar ? 'checked' : ''}>
+          <label class="toggle-sw" ${S.lastfmHasApiKey ? '' : 'title="No Last.fm API key configured"'} style="${S.lastfmHasApiKey ? '' : 'opacity:.4;pointer-events:none;'}">
+            <input type="checkbox" id="dj-similar" ${S.djSimilar && S.lastfmHasApiKey ? 'checked' : ''} ${S.lastfmHasApiKey ? '' : 'disabled'}>
             <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
           </label>
         </div>
@@ -10244,13 +10245,17 @@ function _renderScanProgress(scans) {
   if (!wrap) return;
   if (!scans || scans.length === 0) { wrap.innerHTML = ''; return; }
   wrap.innerHTML = scans.map(sp => {
-    const pctTxt   = sp.pct !== null ? `${sp.pct}%` : 'first scan';
-    const bar      = sp.pct !== null
-      ? `<div class="spc-fill" style="width:${sp.pct}%"></div>`
-      : `<div class="spc-fill-ind"></div>`;
-    const countTxt = sp.expected
-      ? `${sp.scanned.toLocaleString()} / ~${sp.expected.toLocaleString()}`
-      : `${sp.scanned.toLocaleString()} files`;
+    const isCounting = sp.countingFound > 0 && sp.scanned === 0;
+    const pctTxt   = isCounting ? 'Counting\u2026'
+                   : sp.pct !== null ? `${sp.pct}%` : 'first scan';
+    const bar      = isCounting || sp.pct === null
+      ? `<div class="spc-fill-ind"></div>`
+      : `<div class="spc-fill" style="width:${sp.pct}%"></div>`;
+    const countTxt = isCounting
+      ? `${sp.countingFound.toLocaleString()} files found\u2026`
+      : sp.expected
+        ? `${sp.scanned.toLocaleString()} / ${sp.expected.toLocaleString()}`
+        : `${sp.scanned.toLocaleString()} files`;
     const fileTip  = sp.currentFile ? ` title="${sp.currentFile.replace(/"/g,'&quot;')}"` : '';
     return `<div class="spc-card"${fileTip}>
       <span class="spc-dot"></span>
@@ -10496,7 +10501,9 @@ async function tryLogin(username, password) {
     S.isAdmin = true;
     try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
   } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
-  try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; } catch(_) { S.lastfmEnabled = true; }
+  try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; S.lastfmHasApiKey = ls?.hasApiKey === true; } catch(_) { S.lastfmEnabled = true; S.lastfmHasApiKey = false; }
+  // If similar-artists was saved on but there's no API key, clear it so AutoDJ doesn't try to use it
+  if (!S.lastfmHasApiKey && S.djSimilar) { S.djSimilar = false; localStorage.removeItem(_uKey('dj_similar')); }
   try { const lb = await api('GET', 'api/v1/listenbrainz/status'); S.listenbrainzEnabled = lb?.serverEnabled === true; S.listenbrainzLinked = lb?.linked === true; } catch(_) { S.listenbrainzEnabled = false; S.listenbrainzLinked = false; }
   try { const rd = await api('GET', 'api/v1/radio/enabled'); S.radioEnabled = rd?.enabled === true; } catch(_) { S.radioEnabled = false; }
   S.feedsEnabled = true; // Podcasts always available — user needs the section to add their first feed
@@ -10530,6 +10537,7 @@ async function checkSession() {
         api('GET', 'api/v1/radio/enabled').catch(() => null),
       ]);
       S.lastfmEnabled       = ls?.serverEnabled !== false;
+      S.lastfmHasApiKey     = ls?.hasApiKey === true;
       S.listenbrainzEnabled = lb?.serverEnabled === true;
       S.listenbrainzLinked  = lb?.linked === true;
       S.radioEnabled        = rd?.enabled === true;
@@ -10587,6 +10595,7 @@ async function checkSession() {
         api('GET', 'api/v1/radio/enabled').catch(() => null),
       ]);
       S.lastfmEnabled       = ls2?.serverEnabled !== false;
+      S.lastfmHasApiKey     = ls2?.hasApiKey === true;
       S.listenbrainzEnabled = lb2?.serverEnabled === true;
       S.listenbrainzLinked  = lb2?.linked === true;
       S.radioEnabled        = rd2?.enabled === true;
@@ -10734,6 +10743,7 @@ function showApp() {
     try {
       const ls = await api('GET', 'api/v1/lastfm/status');
       S.lastfmEnabled = ls?.serverEnabled !== false;
+      S.lastfmHasApiKey = ls?.hasApiKey === true;
       const lastfmBtn = document.getElementById('lastfm-nav-btn');
       if (lastfmBtn) {
         if (S.lastfmEnabled) lastfmBtn.classList.remove('hidden');

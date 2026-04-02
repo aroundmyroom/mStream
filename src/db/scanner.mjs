@@ -1,5 +1,6 @@
 import { parseFile } from 'music-metadata';
 import fs from 'fs';
+import fsp from 'node:fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import Joi from 'joi';
@@ -34,6 +35,7 @@ const schema = Joi.object({
   scanId: Joi.string().required(),
   isHttps: Joi.boolean().required(),
   compressImage: Joi.boolean().required(),
+  hasBaseline: Joi.boolean().required(),
   supportedFiles: Joi.object().pattern(
     Joi.string(), Joi.boolean()
   ).required(),
@@ -140,6 +142,50 @@ async function confirmOk(absoluteFilepath) {
   }
 }
 
+// Running total used by countValidFiles to send incremental counting-update pings.
+let _countingFound = 0;
+
+/**
+ * First-scan pre-count pass — walks disk once (no tag reads) to give the
+ * progress bar an accurate expected total.  Only runs when there is no DB
+ * baseline (i.e. a brand-new library with 0 indexed files).  For rescans
+ * the DB count is already a good estimate so we skip this entirely and
+ * start scanning immediately.
+ *
+ * Sends incremental counting-update pings every 5 000 files so the UI shows
+ * a growing count rather than a blank progress bar.
+ */
+async function countValidFiles(dir) {
+  let count = 0;
+  let entries;
+  try { entries = await fsp.readdir(dir); } catch (_e) { return 0; }
+  for (const entry of entries) {
+    const full = path.join(dir, entry);
+    let stat;
+    try { stat = fs.statSync(full); } catch (_e) { continue; }
+    if (stat.isDirectory()) {
+      if (loadJson.otherRoots.includes(full)) { continue; }
+      count += await countValidFiles(full);
+    } else if (stat.isFile()) {
+      if (loadJson.supportedFiles[getFileType(entry).toLowerCase()]) {
+        count++;
+        _countingFound++;
+        // Every 5 000 files found, ping the UI so the user sees activity.
+        if (_countingFound % 5000 === 0) {
+          ax({
+            method: 'POST',
+            url: `http${loadJson.isHttps === true ? 's' : ''}://localhost:${loadJson.port}/api/v1/scanner/counting-update`,
+            headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+            responseType: 'json',
+            data: { scanId: loadJson.scanId, found: _countingFound }
+          }).catch(() => {});
+        }
+      }
+    }
+  }
+  return count;
+}
+
 run();
 async function run() {
   try {
@@ -154,8 +200,33 @@ async function run() {
       });
     } catch (_e) { /* non-critical — prune fail should not abort scan */ }
 
+    // Pre-count strategy:
+    //  - Rescan (hasBaseline=true): DB count is already a good estimate; skip
+    //    pre-count entirely so 100% of I/O bandwidth goes to the actual scan.
+    //    pct is capped at 99 in scan-progress.js until finish-scan is called,
+    //    so an interrupted-scan (DB=20K, disk=138K) never shows false 100%.
+    //  - First scan (hasBaseline=false): run pre-count SEQUENTIALLY first so
+    //    the progress bar gets an accurate total before scanning begins.
+    //    The user sees a "Counting…" counter growing, then the real scan starts.
+    if (!loadJson.hasBaseline) {
+      try {
+        _countingFound = 0;
+        const total = await countValidFiles(loadJson.directory);
+        if (total > 0) {
+          await ax({
+            method: 'POST',
+            url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/set-expected`,
+            headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+            responseType: 'json',
+            data: { scanId: loadJson.scanId, expected: total }
+          });
+        }
+      } catch (_e) { /* non-critical */ }
+    }
+
     const scanStartTs = Math.floor(Date.now() / 1000);
     await recursiveScan(loadJson.directory);
+    await flushBatch();
 
     await ax({
       method: 'POST',
@@ -171,6 +242,164 @@ async function run() {
   }catch (err) {
     console.error('Scan Failed');
     console.error(err.stack)
+  }
+}
+
+// ── Batch scan helpers ────────────────────────────────────────────────────────
+// Instead of one HTTP call per file, files are accumulated and sent in batches
+// of SCAN_BATCH_SIZE.  This reduces 138K sequential round trips to ~700, and
+// wraps all unchanged-file scanId UPDATEs in a single SQL transaction per batch.
+
+const SCAN_BATCH_SIZE = 200;
+let _pendingBatch = []; // { absPath, relPath, modTime }
+
+async function processFileResult(absPath, relPath, modTime, data) {
+  if (Object.entries(data).length === 0 || data._stale) {
+    // New or modified file — full parse + insert (cuepoints extracted inside parseMyFile)
+    const songInfo = await parseMyFile(absPath, modTime);
+    // Preserve Discogs-assigned art (DB cache only, e.g. WAV files) when the
+    // re-parsed file carries no embedded art — prevents orphan cleanup from
+    // deleting art the user manually picked via the Discogs picker.
+    if (!songInfo.aaFile && data._preserveAaFile) {
+      songInfo.aaFile = data._preserveAaFile;
+      songInfo._artSource = data._preserveArtSource || null;
+    }
+    // Preserve original insertion timestamp so editing tags/art doesn't
+    // re-flood "Recently Added" (file hash changes after rewrite → ts = now without this).
+    if (data._preserveTs) {
+      songInfo._preserveTs = data._preserveTs;
+    }
+    await insertEntries(songInfo);
+    await confirmOk(absPath);
+  } else {
+    // File already in DB — run targeted updates for anything still missing
+
+    if (data._needsArt) {
+      try {
+        let songInfo;
+        try {
+          songInfo = (await parseFile(absPath, { skipCovers: false })).common;
+        } catch (_e) {
+          await reportError(absPath, 'art', `Failed to parse file for embedded art: ${_e.message}`, _e.stack);
+          songInfo = {};
+        }
+        songInfo.filePath = relPath;
+        await getAlbumArt(songInfo);
+        if (songInfo.aaFile) {
+          await ax({
+            method: 'POST',
+            url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-art`,
+            headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+            responseType: 'json',
+            data: { filepath: data.filepath, vpath: loadJson.vpath, aaFile: songInfo.aaFile, scanId: loadJson.scanId, artSource: songInfo._artSource || null }
+          });
+        }
+      } catch (_artErr) {
+        await reportError(absPath, 'art', `Art update failed: ${_artErr.message}`, _artErr.stack);
+      }
+    }
+
+    if (data._needsCue) {
+      try {
+        let cuepoints = '[]';
+        try {
+          const parsed = await parseFile(absPath, { skipCovers: true });
+          const cue = parsed.common?.cuesheet;
+          const sampleRate = parsed.format?.sampleRate || null;
+          if (cue && Array.isArray(cue.tracks) && cue.tracks.length && sampleRate) {
+            const pts = [];
+            for (const t of cue.tracks) {
+              if (t.number === 170) continue;
+              const idx1 = Array.isArray(t.indexes) && t.indexes.find(i => i.number === 1);
+              if (!idx1) continue;
+              pts.push({ no: t.number, title: t.title || null, t: Math.round((idx1.offset / sampleRate) * 100) / 100 });
+            }
+            if (pts.length > 1) cuepoints = JSON.stringify(pts);
+          }
+        } catch (_e) {
+          await reportError(absPath, 'cue', `Embedded cue sheet parse failed: ${_e.message}`, _e.stack);
+        }
+        if (cuepoints === '[]') {
+          try {
+            const sidecar = parseSidecarCue(absPath);
+            if (sidecar) cuepoints = JSON.stringify(sidecar);
+          } catch (_e) {
+            await reportError(absPath, 'cue', `Sidecar .cue file parse failed: ${_e.message}`, _e.stack);
+          }
+        }
+        await ax({
+          method: 'POST',
+          url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-cue`,
+          headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+          responseType: 'json',
+          data: { filepath: data.filepath, vpath: loadJson.vpath, cuepoints }
+        });
+      } catch (_cueErr) {
+        await reportError(absPath, 'cue', `Cue update failed: ${_cueErr.message}`, _cueErr.stack);
+      }
+    }
+
+    if (data._needsDuration) {
+      try {
+        let duration = null;
+        try {
+          const parsed = await parseFile(absPath, { skipCovers: true });
+          const d = parsed.format?.duration;
+          if (d != null && isFinite(d)) { duration = Math.round(d * 1000) / 1000; }
+        } catch (_e) {
+          await reportError(absPath, 'duration', `Duration parse failed: ${_e.message}`, _e.stack);
+        }
+        if (duration !== null) {
+          await ax({
+            method: 'POST',
+            url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-duration`,
+            headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+            responseType: 'json',
+            data: { filepath: data.filepath, vpath: loadJson.vpath, duration }
+          });
+        }
+      } catch (_durErr) {
+        await reportError(absPath, 'duration', `Duration update failed: ${_durErr.message}`, _durErr.stack);
+      }
+    }
+    await confirmOk(absPath);
+  }
+}
+
+async function flushBatch() {
+  if (_pendingBatch.length === 0) return;
+  const batch = _pendingBatch.splice(0);
+  let batchResults;
+  try {
+    const res = await ax({
+      method: 'POST',
+      url: `http${loadJson.isHttps === true ? 's' : ''}://localhost:${loadJson.port}/api/v1/scanner/get-files-batch`,
+      headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+      responseType: 'json',
+      data: {
+        vpath: loadJson.vpath,
+        scanId: loadJson.scanId,
+        items: batch.map(b => ({ filepath: b.relPath, modTime: b.modTime }))
+      }
+    });
+    batchResults = res.data;
+  } catch (_batchErr) {
+    // If the batch endpoint itself fails, report errors for all files in the batch
+    for (const b of batch) {
+      await reportError(b.absPath, 'insert', `Batch lookup failed: ${_batchErr.message}`, _batchErr.stack);
+    }
+    return;
+  }
+
+  for (const b of batch) {
+    try {
+      const data = batchResults[b.relPath] ?? {};
+      await processFileResult(b.absPath, b.relPath, b.modTime, data);
+    } catch (err) {
+      console.error(`Warning: failed to add file ${b.absPath} to database: ${err.message}`);
+      await reportError(b.absPath, 'insert', err.message, err.stack);
+    }
+    if (loadJson.pause) await timeout(loadJson.pause);
   }
 }
 
@@ -197,151 +426,9 @@ async function recursiveScan(dir) {
       if (loadJson.otherRoots.includes(filepath)) { continue; }
       await recursiveScan(filepath);
     } else if (stat.isFile()) {
-      try {
-        // Make sure this is in our list of allowed files
-        if (!loadJson.supportedFiles[getFileType(file).toLowerCase()]) {
-          continue;
-        }
-
-        const dbFileInfo = await ax({
-          method: 'POST',
-          url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/get-file`,
-          headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
-          responseType: 'json',
-          data: {
-            filepath: path.relative(loadJson.directory, filepath),
-            vpath: loadJson.vpath,
-            modTime: stat.mtime.getTime(),
-            scanId: loadJson.scanId
-          }
-        });
-
-        if (Object.entries(dbFileInfo.data).length === 0 || dbFileInfo.data._stale) {
-          // New or modified file — full parse + insert (cuepoints extracted inside parseMyFile)
-          const songInfo = await parseMyFile(filepath, stat.mtime.getTime());
-          // Preserve Discogs-assigned art (DB cache only, e.g. WAV files) when the
-          // re-parsed file carries no embedded art — prevents orphan cleanup from
-          // deleting art the user manually picked via the Discogs picker.
-          if (!songInfo.aaFile && dbFileInfo.data._preserveAaFile) {
-            songInfo.aaFile = dbFileInfo.data._preserveAaFile;
-            songInfo._artSource = dbFileInfo.data._preserveArtSource || null;
-          }
-          // Preserve original insertion timestamp so editing tags/art doesn't
-          // re-flood "Recently Added" (file hash changes after rewrite → ts = now without this).
-          if (dbFileInfo.data._preserveTs) {
-            songInfo._preserveTs = dbFileInfo.data._preserveTs;
-          }
-          await insertEntries(songInfo);
-          // File parsed and inserted successfully — confirm any fixed scan errors for it.
-          await confirmOk(filepath);
-        } else {
-          // File already in DB — run targeted updates for anything still missing
-
-          if (dbFileInfo.data._needsArt) {
-            // Entire art block is wrapped so a failure here never skips _needsCue below.
-            try {
-              let songInfo;
-              try {
-                songInfo = (await parseFile(filepath, { skipCovers: false })).common;
-              } catch (_e) {
-                await reportError(filepath, 'art', `Failed to parse file for embedded art: ${_e.message}`, _e.stack);
-                songInfo = {};
-              }
-              songInfo.filePath = path.relative(loadJson.directory, filepath);
-              await getAlbumArt(songInfo);
-              if (songInfo.aaFile) {
-                await ax({
-                  method: 'POST',
-                  url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-art`,
-                  headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
-                  responseType: 'json',
-                  data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, aaFile: songInfo.aaFile, scanId: loadJson.scanId, artSource: songInfo._artSource || null }
-                });
-              }
-            } catch (_artErr) {
-              await reportError(filepath, 'art', `Art update failed: ${_artErr.message}`, _artErr.stack);
-            }
-          }
-
-          if (dbFileInfo.data._needsCue) {
-            // Entire cue block is wrapped independently so a failure doesn't leave cuepoints = NULL forever.
-            try {
-              let cuepoints = '[]';
-              try {
-                const parsed = await parseFile(filepath, { skipCovers: true });
-                const cue = parsed.common?.cuesheet;
-                const sampleRate = parsed.format?.sampleRate || null;
-                if (cue && Array.isArray(cue.tracks) && cue.tracks.length && sampleRate) {
-                  const pts = [];
-                  for (const t of cue.tracks) {
-                    if (t.number === 170) continue;
-                    const idx1 = Array.isArray(t.indexes) && t.indexes.find(i => i.number === 1);
-                    if (!idx1) continue;
-                    pts.push({ no: t.number, title: t.title || null, t: Math.round((idx1.offset / sampleRate) * 100) / 100 });
-                  }
-                  if (pts.length > 1) cuepoints = JSON.stringify(pts);
-                }
-              } catch (_e) {
-                await reportError(filepath, 'cue', `Embedded cue sheet parse failed: ${_e.message}`, _e.stack);
-              }
-              // Fallback: sidecar .cue file alongside the audio file
-              if (cuepoints === '[]') {
-                try {
-                  const sidecar = parseSidecarCue(filepath);
-                  if (sidecar) cuepoints = JSON.stringify(sidecar);
-                } catch (_e) {
-                  await reportError(filepath, 'cue', `Sidecar .cue file parse failed: ${_e.message}`, _e.stack);
-                }
-              }
-              // Always write back — even '[]' sentinel clears the NULL so this file is never re-checked
-              await ax({
-                method: 'POST',
-                url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-cue`,
-                headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
-                responseType: 'json',
-                data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, cuepoints }
-              });
-            } catch (_cueErr) {
-              await reportError(filepath, 'cue', `Cue update failed: ${_cueErr.message}`, _cueErr.stack);
-            }
-          }
-
-          if (dbFileInfo.data._needsDuration) {
-            try {
-              let duration = null;
-              try {
-                const parsed = await parseFile(filepath, { skipCovers: true });
-                const d = parsed.format?.duration;
-                if (d != null && isFinite(d)) { duration = Math.round(d * 1000) / 1000; }
-              } catch (_e) {
-                await reportError(filepath, 'duration', `Duration parse failed: ${_e.message}`, _e.stack);
-              }
-              // Only write back when we got a real value — corrupted files stay NULL
-              // and won't be re-checked on every scan, but a future rescan (mtime change) will retry.
-              if (duration !== null) {
-                await ax({
-                  method: 'POST',
-                  url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-duration`,
-                  headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
-                  responseType: 'json',
-                  data: { filepath: dbFileInfo.data.filepath, vpath: loadJson.vpath, duration }
-                });
-              }
-            } catch (_durErr) {
-              await reportError(filepath, 'duration', `Duration update failed: ${_durErr.message}`, _durErr.stack);
-            }
-          }
-          // All targeted updates done without a fatal error — confirm any fixed errors for this file.
-          await confirmOk(filepath);
-        }
-      } catch (err) {
-        // console.log(err)
-        console.error(`Warning: failed to add file ${filepath} to database: ${err.message}`);
-        await reportError(filepath, 'insert', err.message, err.stack);
-      }
-
-      // pause
-      if (loadJson.pause) { await timeout(loadJson.pause); }
+      if (!loadJson.supportedFiles[getFileType(file).toLowerCase()]) { continue; }
+      _pendingBatch.push({ absPath: filepath, relPath: path.relative(loadJson.directory, filepath), modTime: stat.mtime.getTime() });
+      if (_pendingBatch.length >= SCAN_BATCH_SIZE) await flushBatch();
     }
   }
 }

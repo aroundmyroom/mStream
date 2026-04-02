@@ -14,6 +14,7 @@ export function startScan(scanId, vpath, expected) {
     vpath,
     expected,           // null means no baseline (first scan)
     scanned: 0,
+    countingFound: 0,   // grows during pre-count walk (first scans only)
     currentFile: null,
     startedAt: Date.now(),
     _rateBase: 0,
@@ -42,6 +43,29 @@ export function tick(scanId, filepath) {
 }
 
 /**
+ * Update the expected file count after a pre-count pass.
+ * @param {string} scanId
+ * @param {number} expected
+ */
+export function setExpected(scanId, expected) {
+  const s = _scans.get(scanId);
+  if (!s) return;
+  s.expected = expected;
+}
+
+/**
+ * Update the in-progress counting total during the pre-count walk.
+ * Called every 5 000 files so the UI shows activity rather than a blank bar.
+ * @param {string} scanId
+ * @param {number} found
+ */
+export function updateCountingFound(scanId, found) {
+  const s = _scans.get(scanId);
+  if (!s) return;
+  s.countingFound = found;
+}
+
+/**
  * Remove scan from in-memory tracker.
  * @param {string} scanId
  */
@@ -56,8 +80,11 @@ export function getAll() {
   const now = Date.now();
   return [..._scans.values()].map(s => {
     let pct = null;
-    if (s.expected && s.expected > 0 && s.scanned > 0) {
-      pct = Math.min(100, Math.round((s.scanned / s.expected) * 100));
+    if (s.expected && s.expected > 0) {
+      // Cap at 99 while scan is still running — 100 only shows after finish-scan.
+      // This prevents false "100%" when DB estimate is lower than actual file count
+      // (e.g. a previously interrupted scan where DB=20K but disk=138K).
+      pct = Math.min(99, Math.round((s.scanned / s.expected) * 100));
     }
     const elapsedSec = Math.round((now - s.startedAt) / 1000);
     let etaSec = null;
@@ -69,6 +96,7 @@ export function getAll() {
       vpath: s.vpath,
       scanned: s.scanned,
       expected: s.expected,
+      countingFound: s.countingFound || 0,
       pct,
       currentFile: s.currentFile,
       elapsedSec,

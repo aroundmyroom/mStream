@@ -770,6 +770,10 @@ tr:hover td { background: var(--raised); }
   font-size: .78rem; font-weight: 600; padding: .1rem .45rem; border-radius: 99px;
   background: rgba(139,92,246,.12); color: var(--primary); border: 1px solid rgba(139,92,246,.25);
 }
+.sp-counting-badge {
+  font-size: .78rem; font-weight: 600; padding: .1rem .45rem; border-radius: 99px;
+  background: rgba(251,191,36,.12); color: #f59e0b; border: 1px solid rgba(251,191,36,.3);
+}
 .sp-spacer { flex: 1; }
 .sp-eta { font-size: .78rem; color: var(--t2); }
 .sp-rate { font-size: .78rem; color: var(--accent); font-weight: 600; }

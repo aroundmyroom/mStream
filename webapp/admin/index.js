@@ -1904,18 +1904,21 @@ const dbView = Vue.component('db-view', {
                     <div class="sp-header">
                       <span class="sp-live-dot"></span>
                       <span class="sp-vpath">{{sp.vpath}}</span>
-                      <span v-if="sp.pct !== null" class="sp-pct-badge">{{sp.pct}}%</span>
+                      <span v-if="sp.countingFound > 0 && sp.scanned === 0" class="sp-counting-badge">Counting&hellip;</span>
+                      <span v-else-if="sp.pct !== null" class="sp-pct-badge">{{sp.pct}}%</span>
                       <span v-else class="sp-firstscan-badge">first scan</span>
                       <span class="sp-spacer"></span>
                       <span v-if="sp.etaSec" class="sp-eta">est. {{formatEta(sp.etaSec)}}</span>
                       <span v-if="sp.filesPerSec" class="sp-rate">{{sp.filesPerSec}}/s</span>
                     </div>
                     <div class="sp-track">
-                      <div v-if="sp.pct !== null" class="sp-fill" :style="{width: sp.pct + '%'}"></div>
+                      <div v-if="sp.countingFound > 0 && sp.scanned === 0" class="sp-fill-indeterminate"></div>
+                      <div v-else-if="sp.pct !== null" class="sp-fill" :style="{width: sp.pct + '%'}"></div>
                       <div v-else class="sp-fill-indeterminate"></div>
                     </div>
                     <div class="sp-counts">
-                      <span v-if="sp.expected">{{sp.scanned.toLocaleString()}} / ~{{sp.expected.toLocaleString()}} files</span>
+                      <span v-if="sp.countingFound > 0 && sp.scanned === 0">{{sp.countingFound.toLocaleString()}} files found&hellip;</span>
+                      <span v-else-if="sp.expected">{{sp.scanned.toLocaleString()}} / {{sp.expected.toLocaleString()}} files</span>
                       <span v-else>{{sp.scanned.toLocaleString()}} files checked</span>
                       <span class="sp-elapsed">elapsed: {{formatElapsed(sp.elapsedSec)}}</span>
                     </div>

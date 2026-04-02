@@ -157,6 +157,22 @@ export function updateFileScanId(file, scanId) {
   }
 }
 
+export function findFilesByPaths(filepaths, vpath) {
+  const map = new Map();
+  for (const fp of filepaths) {
+    const result = findFileByPath(fp, vpath);
+    if (result) map.set(fp, result);
+  }
+  return map;
+}
+
+export function batchUpdateScanIds(filepaths, vpath, scanId) {
+  for (const fp of filepaths) {
+    const dbFile = fileCollection.findOne({ '$and': [{ 'filepath': fp }, { 'vpath': vpath }] });
+    if (dbFile) { dbFile.sID = scanId; fileCollection.update(dbFile); }
+  }
+}
+
 export function updateFileArt(filepath, vpath, aaFile, scanId, artSource = null) {
   const dbFile = fileCollection.findOne({ '$and': [{ 'filepath': { '$eq': filepath } }, { 'vpath': { '$eq': vpath } }] });
   if (dbFile) {

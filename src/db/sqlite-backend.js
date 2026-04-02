@@ -502,8 +502,30 @@ export function findFileByPath(filepath, vpath) {
   return row || null;
 }
 
+// Batch lookup: returns a Map<filepath, row> for all matching filepaths in one query.
+// Much faster than calling findFileByPath() individually for large rescans.
+export function findFilesByPaths(filepaths, vpath) {
+  if (!filepaths.length) return new Map();
+  const placeholders = filepaths.map(() => '?').join(',');
+  const rows = db.prepare(
+    `SELECT rowid AS id, * FROM files WHERE vpath = ? AND filepath IN (${placeholders})`
+  ).all(vpath, ...filepaths);
+  const map = new Map();
+  for (const row of rows) map.set(row.filepath, row);
+  return map;
+}
+
 export function updateFileScanId(file, scanId) {
   _s.updateScanId.run(scanId, file.filepath, file.vpath);
+}
+
+// Batch scanId update: wraps all individual UPDATEs in a single transaction.
+// Reduces 200 auto-commit transactions to 1, giving ~200x write throughput.
+export function batchUpdateScanIds(filepaths, vpath, scanId) {
+  const tx = db.transaction(fps => {
+    for (const fp of fps) _s.updateScanId.run(scanId, fp, vpath);
+  });
+  tx(filepaths);
 }
 
 export function updateFileArt(filepath, vpath, aaFile, scanId, artSource = null) {
