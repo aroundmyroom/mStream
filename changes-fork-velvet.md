@@ -4,6 +4,20 @@
 
 ---
 
+## v5.16.35-velvet — April 2026
+
+### fix: Docker bootstrap — admin user created even when folders already exist
+- The bootstrap now runs in two independent phases: (1) folder phase — runs once when no folders are configured; (2) user phase — runs once when no users exist and both `MSTREAM_ADMIN_USER` + `MSTREAM_ADMIN_PASS` are set
+- Previously a single guard (`if folders exist, skip everything`) caused `MSTREAM_ADMIN_USER/PASS` to be silently ignored on any restart after the initial folder setup, making login impossible
+- Env var default behaviour for feature folder roots changed: if no `*_SUBDIR` is given, the folder type is set on `MSTREAM_MUSIC_DIR` itself instead of creating a hardcoded sub-folder (`Audiobooks`, `Recordings`, `YouTube`) — avoids unintended sub-folder creation
+
+### docs: complete compose.yaml examples in README and docker.md
+- `README.md` and `docs/docker.md` now contain a full, copy-paste-ready `compose.yaml` including all optional environment variables with explanatory comments
+- Clarified that `MSTREAM_ENABLE_*` variables set a **folder type property**, not vpaths — and that folders can be added, changed, or removed at any time in the Admin panel
+- Removed confusing `*_SUBDIR` examples from compose snippets; usage now explained inline as a named sub-folder override only
+
+---
+
 ## v5.16.34-velvet — April 2026
 
 ### feat: Docker first-run auto-config via environment variables
