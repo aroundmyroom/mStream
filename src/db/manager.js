@@ -118,7 +118,8 @@ export function removeEternalSharedPlaylists() { return backend.removeEternalSha
 export function removeSharedPlaylistsByUser(username) { return backend.removeSharedPlaylistsByUser(username); }
 // Scan Error Audit
 export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stack) { return backend.insertScanError(guid, filepath, vpath, errorType, errorMsg, stack); }
-export function getScanErrors() { return backend.getScanErrors(); }
+export function getScanErrors(limit) { return backend.getScanErrors(limit); }
+export function getScanErrorByGuid(guid) { return backend.getScanErrorByGuid(guid); }
 export function clearScanErrors() { return backend.clearScanErrors(); }
 export function pruneScanErrors(retentionHours) { return backend.pruneScanErrors(retentionHours); }
 export function clearResolvedErrors(vpath, scanStartTs) { return backend.clearResolvedErrors(vpath, scanStartTs); }

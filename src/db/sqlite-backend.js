@@ -1460,14 +1460,27 @@ export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stac
   }
 }
 
-export function getScanErrors() {
-  return db.prepare(`
+export function getScanErrors(limit = 500) {
+  const rows = db.prepare(`
     SELECT se.*,
       CASE WHEN f.filepath IS NOT NULL THEN 1 ELSE 0 END AS file_in_db
     FROM scan_errors se
     LEFT JOIN files f ON f.filepath = se.filepath AND f.vpath = se.vpath
     ORDER BY se.fixed_at DESC NULLS LAST, se.last_seen DESC
-  `).all();
+    LIMIT ?
+  `).all(limit);
+  const total = db.prepare('SELECT COUNT(*) AS cnt FROM scan_errors').get().cnt;
+  return { errors: rows, total };
+}
+
+export function getScanErrorByGuid(guid) {
+  return db.prepare(`
+    SELECT se.*,
+      CASE WHEN f.filepath IS NOT NULL THEN 1 ELSE 0 END AS file_in_db
+    FROM scan_errors se
+    LEFT JOIN files f ON f.filepath = se.filepath AND f.vpath = se.vpath
+    WHERE se.guid = ?
+  `).get(guid) || null;
 }
 
 export function clearScanErrors() {

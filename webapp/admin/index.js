@@ -254,6 +254,7 @@ const scanErrorsView = Vue.component('scan-errors-view', {
   data() {
     return {
       errors:          [],
+      total:           0,
       loading:         false,
       loaded:          false,
       expandedRow:     null,
@@ -289,7 +290,8 @@ const scanErrorsView = Vue.component('scan-errors-view', {
           API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/db/scan-errors` }),
           API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/db/params` })
         ]);
-        this.errors = errRes.data;
+        this.errors = errRes.data.errors;
+        this.total  = errRes.data.total;
         this.loaded = true;
         if (paramRes.data.scanErrorRetentionHours) {
           this.retentionHours = paramRes.data.scanErrorRetentionHours;
@@ -318,6 +320,7 @@ const scanErrorsView = Vue.component('scan-errors-view', {
       try {
         await API.axios({ method: 'DELETE', url: `${API.url()}/api/v1/admin/db/scan-errors` });
         this.errors = [];
+        this.total  = 0;
         this.typeFilter = null;
         const badge = document.getElementById('scan-errors-badge');
         if (badge) badge.style.display = 'none';
@@ -447,7 +450,7 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                       <div class="se-sub">Persistent log of every file that failed during a library scan — deduplicated by file &amp; error type so recurring problems show a count, not duplicate rows.</div>
                     </div>
                     <span class="se-total-pill" v-if="loaded && unfixedCount > 0">
-                      {{unfixedCount}} issue{{unfixedCount === 1 ? '' : 's'}}
+                      {{unfixedCount}} issue{{unfixedCount === 1 ? '' : 's'}}{{total > errors.length ? ' (showing '+errors.length.toLocaleString()+' of '+total.toLocaleString()+')' : ''}}
                     </span>
                     <span class="se-total-pill se-total-ok" v-else-if="loaded && errors.length === 0">
                       ✓ Clean
@@ -514,6 +517,16 @@ const scanErrorsView = Vue.component('scan-errors-view', {
         </div>
 
         <template v-else-if="loaded && errors.length > 0">
+
+          <!-- ── Truncation warning ── -->
+          <div class="row" v-if="total > errors.length">
+            <div class="col s12">
+              <div style="background:rgba(251,191,36,.13);border:1px solid rgba(251,191,36,.35);border-radius:8px;padding:.7rem 1rem;display:flex;align-items:center;gap:.6rem;font-size:.85rem;color:var(--yellow)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                Showing first {{errors.length.toLocaleString()}} of {{total.toLocaleString()}} errors. Use <strong>Clear All</strong> to remove old entries, then re-scan to re-detect current problems.
+              </div>
+            </div>
+          </div>
 
           <!-- ── Type filter chips ── -->
           <div class="row">

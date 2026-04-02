@@ -4,6 +4,17 @@
 
 ---
 
+## v5.16.49-velvet — April 2026
+
+### fix: Scan Error Audit page no longer crashes when thousands of errors are present
+- `GET /api/v1/admin/db/scan-errors` was returning ALL rows with no limit — with 82K accumulated errors the JSON response was massive and the page failed to load entirely
+- Endpoint now returns `{ errors: [...first 500], total: N }` — a `?limit=N` query param allows fetching up to 5000 rows
+- Fix endpoint (`POST .../fix`) was also loading all errors just to look up one by GUID — replaced with a direct `getScanErrorByGuid(guid)` single-row query
+- UI shows a yellow warning banner when results are truncated: "Showing first 500 of N errors — use Clear All to remove old entries"
+- Header pill also shows total/shown count when truncated
+
+---
+
 ## v5.16.48-velvet — April 2026
 
 ### fix: scanner no longer hangs indefinitely on corrupt/unreadable files

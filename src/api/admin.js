@@ -469,7 +469,8 @@ export function setup(mstream) {
 
   // ── Scan Error Audit ──────────────────────────────────────────────────────────
   mstream.get('/api/v1/admin/db/scan-errors', (req, res) => {
-    res.json(db.getScanErrors());
+    const limit = Math.min(parseInt(req.query.limit, 10) || 500, 5000);
+    res.json(db.getScanErrors(limit));
   });
 
   mstream.delete('/api/v1/admin/db/scan-errors', (req, res) => {
@@ -492,8 +493,7 @@ export function setup(mstream) {
       joiValidate(schema, req.body);
       const { guid } = req.body;
 
-      const errors = db.getScanErrors();
-      const err = errors.find(e => e.guid === guid);
+      const err = db.getScanErrorByGuid(guid);
       if (!err) return res.status(404).json({ error: 'Error not found' });
 
       if (err.error_type === 'art') {

@@ -896,9 +896,9 @@ export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stac
   }
 }
 
-export function getScanErrors() {
+export function getScanErrors(limit = 500) {
   const all = scanErrorCollection.find();
-  return all
+  const sorted = all
     .map(r => ({
       guid: r.guid, filepath: r.filepath, vpath: r.vpath,
       error_type: r.error_type, error_msg: r.error_msg, stack: r.stack,
@@ -907,10 +907,22 @@ export function getScanErrors() {
       file_in_db: fileCollection.findOne({ filepath: r.filepath, vpath: r.vpath }) ? 1 : 0
     }))
     .sort((a, b) => {
-      // fixed items last, then newest first
       if ((a.fixed_at === null) !== (b.fixed_at === null)) return a.fixed_at === null ? -1 : 1;
       return b.last_seen - a.last_seen;
     });
+  return { errors: sorted.slice(0, limit), total: sorted.length };
+}
+
+export function getScanErrorByGuid(guid) {
+  const r = scanErrorCollection.findOne({ guid });
+  if (!r) return null;
+  return {
+    guid: r.guid, filepath: r.filepath, vpath: r.vpath,
+    error_type: r.error_type, error_msg: r.error_msg, stack: r.stack,
+    first_seen: r.first_seen, last_seen: r.last_seen, count: r.count,
+    fixed_at: r.fixed_at || null,
+    file_in_db: fileCollection.findOne({ filepath: r.filepath, vpath: r.vpath }) ? 1 : 0
+  };
 }
 
 export function clearScanErrors() {
