@@ -746,6 +746,29 @@ const advancedView = Vue.component('advanced-view', {
           </div>
           <div class="col s12">
             <div class="card">
+              <div class="card-content">
+                <span class="card-title">Server Audio</span>
+                <table>
+                  <tbody>
+                    <tr>
+                      <td><b>Auto-Boot Server Audio:</b> {{params.autoBootServerAudio ? 'Enabled' : 'Disabled'}}</td>
+                      <td>
+                        [<a v-on:click="toggleAutoBootServerAudio()">edit</a>]
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><b>Rust Player Port:</b> {{params.rustPlayerPort}}</td>
+                      <td>
+                        [<a v-on:click="openModal('edit-rust-player-port-modal')">edit</a>]
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div class="col s12">
+            <div class="card">
               <div v-if="!params.ssl || !params.ssl.cert">
                 <div class="card-content">
                   <span class="card-title">SSL Settings</span>
@@ -773,31 +796,6 @@ const advancedView = Vue.component('advanced-view', {
               </div>
             </div>
           </div>
-        </div>
-      </div>
-      <div class="col s12">
-        <div class="card">
-          <div class="card-content">
-            <span class="card-title">Server Audio</span>
-            <table>
-              <tbody>
-                <tr>
-                  <td><b>Auto-Boot Server Audio:</b> {{params.autoBootServerAudio ? 'Enabled' : 'Disabled'}}</td>
-                  <td>
-                    [<a v-on:click="toggleAutoBootServerAudio()">edit</a>]
-                  </td>
-                </tr>
-                <tr>
-                  <td><b>Rust Player Port:</b> {{params.rustPlayerPort}}</td>
-                  <td>
-                    [<a v-on:click="openModal('edit-rust-player-port-modal')">edit</a>]
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
     </div>
   `,
   methods: {
