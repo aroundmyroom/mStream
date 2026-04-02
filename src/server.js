@@ -128,7 +128,7 @@ export async function serveIt(configFile) {
       jwt.verify(req.cookies['x-access-token'], config.program.secret);
       next();
     } catch (_err) {
-      return res.redirect(302, '/login');
+      return res.redirect(302, '/');
     }
   });
 
@@ -144,18 +144,8 @@ export async function serveIt(configFile) {
 
   // Classic UI has been removed. /classic returns 410 Gone.
   mstream.get('/classic', (_req, res) => res.status(410).send('<p>Classic UI has been removed.</p>'));
-  mstream.get('/login', (req, res, next) => {
-    if (Object.keys(config.program.users).length === 0) {
-      return res.redirect(302, '..');
-    }
-
-    try {
-      jwt.verify(req.cookies['x-access-token'], config.program.secret);
-      return res.redirect(302, '..');
-    } catch (_err) {
-      next();
-    }
-  });
+  mstream.get('/login', (_req, res) => res.redirect(301, '/'));
+  mstream.get('/login/', (_req, res) => res.redirect(301, '/'));
 
   // Mount admin panel (webapp/admin/) at /admin — must be before general static
   mstream.use('/admin', express.static(path.join(config.program.webAppDirectory, 'admin')));

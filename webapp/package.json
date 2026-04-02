@@ -27,7 +27,6 @@
     "files": [
       "**/*",
       "!admin/*",
-      "!login/*",
       "!shared/*",
       "!package-lock.json"
     ],

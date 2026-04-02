@@ -4,6 +4,16 @@
 
 ---
 
+## v6.0.0-velvet — April 2026
+
+### fix: `/login` now always redirects to the Velvet UI instead of serving the old login page
+- `GET /login` and `GET /login/` now return a permanent 301 redirect to `/`
+- The old mStream login page (`webapp/login/index.html`) was still being served by the static file handler after the route fell through — it showed the old logo and login form on any page refresh in the admin panel
+- The `/admin` unauthenticated redirect was also updated from `/login` to `/` so it lands on the Velvet login screen
+- Removed `webapp/login/` directory entirely — it is dead code; no page links to it and it served no purpose
+
+---
+
 ## v5.16.50-velvet — April 2026
 
 ### fix: scanner no longer stalls after first batch of 200 files
