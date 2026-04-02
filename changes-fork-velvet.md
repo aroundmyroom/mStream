@@ -4,6 +4,14 @@
 
 ---
 
+## v5.16.42-velvet — April 2026
+
+### fix: transcoding route crashes with `url.charAt is not a function`
+- Express 5 / path-to-regexp v8 changed wildcard param behavior: `{*filepath}` params are no longer plain strings — the captured value is no longer a string type, causing `getVPathInfo()` to throw `TypeError: url.charAt is not a function`
+- Fixed `transcode.js`: extract the file path from `req.path` (always a plain string) instead of `req.params.filepath`, then `decodeURI()` it before passing to `getVPathInfo()`
+
+---
+
 ## v5.16.41-velvet — April 2026
 
 ### fix: yt-dlp 0-byte binary causes silent failure
