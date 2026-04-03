@@ -8049,6 +8049,8 @@ function _stopRadioNowPlaying() {
   if (badge) badge.classList.add('hidden');
   const kbpsEl = document.getElementById('player-radio-kbps');
   if (kbpsEl) kbpsEl.classList.add('hidden');
+  const npKbpsEl = document.getElementById('np-radio-kbps');
+  if (npKbpsEl) { npKbpsEl.classList.add('hidden'); npKbpsEl.style.display = 'none'; }
 }
 
 async function _pollRadioNowPlaying(station) {
@@ -8090,12 +8092,23 @@ async function _pollRadioNowPlaying(station) {
       el.classList.add('hidden');
     }
     const kbpsEl = document.getElementById('player-radio-kbps');
+    const npKbpsEl = document.getElementById('np-radio-kbps');
     if (kbpsEl) {
       if (data?.bitrate) {
         kbpsEl.textContent = `${data.bitrate} kbps`;
         kbpsEl.classList.remove('hidden');
       } else {
         kbpsEl.classList.add('hidden');
+      }
+    }
+    if (npKbpsEl) {
+      if (data?.bitrate) {
+        npKbpsEl.textContent = `${data.bitrate} kbps`;
+        npKbpsEl.classList.remove('hidden');
+        npKbpsEl.style.display = 'inline-block';
+      } else {
+        npKbpsEl.classList.add('hidden');
+        npKbpsEl.style.display = 'none';
       }
     }
   } catch (_) {}
@@ -11147,6 +11160,10 @@ function showApp() {
     S.allowYoutubeDownload = d.allowYoutubeDownload === true;
     const ytBtn = document.getElementById('youtube-nav-btn');
     if (ytBtn) ytBtn.classList.toggle('hidden', !S.allowYoutubeDownload);
+    if (d.version) {
+      const brand = document.querySelector('.sidebar-brand');
+      if (brand) brand.title = `mStream Velvet v${d.version}`;
+    }
     _updateListenSection();
   }).catch(() => { S.transInfo = { serverEnabled: false }; });
 

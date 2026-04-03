@@ -867,13 +867,7 @@ export function getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, include
 
 export function getFilesForAlbumsBrowse(sources) {
   // sources: array of { vpath, prefix } where prefix may be null (root vpath — include all)
-  // OR fallback to old behaviour if no sources provided
-  if (!sources || sources.length === 0) {
-    return db.prepare(
-      `SELECT filepath, title, artist, track, disk, year, duration, aaFile
-       FROM files WHERE filepath LIKE 'Albums/%'`
-    ).all();
-  }
+  if (!sources || sources.length === 0) return [];
   const clauses = sources.map(s =>
     s.prefix
       ? `(vpath = ? AND filepath LIKE ?)`

@@ -1,5 +1,27 @@
 # mStream Velvet Fork — Combined Change Log
 
+## Unreleased (post-v6.1.1)
+
+### feat: version tooltip on sidebar logo
+- `/api/v1/ping` now returns a `version` field from `package.json`
+- `app.js` reads it and sets `title` on `.sidebar-brand` for a native browser tooltip showing the running version
+
+### fix: radio kbps badge pushed volume controls off-line
+- Wrapped `player-title` and the kbps `<span>` in a `.player-title-row` flex div so both sit on one line
+- Added a matching badge element inside the Now Playing modal
+- CSS: `flex-shrink:0` on badge, `flex:0 1 auto` on title
+
+### fix: About panel duplicate version line removed
+- Removed the redundant "mStream Velvet vX — a fork of mStream" sentence that appeared twice in the About section of the admin panel
+
+### chore: legacy Albums/ SQL fallback removed
+- `getFilesForAlbumsBrowse` in `sqlite-backend.js` no longer falls back to `WHERE filepath LIKE 'Albums/%'` when no albumsOnly sources are configured — returns `[]` instead
+
+### docs: albums.md updated
+- "Folder structure requirements" section now describes the albumsOnly admin toggle and ROOT/CHILD vpath model instead of the old auto-detected `Albums/` subfolder behaviour
+
+---
+
 ## v6.1.1-velvet — April 2026
 
 ### fix: Album Library — albumsOnly cache not cleared on admin config change

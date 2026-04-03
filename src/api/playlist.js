@@ -2,6 +2,9 @@ import Joi from 'joi';
 import * as config from '../state/config.js';
 import * as db from '../db/manager.js';
 import { joiValidate } from '../util/validation.js';
+import { createRequire } from 'module';
+const _require = createRequire(import.meta.url);
+const _pkg = _require('../../package.json');
 
 export function setup(mstream) {
   // TODO: This is a legacy endpoint that should be improved
@@ -55,6 +58,7 @@ export function setup(mstream) {
 
     returnThis.allowRadioRecording = req.user['allow-radio-recording'] === true;
     returnThis.allowYoutubeDownload = req.user['allow-youtube-download'] === true;
+    returnThis.version = _pkg.version;
 
     res.json(returnThis);
   });

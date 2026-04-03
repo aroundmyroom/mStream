@@ -106,6 +106,10 @@ Three client-side views handle the Album Library:
 
 ## Folder structure requirements
 
-- Albums must live under an `Albums/` subfolder inside a configured vpath.
-- The vpath with an `Albums/` subfolder is auto-detected on first request — no extra configuration needed.
-- Only one vpath/`Albums/` root is supported at a time; the first one found is used.
+Enable **Albums Only** on a folder via Admin → Directories. That folder (and all its contents) becomes an album source.
+
+- Any folder type `music` or `audio-books` can be marked `albumsOnly: true`.
+- **Multiple** folders can be marked albumsOnly simultaneously — all are merged into one Album Library.
+- A folder can be a **root vpath** (its own DB entry) or a **child vpath** (a sub-folder of another vpath). Child vpath files are already stored in the DB under the parent root; they are never indexed separately.
+- If no folder has `albumsOnly` set, the system falls back to auto-detecting any root vpath that has an `Albums/` sub-directory on disk (legacy fallback).
+- The `albumsOnly` flag change takes effect immediately — no server restart required.
