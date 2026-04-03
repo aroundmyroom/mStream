@@ -23,6 +23,10 @@ bin/rust-parser/*
 !bin/rust-parser/README.md
 !bin/rust-parser/rust-parser-*
 
+bin/rust-server-audio/*
+!bin/rust-server-audio/README.md
+!bin/rust-server-audio/rust-server-audio-*
+
 save/*.json
 
 .DS_Store
