@@ -90,6 +90,20 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [/db/stats/reset-play-counts, /db/stats/reset-recently-played](API/db_stats-reset.md)
 
+### Your Stats — Listening Events *(GitHub Copilot, 2026-04-03)*
+
+`POST /api/v1/wrapped/play-start` · `play-end` · `play-skip` · `play-stop` · `session-end` — song player event hooks
+
+`POST /api/v1/wrapped/radio-start` · `radio-stop` — radio station tracking
+
+`POST /api/v1/wrapped/podcast-start` · `podcast-end` — podcast episode tracking
+
+`GET /api/v1/user/wrapped` · `GET /api/v1/user/wrapped/periods` — per-user statistics
+
+`GET /api/v1/admin/wrapped/stats` · `POST /api/v1/admin/wrapped/purge` — admin overview + purge
+
+See [docs/your-stats.md](your-stats.md) for full schema and field reference.
+
 [/db/rate-song](API/db_rate-song.md)
 
 [/db/rated](API/db_rated.md)

@@ -249,6 +249,128 @@ Vue.mixin({
   }
 });
 
+// ── Wrapped Play Stats Admin View ──────────────────────────────────────────
+const wrappedAdminView = Vue.component('wrapped-admin-view', {
+  data() {
+    return {
+      loading:    false,
+      loaded:     false,
+      stats:      null,   // { total_events, storage_bytes, per_user: [...] }
+      purgeUser:  '',
+      keepMonths: 12,
+      purging:    false,
+    };
+  },
+  computed: {
+    storageKB() {
+      return this.stats ? (this.stats.storage_bytes / 1024).toFixed(1) : '—';
+    },
+  },
+  mounted() { this.load(); },
+  methods: {
+    async load() {
+      this.loading = true;
+      try {
+        const r = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/wrapped/stats` });
+        this.stats = r.data;
+        this.loaded = true;
+        // Pre-fill purge user with first in list
+        if (this.stats.per_user.length) this.purgeUser = this.stats.per_user[0].user_id;
+      } catch (e) {
+        iziToast.error({ title: 'Failed to load play stats', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.loading = false;
+      }
+    },
+    doPurge() {
+      if (!this.purgeUser) return;
+      adminConfirm(
+        `Purge play events for <b>${this.purgeUser}</b>?`,
+        `Events older than ${this.keepMonths} month(s) will be permanently deleted.`,
+        'Purge',
+        async () => {
+          this.purging = true;
+          try {
+            const r = await API.axios({
+              method: 'POST',
+              url: `${API.url()}/api/v1/admin/wrapped/purge`,
+              data: { userId: this.purgeUser, keepMonths: this.keepMonths },
+            });
+            iziToast.success({ title: `Deleted ${r.data.deleted} events`, position: 'topCenter', timeout: 3000 });
+            this.load();
+          } catch (e) {
+            iziToast.error({ title: 'Purge failed', message: e.message, position: 'topCenter', timeout: 4000 });
+          } finally {
+            this.purging = false;
+          }
+        }
+      );
+    },
+    fmtMs(ms) {
+      if (!ms) return '0 min';
+      const h = Math.floor(ms / 3600000);
+      const m = Math.floor((ms % 3600000) / 60000);
+      return h ? `${h}h ${m}m` : `${m} min`;
+    },
+  },
+  template: `
+    <div>
+      <div class="card">
+        <div class="card-content">
+          <span class="card-title">Play Statistics</span>
+          <p class="grey-text">All listening events recorded on this server.</p>
+          <div v-if="loading" class="center-align" style="padding:2rem;">Loading…</div>
+          <div v-else-if="loaded && stats">
+            <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:1.5rem;">
+              <div class="admin-stat-box">
+                <div class="admin-stat-value">{{ stats.total_events.toLocaleString() }}</div>
+                <div class="admin-stat-label">Total play events</div>
+              </div>
+              <div class="admin-stat-box">
+                <div class="admin-stat-value">{{ storageKB }} KB</div>
+                <div class="admin-stat-label">DB storage used</div>
+              </div>
+            </div>
+            <table class="striped" v-if="stats.per_user.length">
+              <thead><tr><th>User</th><th>Events</th><th>Listening time</th></tr></thead>
+              <tbody>
+                <tr v-for="u in stats.per_user" :key="u.user_id">
+                  <td>{{ u.user_id }}</td>
+                  <td>{{ u.event_count.toLocaleString() }}</td>
+                  <td>{{ fmtMs(u.total_played_ms) }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <p v-else class="grey-text">No play events recorded yet.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" v-if="loaded && stats && stats.per_user.length">
+        <div class="card-content">
+          <span class="card-title">Purge Old Events</span>
+          <p class="grey-text">Delete play events older than N months for a specific user.</p>
+          <div style="display:flex;gap:1rem;align-items:flex-end;flex-wrap:wrap;">
+            <div class="input-field" style="margin:0;">
+              <select v-model="purgeUser" style="display:block;padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg);">
+                <option v-for="u in stats.per_user" :key="u.user_id" :value="u.user_id">{{ u.user_id }}</option>
+              </select>
+              <label style="position:static;font-size:.8rem;color:var(--fg-muted);">User</label>
+            </div>
+            <div class="input-field" style="margin:0;">
+              <input type="number" v-model.number="keepMonths" min="1" max="60" style="width:5rem;" />
+              <label style="position:static;font-size:.8rem;color:var(--fg-muted);">Keep months</label>
+            </div>
+            <button class="btn red darken-1" :disabled="purging" @click="doPurge">
+              {{ purging ? 'Purging…' : 'Purge' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `,
+});
+
 // ── Scan Error Audit View ──────────────────────────────────────────────────
 const scanErrorsView = Vue.component('scan-errors-view', {
   data() {
@@ -3870,6 +3992,7 @@ const vm = new Vue({
     'rpn-view': rpnView,
     'lock-view': lockView,
     'scan-errors-view': scanErrorsView,
+    'wrapped-admin-view': wrappedAdminView,
     'lastfm-view': lastFMView,
     'listenbrainz-view': listenBrainzView,
     'discogs-view': discogsView,

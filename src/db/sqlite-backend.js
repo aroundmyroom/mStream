@@ -188,6 +188,59 @@ export function init(dbDirectory) {
     );
     CREATE INDEX IF NOT EXISTS idx_rsched_user    ON radio_schedules(username);
     CREATE INDEX IF NOT EXISTS idx_rsched_enabled ON radio_schedules(enabled);
+
+    CREATE TABLE IF NOT EXISTS play_events (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id      TEXT NOT NULL,
+      file_hash    TEXT NOT NULL,
+      started_at   INTEGER NOT NULL,
+      ended_at     INTEGER,
+      duration_ms  INTEGER,
+      played_ms    INTEGER,
+      completed    INTEGER DEFAULT 0,
+      skipped      INTEGER DEFAULT 0,
+      source       TEXT,
+      session_id   TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_pe_user_started  ON play_events(user_id, started_at);
+    CREATE INDEX IF NOT EXISTS idx_pe_user_hash     ON play_events(user_id, file_hash);
+    CREATE INDEX IF NOT EXISTS idx_pe_session       ON play_events(session_id);
+    CREATE INDEX IF NOT EXISTS idx_pe_user_completed ON play_events(user_id, completed);
+
+    CREATE TABLE IF NOT EXISTS listening_sessions (
+      session_id   TEXT PRIMARY KEY,
+      user_id      TEXT NOT NULL,
+      started_at   INTEGER NOT NULL,
+      ended_at     INTEGER,
+      total_tracks INTEGER DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_ls_user_started ON listening_sessions(user_id, started_at);
+
+    CREATE TABLE IF NOT EXISTS radio_play_events (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id      TEXT NOT NULL,
+      station_id   INTEGER,
+      station_name TEXT NOT NULL,
+      started_at   INTEGER NOT NULL,
+      ended_at     INTEGER,
+      listened_ms  INTEGER DEFAULT 0,
+      session_id   TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_rpe_user_started ON radio_play_events(user_id, started_at);
+
+    CREATE TABLE IF NOT EXISTS podcast_play_events (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id     TEXT NOT NULL,
+      episode_id  INTEGER NOT NULL,
+      feed_id     INTEGER NOT NULL,
+      started_at  INTEGER NOT NULL,
+      ended_at    INTEGER,
+      played_ms   INTEGER DEFAULT 0,
+      completed   INTEGER DEFAULT 0,
+      session_id  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_ppe_user_started ON podcast_play_events(user_id, started_at);
+    CREATE INDEX IF NOT EXISTS idx_ppe_user_feed    ON podcast_play_events(user_id, feed_id);
   `);
   // Migration: add cuepoints column for databases created before this feature
   try { db.exec('ALTER TABLE files ADD COLUMN cuepoints TEXT'); } catch (_e) {}
@@ -2115,4 +2168,180 @@ export function getGenreGroups() {
 export function saveGenreGroups(groups) {
   db.prepare('INSERT INTO genre_groups(id, groups) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET groups=excluded.groups')
     .run(JSON.stringify(groups));
+}
+
+// ── Wrapped / Play Events ─────────────────────────────────────────────────
+
+export function insertPlayEvent({ user_id, file_hash, started_at, duration_ms, source, session_id }) {
+  const result = db.prepare(
+    'INSERT INTO play_events (user_id, file_hash, started_at, duration_ms, source, session_id) VALUES (?,?,?,?,?,?)'
+  ).run(user_id, file_hash, started_at, duration_ms ?? null, source ?? null, session_id ?? null);
+  return Number(result.lastInsertRowid);
+}
+
+export function getPlayEventById(id, userId) {
+  return db.prepare('SELECT id, user_id, duration_ms FROM play_events WHERE id=? AND user_id=?').get(id, userId) ?? null;
+}
+
+export function hasPlayEventBefore(userId, fileHash, beforeMs) {
+  const row = db.prepare('SELECT 1 AS found FROM play_events WHERE user_id=? AND file_hash=? AND started_at < ? LIMIT 1').get(userId, fileHash, beforeMs);
+  return !!row;
+}
+
+export function updatePlayEvent(id, userId, { ended_at, played_ms, completed, skipped }) {
+  db.prepare(
+    'UPDATE play_events SET ended_at=?, played_ms=?, completed=?, skipped=? WHERE id=? AND user_id=?'
+  ).run(ended_at ?? Date.now(), played_ms ?? null, completed ? 1 : 0, skipped ? 1 : 0, id, userId);
+}
+
+export function upsertListeningSession({ session_id, user_id, started_at }) {
+  db.prepare(
+    `INSERT INTO listening_sessions (session_id, user_id, started_at, total_tracks)
+     VALUES (?,?,?,1)
+     ON CONFLICT(session_id) DO UPDATE SET total_tracks = total_tracks + 1`
+  ).run(session_id, user_id, started_at);
+}
+
+export function updateListeningSession(sessionId, userId, { ended_at }) {
+  db.prepare(
+    'UPDATE listening_sessions SET ended_at=? WHERE session_id=? AND user_id=?'
+  ).run(ended_at ?? Date.now(), sessionId, userId);
+}
+
+export function getWrappedPeriods(userId) {
+  // Returns distinct year-month buckets that have play_events for this user
+  // (most recent first, max 36 months back)
+  return db.prepare(`
+    SELECT
+      strftime('%Y', datetime(started_at/1000,'unixepoch','localtime')) AS year,
+      strftime('%m', datetime(started_at/1000,'unixepoch','localtime')) AS month,
+      COUNT(*) AS play_count
+    FROM play_events
+    WHERE user_id = ?
+    GROUP BY year, month
+    ORDER BY year DESC, month DESC
+    LIMIT 36
+  `).all(userId);
+}
+
+export function getWrappedDataInRange(userId, fromMs, toMs) {
+  // Returns all play_events in range joined to file metadata
+  // Used by wrapped-stats.mjs for aggregation
+  return db.prepare(`
+    SELECT
+      pe.id, pe.file_hash, pe.started_at, pe.ended_at,
+      pe.duration_ms, pe.played_ms, pe.completed, pe.skipped,
+      pe.source, pe.session_id,
+      f.title, f.artist, f.album, f.year, f.genre,
+      f.aaFile, f.artist_id, f.album_id
+    FROM play_events pe
+    LEFT JOIN files f ON f.hash = pe.file_hash
+    WHERE pe.user_id = ? AND pe.started_at >= ? AND pe.started_at < ?
+    ORDER BY pe.started_at ASC
+  `).all(userId, fromMs, toMs);
+}
+
+export function getWrappedSessionsInRange(userId, fromMs, toMs) {
+  return db.prepare(`
+    SELECT session_id, started_at, ended_at, total_tracks
+    FROM listening_sessions
+    WHERE user_id = ? AND started_at >= ? AND started_at < ?
+    ORDER BY started_at ASC
+  `).all(userId, fromMs, toMs);
+}
+
+export function getTotalFileCount(vpaths) {
+  if (!vpaths || vpaths.length === 0) return 0;
+  const placeholders = vpaths.map(() => '?').join(',');
+  return db.prepare(`SELECT COUNT(*) AS cnt FROM files WHERE vpath IN (${placeholders})`).get(...vpaths).cnt;
+}
+
+export function getWrappedAdminStats() {
+  const total = db.prepare('SELECT COUNT(*) AS cnt FROM play_events').get().cnt;
+  // Storage estimate via dbstat virtual table (available in SQLite 3.31+)
+  let storageBytes = 0;
+  try {
+    const row = db.prepare("SELECT SUM(payload) AS sz FROM dbstat WHERE name IN ('play_events','listening_sessions')").get();
+    storageBytes = row?.sz ?? 0;
+  } catch (_e) {}
+  const perUser = db.prepare(`
+    SELECT user_id,
+           COUNT(*) AS event_count,
+           SUM(COALESCE(played_ms,0)) AS total_played_ms
+    FROM play_events
+    GROUP BY user_id
+    ORDER BY event_count DESC
+  `).all();
+  return { total_events: total, storage_bytes: storageBytes, per_user: perUser };
+}
+
+export function purgePlayEvents(userId, beforeMs) {
+  // Delete events for a specific user older than beforeMs
+  const evRes = db.prepare('DELETE FROM play_events WHERE user_id = ? AND started_at < ?').run(userId, beforeMs);
+  // Prune sessions that have no remaining events
+  db.prepare(`
+    DELETE FROM listening_sessions
+    WHERE user_id = ? AND session_id NOT IN (
+      SELECT DISTINCT session_id FROM play_events WHERE session_id IS NOT NULL
+    )
+  `).run(userId);
+  return evRes.changes;
+}
+
+// ── Radio Play Events ─────────────────────────────────────────────────────────
+
+export function insertRadioPlayEvent({ user_id, station_id, station_name, started_at, session_id }) {
+  const result = db.prepare(
+    'INSERT INTO radio_play_events (user_id, station_id, station_name, started_at, session_id) VALUES (?,?,?,?,?)'
+  ).run(user_id, station_id ?? null, station_name, started_at, session_id ?? null);
+  return Number(result.lastInsertRowid);
+}
+
+export function updateRadioPlayEvent(id, userId, { ended_at, listened_ms }) {
+  db.prepare(
+    'UPDATE radio_play_events SET ended_at=?, listened_ms=? WHERE id=? AND user_id=?'
+  ).run(ended_at ?? Date.now(), listened_ms ?? 0, id, userId);
+}
+
+export function getRadioStatsInRange(userId, fromMs, toMs) {
+  return db.prepare(`
+    SELECT station_name, station_id,
+           COUNT(*) AS sessions,
+           SUM(listened_ms) AS total_ms
+    FROM radio_play_events
+    WHERE user_id = ? AND started_at >= ? AND started_at < ?
+    GROUP BY station_name
+    ORDER BY total_ms DESC
+  `).all(userId, fromMs, toMs);
+}
+
+// ── Podcast Play Events ───────────────────────────────────────────────────────
+
+export function insertPodcastPlayEvent({ user_id, episode_id, feed_id, started_at, session_id }) {
+  const result = db.prepare(
+    'INSERT INTO podcast_play_events (user_id, episode_id, feed_id, started_at, session_id) VALUES (?,?,?,?,?)'
+  ).run(user_id, episode_id, feed_id, started_at, session_id ?? null);
+  return Number(result.lastInsertRowid);
+}
+
+export function updatePodcastPlayEvent(id, userId, { ended_at, played_ms, completed }) {
+  db.prepare(
+    'UPDATE podcast_play_events SET ended_at=?, played_ms=?, completed=? WHERE id=? AND user_id=?'
+  ).run(ended_at ?? Date.now(), played_ms ?? 0, completed ? 1 : 0, id, userId);
+}
+
+export function getPodcastStatsInRange(userId, fromMs, toMs) {
+  return db.prepare(`
+    SELECT ppe.feed_id,
+           pf.title AS feed_title,
+           pf.img   AS feed_img,
+           COUNT(*) AS episodes_played,
+           SUM(ppe.played_ms) AS total_ms,
+           SUM(ppe.completed) AS completed_count
+    FROM podcast_play_events ppe
+    LEFT JOIN podcast_feeds pf ON pf.id = ppe.feed_id AND pf.user = ppe.user_id
+    WHERE ppe.user_id = ? AND ppe.started_at >= ? AND ppe.started_at < ?
+    GROUP BY ppe.feed_id
+    ORDER BY total_ms DESC
+  `).all(userId, fromMs, toMs);
 }

@@ -438,10 +438,7 @@ Audit completed 2026-03-26. Strategy: **Option A — separate `mobile.css`** loa
 - [ ] **Mood quick-picks** — Energy / Chill / Nostalgia from own play history
 
 ### Listening Analytics — Play Events
-- [ ] `play_events` table: `timestamp`, `filepath`, `duration_played`, `song_duration`, `source`
-- [ ] Insert on every completion or skip (>5 s played)
-- [ ] `GET /api/v1/stats/playstats` — listening volume, time-of-day histogram, skip/completion rates
-- [ ] **Analytics view** — plays-per-day sparkline, heatmap, top genres by hour bucket
+- [x] **Your Stats (Wrapped)** — `play_events` + `listening_sessions` tables; play-start/end/skip/stop API hooks wired into the player; per-period stats (top songs/artists, heatmaps, personality, fun facts); user "Your Stats" nav view; admin "Play Stats" panel with purge tool — **DONE**
 - [ ] **"Unplayed gems"** — tracks with 0 play events, filterable by decade/genre
 
 ### Smart Auto-DJ — Personal Weights

@@ -190,3 +190,23 @@ export function deleteSmartPlaylist(id, username) { return backend.deleteSmartPl
 // Genre Groups
 export function getGenreGroups() { return backend.getGenreGroups(); }
 export function saveGenreGroups(groups) { return backend.saveGenreGroups(groups); }
+// Wrapped / Play Events
+export function insertPlayEvent(e) { return backend.insertPlayEvent(e); }
+export function getPlayEventById(id, userId) { return backend.getPlayEventById(id, userId); }
+export function hasPlayEventBefore(userId, hash, beforeMs) { return backend.hasPlayEventBefore(userId, hash, beforeMs); }
+export function updatePlayEvent(id, userId, fields) { return backend.updatePlayEvent(id, userId, fields); }
+export function upsertListeningSession(s) { return backend.upsertListeningSession(s); }
+export function updateListeningSession(sid, uid, fields) { return backend.updateListeningSession(sid, uid, fields); }
+export function getWrappedPeriods(userId) { return backend.getWrappedPeriods(userId); }
+export function getWrappedDataInRange(userId, from, to) { return backend.getWrappedDataInRange(userId, from, to); }
+export function getWrappedSessionsInRange(userId, from, to) { return backend.getWrappedSessionsInRange(userId, from, to); }
+export function getTotalFileCount(vpaths) { return backend.getTotalFileCount(vpaths); }
+export function getWrappedAdminStats() { return backend.getWrappedAdminStats(); }
+export function purgePlayEvents(userId, beforeMs) { return backend.purgePlayEvents(userId, beforeMs); }
+// Radio / Podcast Play Events
+export function insertRadioPlayEvent(e) { return backend.insertRadioPlayEvent(e); }
+export function updateRadioPlayEvent(id, userId, fields) { return backend.updateRadioPlayEvent(id, userId, fields); }
+export function getRadioStatsInRange(userId, from, to) { return backend.getRadioStatsInRange(userId, from, to); }
+export function insertPodcastPlayEvent(e) { return backend.insertPodcastPlayEvent(e); }
+export function updatePodcastPlayEvent(id, userId, fields) { return backend.updatePodcastPlayEvent(id, userId, fields); }
+export function getPodcastStatsInRange(userId, from, to) { return backend.getPodcastStatsInRange(userId, from, to); }

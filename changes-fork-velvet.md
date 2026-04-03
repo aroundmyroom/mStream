@@ -1,15 +1,54 @@
 # mStream Velvet Fork — Combined Change Log
 
-## Unreleased (post-v6.1.1)
+## v6.2.0-velvet — April 2026
+
+### feat: Your Stats — on-server listening statistics system
+- New DB tables `play_events` and `listening_sessions` created in SQLite on startup (idempotent `CREATE TABLE IF NOT EXISTS`)
+- Every song play fires `POST /api/v1/wrapped/play-start` → inserts a row; response `eventId` is stored client-side
+- Natural track end fires `play-end`, user skip fires `play-skip`, tab close fires `play-stop` + `session-end` (via `navigator.sendBeacon`) — all completing the event row
+- Stats computed in `src/db/wrapped-stats.mjs`: top songs/artists/albums, listening-by-hour/weekday, personality type, fun facts, completion/skip rates, session insights
+- **User view**: "Your Stats" nav item → period picker (Week / Month / Quarter / Half-Year / Year) with ← / → navigation, summary strip, top lists with album art, hour/weekday bar charts, personality card, fun facts
+- **Admin view**: "Play Stats" panel shows total event count, DB storage estimate, per-user breakdown table, and per-user purge tool (keep last N months)
+- Privacy-first: all data stays in the local SQLite DB, zero external calls
+- New API endpoints: `POST /api/v1/wrapped/play-{start,end,skip,stop}`, `POST /api/v1/wrapped/session-end`, `GET /api/v1/user/wrapped`, `GET /api/v1/user/wrapped/periods`, `GET /api/v1/admin/wrapped/stats`, `POST /api/v1/admin/wrapped/purge`
+
+### feat: Your Stats — radio & podcast play tracking
+- New DB tables `radio_play_events` and `podcast_play_events` track radio station listens and podcast episode plays
+- Radio: `POST /api/v1/wrapped/radio-start` / `radio-stop` — records station, stream URL, ICY title at start and stop time
+- Podcast: `POST /api/v1/wrapped/podcast-start` / `podcast-end` — records feed URL, episode ID, title, duration
+- Player hooks in `app.js` call these endpoints automatically on radio play/stop and podcast play/end
+- Radio and Podcast summary cards rendered in the Your Stats view alongside music stats
 
 ### feat: version tooltip on sidebar logo
 - `/api/v1/ping` now returns a `version` field from `package.json`
 - `app.js` reads it and sets `title` on `.sidebar-brand` for a native browser tooltip showing the running version
 
+### fix: Your Stats — stats period displayed in wrong timezone
+- All date arithmetic in `wrapped-stats.mjs` now uses local time (not UTC), so "Week" and "Month" boundaries align with the server's local calendar
+- `getWrappedPeriods` SQL query adds `,'localtime'` modifier to `datetime()` so period labels are also correct
+
+### fix: Your Stats — period offset navigation broken for values > 1
+- `getPeriodBounds()` now coerces `offset` with `parseInt(offset, 10) || 0` to prevent string concatenation (`m + "0"` → `"20"`)
+
+### fix: radio "in library" detection — fuzzy multi-strategy matching
+- Raw ICY StreamTitle (e.g. `"ELIZA ROSE & INTERPLANETARY CRIMINAL - BOTA (BADDEST OF THEM ALL)"`) is now split on ` - ` and each half searched independently
+- Special characters (`&`, `(`, `)`, `.`) are stripped before querying FTS5 so they never reach the query parser
+- Parenthetical content is extracted as an additional candidate (e.g. `"BADDEST OF THEM ALL"`) covering abbreviation mismatches like BOTA vs B.O.T.A.
+- Handles both `ARTIST - TITLE` and `TITLE - ARTIST` station metadata orderings
+
 ### fix: radio kbps badge pushed volume controls off-line
 - Wrapped `player-title` and the kbps `<span>` in a `.player-title-row` flex div so both sit on one line
 - Added a matching badge element inside the Now Playing modal
 - CSS: `flex-shrink:0` on badge, `flex:0 1 auto` on title
+
+### fix: search — clicking an album result showed "No songs found"
+- `viewAlbumSongs()` was applying the albumsOnly path filter when called from search results, excluding songs stored outside the albumsOnly subfolder
+- Added `skipAOFilter` option; search result album clicks now bypass the filter so all tracks are shown
+
+### fix: artist page — clicking an artist from search or Artists list showed incomplete album list
+- `viewArtistAlbums()` was applying the albumsOnly filter, hiding releases stored in non-albumsOnly folders (e.g. Minimixes, live sets)
+- Now uses `_audioBookExclusions()` (same scope as the artist list itself) so all an artist's releases are shown
+- Album card clicks from the artist page also skip the albumsOnly filter in `viewAlbumSongs()`
 
 ### fix: About panel duplicate version line removed
 - Removed the redundant "mStream Velvet vX — a fork of mStream" sentence that appeared twice in the About section of the admin panel

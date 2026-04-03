@@ -1168,6 +1168,22 @@ export function setup(mstream) {
       res.status(500).json({ error: e.message });
     }
   });
+
+  // ── Wrapped admin: stats + purge ──────────────────────────────────────────
+  mstream.get('/api/v1/admin/wrapped/stats', (req, res) => {
+    res.json(db.getWrappedAdminStats());
+  });
+
+  mstream.post('/api/v1/admin/wrapped/purge', (req, res) => {
+    const schema = Joi.object({
+      userId:     Joi.string().required(),
+      keepMonths: Joi.number().integer().min(1).max(60).required(),
+    });
+    joiValidate(schema, req.body);
+    const beforeMs = Date.now() - req.body.keepMonths * 30 * 24 * 60 * 60 * 1000;
+    const deleted = db.purgePlayEvents(req.body.userId, beforeMs);
+    res.json({ ok: true, deleted });
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

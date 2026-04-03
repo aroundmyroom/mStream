@@ -88,6 +88,17 @@ let audioEl = document.getElementById('audio');
 let scanTimer    = null;
 let djTimer      = null;
 let scrobbleTimer = null;
+// ── Wrapped play tracking ────────────────────────────────────────────────────
+const _wrappedSessionId = (() => {
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+})();
+let _wrappedEventId      = null;   // eventId from play-start; cleared on each new playAt
+let _wrappedEndedNaturally = false; // true when _onAudioEnded fires — distinguishes end vs skip
+let _wrappedRadioEventId  = null;   // eventId for active radio listening session
+let _wrappedRadioStartMs  = 0;      // Date.now() when radio-start fired
+let _wrappedPodcastEventId = null;  // eventId for active podcast episode
 let audioCtx     = null;   // shared Web Audio context (initialised by VIZ.open)
 // Detect Web Audio API + 2D canvas support once at load time.
 // Browsers without these (e.g. CleverShare) will have the VU column hidden.
@@ -635,6 +646,65 @@ const Player = {
     (function(){ const el = document.getElementById('np-scrobble-status'); if (el) { el.textContent = ''; el.className = 'np-scrobble-status'; } })();
     if (!s.isRadio && !s.isPodcast) {
       api('POST', 'api/v1/db/stats/log-play', { filePath: s.filepath }).catch(() => {});
+      // Wrapped: stop any active radio or podcast event, then log play-start
+      if (_wrappedRadioEventId) {
+        const eid = _wrappedRadioEventId; _wrappedRadioEventId = null;
+        api('POST', 'api/v1/wrapped/radio-stop', { eventId: eid, listenedMs: Date.now() - _wrappedRadioStartMs }).catch(() => {});
+      }
+      if (_wrappedPodcastEventId) {
+        const eid = _wrappedPodcastEventId; _wrappedPodcastEventId = null;
+        api('POST', 'api/v1/wrapped/podcast-end', { eventId: eid, playedMs: Math.round((audioEl.currentTime || 0) * 1000), completed: false }).catch(() => {});
+      }
+      _wrappedEndedNaturally = false;
+      _wrappedEventId = null;
+      api('POST', 'api/v1/wrapped/play-start', {
+        filePath:  s.filepath,
+        sessionId: _wrappedSessionId,
+        source:    _wrappedSource(),
+      }).then(r => { _wrappedEventId = r?.eventId ?? null; }).catch(() => {});
+    } else if (s.isRadio) {
+      // Wrapped: stop any active music/podcast event, then log radio-start
+      if (_wrappedEventId) {
+        const eid = _wrappedEventId; _wrappedEventId = null;
+        api('POST', 'api/v1/wrapped/play-stop', { eventId: eid, playedMs: Math.round((audioEl.currentTime || 0) * 1000) }).catch(() => {});
+      }
+      if (_wrappedPodcastEventId) {
+        const eid = _wrappedPodcastEventId; _wrappedPodcastEventId = null;
+        api('POST', 'api/v1/wrapped/podcast-end', { eventId: eid, playedMs: Math.round((audioEl.currentTime || 0) * 1000), completed: false }).catch(() => {});
+      }
+      if (_wrappedRadioEventId) {
+        const eid = _wrappedRadioEventId; _wrappedRadioEventId = null;
+        api('POST', 'api/v1/wrapped/radio-stop', { eventId: eid, listenedMs: Date.now() - _wrappedRadioStartMs }).catch(() => {});
+      }
+      _wrappedRadioStartMs = Date.now();
+      _wrappedRadioEventId = null;
+      api('POST', 'api/v1/wrapped/radio-start', {
+        stationName: s.title,
+        stationId:   s._radioStationId ?? null,
+        sessionId:   _wrappedSessionId,
+      }).then(r => { _wrappedRadioEventId = r?.eventId ?? null; }).catch(() => {});
+    } else if (s.isPodcast) {
+      // Wrapped: stop any active music/radio event, then log podcast-start
+      if (_wrappedEventId) {
+        const eid = _wrappedEventId; _wrappedEventId = null;
+        api('POST', 'api/v1/wrapped/play-stop', { eventId: eid, playedMs: Math.round((audioEl.currentTime || 0) * 1000) }).catch(() => {});
+      }
+      if (_wrappedRadioEventId) {
+        const eid = _wrappedRadioEventId; _wrappedRadioEventId = null;
+        api('POST', 'api/v1/wrapped/radio-stop', { eventId: eid, listenedMs: Date.now() - _wrappedRadioStartMs }).catch(() => {});
+      }
+      if (_wrappedPodcastEventId) {
+        const eid = _wrappedPodcastEventId; _wrappedPodcastEventId = null;
+        api('POST', 'api/v1/wrapped/podcast-end', { eventId: eid, playedMs: Math.round((audioEl.currentTime || 0) * 1000), completed: false }).catch(() => {});
+      }
+      if (s._episodeId && s._feedId) {
+        _wrappedPodcastEventId = null;
+        api('POST', 'api/v1/wrapped/podcast-start', {
+          episodeId: s._episodeId,
+          feedId:    s._feedId,
+          sessionId: _wrappedSessionId,
+        }).then(r => { _wrappedPodcastEventId = r?.eventId ?? null; }).catch(() => {});
+      }
     }
     if ((S.lastfmEnabled || (S.listenbrainzEnabled && S.listenbrainzLinked)) && !s.isRadio && !s.isPodcast) {
       if (S.listenbrainzEnabled && S.listenbrainzLinked) {
@@ -681,6 +751,27 @@ const Player = {
   },
   next() {
     if (!S.queue.length) return;
+    // Wrapped: if a play is active and it didn't end naturally, it's a skip
+    if (_wrappedEventId && !_wrappedEndedNaturally) {
+      const eid = _wrappedEventId;
+      _wrappedEventId = null;
+      api('POST', 'api/v1/wrapped/play-skip', {
+        eventId:  eid,
+        playedMs: Math.round((audioEl.currentTime || 0) * 1000),
+      }).catch(() => {});
+    }
+    if (_wrappedPodcastEventId) {
+      const eid = _wrappedPodcastEventId; _wrappedPodcastEventId = null;
+      api('POST', 'api/v1/wrapped/podcast-end', {
+        eventId: eid, playedMs: Math.round((audioEl.currentTime || 0) * 1000), completed: false,
+      }).catch(() => {});
+    }
+    if (_wrappedRadioEventId) {
+      const eid = _wrappedRadioEventId; _wrappedRadioEventId = null;
+      api('POST', 'api/v1/wrapped/radio-stop', {
+        eventId: eid, listenedMs: Date.now() - _wrappedRadioStartMs,
+      }).catch(() => {});
+    }
     if (S.shuffle) {
       const next = Math.floor(Math.random() * S.queue.length);
       this.playAt(next);
@@ -804,7 +895,16 @@ const Player = {
   },
 };
 
-// ── AUTO-DJ ──────────────────────────────────────────────────
+// Returns the Wrapped source label for the currently playing context
+function _wrappedSource() {
+  if (S.autoDJ) return 'autodj';
+  if (S.shuffle) return 'shuffle';
+  if (S.playSource?.type === 'playlist') return 'playlist';
+  if (S.playSource?.type === 'smart-playlist') return 'smart-playlist';
+  return 'manual';
+}
+
+// \u2500\u2500 AUTO-DJ \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 // Returns true only for regular music songs (not radio, podcast, or audiobook vpath).
 function _isMusicSong(s) {
   if (!s || s.isRadio || s.isPodcast) return false;
@@ -4840,11 +4940,11 @@ async function viewArtistAlbums(displayName, variantsOrBackFn, backFn) {
   const sig = _navCancel();
   setBody('<div class="loading-state"></div>');
   try {
-    const aoF = _albumsOnlyFilter();
+    const abEx = _audioBookExclusions();
     const d = await api('POST', 'api/v1/db/artists-albums-multi', {
       artists: variants,
-      ...(aoF.ignoreVPaths?.length                ? { ignoreVPaths: aoF.ignoreVPaths } : {}),
-      ...(aoF.includeFilepathPrefixes?.length ? { includeFilepathPrefixes: aoF.includeFilepathPrefixes } : {}),
+      ...(abEx.ignoreVPaths?.length                ? { ignoreVPaths: abEx.ignoreVPaths } : {}),
+      ...(abEx.excludeFilepathPrefixes?.length ? { excludeFilepathPrefixes: abEx.excludeFilepathPrefixes } : {}),
     }, sig);
     renderAlbumGrid(d.albums || [], displayName, variants);
   } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
@@ -5306,7 +5406,7 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
     const backFn = defaultArtist
       ? () => viewArtistAlbums(defaultArtist, artistVariants || [defaultArtist])
       : () => viewAlbumLibrary();
-    viewAlbumSongs(album.name, album._rawArtist || defaultArtist, backFn);
+    viewAlbumSongs(album.name, album._rawArtist || defaultArtist, backFn, { skipAOFilter: true });
   });
 
   // Switch the active data set + reset scroll + redraw
@@ -5378,17 +5478,21 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
   requestAnimationFrame(() => { if (grid.isConnected) renderWindow(true); });
 }
 
-async function viewAlbumSongs(albumName, artist, backFn) {
+async function viewAlbumSongs(albumName, artist, backFn, opts = {}) {
   setTitle(albumName || 'Singles');
   setBack(backFn || null);
   const sig = _navCancel();
   setBody('<div class="loading-state"></div>');
   try {
-    const aoF = _albumsOnlyFilter();
     const body = { album: albumName };
     if (artist) body.artist = artist;
-    if (aoF.ignoreVPaths?.length)             body.ignoreVPaths             = aoF.ignoreVPaths;
-    if (aoF.includeFilepathPrefixes?.length)  body.includeFilepathPrefixes  = aoF.includeFilepathPrefixes;
+    // skipAOFilter: when called from search, don't restrict to albumsOnly paths —
+    // the search found the album across all vpaths, so the song view should match.
+    if (!opts.skipAOFilter) {
+      const aoF = _albumsOnlyFilter();
+      if (aoF.ignoreVPaths?.length)             body.ignoreVPaths             = aoF.ignoreVPaths;
+      if (aoF.includeFilepathPrefixes?.length)  body.includeFilepathPrefixes  = aoF.includeFilepathPrefixes;
+    }
     const d = await api('POST', 'api/v1/db/album-songs', body, sig);
     showSongs(d.map(norm), null, albumName || 'album');
   } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
@@ -5597,7 +5701,7 @@ async function doSearch(q) {
       S.feDirStack = []; // start fresh stack so back goes to search, not a stale dir
       viewFiles(r.dataset.browsePath, false);
     }));
-    res.querySelectorAll('.artist-row[data-album]').forEach(r => r.addEventListener('click', () => viewAlbumSongs(r.dataset.album, null, () => viewSearch())));
+    res.querySelectorAll('.artist-row[data-album]').forEach(r => r.addEventListener('click', () => viewAlbumSongs(r.dataset.album, null, () => viewSearch(), { skipAOFilter: true })));
     attachSongListEvents(res, displaySongs);
     S.curSongs = displaySongs;
   } catch(e) {
@@ -7690,6 +7794,251 @@ function viewPlayHistory() {
   });
 }
 
+// ── YOUR STATS (Wrapped) VIEW ─────────────────────────────────────────────────
+// Module-level state for the period picker so navigating away and back restores position
+let _wrappedPeriod = 'monthly';
+let _wrappedOffset = 0;
+
+async function viewWrapped() {
+  setTitle('Your Stats'); setBack(null); setNavActive('wrapped'); S.view = 'wrapped';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+  _renderWrapped();
+}
+
+async function _renderWrapped() {
+  if (S.view !== 'wrapped') return;
+
+  setBody(`<div class="loading-state"></div>`);
+
+  let stats, periods;
+  try {
+    [stats, periods] = await Promise.all([
+      api('GET', `api/v1/user/wrapped?period=${_wrappedPeriod}&offset=${_wrappedOffset}`),
+      api('GET', 'api/v1/user/wrapped/periods'),
+    ]);
+  } catch(e) {
+    setBody(`<div class="empty-state"><p>Could not load stats.</p></div>`);
+    return;
+  }
+  if (S.view !== 'wrapped') return;
+
+  // ── Period picker ──────────────────────────────────────────────────────────
+  const periods_list = ['weekly','monthly','quarterly','half-yearly','yearly'];
+  const periodTabs = periods_list.map(p =>
+    `<button class="wrapped-period-tab${_wrappedPeriod === p ? ' active' : ''}" data-p="${p}">${_wrappedPeriodLabel(p)}</button>`
+  ).join('');
+
+  const canPrev = _wrappedOffset < -35;   // arbitrary hard limit
+  const canNext = _wrappedOffset < 0;
+
+  // ── Helper renderers ───────────────────────────────────────────────────────
+  const fmtMs = ms => {
+    if (!ms) return '0 min';
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    return h ? `${h}h ${m}m` : `${m}m`;
+  };
+  const pct = v => `${Math.round(v * 100)}%`;
+
+  // Top songs list
+  const topSongsHtml = stats.top_songs.length
+    ? stats.top_songs.map((s, i) => `
+        <div class="wrapped-top-row">
+          <span class="wrapped-rank">${i + 1}</span>
+          ${s.aaFile ? `<img class="wrapped-thumb" src="${esc(artUrl(s.aaFile,'s'))}" alt="" loading="lazy">` : `<div class="wrapped-thumb wrapped-thumb-empty"></div>`}
+          <div class="wrapped-top-info">
+            <div class="wrapped-top-title">${esc(s.title || s.hash)}</div>
+            <div class="wrapped-top-sub">${esc(s.artist || '—')}</div>
+          </div>
+          <span class="wrapped-top-count">${s.play_count}×</span>
+        </div>`).join('')
+    : '<div class="wrapped-empty-section">No data yet</div>';
+
+  // Top artists list
+  const topArtistsHtml = stats.top_artists.length
+    ? stats.top_artists.map((a, i) => `
+        <div class="wrapped-top-row">
+          <span class="wrapped-rank">${i + 1}</span>
+          <div class="wrapped-top-info">
+            <div class="wrapped-top-title">${esc(a.artist)}</div>
+            <div class="wrapped-top-sub">${fmtMs(a.total_played_ms)} listened</div>
+          </div>
+          <span class="wrapped-top-count">${a.play_count}×</span>
+        </div>`).join('')
+    : '<div class="wrapped-empty-section">No data yet</div>';
+
+  // Heatmap — 24 rows × 7 columns (hours × weekdays)
+  const heatmapMax = Math.max(1, ...stats.listening_by_hour);
+  const dayLabels  = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const timeLabels = ['0h','3h','6h','9h','12h','15h','18h','21h'];
+
+  // Build a 24×7 grid from per-hour and per-weekday data (approximated)
+  // We only have 1D data from the server, so we show two separate 1D bar charts
+  const hourBars = stats.listening_by_hour.map((c, h) => {
+    const intensity = c === 0 ? 0 : c < heatmapMax * 0.25 ? 1 : c < heatmapMax * 0.6 ? 2 : 3;
+    return `<div class="hm-cell i${intensity}" title="${h}:00 — ${c} plays"></div>`;
+  }).join('');
+
+  const wdMax = Math.max(1, ...stats.listening_by_weekday);
+  const wdBars = stats.listening_by_weekday.map((c, d) => {
+    const intensity = c === 0 ? 0 : c < wdMax * 0.33 ? 1 : c < wdMax * 0.67 ? 2 : 3;
+    return `<div class="hm-wd-cell" style="--bar-h:${Math.round(c/wdMax*100)}%;"><div class="hm-wd-bar i${intensity}"></div><div class="hm-wd-label">${dayLabels[d]}</div></div>`;
+  }).join('');
+
+  // Top listening day
+  const topDayHtml = stats.top_listening_day
+    ? `<div class="wrapped-fact-item">📅 Best day: <b>${esc(stats.top_listening_day.date)}</b> — ${fmtMs(stats.top_listening_day.total_listening_ms)}</div>`
+    : '';
+
+  // Fun facts
+  const ff = stats.fun_facts;
+  const funFactsHtml = [
+    ff.top_song_hours ? `<div class="wrapped-fact-item">🎵 Top song <b>${esc(ff.top_song_hours.song || '')}</b> — ${ff.top_song_hours.hours}h total</div>` : '',
+    ff.most_loyal_song ? `<div class="wrapped-fact-item">💪 Always finish: <b>${esc(ff.most_loyal_song.title || '')}</b> by ${esc(ff.most_loyal_song.artist || '')}</div>` : '',
+    ff.most_skipped_artist ? `<div class="wrapped-fact-item">⏭ Most skipped: <b>${esc(ff.most_skipped_artist.artist)}</b> (${pct(ff.most_skipped_artist.skip_rate)} skip rate)</div>` : '',
+    ff.most_replayed_song ? `<div class="wrapped-fact-item">🔁 Most replayed: <b>${esc(ff.most_replayed_song.title || '')}</b> — ${ff.most_replayed_song.replay_count}× in a row</div>` : '',
+    ff.earliest_play ? `<div class="wrapped-fact-item">⏰ Earliest play: <b>${esc(ff.earliest_play)}</b></div>` : '',
+    topDayHtml,
+    stats.new_discoveries > 0 ? `<div class="wrapped-fact-item">🔭 New discoveries: <b>${stats.new_discoveries}</b> songs heard for the first time</div>` : '',
+  ].filter(Boolean).join('') || '<div class="wrapped-empty-section">Play more music to unlock fun facts</div>';
+
+  const noData = stats.total_plays === 0 && stats.radio.total_sessions === 0 && stats.podcast.episodes_played === 0;
+
+  setBody(`
+    <div class="wrapped-view">
+
+      <div class="wrapped-period-bar">
+        <div class="wrapped-period-tabs">${periodTabs}</div>
+        <div class="wrapped-nav-row">
+          <button class="wrapped-nav-btn" id="wr-prev" ${canPrev ? '' : 'disabled'}>&#8592; Earlier</button>
+          <span class="wrapped-period-label">${esc(stats.period_label || '')}</span>
+          <button class="wrapped-nav-btn" id="wr-next" ${canNext ? '' : 'disabled'}>Later &#8594;</button>
+        </div>
+      </div>
+
+      ${noData ? `<div class="empty-state"><p>No listening data for this period yet.<br>Start playing music and come back!</p></div>` : `
+
+      <div class="wrapped-summary-strip">
+        <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.total_plays.toLocaleString()}</span><span class="wrapped-stat-lbl">plays</span></div>
+        <div class="wrapped-stat"><span class="wrapped-stat-val">${fmtMs(stats.total_listening_ms)}</span><span class="wrapped-stat-lbl">listened</span></div>
+        <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.unique_songs.toLocaleString()}</span><span class="wrapped-stat-lbl">unique songs</span></div>
+        <div class="wrapped-stat"><span class="wrapped-stat-val">${pct(stats.skip_rate)}</span><span class="wrapped-stat-lbl">skip rate</span></div>
+        <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.library_coverage_pct.toFixed(1)}%</span><span class="wrapped-stat-lbl">library covered</span></div>
+      </div>
+
+      <div class="wrapped-grid">
+
+        <div class="wrapped-card">
+          <div class="wrapped-card-hdr">Top Songs</div>
+          <div class="wrapped-top-list">${topSongsHtml}</div>
+        </div>
+
+        <div class="wrapped-card">
+          <div class="wrapped-card-hdr">Top Artists</div>
+          <div class="wrapped-top-list">${topArtistsHtml}</div>
+        </div>
+
+        <div class="wrapped-card wrapped-card-wide">
+          <div class="wrapped-card-hdr">Listening by Hour</div>
+          <div class="wrapped-hour-chart">${hourBars}</div>
+          <div class="wrapped-hour-labels">
+            ${[0,3,6,9,12,15,18,21].map(h => `<span>${h}h</span>`).join('')}
+          </div>
+        </div>
+
+        <div class="wrapped-card">
+          <div class="wrapped-card-hdr">Listening by Day</div>
+          <div class="wrapped-wd-chart">${wdBars}</div>
+        </div>
+
+        <div class="wrapped-card">
+          <div class="wrapped-card-hdr">Your Personality</div>
+          <div class="wrapped-personality">
+            <div class="wrapped-personality-type">${esc(stats.personality.type)}</div>
+            <div class="wrapped-personality-desc">${esc(stats.personality.desc)}</div>
+          </div>
+          <div class="wrapped-completion-row">
+            <div class="wrapped-completion-label">Completion rate <b>${pct(stats.completion_rate)}</b></div>
+            <div class="wrapped-bar-track"><div class="wrapped-bar-fill" style="width:${pct(stats.completion_rate)}"></div></div>
+          </div>
+          ${stats.longest_session ? `<div class="wrapped-session-stat">Longest session: <b>${fmtMs(stats.longest_session.ended_at - stats.longest_session.started_at)}</b> · ${stats.longest_session.total_tracks} tracks</div>` : ''}
+          ${stats.avg_session_length_ms ? `<div class="wrapped-session-stat">Avg session: <b>${fmtMs(stats.avg_session_length_ms)}</b></div>` : ''}
+        </div>
+
+        <div class="wrapped-card">
+          <div class="wrapped-card-hdr">Fun Facts</div>
+          <div class="wrapped-facts-list">${funFactsHtml}</div>
+        </div>
+
+        ${stats.radio.total_sessions > 0 ? `
+        <div class="wrapped-card">
+          <div class="wrapped-card-hdr">📻 Radio</div>
+          <div class="wrapped-summary-strip" style="margin-bottom:.75rem">
+            <div class="wrapped-stat"><span class="wrapped-stat-val">${fmtMs(stats.radio.total_ms)}</span><span class="wrapped-stat-lbl">listened</span></div>
+            <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.radio.total_sessions.toLocaleString()}</span><span class="wrapped-stat-lbl">sessions</span></div>
+            ${stats.radio.top_stations.length ? `<div class="wrapped-stat"><span class="wrapped-stat-val wrapped-stat-val--sm">${esc(stats.radio.top_stations[0].station_name)}</span><span class="wrapped-stat-lbl">favourite</span></div>` : ''}
+          </div>
+          ${stats.radio.top_stations.length > 1 ? `
+          <div class="wrapped-top-list">
+            ${stats.radio.top_stations.map((st, i) => `
+              <div class="wrapped-top-row">
+                <span class="wrapped-rank">${i + 1}</span>
+                <div class="wrapped-top-info">
+                  <div class="wrapped-top-title">${esc(st.station_name)}</div>
+                  <div class="wrapped-top-sub">${st.sessions} session${st.sessions !== 1 ? 's' : ''}</div>
+                </div>
+                <span class="wrapped-top-count">${fmtMs(st.total_ms)}</span>
+              </div>`).join('')}
+          </div>` : ''}
+        </div>` : ''}
+
+        ${stats.podcast.episodes_played > 0 ? `
+        <div class="wrapped-card">
+          <div class="wrapped-card-hdr">🎙️ Podcasts</div>
+          <div class="wrapped-summary-strip" style="margin-bottom:.75rem">
+            <div class="wrapped-stat"><span class="wrapped-stat-val">${fmtMs(stats.podcast.total_ms)}</span><span class="wrapped-stat-lbl">listened</span></div>
+            <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.podcast.episodes_played.toLocaleString()}</span><span class="wrapped-stat-lbl">episodes</span></div>
+            <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.podcast.shows_heard}</span><span class="wrapped-stat-lbl">shows</span></div>
+            ${stats.podcast.episodes_completed > 0 ? `<div class="wrapped-stat"><span class="wrapped-stat-val">${Math.round(stats.podcast.episodes_completed / stats.podcast.episodes_played * 100)}%</span><span class="wrapped-stat-lbl">completed</span></div>` : ''}
+          </div>
+          ${stats.podcast.top_shows.length ? `
+          <div class="wrapped-top-list">
+            ${stats.podcast.top_shows.map((sh, i) => `
+              <div class="wrapped-top-row">
+                <span class="wrapped-rank">${i + 1}</span>
+                ${sh.feed_img ? `<img class="wrapped-thumb" src="${esc(artUrl(sh.feed_img,'s'))}" alt="" loading="lazy">` : `<div class="wrapped-thumb wrapped-thumb-empty"></div>`}
+                <div class="wrapped-top-info">
+                  <div class="wrapped-top-title">${esc(sh.feed_title || '(Unknown)')}</div>
+                  <div class="wrapped-top-sub">${sh.episodes_played} ep${sh.episodes_played !== 1 ? 's' : ''}</div>
+                </div>
+                <span class="wrapped-top-count">${fmtMs(sh.total_ms)}</span>
+              </div>`).join('')}
+          </div>` : ''}
+        </div>` : ''}
+
+      </div>
+    `}
+    </div>
+  `);
+
+  // Period tab clicks
+  document.querySelectorAll('.wrapped-period-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _wrappedPeriod = btn.dataset.p;
+      _wrappedOffset = 0;
+      _renderWrapped();
+    });
+  });
+  document.getElementById('wr-prev')?.addEventListener('click', () => { _wrappedOffset--; _renderWrapped(); });
+  document.getElementById('wr-next')?.addEventListener('click', () => { _wrappedOffset++; _renderWrapped(); });
+}
+
+function _wrappedPeriodLabel(p) {
+  return { weekly: 'Week', monthly: 'Month', quarterly: 'Quarter', 'half-yearly': 'Half-Year', yearly: 'Year' }[p] || p;
+}
+
 // ── PLAYBACK VIEW ─────────────────────────────────────────────
 // ── LAST.FM VIEW ───────────────────────────────────────────
 async function viewLastFM() {
@@ -8053,6 +8402,32 @@ function _stopRadioNowPlaying() {
   if (npKbpsEl) { npKbpsEl.classList.add('hidden'); npKbpsEl.style.display = 'none'; }
 }
 
+// Build fuzzy search candidates from a raw ICY StreamTitle.
+// Stations use "ARTIST - TITLE" or "TITLE - ARTIST" (either order).
+// Strategy: split on first ' - ', then for each half generate:
+//   1. The half minus any parenthetical text  (e.g. "GET DOWN (RADIO EDIT)" → "GET DOWN")
+//   2. Content inside the first parentheses   (e.g. "BOTA (BADDEST OF THEM ALL)" → "BADDEST OF THEM ALL")
+// All candidates are stripped to alphanumeric + spaces so special chars
+// like & ( ) . never reach the FTS5 query parser.
+function _buildRadioSearchCandidates(raw) {
+  const clean = s => s.replace(/[^a-zA-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const dashIdx = raw.indexOf(' - ');
+  const parts = dashIdx > 0 ? [raw.slice(0, dashIdx), raw.slice(dashIdx + 3)] : [raw];
+  const candidates = [];
+  for (const part of parts) {
+    const stripped = clean(part.replace(/\([^)]*\)/g, ''));
+    if (stripped.length > 2) candidates.push(stripped);
+    const m = part.match(/\(([^)]+)\)/);
+    if (m) {
+      const inside = clean(m[1]);
+      if (inside.length > 2) candidates.push(inside);
+    }
+  }
+  // deduplicate (case-insensitive), preserve order
+  const seen = new Set();
+  return candidates.filter(c => { const k = c.toLowerCase(); return seen.has(k) ? false : seen.add(k); });
+}
+
 async function _pollRadioNowPlaying(station) {
   const url = station._radioLinks?.[station._radioLinkIdx || 0];
   if (!url) return;
@@ -8066,21 +8441,26 @@ async function _pollRadioNowPlaying(station) {
       const textEl = document.getElementById('player-radio-np-text');
       if (textEl) textEl.textContent = newText;
       el.classList.remove('hidden');
-      // If the track changed: reset badge and schedule a 10 s DB lookup
+      // If the track changed: reset badge and schedule DB lookup
       if (newText !== _radioNpLastText) {
         _radioNpLastText = newText;
         const badge = document.getElementById('player-radio-db-badge');
         if (badge) badge.classList.add('hidden');
         if (_radioDbLookupTimer) { clearTimeout(_radioDbLookupTimer); _radioDbLookupTimer = null; }
-        // Build a query from artist + title tokens; the cross-field search
-        // handles either order (artist-title or title-artist in the DB).
-        const query = [data.artist || '', data.title || ''].filter(Boolean).join(' ').trim();
-        if (query) {
+        // Fuzzy library lookup: split on ' - ', try each half (and parenthetical
+        // content) as independent searches so "ARTIST - TITLE", "TITLE - ARTIST",
+        // abbreviations (BOTA vs B.O.T.A.), and version suffixes all resolve.
+        const candidates = _buildRadioSearchCandidates((data.title || '').trim());
+        if (candidates.length) {
           _radioDbLookupTimer = setTimeout(async () => { // 3 s delay
             try {
-              const res = await api('POST', 'api/v1/db/search', { search: query, noArtists: true, noAlbums: true, noFiles: true });
-              // Only show badge if the track hasn't changed in the meantime
-              if (_radioNpLastText === newText && res.title?.length > 0) {
+              let found = false;
+              for (const q of candidates) {
+                if (found) break;
+                const res = await api('POST', 'api/v1/db/search', { search: q, noArtists: true, noAlbums: true, noFiles: true });
+                if (res.title?.length > 0) found = true;
+              }
+              if (found && _radioNpLastText === newText) {
                 const b = document.getElementById('player-radio-db-badge');
                 if (b) b.classList.remove('hidden');
               }
@@ -8136,6 +8516,7 @@ function _playRadio(station) {
     isRadio: true,
     _radioLinks: links,
     _radioLinkIdx: 0,
+    _radioStationId: station.id || null,
   };
   _setPlaySource('radio', station.name);
   _startRadioNowPlaying(song);
@@ -9006,6 +9387,8 @@ async function viewPodcastEpisodes(feed) {
         'album-art':    feed.img || null,
         'album-art-v':  feed.last_fetched || '',
         isPodcast:      true,
+        _episodeId:     ep.id,
+        _feedId:        feed.id,
       });
     });
   });
@@ -11023,6 +11406,21 @@ function showApp() {
       }});
       navigator.sendBeacon('/api/v1/user/settings?token=' + encodeURIComponent(S.token),
         new Blob([payload], { type: 'application/json' }));
+      // Wrapped: fire play-stop + session-end on tab/window close
+      if (_wrappedEventId) {
+        const stopPayload = JSON.stringify({ eventId: _wrappedEventId, playedMs: Math.round((audioEl.currentTime || 0) * 1000) });
+        navigator.sendBeacon('/api/v1/wrapped/play-stop?token=' + encodeURIComponent(S.token), new Blob([stopPayload], { type: 'application/json' }));
+      }
+      if (_wrappedRadioEventId) {
+        const radioPayload = JSON.stringify({ eventId: _wrappedRadioEventId, listenedMs: Date.now() - _wrappedRadioStartMs });
+        navigator.sendBeacon('/api/v1/wrapped/radio-stop?token=' + encodeURIComponent(S.token), new Blob([radioPayload], { type: 'application/json' }));
+      }
+      if (_wrappedPodcastEventId) {
+        const podPayload = JSON.stringify({ eventId: _wrappedPodcastEventId, playedMs: Math.round((audioEl.currentTime || 0) * 1000), completed: false });
+        navigator.sendBeacon('/api/v1/wrapped/podcast-end?token=' + encodeURIComponent(S.token), new Blob([podPayload], { type: 'application/json' }));
+      }
+      const sessPayload = JSON.stringify({ sessionId: _wrappedSessionId });
+      navigator.sendBeacon('/api/v1/wrapped/session-end?token=' + encodeURIComponent(S.token), new Blob([sessPayload], { type: 'application/json' }));
     }
   });
   // Restore sleep timer if still running from a previous session
@@ -11230,6 +11628,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'podcasts')        viewPodcasts();
     else if (v === 'podcast-feeds')  viewPodcastFeeds();
     else if (v === 'youtube')        viewYoutube();
+    else if (v === 'wrapped')        viewWrapped();
     else if (v === 'smart-playlists') { _splEditId = null; _splEditName = null; _splFilters = { genres: [], yearFrom: null, yearTo: null, minRating: 0, playedStatus: 'any', minPlayCount: 0, starred: false, artistSearch: '' }; _splSort = 'random'; _splLimit = 100; viewSmartPlaylists(); }
   });
 });
@@ -11896,6 +12295,22 @@ function _onAudioEnded() {
     return;
   }
   _stopWaveformRaf();
+  // Wrapped: fire play-end (natural completion)
+  _wrappedEndedNaturally = true;
+  if (_wrappedEventId) {
+    const eid = _wrappedEventId;
+    _wrappedEventId = null;
+    api('POST', 'api/v1/wrapped/play-end', {
+      eventId:  eid,
+      playedMs: Math.round((audioEl.duration || 0) * 1000),
+    }).catch(() => {});
+  }
+  if (_wrappedPodcastEventId) {
+    const eid = _wrappedPodcastEventId; _wrappedPodcastEventId = null;
+    api('POST', 'api/v1/wrapped/podcast-end', {
+      eventId: eid, playedMs: Math.round((audioEl.duration || 0) * 1000), completed: true,
+    }).catch(() => {});
+  }
   Player.next();
 }
 // Tracks how many reload attempts have been made for a given src URL so we

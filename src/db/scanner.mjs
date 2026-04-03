@@ -466,9 +466,28 @@ async function parseMyFile(thisSong, modified) {
     songInfo = parsed.common;
     fmtInfo = parsed.format || {};
   } catch (err) {
-    console.error(`Warning: metadata parse error on ${thisSong}: ${err.message}`);
-    await reportError(thisSong, 'parse', err.message, err.stack);
-    songInfo = {track: { no: null, of: null }, disk: { no: null, of: null }};
+    // If the error is in the embedded picture block, retry without covers to
+    // still recover text tags (title, artist, album, year, track, etc.)
+    if (!loadJson.skipImg) {
+      try {
+        const fallback = await withTimeout(
+          parseFile(thisSong, { skipCovers: true }),
+          PARSE_TIMEOUT_MS
+        );
+        songInfo = fallback.common;
+        fmtInfo = fallback.format || {};
+        console.error(`Warning: metadata parse error (covers skipped) on ${thisSong}: ${err.message}`);
+        await reportError(thisSong, 'parse', err.message, err.stack);
+      } catch (err2) {
+        console.error(`Warning: metadata parse error on ${thisSong}: ${err2.message}`);
+        await reportError(thisSong, 'parse', err2.message, err2.stack);
+        songInfo = {track: { no: null, of: null }, disk: { no: null, of: null }};
+      }
+    } else {
+      console.error(`Warning: metadata parse error on ${thisSong}: ${err.message}`);
+      await reportError(thisSong, 'parse', err.message, err.stack);
+      songInfo = {track: { no: null, of: null }, disk: { no: null, of: null }};
+    }
   }
 
   songInfo.modified = modified;
@@ -554,19 +573,23 @@ async function getAlbumArt(songInfo) {
 
   // picture is stored in song metadata
   if (songInfo.picture && songInfo.picture[0]) {
+    // Prefer the Front Cover (type 3 / 'Cover (front)') over whatever [0] happens to be.
+    // FLAC files with both ID3 and Vorbis tag blocks can have multiple picture entries
+    // in arbitrary order; picking by type avoids using a back cover or artist photo.
+    const frontCover = songInfo.picture.find(p => p.type === 'Cover (front)') || songInfo.picture[0];
     // Generate unique name based off hash of album art and metadata
-    const picHashString = crypto.createHash('md5').update(songInfo.picture[0].data).digest('hex');
+    const picHashString = crypto.createHash('md5').update(frontCover.data).digest('hex');
     // mime-types returns 'jpeg' for image/jpeg — normalise to 'jpg' so filenames
     // are consistent with what the Discogs embed endpoint writes (.jpg hardcoded).
-    const _rawExt = mime.extension(songInfo.picture[0].format);
+    const _rawExt = mime.extension(frontCover.format);
     const _normExt = (_rawExt === 'jpeg') ? 'jpg' : (_rawExt || 'jpg');
     songInfo.aaFile = picHashString + '.' + _normExt;
     songInfo._artSource = 'embedded';
     // Check image-cache folder for filename and save if doesn't exist
     if (!fs.existsSync(path.join(loadJson.albumArtDirectory, songInfo.aaFile))) {
       // Save file sync
-      fs.writeFileSync(path.join(loadJson.albumArtDirectory, songInfo.aaFile), songInfo.picture[0].data);
-      originalFileBuffer = Buffer.from(songInfo.picture[0].data);
+      fs.writeFileSync(path.join(loadJson.albumArtDirectory, songInfo.aaFile), frontCover.data);
+      originalFileBuffer = Buffer.from(frontCover.data);
     }
   } else {
     originalFileBuffer = await checkDirectoryForAlbumArt(songInfo);
