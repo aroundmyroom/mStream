@@ -12,6 +12,7 @@ import * as imageCompress from '../db/image-compress-manager.js';
 import * as transcode from './transcode.js';
 import * as db from '../db/manager.js';
 import { joiValidate } from '../util/validation.js';
+import { bootRustPlayer, killRustPlayer } from './server-playback.js';
 
 import { getTransAlgos, getTransCodecs, getTransBitrates } from '../api/transcode.js';
 
@@ -388,6 +389,14 @@ export function setup(mstream) {
     joiValidate(schema, req.body);
 
     await admin.editAutoBootServerAudio(req.body.autoBootServerAudio);
+
+    // Start or stop the Rust player immediately
+    if (req.body.autoBootServerAudio) {
+      bootRustPlayer();
+    } else {
+      killRustPlayer();
+    }
+
     res.json({});
   });
 
