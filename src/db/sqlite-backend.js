@@ -1379,6 +1379,10 @@ export function deletePlaylist(username, playlistName) {
   db.prepare('DELETE FROM playlists WHERE user = ? AND name = ?').run(username, playlistName);
 }
 
+export function renamePlaylist(username, oldName, newName) {
+  db.prepare('UPDATE playlists SET name = ? WHERE user = ? AND name = ?').run(newName, username, oldName);
+}
+
 export function getPlaylistEntryById(id) {
   const row = db.prepare('SELECT rowid AS id, * FROM playlists WHERE rowid = ?').get(id);
   return row || null;

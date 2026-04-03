@@ -22,7 +22,7 @@ export function setup(mstream) {
       const token = jwt.sign({ username: req.body.username }, config.program.secret);
 
       res.cookie('x-access-token', token, {
-        maxAge:  157784630000, // 5 years in ms
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in ms
         sameSite: 'Strict',
       });
 

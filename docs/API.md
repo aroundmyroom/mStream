@@ -52,6 +52,8 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [/playlist/delete](API/playlist_delete.md)
 
+[/playlist/rename](API/playlist_rename.md) *(v6.0.1-velvet)*
+
 [/playlist/new, /playlist/add-song, /playlist/remove-song](API/playlist_manage.md) *(GitHub Copilot, 2026-02-27)*
 
 ## Metadata (Albums/Artists/Etc)

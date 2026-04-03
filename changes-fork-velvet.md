@@ -4,6 +4,24 @@
 
 ---
 
+## v6.0.1-velvet — April 2026
+
+### feat: playlist rename
+- Added ✎ rename button to every playlist row in the sidebar (between Share and Delete)
+- `POST /api/v1/playlist/rename` endpoint with `{ oldName, newName }` body — returns 400 if the new name is already in use
+- Modal pre-fills the current name with text selected for immediate typing
+- On rename: sidebar refreshes and navigates to the renamed playlist if it was currently open
+- Backend: `UPDATE playlists SET name = ? WHERE user = ? AND name = ?` in SQLite
+
+### fix: auth cookie TTL reduced from 5 years to 30 days
+- `maxAge` was `157784630000` (5 years) — now `30 * 24 * 60 * 60 * 1000` (30 days)
+- Reduces the exposure window if a session token is leaked
+
+### docs: Album Library design document
+- Added `docs/album-browser-design.md` — full filesystem analysis of `/media/music/Albums`, 4 structural patterns detected, data model, API design, UI specification, and implementation plan for the new Album Library view
+
+---
+
 ## v6.0.0-velvet — April 2026
 
 ### fix: `/login` now always redirects to the Velvet UI instead of serving the old login page

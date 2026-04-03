@@ -103,6 +103,7 @@ export function getUserPlaylists(username) { return backend.getUserPlaylists(use
 export function findPlaylist(username, playlistName) { return backend.findPlaylist(username, playlistName); }
 export function createPlaylistEntry(entry) { return backend.createPlaylistEntry(entry); }
 export function deletePlaylist(username, playlistName) { return backend.deletePlaylist(username, playlistName); }
+export function renamePlaylist(username, oldName, newName) { return backend.renamePlaylist(username, oldName, newName); }
 export function getPlaylistEntryById(id) { return backend.getPlaylistEntryById(id); }
 export function removePlaylistEntryById(id) { return backend.removePlaylistEntryById(id); }
 export function loadPlaylistEntries(username, playlistName) { return backend.loadPlaylistEntries(username, playlistName); }

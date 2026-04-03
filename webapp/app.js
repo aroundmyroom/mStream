@@ -4432,6 +4432,12 @@ function showDeletePlaylistModal(name) {
   document.getElementById('pl-del-ok').dataset.pl = name;
   showModal('pl-del-modal');
 }
+function showRenamePlaylistModal(name) {
+  document.getElementById('pl-rename-input').value = name;
+  document.getElementById('pl-rename-ok').dataset.pl = name;
+  showModal('pl-rename-modal');
+  setTimeout(() => document.getElementById('pl-rename-input').select(), 50);
+}
 function showAddToPlaylistModal(song) {
   const list = document.getElementById('atp-list');
   if (!S.playlists.length) {
@@ -4519,6 +4525,7 @@ function renderPlaylistNav() {
       <button class="pl-row-share" data-pl="${esc(p.name)}" title="Share">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
       </button>
+      <button class="pl-row-edit" data-pl="${esc(p.name)}" title="Rename">✎</button>
       <button class="pl-row-del" data-pl="${esc(p.name)}" title="Delete">×</button>
     </div>`).join('');
 
@@ -4534,6 +4541,12 @@ function renderPlaylistNav() {
         const songs = d.map(item => norm(item));
         showSharePlaylistModal(songs);
       } catch(_) { toast('Failed to load playlist'); }
+    });
+  });
+  nav.querySelectorAll('.pl-row-edit').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      showRenamePlaylistModal(btn.dataset.pl);
     });
   });
   nav.querySelectorAll('.pl-row-del').forEach(btn => {
@@ -11155,6 +11168,7 @@ document.getElementById('pl-save-ok').addEventListener('click', async () => {
 // Add to playlist modal cancel
 document.getElementById('atp-cancel').addEventListener('click', () => hideModal('atp-modal'));
 document.getElementById('pl-del-cancel').addEventListener('click', () => hideModal('pl-del-modal'));
+document.getElementById('pl-rename-cancel').addEventListener('click', () => hideModal('pl-rename-modal'));
 document.getElementById('confirm-modal-cancel').addEventListener('click', () => hideModal('confirm-modal'));
 document.getElementById('upload-cancel-btn').addEventListener('click', () => hideModal('upload-modal'));
 document.getElementById('pl-del-ok').addEventListener('click', async () => {
@@ -11166,6 +11180,18 @@ document.getElementById('pl-del-ok').addEventListener('click', async () => {
     toast(`Deleted "${name}"`);
     if (S.view === 'playlist:' + name) viewRecent();
   } catch(e) { toast('Failed to delete playlist'); }
+});
+document.getElementById('pl-rename-ok').addEventListener('click', async () => {
+  const oldName = document.getElementById('pl-rename-ok').dataset.pl;
+  const newName = document.getElementById('pl-rename-input').value.trim();
+  if (!newName || newName === oldName) { hideModal('pl-rename-modal'); return; }
+  hideModal('pl-rename-modal');
+  try {
+    await api('POST', 'api/v1/playlist/rename', { oldName, newName });
+    await loadPlaylists();
+    toast(`Renamed to "${newName}"`);
+    if (S.view === 'playlist:' + oldName) openPlaylist(newName);
+  } catch(e) { toast(e.message || 'Failed to rename playlist'); }
 });
 
 // Context menu actions

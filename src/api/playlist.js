@@ -68,6 +68,22 @@ export function setup(mstream) {
     res.json({});
   });
 
+  mstream.post('/api/v1/playlist/rename', (req, res) => {
+    const schema = Joi.object({
+      oldName: Joi.string().required(),
+      newName: Joi.string().required()
+    });
+    joiValidate(schema, req.body);
+
+    if (db.findPlaylist(req.user.username, req.body.newName) !== null) {
+      return res.status(400).json({ error: 'Playlist name already in use' });
+    }
+
+    db.renamePlaylist(req.user.username, req.body.oldName, req.body.newName);
+    db.saveUserDB();
+    res.json({});
+  });
+
   mstream.post('/api/v1/playlist/add-song', (req, res) => {
     const schema = Joi.object({
       song: Joi.string().required(),
