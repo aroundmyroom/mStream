@@ -4,6 +4,24 @@
 
 ---
 
+## v6.1.0-velvet — April 2026
+
+### feat: Complete Album Library
+- New DB-driven album browser replacing the legacy flat albums list
+- `GET /api/v1/albums/browse` — builds full album tree in-memory from DB (~60 ms first load); 5-minute cache; returns `{ albums, series }` with disc grouping and art
+- `GET /api/v1/albums/art-file?p=` — serves on-disk cover images with path-traversal protection
+- Automatic structure detection: standalone album / multi-disc album (CD 1, Disc 2, bare numeric) / series (non-disc sub-folders each become an album card)
+- Cover art resolution: on-disk image file → disc sub-folder image → embedded aaFile from DB
+- Frontend: `viewAlbumLibrary()` grid with live search, `viewAlbumSeries()` drill-down, `viewAlbumDetail()` with disc tabs and track list
+- Play hint shown below disc tabs explaining that clicking a track loads the full album (all discs) into the queue
+- Queue panel shows disc separator labels (CD 1, CD 2 …) when a multi-disc album is loaded
+- Old `viewAllAlbums()` removed; nav button replaced; back-navigation fixed to return to Album Library
+
+### chore: .gitignore — exclude .last-weekly
+- Added `.last-weekly` to prevent the weekly-job state file from being committed
+
+---
+
 ## v6.0.1-velvet — April 2026
 
 ### feat: playlist rename

@@ -865,6 +865,13 @@ export function getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, include
   return albums;
 }
 
+export function getFilesForAlbumsBrowse() {
+  return db.prepare(
+    `SELECT filepath, title, artist, track, disk, year, duration, aaFile
+     FROM files WHERE filepath LIKE 'Albums/%'`
+  ).all();
+}
+
 export function getAlbumSongs(album, vpaths, username, opts) {
   const filtered = vpathFilter(vpaths, opts.ignoreVPaths);
   if (filtered.length === 0) { return []; }

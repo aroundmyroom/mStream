@@ -40,6 +40,9 @@ save/db/*.db
 check-*.cjs
 check-*.mjs
 
+# weekly job state file
+.last-weekly
+
 # ytdl-core player script cache files
 *-player-script.js
 

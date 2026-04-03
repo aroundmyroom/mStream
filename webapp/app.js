@@ -1208,7 +1208,11 @@ function refreshQueueUI() {
 
   list.innerHTML = S.queue.map((s, i) => {
     const isActive = i === S.idx;
-    return `
+    const prevLabel = i > 0 ? S.queue[i - 1]._discLabel : undefined;
+    const sep = (s._discLabel && s._discLabel !== prevLabel)
+      ? `<div class="q-disc-sep"><span>${esc(s._discLabel)}</span></div>`
+      : '';
+    return sep + `
       <div class="q-item${isActive ? ' q-active' : ''}" data-qi="${i}" draggable="true">
         <div class="q-drag-handle" title="Drag to reorder">
           <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" opacity=".7">
@@ -4846,22 +4850,307 @@ async function viewArtistAlbums(displayName, variantsOrBackFn, backFn) {
   } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
-async function viewAllAlbums() {
-  setTitle('Albums'); setBack(null); setNavActive('albums'); S.view = 'albums';
+// ── ALBUM LIBRARY (Albums New) ────────────────────────────────────────────────
+// A filesystem-based browsable album grid backed by /api/v1/albums/browse.
+
+let _albLib = null;   // { albums: [], series: [], byId: {}, bySeriesId: {} }
+
+function _albArtUrl(artFile, aaFile) {
+  if (aaFile) return artUrl(aaFile, 's');
+  if (artFile) return `/api/v1/albums/art-file?p=${encodeURIComponent(artFile)}&token=${S.token}`;
+  return null;
+}
+
+function _albSongObj(track, album, discLabel, discIndex) {
+  return {
+    filepath    : track.filepath,
+    title       : track.title   || null,
+    artist      : track.artist  || album.artist || null,
+    album       : album.displayName || null,
+    year        : album.year    || null,
+    track       : track.number  || null,
+    disk        : discIndex     || null,
+    'album-art' : track.aaFile  || null,
+    hash        : null,
+    rating      : null,
+    genre       : null,
+    replaygain  : null,
+    _discLabel  : discLabel     || null,
+  };
+}
+
+async function _loadAlbLib() {
+  if (_albLib) return;
+  const d = await api('GET', 'api/v1/albums/browse');
+  const byId = {};
+  const bySeriesId = {};
+  for (const a of (d.albums || [])) {
+    byId[a.id] = a;
+    if (a.seriesId) {
+      if (!bySeriesId[a.seriesId]) bySeriesId[a.seriesId] = [];
+      bySeriesId[a.seriesId].push(a);
+    }
+  }
+  _albLib = { albums: d.albums || [], series: d.series || [], byId, bySeriesId };
+}
+
+async function viewAlbumLibrary() {
+  setTitle('Albums New'); setBack(null); setNavActive('album-library'); S.view = 'album-library';
   setBody('<div class="loading-state"></div>');
   try {
-    const abEx = _audioBookExclusions();
-    const aoF  = _albumsOnlyFilter();
-    const mergedIgnore  = [...(abEx.ignoreVPaths || []), ...(aoF.ignoreVPaths || [])];
-    const mergedExclude = abEx.excludeFilepathPrefixes || [];
-    const d = await api('POST', 'api/v1/db/albums', {
-      ...(mergedIgnore.length  ? { ignoreVPaths: mergedIgnore } : {}),
-      ...(mergedExclude.length ? { excludeFilepathPrefixes: mergedExclude } : {}),
-      ...(aoF.includeFilepathPrefixes?.length ? { includeFilepathPrefixes: aoF.includeFilepathPrefixes } : {}),
+    await _loadAlbLib();
+    const { albums, series } = _albLib;
+
+    // Collect top-level items: series cards + albums not belonging to a series
+    const seriesIds     = new Set(series.map(s => s.id));
+    const standaloneAlb = albums.filter(a => !a.seriesId);
+
+    // Build combined list: series first (sorted), then standalone
+    const seriesSorted     = [...series].sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }));
+    const standaloneSorted = [...standaloneAlb].sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }));
+
+    const body = document.getElementById('content-body');
+    body.innerHTML = `
+      <div class="fe-filter-row">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="allib-filter" class="fe-filter-input" type="text" placeholder="Search albums or series…" autocomplete="off">
+        <span id="allib-count" class="fe-match-count"></span>
+        <button id="allib-clear" class="fe-filter-clear hidden" title="Clear filter">✕</button>
+      </div>
+      <div id="allib-grid" class="album-grid"></div>`;
+
+    const filterInput = body.querySelector('#allib-filter');
+    const filterClear = body.querySelector('#allib-clear');
+    const countEl     = body.querySelector('#allib-count');
+    const grid        = body.querySelector('#allib-grid');
+
+    // Build card HTML for a series
+    function seriesCard(s) {
+      const art = _albArtUrl(s.artFile, s.aaFile);
+      const count = (s.albumIds || []).length;
+      return `<div class="album-card album-card--series" data-series-id="${esc(s.id)}">
+        <div class="album-art" style="position:relative;">
+          ${art ? `<img src="${esc(art)}" alt="${esc(s.displayName)}" loading="lazy" onerror="this.style.display='none'">` : noArtHtml()}
+          <div class="alb-badges"><span class="alb-badge">${count} albums</span></div>
+          <div class="play-ov"><svg width="30" height="30" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div>
+        </div>
+        <div class="album-meta">
+          <div class="album-name">${esc(s.displayName)}</div>
+          <div class="album-year">&nbsp;</div>
+        </div>
+      </div>`;
+    }
+
+    // Build card HTML for a standalone album
+    function albumCard(a) {
+      const art = _albArtUrl(a.artFile, a.aaFile);
+      const totalTracks = (a.discs || []).reduce((n, d) => n + d.tracks.length, 0);
+      const multiDisc   = (a.discs || []).length > 1;
+      return `<div class="album-card" data-album-id="${esc(a.id)}">
+        <div class="album-art" style="position:relative;">
+          ${art ? `<img src="${esc(art)}" alt="${esc(a.displayName)}" loading="lazy" onerror="this.style.display='none'">` : noArtHtml()}
+          <div class="alb-badges">${multiDisc ? `<span class="alb-badge alb-badge--disc">${a.discs.length} discs</span>` : ''}</div>
+          <div class="play-ov"><svg width="30" height="30" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div>
+        </div>
+        <div class="album-meta">
+          <div class="album-name">${esc(a.displayName)}</div>
+          <div class="album-year">${a.year || '&nbsp;'}</div>
+        </div>
+      </div>`;
+    }
+
+    function render(filter) {
+      const lc = (filter || '').toLowerCase().trim();
+      let html = '';
+      let count = 0;
+
+      for (const s of seriesSorted) {
+        if (lc && !s.displayName.toLowerCase().includes(lc)) continue;
+        html += seriesCard(s);
+        count++;
+      }
+      for (const a of standaloneSorted) {
+        if (lc && !a.displayName.toLowerCase().includes(lc) && !(a.artist||'').toLowerCase().includes(lc)) continue;
+        html += albumCard(a);
+        count++;
+      }
+      grid.innerHTML = html || '<div class="empty-state">No albums found</div>';
+      countEl.textContent = lc ? `${count} result${count !== 1 ? 's' : ''}` : '';
+    }
+
+    render('');
+
+    // Filter input
+    filterInput.addEventListener('input', () => {
+      filterClear.classList.toggle('hidden', !filterInput.value);
+      render(filterInput.value);
     });
-    renderAlbumGrid(d.albums || [], null);
+    filterClear.addEventListener('click', () => {
+      filterInput.value = '';
+      filterClear.classList.add('hidden');
+      render('');
+    });
+
+    // Click: series → drill-down; album → detail
+    grid.addEventListener('click', e => {
+      const seriesCard = e.target.closest('[data-series-id]');
+      const albumCard  = e.target.closest('[data-album-id]');
+      if (seriesCard) viewAlbumSeries(seriesCard.dataset.seriesId);
+      else if (albumCard) viewAlbumDetail(albumCard.dataset.albumId, 0);
+    });
+
   } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
+
+async function viewAlbumSeries(seriesId) {
+  setTitle('…'); setBack(viewAlbumLibrary); setNavActive('album-library'); S.view = 'album-library';
+  setBody('<div class="loading-state"></div>');
+  try {
+    await _loadAlbLib();
+    const series   = _albLib.series.find(s => s.id === seriesId);
+    if (!series) { setBody('<div class="empty-state">Series not found</div>'); return; }
+    const albums   = (_albLib.bySeriesId[seriesId] || [])
+      .slice().sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }));
+
+    setTitle(series.displayName);
+
+    const body = document.getElementById('content-body');
+    body.innerHTML = `<div id="allib-grid" class="album-grid"></div>`;
+    const grid = body.querySelector('#allib-grid');
+
+    grid.innerHTML = albums.map(a => {
+      const art = _albArtUrl(a.artFile, a.aaFile);
+      const multiDisc = (a.discs || []).length > 1;
+      return `<div class="album-card" data-album-id="${esc(a.id)}">
+        <div class="album-art" style="position:relative;">
+          ${art ? `<img src="${esc(art)}" alt="${esc(a.displayName)}" loading="lazy" onerror="this.style.display='none'">` : noArtHtml()}
+          <div class="alb-badges">${multiDisc ? `<span class="alb-badge alb-badge--disc">${a.discs.length} discs</span>` : ''}</div>
+          <div class="play-ov"><svg width="30" height="30" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div>
+        </div>
+        <div class="album-meta">
+          <div class="album-name">${esc(a.displayName)}</div>
+          <div class="album-year">${a.year || '&nbsp;'}</div>
+        </div>
+      </div>`;
+    }).join('') || '<div class="empty-state">No albums in series</div>';
+
+    grid.addEventListener('click', e => {
+      const card = e.target.closest('[data-album-id]');
+      if (card) viewAlbumDetail(card.dataset.albumId, 0);
+    });
+
+  } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
+}
+
+async function viewAlbumDetail(albumId, activeDiscIdx) {
+  setTitle('…'); setBack(null); setNavActive('album-library'); S.view = 'album-library';
+  setBody('<div class="loading-state"></div>');
+  try {
+    await _loadAlbLib();
+    const album = _albLib.byId[albumId];
+    if (!album) { setBody('<div class="empty-state">Album not found</div>'); return; }
+
+    setTitle(album.displayName);
+
+    // Back: if belongs to a series → that series, else library
+    const backFn = album.seriesId
+      ? () => viewAlbumSeries(album.seriesId)
+      : viewAlbumLibrary;
+    setBack(backFn);
+
+    const discs      = album.discs || [];
+    const discIdx    = Math.max(0, Math.min(activeDiscIdx, discs.length - 1));
+    const multiDisc  = discs.length > 1;
+    const art        = _albArtUrl(album.artFile, album.aaFile);
+
+    // Gather all tracks across all discs (for Play All)
+    const discLabel  = disc => multiDisc ? (disc.label || ('Disc ' + disc.discIndex)) : null;
+    const allSongs   = discs.flatMap(disc => disc.tracks.map(t => _albSongObj(t, album, discLabel(disc), disc.discIndex)));
+    const discSongs  = discs[discIdx] ? discs[discIdx].tracks.map(t => _albSongObj(t, album, discLabel(discs[discIdx]), discs[discIdx].discIndex)) : [];
+
+    const body = document.getElementById('content-body');
+    body.innerHTML = `
+      <div class="alb-detail-header">
+        ${art
+          ? `<img class="alb-detail-art" src="${esc(art)}" alt="${esc(album.displayName)}" onerror="this.style.display='none'">`
+          : `<div class="alb-detail-art" style="display:flex;align-items:center;justify-content:center;">${noArtHtml()}</div>`}
+        <div style="min-width:0;flex:1;">
+          <div class="alb-detail-title">${esc(album.displayName)}</div>
+          <div class="alb-detail-sub">${album.artist ? esc(album.artist) + (album.year ? ' · ' + album.year : '') : (album.year || '')}</div>
+          <div class="alb-detail-actions">
+            <button id="albd-play-all" class="primary-btn">▶ Play All</button>
+            <button id="albd-add-all" class="secondary-btn">+ Add to Queue</button>
+          </div>
+        </div>
+      </div>
+      ${multiDisc ? `
+      <div class="disc-tabs" id="albd-disc-tabs" style="display:flex;gap:6px;padding:16px 0 8px;flex-wrap:wrap;">
+        ${discs.map((d, i) => `<button class="disc-tab-btn${i === discIdx ? ' active' : ''}" data-disc="${i}">${esc(d.label || ('Disc ' + (i+1)))}</button>`).join('')}
+      </div>` : ''}
+      <div class="alb-play-hint">Clicking a track loads the full album into the queue and starts from that track${multiDisc ? ' — all discs are included' : ''}.</div>
+      <div id="albd-tracklist" class="song-list"></div>`;
+
+    // Render track list
+    function renderTracks(dIdx) {
+      const disc = discs[dIdx];
+      if (!disc) return;
+      const tl = body.querySelector('#albd-tracklist');
+      tl.innerHTML = disc.tracks.length === 0
+        ? '<div class="empty-state">No tracks found</div>'
+        : disc.tracks.map((t, ti) => {
+            const dur = t.duration ? fmt(t.duration) : '';
+            return `<div class="alb-track-row" data-ti="${ti}" data-disc="${dIdx}">
+              <span class="alb-track-num">${t.number || (ti + 1)}</span>
+              <span class="alb-track-title">${esc(t.title || '?')}</span>
+              ${t.artist && t.artist !== album.artist ? `<span class="alb-track-artist">${esc(t.artist)}</span>` : '<span></span>'}
+              <span class="alb-track-dur">${dur}</span>
+            </div>`;
+          }).join('');
+    }
+    renderTracks(discIdx);
+
+    // Play All
+    body.querySelector('#albd-play-all').onclick = () => {
+      if (!allSongs.length) return;
+      Player.setQueue(allSongs, 0);
+    };
+    // Add All
+    body.querySelector('#albd-add-all').onclick = () => {
+      Player.addAll(allSongs);
+    };
+
+    // Disc tabs
+    if (multiDisc) {
+      body.querySelector('#albd-disc-tabs').addEventListener('click', e => {
+        const btn = e.target.closest('.disc-tab-btn');
+        if (!btn) return;
+        const dIdx = parseInt(btn.dataset.disc, 10);
+        body.querySelectorAll('.disc-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.disc == dIdx));
+        renderTracks(dIdx);
+      });
+    }
+
+    // Click row to play from that track
+    body.querySelector('#albd-tracklist').addEventListener('click', e => {
+      const row = e.target.closest('.alb-track-row');
+      if (!row) return;
+      const dIdx  = parseInt(row.dataset.disc, 10);
+      const ti    = parseInt(row.dataset.ti,   10);
+      const disc  = discs[dIdx];
+      if (!disc) return;
+      // Queue whole album from this track
+      const songs = allSongs;
+      // Find global index of this track
+      let globalIdx = 0;
+      for (let d = 0; d < dIdx; d++) globalIdx += discs[d].tracks.length;
+      globalIdx += ti;
+      Player.setQueue(songs, globalIdx);
+    });
+
+  } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
+}
+
+// ── END ALBUM LIBRARY ─────────────────────────────────────────────────────────
 
 function renderAlbumGrid(albums, defaultArtist, artistVariants) {
   if (!albums.length) { setBody('<div class="empty-state">No albums found</div>'); return; }
@@ -5008,7 +5297,7 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
     if (!album) return;
     const backFn = defaultArtist
       ? () => viewArtistAlbums(defaultArtist, artistVariants || [defaultArtist])
-      : () => viewAllAlbums();
+      : () => viewAlbumLibrary();
     viewAlbumSongs(album.name, album._rawArtist || defaultArtist, backFn);
   });
 
@@ -10893,7 +11182,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     if (v === 'home')        viewHome();
     else if (v === 'recent')      viewRecent();
     else if (v === 'artists') viewArtists();
-    else if (v === 'albums')  viewAllAlbums();
+    else if (v === 'album-library') viewAlbumLibrary();
     else if (v === 'search')  viewSearch();
     else if (v === 'rated')   viewRated();
     else if (v === 'most-played') viewMostPlayed();

@@ -2022,3 +2022,58 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .home-shelf.hs-empty{display:none;}
 .home-editing .home-shelf.hs-empty{display:block;}
 
+
+/* ── Album Library ─────────────────────────────────────────────────────────── */
+/* Series card: stacked cover effect */
+.album-card--series .album-art{position:relative;}
+.album-card--series .album-art::before,
+.album-card--series .album-art::after{
+  content:'';position:absolute;inset:0;background:var(--card);
+  border-radius:var(--r2);z-index:-1;
+}
+.album-card--series .album-art::before{transform:rotate(-4deg) translateX(-6px);}
+.album-card--series .album-art::after{transform:rotate(-8deg) translateX(-11px);opacity:.6;}
+
+/* Art badges */
+.alb-badges{position:absolute;top:7px;right:7px;display:flex;gap:4px;z-index:2;}
+.alb-badge{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;
+  background:rgba(0,0,0,.65);color:#fff;letter-spacing:.4px;}
+.alb-badge--disc{background:var(--primary-d);color:var(--primary);}
+
+/* Album detail header */
+.alb-detail-header{display:flex;gap:24px;align-items:flex-start;
+  padding:0 0 24px;border-bottom:1px solid var(--border);margin-bottom:8px;}
+.alb-detail-art{width:180px;height:180px;flex-shrink:0;border-radius:var(--r2);
+  object-fit:cover;background:var(--raised);}
+.alb-detail-title{font-size:22px;font-weight:700;color:var(--t1);margin-bottom:4px;}
+.alb-detail-sub{font-size:13px;color:var(--t2);margin-bottom:16px;}
+.alb-detail-actions{display:flex;gap:10px;flex-wrap:wrap;}
+
+/* Disc tab buttons */
+.disc-tab-btn{
+  padding:5px 14px;border-radius:var(--r);border:1px solid var(--border2);
+  background:transparent;color:var(--t2);font-size:13px;font-weight:500;
+  cursor:pointer;transition:background .12s,color .12s,border-color .12s;
+  touch-action:manipulation;
+}
+.disc-tab-btn:hover{background:var(--raised);color:var(--t1);}
+.disc-tab-btn.active{background:var(--primary-d);color:var(--primary);border-color:var(--primary);}
+
+/* Album detail track list */
+.alb-track-row{
+  display:grid;grid-template-columns:36px 1fr auto auto;
+  align-items:center;gap:10px;padding:8px 10px;border-radius:var(--r);
+  cursor:pointer;transition:background .14s;min-width:0;
+  touch-action:manipulation;
+}
+.alb-track-row:hover{background:var(--hover);}
+.alb-track-num{font-size:12px;color:var(--t3);text-align:right;width:20px;flex-shrink:0;}
+.alb-track-title{font-size:14px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+.alb-track-artist{font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
+.alb-track-dur{font-size:12px;color:var(--t3);white-space:nowrap;flex-shrink:0;}
+/* Album detail — play hint */
+.alb-play-hint{font-size:11.5px;color:var(--t3);padding:6px 0 10px;opacity:.75;}
+/* Queue panel — disc separator */
+.q-disc-sep{padding:10px 14px 4px;display:flex;align-items:center;gap:8px;}
+.q-disc-sep span{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);background:var(--raised);padding:2px 8px;border-radius:4px;}
+.q-disc-sep:first-child{padding-top:4px;}

@@ -76,6 +76,12 @@ https://yourserver.com/media/[your vPath]/path/to/song.mp3?token=XXXXXXXX
 
 [/db/cuepoints](API/db_cuepoints.md) — CUE sheet chapter markers for a file *(GitHub Copilot, 2026-03-02)*
 
+## Album Library *(v6.1.0-velvet)*
+
+[/api/v1/albums/browse — full DB-driven album tree with series, discs, tracks, and art](API/albums_browse.md)
+
+[/api/v1/albums/art-file — serve an on-disk cover art image by relative path](API/albums_browse.md#get-apiv1albumsart-file)
+
 ### Play Statistics *(GitHub Copilot, 2026-02-27)*
 
 [/db/recent/added, /db/stats/recently-played, /db/stats/most-played](API/db_stats-queries.md)

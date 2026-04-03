@@ -39,6 +39,7 @@ import * as telemetryApi from './api/telemetry.js';
 import * as podcastApi from './api/podcasts.js';
 import * as smartPlaylistApi from './api/smart-playlists.js';
 import * as ytdlApi from './api/ytdl.js';
+import * as albumsBrowseApi from './api/albums-browse.js';
 import WebError from './util/web-error.js';
 import { sanitizeFilename } from './util/validation.js';
 import { ensureFfmpeg } from './util/ffmpeg-bootstrap.js';
@@ -195,6 +196,7 @@ export async function serveIt(configFile) {
   podcastApi.setup(mstream);
   smartPlaylistApi.setup(mstream);
   ytdlApi.setup(mstream);
+  albumsBrowseApi.setup(mstream);
   // Kick off ffmpeg auto-download early so it's ready for radio-recorder,
   // discogs cover-art and ytdl use — non-blocking, safe to ignore errors here.
   ensureFfmpeg().catch(e => winston.warn('[ffmpeg-bootstrap] startup prefetch failed: ' + e.message));

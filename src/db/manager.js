@@ -71,6 +71,7 @@ export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPre
 export function getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) { return backend.getArtistAlbumsMulti ? backend.getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) : []; }
 export function getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) { return backend.getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes); }
 export function getAlbumSongs(album, vpaths, username, opts) { return backend.getAlbumSongs(album, vpaths, username, opts); }
+export function getFilesForAlbumsBrowse() { return backend.getFilesForAlbumsBrowse ? backend.getFilesForAlbumsBrowse() : []; }
 export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
 export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
 export function searchFolders(query, vpaths, ignoreVPaths) { return backend.searchFolders ? backend.searchFolders(query, vpaths, ignoreVPaths) : []; }
