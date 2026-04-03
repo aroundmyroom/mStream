@@ -99,6 +99,7 @@ let _wrappedEndedNaturally = false; // true when _onAudioEnded fires — disting
 let _wrappedRadioEventId  = null;   // eventId for active radio listening session
 let _wrappedRadioStartMs  = 0;      // Date.now() when radio-start fired
 let _wrappedPodcastEventId = null;  // eventId for active podcast episode
+let _wrappedTrackStartOffset = 0;   // audioEl.currentTime when play-start fired (>0 when resumed mid-song)
 let audioCtx     = null;   // shared Web Audio context (initialised by VIZ.open)
 // Detect Web Audio API + 2D canvas support once at load time.
 // Browsers without these (e.g. CleverShare) will have the VU column hidden.
@@ -451,7 +452,16 @@ function restoreQueue(silent = false) {
       if (!s.isRadio && data.time > 1) {
         audioEl.addEventListener('loadedmetadata', () => {
           audioEl.currentTime = data.time;
-          if (data.playing && S.autoResume) audioEl.play().catch(() => {});
+          if (data.playing && S.autoResume) {
+            if (!s.isPodcast) {
+              _wrappedTrackStartOffset = data.time;
+              _wrappedEndedNaturally = false;
+              _wrappedEventId = null;
+              api('POST', 'api/v1/wrapped/play-start', { filePath: s.filepath, sessionId: _wrappedSessionId, source: _wrappedSource() })
+                .then(r => { _wrappedEventId = r?.eventId ?? null; }).catch(() => {});
+            }
+            audioEl.play().catch(() => {});
+          }
         }, { once: true });
         // Update scrubber + time display once the seek lands
         audioEl.addEventListener('seeked', () => {
@@ -462,6 +472,13 @@ function restoreQueue(silent = false) {
           _drawWaveform();
         }, { once: true });
       } else if (!s.isRadio && data.playing && S.autoResume) {
+        if (!s.isPodcast) {
+          _wrappedTrackStartOffset = 0;
+          _wrappedEndedNaturally = false;
+          _wrappedEventId = null;
+          api('POST', 'api/v1/wrapped/play-start', { filePath: s.filepath, sessionId: _wrappedSessionId, source: _wrappedSource() })
+            .then(r => { _wrappedEventId = r?.eventId ?? null; }).catch(() => {});
+        }
         audioEl.play().catch(() => {});
       }
     }
@@ -624,6 +641,15 @@ const Player = {
   },
   playAt(idx) {
     if (idx < 0 || idx >= S.queue.length) return;
+    // Wrapped: if a song was interrupted (not naturally ended), count it as a skip
+    if (_wrappedEventId && !_wrappedEndedNaturally) {
+      const eid = _wrappedEventId;
+      _wrappedEventId = null;
+      api('POST', 'api/v1/wrapped/play-skip', {
+        eventId:  eid,
+        playedMs: Math.max(0, Math.round(((audioEl.currentTime || 0) - _wrappedTrackStartOffset) * 1000)),
+      }).catch(() => {});
+    }
     S.idx = idx;
     _resetXfade();  // new track starting — arm crossfade for this track
     const s = S.queue[idx];
@@ -656,6 +682,7 @@ const Player = {
         api('POST', 'api/v1/wrapped/podcast-end', { eventId: eid, playedMs: Math.round((audioEl.currentTime || 0) * 1000), completed: false }).catch(() => {});
       }
       _wrappedEndedNaturally = false;
+      _wrappedTrackStartOffset = 0;
       _wrappedEventId = null;
       api('POST', 'api/v1/wrapped/play-start', {
         filePath:  s.filepath,
@@ -666,7 +693,7 @@ const Player = {
       // Wrapped: stop any active music/podcast event, then log radio-start
       if (_wrappedEventId) {
         const eid = _wrappedEventId; _wrappedEventId = null;
-        api('POST', 'api/v1/wrapped/play-stop', { eventId: eid, playedMs: Math.round((audioEl.currentTime || 0) * 1000) }).catch(() => {});
+        api('POST', 'api/v1/wrapped/play-stop', { eventId: eid, playedMs: Math.max(0, Math.round(((audioEl.currentTime || 0) - _wrappedTrackStartOffset) * 1000)) }).catch(() => {});
       }
       if (_wrappedPodcastEventId) {
         const eid = _wrappedPodcastEventId; _wrappedPodcastEventId = null;
@@ -687,7 +714,7 @@ const Player = {
       // Wrapped: stop any active music/radio event, then log podcast-start
       if (_wrappedEventId) {
         const eid = _wrappedEventId; _wrappedEventId = null;
-        api('POST', 'api/v1/wrapped/play-stop', { eventId: eid, playedMs: Math.round((audioEl.currentTime || 0) * 1000) }).catch(() => {});
+        api('POST', 'api/v1/wrapped/play-stop', { eventId: eid, playedMs: Math.max(0, Math.round(((audioEl.currentTime || 0) - _wrappedTrackStartOffset) * 1000)) }).catch(() => {});
       }
       if (_wrappedRadioEventId) {
         const eid = _wrappedRadioEventId; _wrappedRadioEventId = null;
@@ -746,20 +773,23 @@ const Player = {
     if (!audioEl.src) { this.playAt(S.idx); return; }
     // src is set: toggle play/pause regardless of queue state
     // (queue may have been cleared while a song was already loaded)
-    if (audioEl.paused) { VIZ.initAudio(); audioEl.play().catch(() => {}); }
-    else { audioEl.pause(); }
+    if (audioEl.paused) {
+      VIZ.initAudio();
+      // If no wrapped event is active (e.g. after restoreQueue without autoResume), fire play-start now
+      if (!_wrappedEventId && !_wrappedRadioEventId && !_wrappedPodcastEventId) {
+        const _ts = S.queue[S.idx];
+        if (_ts && !_ts.isRadio && !_ts.isPodcast) {
+          _wrappedTrackStartOffset = audioEl.currentTime || 0;
+          _wrappedEndedNaturally = false;
+          api('POST', 'api/v1/wrapped/play-start', { filePath: _ts.filepath, sessionId: _wrappedSessionId, source: _wrappedSource() })
+            .then(r => { _wrappedEventId = r?.eventId ?? null; }).catch(() => {});
+        }
+      }
+      audioEl.play().catch(() => {});
+    } else { audioEl.pause(); }
   },
   next() {
     if (!S.queue.length) return;
-    // Wrapped: if a play is active and it didn't end naturally, it's a skip
-    if (_wrappedEventId && !_wrappedEndedNaturally) {
-      const eid = _wrappedEventId;
-      _wrappedEventId = null;
-      api('POST', 'api/v1/wrapped/play-skip', {
-        eventId:  eid,
-        playedMs: Math.round((audioEl.currentTime || 0) * 1000),
-      }).catch(() => {});
-    }
     if (_wrappedPodcastEventId) {
       const eid = _wrappedPodcastEventId; _wrappedPodcastEventId = null;
       api('POST', 'api/v1/wrapped/podcast-end', {
@@ -6171,6 +6201,9 @@ function renderFileExplorer(d) {
   const matchCount   = body.querySelector('#fe-match-count');
   const grid         = body.querySelector('#fe-grid');
 
+  // Restore saved filter from previous navigation level
+  if (S.feFilter) { filterInput.value = S.feFilter; }
+
   function applyFilter() {
     const q = filterInput.value.trim().toLowerCase();
     filterClear.classList.toggle('hidden', !q);
@@ -6186,8 +6219,11 @@ function renderFileExplorer(d) {
     matchCount.textContent = q ? `${visible} result${visible !== 1 ? 's' : ''}` : '';
   }
 
-  filterInput.addEventListener('input', applyFilter);
-  filterClear.addEventListener('click', () => { filterInput.value = ''; filterInput.focus(); applyFilter(); });
+  filterInput.addEventListener('input', () => { S.feFilter = filterInput.value; applyFilter(); });
+  filterClear.addEventListener('click', () => { filterInput.value = ''; S.feFilter = ''; filterInput.focus(); applyFilter(); });
+
+  // Apply restored filter immediately if one exists
+  if (S.feFilter) applyFilter();
 
   // Upload button
   body.querySelector('#fe-upload-btn')?.addEventListener('click', () => openUploadModal(curPath));
@@ -6207,7 +6243,7 @@ function renderFileExplorer(d) {
       }
     });
   });
-  // Navigate into directory
+  // Navigate into directory — filter persists (saved in S.feFilter)
   body.querySelectorAll('.fe-dir').forEach(el => {
     el.addEventListener('click', () => viewFiles(el.dataset.dir, true));
   });
@@ -11408,7 +11444,7 @@ function showApp() {
         new Blob([payload], { type: 'application/json' }));
       // Wrapped: fire play-stop + session-end on tab/window close
       if (_wrappedEventId) {
-        const stopPayload = JSON.stringify({ eventId: _wrappedEventId, playedMs: Math.round((audioEl.currentTime || 0) * 1000) });
+        const stopPayload = JSON.stringify({ eventId: _wrappedEventId, playedMs: Math.max(0, Math.round(((audioEl.currentTime || 0) - _wrappedTrackStartOffset) * 1000)) });
         navigator.sendBeacon('/api/v1/wrapped/play-stop?token=' + encodeURIComponent(S.token), new Blob([stopPayload], { type: 'application/json' }));
       }
       if (_wrappedRadioEventId) {
@@ -11610,7 +11646,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'rated')   viewRated();
     else if (v === 'most-played') viewMostPlayed();
     else if (v === 'played')  viewPlayed();
-    else if (v === 'files')   { S.feDirStack = []; viewFiles('', false); }
+    else if (v === 'files')   { S.feDirStack = []; S.feFilter = ''; viewFiles('', false); }
     else if (v === 'autodj')  viewAutoDJ();
     else if (v === 'genres')        viewGenres();
     else if (v === 'decades')       viewDecades();
@@ -12302,7 +12338,7 @@ function _onAudioEnded() {
     _wrappedEventId = null;
     api('POST', 'api/v1/wrapped/play-end', {
       eventId:  eid,
-      playedMs: Math.round((audioEl.duration || 0) * 1000),
+      playedMs: Math.max(0, Math.round(((audioEl.duration || 0) - _wrappedTrackStartOffset) * 1000)),
     }).catch(() => {});
   }
   if (_wrappedPodcastEventId) {

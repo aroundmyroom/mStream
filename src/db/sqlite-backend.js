@@ -2235,7 +2235,7 @@ export function getWrappedDataInRange(userId, fromMs, toMs) {
       f.title, f.artist, f.album, f.year, f.genre,
       f.aaFile, f.artist_id, f.album_id
     FROM play_events pe
-    LEFT JOIN files f ON f.hash = pe.file_hash
+    LEFT JOIN (SELECT hash, title, artist, album, year, genre, aaFile, artist_id, album_id FROM files GROUP BY hash) f ON f.hash = pe.file_hash
     WHERE pe.user_id = ? AND pe.started_at >= ? AND pe.started_at < ?
     ORDER BY pe.started_at ASC
   `).all(userId, fromMs, toMs);
@@ -2258,21 +2258,35 @@ export function getTotalFileCount(vpaths) {
 
 export function getWrappedAdminStats() {
   const total = db.prepare('SELECT COUNT(*) AS cnt FROM play_events').get().cnt;
+  const totalRadio = db.prepare('SELECT COUNT(*) AS cnt FROM radio_play_events').get().cnt;
+  const totalPodcast = db.prepare('SELECT COUNT(*) AS cnt FROM podcast_play_events').get().cnt;
   // Storage estimate via dbstat virtual table (available in SQLite 3.31+)
   let storageBytes = 0;
   try {
-    const row = db.prepare("SELECT SUM(payload) AS sz FROM dbstat WHERE name IN ('play_events','listening_sessions')").get();
+    const row = db.prepare("SELECT SUM(payload) AS sz FROM dbstat WHERE name IN ('play_events','listening_sessions','radio_play_events','podcast_play_events')").get();
     storageBytes = row?.sz ?? 0;
   } catch (_e) {}
   const perUser = db.prepare(`
-    SELECT user_id,
-           COUNT(*) AS event_count,
-           SUM(COALESCE(played_ms,0)) AS total_played_ms
-    FROM play_events
-    GROUP BY user_id
+    SELECT
+      COALESCE(pe.user_id, re.user_id, pod.user_id) AS user_id,
+      COALESCE(pe.event_count, 0)         AS event_count,
+      COALESCE(pe.total_played_ms, 0)     AS total_played_ms,
+      COALESCE(re.radio_sessions, 0)      AS radio_sessions,
+      COALESCE(re.total_radio_ms, 0)      AS total_radio_ms,
+      COALESCE(pod.podcast_episodes, 0)   AS podcast_episodes,
+      COALESCE(pod.total_podcast_ms, 0)   AS total_podcast_ms
+    FROM
+      (SELECT user_id, COUNT(*) AS event_count, SUM(COALESCE(played_ms,0)) AS total_played_ms
+       FROM play_events GROUP BY user_id) pe
+    FULL OUTER JOIN
+      (SELECT user_id, COUNT(*) AS radio_sessions, SUM(COALESCE(listened_ms,0)) AS total_radio_ms
+       FROM radio_play_events GROUP BY user_id) re ON pe.user_id = re.user_id
+    FULL OUTER JOIN
+      (SELECT user_id, COUNT(*) AS podcast_episodes, SUM(COALESCE(played_ms,0)) AS total_podcast_ms
+       FROM podcast_play_events GROUP BY user_id) pod ON COALESCE(pe.user_id, re.user_id) = pod.user_id
     ORDER BY event_count DESC
   `).all();
-  return { total_events: total, storage_bytes: storageBytes, per_user: perUser };
+  return { total_events: total, total_radio: totalRadio, total_podcast: totalPodcast, storage_bytes: storageBytes, per_user: perUser };
 }
 
 export function purgePlayEvents(userId, beforeMs) {

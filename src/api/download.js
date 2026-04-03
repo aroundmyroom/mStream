@@ -172,7 +172,8 @@ export function setup(mstream) {
   });
 
   // ── GET /api/v1/files/art?fp=<vpath/filename> ─────────────────────────────
-  // Extracts embedded cover art from an audio file without waiting for a scan.
+  // Extracts cover art from an audio file (embedded) or a folder image
+  // (cover.jpg / folder.jpg / front.jpg etc.) in the same directory.
   // Returns { aaFile: "md5hash.jpg" } which the client can pass to /album-art/.
   // The result is written to the album-art cache directory so subsequent requests
   // (and the scanner) reuse the same cached file — no duplicate writes.
@@ -186,23 +187,42 @@ export function setup(mstream) {
       return res.status(403).json({ error: e.message });
     }
 
-    try {
-      const meta = await parseFile(pathInfo.fullPath, { skipCovers: false, duration: false });
-      const pic  = meta.common?.picture?.[0];
-      if (!pic) return res.json({ aaFile: null });
+    const artDir  = config.program.storage.albumArtDirectory;
 
-      const ext     = pic.format === 'image/png' ? 'png' : 'jpg';
-      const hash    = crypto.createHash('md5').update(pic.data).digest('hex');
-      const aaFile  = `${hash}.${ext}`;
-      const artDir  = config.program.storage.albumArtDirectory;
+    // Helper: cache raw image buffer and return its filename
+    async function cacheImage(buf, format) {
+      const ext    = format === 'image/png' ? 'png' : 'jpg';
+      const hash   = crypto.createHash('md5').update(buf).digest('hex');
+      const aaFile = `${hash}.${ext}`;
       const artPath = path.join(artDir, aaFile);
-
       if (!fsSync.existsSync(artPath)) {
         await fs.mkdir(artDir, { recursive: true });
-        await fs.writeFile(artPath, pic.data);
+        await fs.writeFile(artPath, buf);
+      }
+      return aaFile;
+    }
+
+    try {
+      // 1. Try embedded art first
+      const meta = await parseFile(pathInfo.fullPath, { skipCovers: false, duration: false });
+      const pic  = meta.common?.picture?.[0];
+      if (pic) {
+        return res.json({ aaFile: await cacheImage(pic.data, pic.format) });
       }
 
-      res.json({ aaFile });
+      // 2. Fall back to a folder image in the same directory
+      const folderDir   = path.dirname(pathInfo.fullPath);
+      const candidates  = ['cover.jpg', 'cover.png', 'folder.jpg', 'folder.png', 'front.jpg', 'front.png', 'artwork.jpg', 'artwork.png'];
+      for (const name of candidates) {
+        const imgPath = path.join(folderDir, name);
+        if (fsSync.existsSync(imgPath)) {
+          const buf    = await fs.readFile(imgPath);
+          const format = name.endsWith('.png') ? 'image/png' : 'image/jpeg';
+          return res.json({ aaFile: await cacheImage(buf, format) });
+        }
+      }
+
+      res.json({ aaFile: null });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }

@@ -1,5 +1,24 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.2.1-velvet — April 2026
+
+### fix: Your Stats — play-start not fired after server restart / page reload
+- Auto-resumed playback (`restoreQueue`) and manual resume via the play button both called `audioEl.play()` without going through `playAt()`, so `play-start` was never fired; all post-reload listening was invisible to wrapped stats
+- `restoreQueue` now fires `play-start` when auto-resuming a music track (both mid-song-resume and from-start paths)
+- `Player.toggle()` now fires `play-start` when resuming a paused track that has no active wrapped event ID
+
+### fix: Your Stats — playedMs overcounted on resumed tracks
+- When a song resumed from a saved position, `playedMs` used the raw `audioEl.currentTime` / `audioEl.duration` without subtracting the resume offset — a 2-minute listen on a 7-minute track was logged as 7 minutes
+- New `_wrappedTrackStartOffset` variable captures `audioEl.currentTime` when tracking begins; all `play-end`, `play-skip`, `play-stop` and `beforeunload` beacon payloads subtract it
+
+### fix: Your Stats — duplicate play counts when song hash exists in multiple folders
+- `getWrappedDataInRange` joined `play_events` against `files` without deduplication; songs present in multiple folders (compilations, mixes) with the same audio hash returned multiple rows per event, inflating play counts and listening time
+- Query now uses a `(SELECT … FROM files GROUP BY hash)` subquery so each play event maps to exactly one metadata row
+
+### fix: folder cover art (cover.jpg / folder.jpg) not shown in file explorer
+- `/api/v1/files/art` only extracted embedded cover art via `music-metadata`; songs with no embedded art but a `cover.jpg` / `folder.jpg` in their directory showed no art
+- Endpoint now falls back to scanning the song's directory for `cover.jpg`, `cover.png`, `folder.jpg`, `folder.png`, `front.jpg`, `front.png`, `artwork.jpg`, `artwork.png` and caches the first match
+
 ## v6.2.0-velvet — April 2026
 
 ### feat: Your Stats — on-server listening statistics system

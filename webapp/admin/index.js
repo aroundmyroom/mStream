@@ -324,7 +324,15 @@ const wrappedAdminView = Vue.component('wrapped-admin-view', {
             <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:1.5rem;">
               <div class="admin-stat-box">
                 <div class="admin-stat-value">{{ stats.total_events.toLocaleString() }}</div>
-                <div class="admin-stat-label">Total play events</div>
+                <div class="admin-stat-label">Song play events</div>
+              </div>
+              <div class="admin-stat-box">
+                <div class="admin-stat-value">{{ stats.total_radio.toLocaleString() }}</div>
+                <div class="admin-stat-label">Radio sessions</div>
+              </div>
+              <div class="admin-stat-box">
+                <div class="admin-stat-value">{{ stats.total_podcast.toLocaleString() }}</div>
+                <div class="admin-stat-label">Podcast episodes</div>
               </div>
               <div class="admin-stat-box">
                 <div class="admin-stat-value">{{ storageKB }} KB</div>
@@ -332,12 +340,16 @@ const wrappedAdminView = Vue.component('wrapped-admin-view', {
               </div>
             </div>
             <table class="striped" v-if="stats.per_user.length">
-              <thead><tr><th>User</th><th>Events</th><th>Listening time</th></tr></thead>
+              <thead><tr><th>User</th><th>Songs</th><th>Song time</th><th>Radio sessions</th><th>Radio time</th><th>Podcast eps</th><th>Podcast time</th></tr></thead>
               <tbody>
                 <tr v-for="u in stats.per_user" :key="u.user_id">
                   <td>{{ u.user_id }}</td>
                   <td>{{ u.event_count.toLocaleString() }}</td>
                   <td>{{ fmtMs(u.total_played_ms) }}</td>
+                  <td>{{ u.radio_sessions.toLocaleString() }}</td>
+                  <td>{{ fmtMs(u.total_radio_ms) }}</td>
+                  <td>{{ u.podcast_episodes.toLocaleString() }}</td>
+                  <td>{{ fmtMs(u.total_podcast_ms) }}</td>
                 </tr>
               </tbody>
             </table>

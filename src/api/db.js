@@ -72,7 +72,13 @@ export function pullMetaData(filepath, user) {
         if (myRoot.startsWith(parentRoot) && myRoot !== parentRoot) {
           const prefix = myRoot.slice(parentRoot.length);
           result = db.getFileWithMetadata(prefix + pathInfo.relativePath, parentKey, user.username);
-          if (result) break;
+          if (result) {
+            // File is served from the parent vpath's static mount, so the
+            // playback filepath must use the parent vpath, not the child name.
+            const rendered = renderMetadataObj(result);
+            rendered.filepath = parentKey + '/' + prefix + pathInfo.relativePath;
+            return rendered;
+          }
         }
       }
     }
@@ -266,11 +272,14 @@ export function setup(mstream) {
     for (let i = 0; i < parts.length; i++) {
       if (skipNext) { skipNext = false; continue; }
       const t = parts[i];
-      if (t.toLowerCase() === 'not' && i + 1 < parts.length) {
-        negativeTerms.push(parts[i + 1]);
-        skipNext = true;
-      } else if (t.startsWith('-') && t.length > 1) {
-        negativeTerms.push(t.slice(1));
+      // Skip tokens that contain no alphanumeric characters — the FTS5 unicode61
+      // tokenizer strips them to nothing, producing an empty phrase query that
+      // causes a 500 (e.g. "&", "-", "–" entered literally).
+      if (!/[a-zA-Z0-9]/.test(t)) continue;
+      if (t.startsWith('-') && t.length > 1) {
+        // -word prefix → explicit negative term (must still contain alnum chars)
+        const neg = t.slice(1);
+        if (/[a-zA-Z0-9]/.test(neg)) negativeTerms.push(neg);
       } else {
         positiveTerms.push(t);
       }
