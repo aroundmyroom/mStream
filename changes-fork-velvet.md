@@ -1,6 +1,12 @@
 # mStream Velvet Fork — Combined Change Log
 
-## Unreleased
+## v6.1.1-velvet — April 2026
+
+### fix: Album Library — albumsOnly cache not cleared on admin config change
+- `PATCH /api/v1/admin/directory/flags` now calls `invalidateCache()` after saving an `albumsOnly` change, so the next Albums page load immediately reflects the new config without requiring a server restart
+
+### fix: Album Library — 404 on tracks when child vpath name contains spaces
+- Track filepaths now use `dbVpath + '/' + original_DB_filepath` instead of `vpathName + '/' + stripped_treePath`, routing all playback through the parent root vpath's static mount (no spaces in URL segment)
 
 ---
 

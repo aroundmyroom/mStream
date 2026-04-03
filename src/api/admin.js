@@ -18,6 +18,7 @@ import { getVPathInfo } from '../util/vpath.js';
 
 import { getTransAlgos, getTransCodecs, getTransBitrates } from '../api/transcode.js';
 import * as scanProgress from '../state/scan-progress.js';
+import { invalidateCache as invalidateAlbumsCache } from './albums-browse.js';
 import * as scrobblerApi from './scrobbler.js';
 import { mergeGenreRows } from '../util/genre-merge.js';
 
@@ -334,6 +335,7 @@ export function setup(mstream) {
     }
 
     await admin.saveFile(loadConfig, config.configFile);
+    if (albumsOnly !== undefined) invalidateAlbumsCache();
     res.json({});
   });
 

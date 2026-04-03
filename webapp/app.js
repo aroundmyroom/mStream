@@ -4891,15 +4891,23 @@ async function _loadAlbLib() {
       bySeriesId[a.seriesId].push(a);
     }
   }
-  _albLib = { albums: d.albums || [], series: d.series || [], byId, bySeriesId };
+  _albLib = { albums: d.albums || [], series: d.series || [], byId, bySeriesId, error: d.error || null };
 }
 
 async function viewAlbumLibrary() {
-  setTitle('Albums New'); setBack(null); setNavActive('album-library'); S.view = 'album-library';
+  _albLib = null;  // always re-fetch on entry so config changes / server restarts are reflected
+  setTitle('Albums'); setBack(null); setNavActive('album-library'); S.view = 'album-library';
   setBody('<div class="loading-state"></div>');
   try {
     await _loadAlbLib();
     const { albums, series } = _albLib;
+
+    if (!albums.length && !series.length) {
+      const msg = _albLib.error || 'No albums found.';
+      document.getElementById('content-body').innerHTML =
+        `<div class="empty-state" style="flex-direction:column;height:auto;padding:3em 1em;text-align:center;"><p>${esc(msg)}</p><p style="margin-top:.5em;font-size:.85em;opacity:.65;">Enable <strong>Albums Only</strong> on at least one folder in Admin \u2192 Directories to use the Album Library.</p></div>`;
+      return;
+    }
 
     // Collect top-level items: series cards + albums not belonging to a series
     const seriesIds     = new Set(series.map(s => s.id));
