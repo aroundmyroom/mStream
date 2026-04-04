@@ -166,6 +166,24 @@ See [docs/your-stats.md](your-stats.md) for full schema and field reference.
 
 [/jukebox/sessions](API/jukebox_sessions.md) *(admin)*
 
+**Jukebox control endpoints (require auth):**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/jukebox/open-jukebox` | Start a jukebox session; returns `{ code }` |
+| `POST` | `/api/v1/jukebox/close-jukebox` | Close active jukebox session |
+| `POST` | `/api/v1/jukebox/push-to-client` | Push a command to the player. Commands: `addSong`, `playPause`, `next`, `previous`, `removeSong`, `goToSong`, `getPlaylist`, `getNowPlaying` |
+| `POST` | `/api/v1/jukebox/update-playlist` | Player → server: write current queue to cache. Body: `{ code, tracks[], idx }` |
+| `POST` | `/api/v1/jukebox/update-now-playing` | Player → server: write current song info to cache. Body: `{ code, nowPlaying: { title, artist, album, albumArt, filepath, currentTime, duration, playing } }` |
+
+**Public endpoints (no auth — use code):**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/jukebox/does-code-exist` | Check if a jukebox code is active; returns `{ status: true, token }` |
+| `GET`  | `/api/v1/jukebox/get-playlist?code=X` | Remote → server: read cached queue |
+| `GET`  | `/api/v1/jukebox/get-now-playing?code=X` | Remote → server: read cached now-playing state |
+
 ## YouTube Download *(v5.16.32)*
 
 [/api/v1/ytdl — preview metadata, download & tag to YouTube folder; Opus METADATA_BLOCK_PICTURE art; temp-isolated; auto-managed yt-dlp + ffmpeg](API/ytdl.md)
@@ -216,4 +234,5 @@ These endpoints server various parts of the webapp
 
 * /
 * /remote
+* /server-remote — Server Audio remote control (requires Server Audio to be enabled in Admin)
 * /shared/playlist/[PLAYLIST ID]

@@ -26,6 +26,9 @@ const ADMINDATA = (() => {
   module.transcodeParams = {};
   module.transcodeParamsUpdated = { ts: 0 };
   module.downloadPending = { val: false };
+  // server audio (mpv)
+  module.serverAudioParams = {};
+  module.serverAudioParamsUpdated = { ts: 0 };
   // shared playlists
   module.sharedPlaylists = [];
   module.sharedPlaylistUpdated = { ts: 0 };
@@ -151,6 +154,19 @@ const ADMINDATA = (() => {
     module.transcodeParamsUpdated.ts = Date.now();
   }
 
+  module.getServerAudioParams = async () => {
+    const res = await API.axios({
+      method: 'GET',
+      url: `${API.url()}/api/v1/admin/server-audio`
+    });
+
+    Object.keys(res.data).forEach(key=>{
+      module.serverAudioParams[key] = res.data[key];
+    });
+
+    module.serverAudioParamsUpdated.ts = Date.now();
+  }
+
   module.getFederationParams = async () => {
     try {
       const res = await API.axios({
@@ -202,6 +218,7 @@ const ADMINDATA = (() => {
 
 // Load in data
 ADMINDATA.getTranscodeParams();
+ADMINDATA.getServerAudioParams();
 ADMINDATA.getFolders();
 ADMINDATA.getUsers();
 ADMINDATA.getDbParams();
@@ -720,7 +737,8 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                         </span>
                         <span class="se-fixed-badge" v-if="err.fixed_at && err.fix_action !== 'unrecoverable'">&#x2713; Fixed</span>
                         <span class="se-unrecoverable-badge" v-if="err.fix_action === 'unrecoverable'">&#x26A0; Unrecoverable</span>
-                        <span class="se-deleted-badge" v-if="!err.file_in_db">&#x1F5D1; Gone from library</span>
+                        <span class="se-deleted-badge" v-if="!err.file_in_db && !(err.error_msg && (err.error_msg.includes('EPIPE') || err.error_msg.includes('ECONNRESET') || err.error_msg.includes('ECONNREFUSED')))">&#x1F5D1; Gone from library</span>
+                        <span class="se-deleted-badge" v-if="!err.file_in_db && err.error_msg && (err.error_msg.includes('EPIPE') || err.error_msg.includes('ECONNRESET') || err.error_msg.includes('ECONNREFUSED'))">&#x26A1; Scan interrupted</span>
                       </div>
 
                       <!-- File path -->
@@ -807,7 +825,10 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
                           <div>
                             <div class="se-deleted-title">File no longer in library</div>
-                            <div class="se-deleted-body">This file was removed from the library database (most likely deleted from disk). No action needed &mdash; this error record will expire automatically after 48 h.</div>
+                            <div class="se-deleted-body" v-if="err.error_msg && (err.error_msg.includes('EPIPE') || err.error_msg.includes('ECONNRESET') || err.error_msg.includes('ECONNREFUSED'))">
+                              The scan was interrupted by a connection error (server restart or crash mid-scan) &mdash; the file itself may be perfectly fine. Run another scan and it should be picked up normally. This error record will expire automatically after 48 h.
+                            </div>
+                            <div class="se-deleted-body" v-else>This file was removed from the library database (most likely deleted from disk). No action needed &mdash; this error record will expire automatically after 48 h.</div>
                           </div>
                         </div>
 
@@ -2782,6 +2803,135 @@ const infoView = Vue.component('info-view', {
     </div>`
 });
 
+// ── Server Audio Admin View ────────────────────────────────────────────────
+const serverAudioView = Vue.component('server-audio-view', {
+  data() {
+    return {
+      params: ADMINDATA.serverAudioParams,
+      paramsTS: ADMINDATA.serverAudioParamsUpdated,
+      mpvPath: '',
+      detecting: false,
+      detectResult: null,
+    };
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card" style="margin-bottom:10px">
+            <div class="card-content">
+              <span class="card-title">Server Audio <span style="font-size:.7em;font-weight:400;color:var(--t2)">▸ mpv</span></span>
+              <p style="color:var(--t2);font-size:.92rem;margin-bottom:18px">
+                Stream audio directly through the server's speakers.
+                A lightweight browser remote at <code>/server-remote</code> lets you control playback, browse files, and run Auto-DJ from any device.
+              </p>
+              <div v-if="paramsTS.ts === 0" style="padding:16px 0;display:flex;justify-content:center">
+                <svg class="spinner" width="48px" height="48px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
+              </div>
+              <div v-else>
+                <table>
+                  <tbody>
+                    <tr>
+                      <td><b>Status:</b>&nbsp;
+                        <span v-if="params.enabled">
+                          <span v-if="params.running" style="color:var(--green)">● Running</span>
+                          <span v-else style="color:var(--orange,#f97316)">● Enabled, mpv not started</span>
+                        </span>
+                        <span v-else style="color:var(--t3)">Disabled</span>
+                      </td>
+                      <td>
+                        <a v-on:click="toggleEnabled()" class="btn-sm btn-sm-edit">{{params.enabled ? 'Disable' : 'Enable'}}</a>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><b>mpv Enabled:</b> {{params.enabled ? 'Yes' : 'No'}}</td>
+                      <td></td>
+                    </tr>
+                    <tr>
+                      <td><b>mpv Binary Path:</b> <code>{{params.mpvBin || 'mpv'}}</code></td>
+                      <td>
+                        <a v-on:click="changeMpvBin()" class="btn-sm btn-sm-edit">edit</a>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td colspan="2" style="padding-top:10px;padding-bottom:4px">
+                        <a v-on:click="detectMpv()" class="btn-sm" style="margin-right:6px">Detect mpv</a>
+                        <a v-on:click="startMpv()"  class="btn-sm" style="margin-right:6px">Start</a>
+                        <a v-on:click="stopMpv()"   class="btn-sm">Stop</a>
+                      </td>
+                    </tr>
+                    <tr v-if="detectResult !== null">
+                      <td colspan="2" style="font-size:.87rem;color:var(--t2)">
+                        <span v-if="detectResult.found" style="color:var(--green)">
+                          ✓ Found mpv {{detectResult.version}} at <code>{{detectResult.path}}</code>
+                        </span>
+                        <span v-else style="color:var(--red)">
+                          ✗ mpv not found at <code>{{detectResult.path}}</code>. Install mpv or set path above.
+                        </span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td colspan="2" style="padding-top:12px">
+                        <a href="/server-remote" target="_blank" class="btn-sm btn-sm-edit">Open Server Remote ↗</a>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">How it works</span>
+              <ul style="color:var(--t2);font-size:.9rem;line-height:1.7;padding-left:1.2em;list-style:disc">
+                <li>mStream starts <b>mpv</b> in <em>idle</em> mode and communicates via a local Unix socket.</li>
+                <li>Your browser becomes a remote control — you never need to install anything on mobile.</li>
+                <li>Auto-DJ in the remote page automatically queues new songs using your library, with optional Last.fm similar-artists matching.</li>
+                <li>mpv must be installed on the server. See the <a href="https://github.com/AroundMyRoom/mStream/blob/master/docs/server-audio.md" target="_blank" style="color:var(--primary)">documentation</a> for install instructions.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  methods: {
+    toggleEnabled() {
+      const next = !this.params.enabled;
+      adminConfirm(
+        `<b>${next ? 'Enable' : 'Disable'} Server Audio?</b>`,
+        next ? 'This will start mpv on the server.' : 'This will stop mpv on the server.',
+        next ? 'Enable' : 'Disable',
+        async () => {
+          await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/server-audio`, data: { enabled: next } });
+          Vue.set(ADMINDATA.serverAudioParams, 'enabled', next);
+          if (!next) Vue.set(ADMINDATA.serverAudioParams, 'running', false);
+          await ADMINDATA.getServerAudioParams();
+        }
+      );
+    },
+    changeMpvBin() {
+      modVM.currentViewModal = 'server-audio-mpvbin-modal';
+      modVM.openModal();
+    },
+    async detectMpv() {
+      this.detecting = true; this.detectResult = null;
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/server-playback/detect` });
+        this.detectResult = res.data;
+      } catch (_) { this.detectResult = { found: false, path: this.params.mpvBin || 'mpv' }; }
+      this.detecting = false;
+    },
+    async startMpv() {
+      await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/server-audio/start` });
+      await ADMINDATA.getServerAudioParams();
+    },
+    async stopMpv() {
+      await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/server-audio/stop` });
+      Vue.set(ADMINDATA.serverAudioParams, 'running', false);
+    },
+  }
+});
+
 const transcodeView = Vue.component('transcode-view', {
   data() {
     return {
@@ -3987,6 +4137,7 @@ const vm = new Vue({
     'advanced-view': advancedView,
     'info-view': infoView,
     'transcode-view': transcodeView,
+    'server-audio-view': serverAudioView,
     'federation-view': federationView,
     'logs-view': logsView,
     'rpn-view': rpnView,
@@ -4846,6 +4997,39 @@ const editSslModal =  Vue.component('edit-ssl-modal', {
   }
 });
 
+const serverAudioMpvBinModal = Vue.component('server-audio-mpvbin-modal', {
+  data() {
+    return {
+      editValue: ADMINDATA.serverAudioParams.mpvBin || 'mpv',
+      submitPending: false,
+    };
+  },
+  template: `
+    <form @submit.prevent="save">
+      ${(()=>'')()}
+      <div class="modal-header"><div><div class="modal-title">mpv Binary Path</div><div class="modal-subtitle">Full path or just 'mpv' if it's on your PATH</div></div><button class="modal-close-x" type="button" @click="closeModal">&times;</button></div>
+      <div class="modal-body">
+        <label class="modal-label">Binary path</label>
+        <input class="modal-input" type="text" v-model="editValue" placeholder="mpv" spellcheck="false" autocorrect="off">
+        <p style="color:var(--t2);font-size:.82rem;margin-top:6px">Example: <code>/usr/bin/mpv</code> or leave as <code>mpv</code> if installed system-wide.</p>
+      </div>
+      <div class="modal-footer-row">
+        <button class="btn-flat" type="button" @click="closeModal">Cancel</button>
+        <button class="btn" type="submit" :disabled="submitPending">{{submitPending ? 'Saving...' : 'Save'}}</button>
+      </div>
+    </form>`,
+  methods: {
+    async save() {
+      this.submitPending = true;
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/server-audio`, data: { mpvBin: this.editValue } });
+        Vue.set(ADMINDATA.serverAudioParams, 'mpvBin', this.editValue);
+        this.closeModal();
+      } finally { this.submitPending = false; }
+    }
+  }
+});
+
 const editTranscodeCodecModal = Vue.component('edit-transcode-codec-modal', {
   data() {
     return {
@@ -5194,6 +5378,7 @@ const modVM = new Vue({
     'edit-transcode-codec-modal': editTranscodeCodecModal,
     'edit-transcode-bitrate-modal': editTranscodeDefaultBitrate,
     'edit-transcode-algorithm-modal': editTranscodeDefaultAlgorithm,
+    'server-audio-mpvbin-modal': serverAudioMpvBinModal,
     'edit-max-scan-modal': editMaxScanModal,
     'edit-ssl-modal': editSslModal,
     'federation-generate-invite-modal': federationGenerateInvite,

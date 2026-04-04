@@ -21,6 +21,7 @@ import * as scanProgress from '../state/scan-progress.js';
 import { invalidateCache as invalidateAlbumsCache } from './albums-browse.js';
 import * as scrobblerApi from './scrobbler.js';
 import { mergeGenreRows } from '../util/genre-merge.js';
+import * as serverPlaybackApi from './server-playback.js';
 
 export function setup(mstream) {
   mstream.all('/api/v1/admin/{*path}', (req, res, next) => {
@@ -1163,6 +1164,54 @@ export function setup(mstream) {
     const beforeMs = Date.now() - req.body.keepMonths * 30 * 24 * 60 * 60 * 1000;
     const deleted = db.purgePlayEvents(req.body.userId, beforeMs);
     res.json({ ok: true, deleted });
+  });
+
+  // ── Server Audio (mpv) Admin API ──────────────────────────────────────────
+
+  // GET /api/v1/admin/server-audio — get current config + running state
+  mstream.get('/api/v1/admin/server-audio', (req, res) => {
+    const sa = config.program.serverAudio || {};
+    res.json({
+      enabled: sa.enabled || false,
+      mpvBin:  sa.mpvBin  || 'mpv',
+      running: serverPlaybackApi.isRunning(),
+    });
+  });
+
+  // POST /api/v1/admin/server-audio — update config (enabled, mpvBin)
+  mstream.post('/api/v1/admin/server-audio', async (req, res) => {
+    const schema = Joi.object({
+      enabled: Joi.boolean().optional(),
+      mpvBin:  Joi.string().optional(),
+    }).min(1);
+    joiValidate(schema, req.body);
+
+    if (!config.program.serverAudio) config.program.serverAudio = {};
+    if (req.body.enabled !== undefined) config.program.serverAudio.enabled = req.body.enabled;
+    if (req.body.mpvBin  !== undefined) config.program.serverAudio.mpvBin  = req.body.mpvBin;
+
+    const loadConfig = await admin.loadFile(config.configFile);
+    if (!loadConfig.serverAudio) loadConfig.serverAudio = {};
+    if (req.body.enabled !== undefined) loadConfig.serverAudio.enabled = req.body.enabled;
+    if (req.body.mpvBin  !== undefined) loadConfig.serverAudio.mpvBin  = req.body.mpvBin;
+    await admin.saveFile(loadConfig, config.configFile);
+
+    if (req.body.enabled === true)  serverPlaybackApi.bootMpv();
+    if (req.body.enabled === false) serverPlaybackApi.killMpv();
+
+    res.json({});
+  });
+
+  // POST /api/v1/admin/server-audio/start — start mpv without changing config
+  mstream.post('/api/v1/admin/server-audio/start', (req, res) => {
+    serverPlaybackApi.bootMpv();
+    res.json({ running: serverPlaybackApi.isRunning() });
+  });
+
+  // POST /api/v1/admin/server-audio/stop — stop mpv without changing config
+  mstream.post('/api/v1/admin/server-audio/stop', (req, res) => {
+    serverPlaybackApi.killMpv();
+    res.json({ running: false });
   });
 }
 

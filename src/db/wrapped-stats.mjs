@@ -113,6 +113,7 @@ export async function getWrappedStats(userId, fromMs, toMs, vpaths = []) {
   const unique_songs       = new Set(events.map(e => e.file_hash)).size;
   const skip_rate          = total_plays ? skipped_plays / total_plays : 0;
   const completion_rate    = total_plays ? completed_plays / total_plays : 0;
+  const pause_count        = events.reduce((s, e) => s + (e.pause_count ?? 0), 0);
 
   const totalFiles = db.getTotalFileCount(vpaths);
   const library_coverage_pct = totalFiles > 0 ? (unique_songs / totalFiles) * 100 : 0;
@@ -296,6 +297,7 @@ export async function getWrappedStats(userId, fromMs, toMs, vpaths = []) {
     unique_songs,
     completed_plays,
     skipped_plays,
+    pause_count,
     total_listening_ms,
     skip_rate,
     completion_rate,
@@ -326,7 +328,7 @@ export async function getWrappedStats(userId, fromMs, toMs, vpaths = []) {
 
 function emptyStats() {
   return {
-    total_plays: 0, unique_songs: 0, completed_plays: 0, skipped_plays: 0,
+    total_plays: 0, unique_songs: 0, completed_plays: 0, skipped_plays: 0, pause_count: 0,
     total_listening_ms: 0, skip_rate: 0, completion_rate: 0, library_coverage_pct: 0,
     top_songs: [], top_artists: [], top_albums: [],
     listening_by_hour: new Array(24).fill(0),

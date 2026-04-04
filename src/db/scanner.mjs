@@ -543,11 +543,15 @@ async function parseMyFile(thisSong, modified) {
   return songInfo;
 }
 
+// Maximum bytes read when hashing — first 512 KB is sufficient for change
+// detection and uniqueness. Avoids 30-s timeouts on large single-file mixes.
+const HASH_READ_LIMIT = 524288; // 512 KB
+
 function calculateHash(filepath) {
   return new Promise((resolve, reject) => {
     try {
       const hash = crypto.createHash('md5').setEncoding('hex');
-      const fileStream = fs.createReadStream(filepath);
+      const fileStream = fs.createReadStream(filepath, { start: 0, end: HASH_READ_LIMIT - 1 });
 
       fileStream.on('error', (err) => {
         reject(err);

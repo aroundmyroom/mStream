@@ -27,6 +27,11 @@ export function setup(mstream) {
       db.removeFileByPath(req.body.filepath, req.body.vpath);
       return res.json({ _stale: true, _preserveAaFile: preserveAaFile, _preserveArtSource: preserveArtSource, _preserveTs: dbFileInfo.ts || null });
     }
+    // hash=null means a previous parse failed (e.g. hash timeout on a large file) — force re-parse
+    else if (dbFileInfo.hash === null || dbFileInfo.hash === undefined) {
+      db.removeFileByPath(req.body.filepath, req.body.vpath);
+      return res.json({ _stale: true, _preserveAaFile: dbFileInfo.aaFile || null, _preserveArtSource: dbFileInfo.art_source || null, _preserveTs: dbFileInfo.ts || null });
+    }
     // update scan ID now so the record survives finish-scan pruning
     db.updateFileScanId(dbFileInfo, req.body.scanId);
 
@@ -96,6 +101,13 @@ export function setup(mstream) {
           const preserveArtSource = dbFileInfo.art_source || null;
           db.removeFileByPath(item.filepath, vpath);
           results[item.filepath] = { _stale: true, _preserveAaFile: preserveAaFile, _preserveArtSource: preserveArtSource, _preserveTs: dbFileInfo.ts || null };
+          continue;
+        }
+
+        // hash=null means a previous parse failed (e.g. hash timeout on large file) — force re-parse
+        if (dbFileInfo.hash === null || dbFileInfo.hash === undefined) {
+          db.removeFileByPath(item.filepath, vpath);
+          results[item.filepath] = { _stale: true, _preserveAaFile: dbFileInfo.aaFile || null, _preserveArtSource: dbFileInfo.art_source || null, _preserveTs: dbFileInfo.ts || null };
           continue;
         }
 

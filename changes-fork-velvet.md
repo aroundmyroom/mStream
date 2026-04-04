@@ -1,6 +1,37 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.3.0-velvet — April 2026
+
+### feat: Server Audio — mpv plays through server speakers, browser is remote control
+- New `src/api/server-playback.js` module manages an mpv process via a Unix socket (JSON IPC). Supports full queue control, seek, volume, loop cycling, and Auto-DJ.
+- New standalone SPA at `webapp/server-remote/index.html` served at `/server-remote`. Works with any browser; no app install needed. Includes login screen, Now Playing bar, transport controls, Queue tab, Auto-DJ tab, and file Browse tab.
+- **Auto-DJ** runs in the browser: polls playback status every 2 s; when the queue runs low (< 2 songs ahead), fetches the next track via the existing `/api/v1/db/random-songs` endpoint. In *Similar Artists* mode it first calls `/api/v1/lastfm/similar-artists` for context-aware song selection (requires Last.fm API key).
+- Admin panel gains a **Server Audio** nav item. Configure `enabled` (auto-start on boot) and the `mpvBin` binary path. Inline *Detect*, *Start*, and *Stop* buttons for manual control.
+- New config keys under `serverAudio`: `enabled` (boolean, default `false`), `mpvBin` (string, default `"mpv"`).
+- If Server Audio is disabled, `/server-remote` returns a friendly "not enabled" page with a link to the admin panel.
+- REST API under `/api/v1/server-playback/*` (auth required): status, queue/add, queue/clear, queue/remove, queue/play-index, next, previous, pause, seek, volume, loop, detect.
+- Admin REST API under `/api/v1/admin/server-audio` (GET, POST) plus `/start` and `/stop` sub-routes.
+- See `docs/server-audio.md` for full setup guide, install instructions, API reference, and troubleshooting.
+
+### fix: Jukebox remote addSong 404 on child vpaths with spaces
+- When adding a song via the Jukebox remote file browser, the filepath sent by the remote was the raw child-vpath path (e.g. `Unidisc 12-inch classics/...`). Express.static mounts use literal vpath names with spaces; browsers percent-encode spaces in URLs → Express couldn't match the mount → 404.
+- Fixed in `webapp/app.js`: the `addSong` WebSocket command handler now calls `api('POST', 'api/v1/db/metadata', { filepath })` → `norm(meta)` to resolve the correct DB parent-vpath filepath (`Music/12 inches/...`) before adding to queue. Falls back to the raw path if the lookup fails (e.g. for non-indexed files).
+
 ## v6.2.2-velvet — April 2026
+
+### feat: Remote Control — Now Playing strip + Queue panel
+- Remote page (`/remote`) now shows a live **Now Playing strip** at the top: album art thumbnail, title, artist, progress bar, play/pause badge
+- A **▤ Queue** toggle button opens/closes an inline queue panel below the transport controls
+- Queue panel lists all songs in order; the current track is highlighted in accent colour
+- Tap any queue row to jump to that song; × button removes a song; Refresh button re-syncs
+- Now Playing polls every 2.5 s via `GET /api/v1/jukebox/get-now-playing?code=X`
+- Queue fetches on demand via `GET /api/v1/jukebox/get-playlist?code=X`
+- New server-side cache objects `playlistCache` and `nowPlayingCache` in `src/api/remote.js`; cache is cleared when the player WebSocket disconnects
+- Four new endpoints: `POST /api/v1/jukebox/update-playlist`, `POST /api/v1/jukebox/update-now-playing` (player → server, auth required), `GET /api/v1/jukebox/get-playlist`, `GET /api/v1/jukebox/get-now-playing` (remote → server, code-only)
+- Two new WS commands routed through `push-to-client`: `getPlaylist`, `getNowPlaying` (join existing `addSong`, `playPause`, `next`, `previous`, `removeSong`, `goToSong`)
+- New WS handlers in `webapp/app.js`: `getPlaylist` pushes queue state; `getNowPlaying` pushes current song + time + playing state; `removeSong` splices from queue; `goToSong` calls `Player.playAt(idx)`
+- Theme system upgraded: 3-state cycle **Velvet → Dark → Light** (was 2-state dark/light only); Dark theme uses pure-black palette; button label shows current theme name; legacy `'dark'` localStorage value migrated to `'velvet'`
+- `--card` CSS variable added to all three themes for NP strip and queue item backgrounds
 
 ### refactor: drop fluent-ffmpeg dependency; use child_process.spawn directly
 - Ported from upstream `new-sqlite` branch commit `80212fe`

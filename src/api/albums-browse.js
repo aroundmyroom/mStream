@@ -116,11 +116,16 @@ async function resolveAlbumsSources() {
     }
   }
 
-  // Fallback: if nothing is marked albumsOnly, find any root with an Albums/ subdir
+  // Fallback: if nothing is marked albumsOnly, find any root with an Albums/ subdir.
+  // Skip roots where the Albums/ subdirectory is already explicitly registered
+  // as its own vpath (regardless of that vpath's albumsOnly setting) — this
+  // respects an operator explicitly setting albumsOnly:false on the Albums vpath.
+  const explicitRoots = new Set(folderEntries.map(([, f]) => f.root.replace(/\/?$/, '')));
   if (sources.length === 0) {
     for (const [name, folder] of folderEntries) {
       if (parentOf[name]) continue; // skip children
       const candidate = path.join(folder.root, 'Albums');
+      if (explicitRoots.has(candidate)) continue; // Albums/ is its own configured vpath — honour albumsOnly:false
       try {
         const stat = await fsp.stat(candidate);
         if (stat.isDirectory()) {

@@ -75,6 +75,11 @@ const federationOptions = Joi.object({
   federateUsersMode: Joi.boolean().default(false),
 });
 
+const serverAudioOptions = Joi.object({
+  enabled: Joi.boolean().default(false),
+  mpvBin:  Joi.string().default('mpv'),
+});
+
 const schema = Joi.object({
   address: Joi.string().ip({ cidr: 'forbidden' }).default('::'),
   port: Joi.number().default(3000),
@@ -128,6 +133,7 @@ const schema = Joi.object({
     cert: Joi.string().allow('').optional()
   }).optional(),
   federation: federationOptions.default(federationOptions.validate({}).value),
+  serverAudio: serverAudioOptions.default(serverAudioOptions.validate({}).value),
 });
 
 export let program;

@@ -56,8 +56,9 @@ const S = {
   transBitrate: localStorage.getItem('ms2_trans_bitrate_'   + _u) || '',
   transAlgo:    localStorage.getItem('ms2_trans_algo_'      + _u) || '',
   // Jukebox
-  jukeWs:   null,
-  jukeCode: null,
+  jukeWs:            null,
+  jukeCode:          null,
+  _jukePushInterval: null,
   // Playback
   crossfade: parseInt(localStorage.getItem('ms2_crossfade_' + _u) || '0'),
   sleepMins: 0,        // 0 = off; remaining minutes when active
@@ -786,7 +787,12 @@ const Player = {
         }
       }
       audioEl.play().catch(() => {});
-    } else { audioEl.pause(); }
+    } else {
+      if (_wrappedEventId) {
+        api('POST', 'api/v1/wrapped/pause', { eventId: _wrappedEventId }).catch(() => {});
+      }
+      audioEl.pause();
+    }
   },
   next() {
     if (!S.queue.length) return;
@@ -7666,6 +7672,27 @@ function viewJukebox() {
   document.getElementById('juke-connect-btn').onclick = _connectJukebox;
 }
 
+function _pushJukeboxState() {
+  if (!S.jukeCode) return;
+  const song = S.queue[S.idx] || null;
+  const safeIdx = Math.max(0, S.idx || 0);
+  fetch('/api/v1/jukebox/update-now-playing', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: S.jukeCode, nowPlaying: {
+      title: song?.title||null, artist: song?.artist||null, album: song?.album||null,
+      albumArt: song?.['album-art']||null, filepath: song?.filepath||null,
+      currentTime: audioEl.currentTime||0, duration: audioEl.duration||0, playing: !audioEl.paused,
+    }}),
+  }).catch(() => {});
+  const tracks = S.queue.map(s => ({ title: s.title||null, artist: s.artist||null, album: s.album||null, 'album-art': s['album-art']||null, filepath: s.filepath }));
+  fetch('/api/v1/jukebox/update-playlist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: S.jukeCode, tracks, idx: safeIdx }),
+  }).catch(() => {});
+}
+
 function _connectJukebox() {
   const btn = document.getElementById('juke-connect-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Connecting…'; }
@@ -7681,6 +7708,12 @@ function _connectJukebox() {
         S.jukeCode = msg.code;
         S.jukeWs = ws;
         if (S.view === 'jukebox') _renderJukeboxActive(msg.code);
+        // Proactive push: send state immediately and every 4 s
+        clearInterval(S._jukePushInterval);
+        S._jukePushInterval = setInterval(_pushJukeboxState, 4000);
+        _pushJukeboxState();
+        audioEl.addEventListener('play',  _pushJukeboxState);
+        audioEl.addEventListener('pause', _pushJukeboxState);
       }
       // Remote commands
       if (msg.command) {
@@ -7688,7 +7721,49 @@ function _connectJukebox() {
         else if (msg.command === 'previous')  Player.prev();
         else if (msg.command === 'playPause') Player.toggle();
         else if (msg.command === 'addSong' && msg.file) {
-          Player.addSong({ filepath: msg.file, title: msg.file.split('/').pop() });
+          // Always fetch metadata so the filepath is resolved through the DB
+          // (parent-vpath lookup). Child vpaths with spaces in their name
+          // (e.g. "Unidisc 12-inch classics") produce 404s when used raw because
+          // Express.static literal-space mounts don't match percent-encoded URLs.
+          api('POST', 'api/v1/db/metadata', { filepath: msg.file })
+            .then(meta => Player.addSong(norm(meta)))
+            .catch(() => Player.addSong({ filepath: msg.file, title: msg.file.split('/').pop() }));
+        }
+        else if (msg.command === 'removeSong') {
+          const idx = parseInt(msg.file, 10);
+          if (!isNaN(idx) && idx >= 0 && idx < S.queue.length) {
+            S.queue.splice(idx, 1);
+            if (S.idx > idx) S.idx--;
+            else if (S.idx === idx) S.idx = Math.min(S.idx, S.queue.length - 1);
+            persistQueue();
+            refreshQueueUI();
+          }
+        }
+        else if (msg.command === 'goToSong') {
+          const idx = parseInt(msg.file, 10);
+          if (!isNaN(idx) && idx >= 0 && idx < S.queue.length) {
+            Player.playAt(idx);
+          }
+        }
+        else if (msg.command === 'getPlaylist') {
+          const tracks = S.queue.map(s => ({ title: s.title||null, artist: s.artist||null, album: s.album||null, 'album-art': s['album-art']||null, filepath: s.filepath }));
+          fetch('/api/v1/jukebox/update-playlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: S.jukeCode, tracks, idx: Math.max(0, S.idx || 0) }),
+          }).catch(() => {});
+        }
+        else if (msg.command === 'getNowPlaying') {
+          const song = S.queue[S.idx] || null;
+          fetch('/api/v1/jukebox/update-now-playing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: S.jukeCode, nowPlaying: {
+              title: song?.title||null, artist: song?.artist||null, album: song?.album||null,
+              albumArt: song?.['album-art']||null, filepath: song?.filepath||null,
+              currentTime: audioEl.currentTime||0, duration: audioEl.duration||0, playing: !audioEl.paused,
+            }}),
+          }).catch(() => {});
         }
       }
     } catch(_) {}
@@ -7700,6 +7775,10 @@ function _connectJukebox() {
   };
 
   ws.onclose = () => {
+    clearInterval(S._jukePushInterval);
+    S._jukePushInterval = null;
+    audioEl.removeEventListener('play',  _pushJukeboxState);
+    audioEl.removeEventListener('pause', _pushJukeboxState);
     S.jukeCode = null; S.jukeWs = null;
     if (S.view === 'jukebox') viewJukebox();
   };
@@ -7996,6 +8075,7 @@ async function _renderWrapped() {
         <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.total_plays.toLocaleString()}</span><span class="wrapped-stat-lbl">plays</span></div>
         <div class="wrapped-stat"><span class="wrapped-stat-val">${fmtMs(stats.total_listening_ms)}</span><span class="wrapped-stat-lbl">listened</span></div>
         <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.unique_songs.toLocaleString()}</span><span class="wrapped-stat-lbl">unique songs</span></div>
+        <div class="wrapped-stat"><span class="wrapped-stat-val">${(stats.pause_count ?? 0).toLocaleString()}</span><span class="wrapped-stat-lbl">pauses</span></div>
         <div class="wrapped-stat"><span class="wrapped-stat-val">${pct(stats.skip_rate)}</span><span class="wrapped-stat-lbl">skip rate</span></div>
         <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.library_coverage_pct.toFixed(1)}%</span><span class="wrapped-stat-lbl">library covered</span></div>
       </div>

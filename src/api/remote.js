@@ -16,6 +16,8 @@ const clients = {};
 const codeTokenMap = {};
 // Map code to session start time (unix ms)
 const codeStartTime = {};
+const playlistCache = {};
+const nowPlayingCache = {};
 const allowedCommands = [
   'next',
   'previous',
@@ -23,6 +25,8 @@ const allowedCommands = [
   'addSong',
   'getPlaylist',
   'removeSong',
+  'getNowPlaying',
+  'goToSong',
 ];
 
 export function setupAfterAuth(mstream, server) {
@@ -43,8 +47,8 @@ export function setupAfterAuth(mstream, server) {
         jukebox: true
       }, config.program.secret);
       cb(true);
-    }catch (err) {
-      winston.error('WS Connection Failed', { stack: err })
+    } catch (err) {
+      winston.error('WS Connection Failed', { stack: err });
       cb(false, 401, 'Unauthorized');
     }
   }});
@@ -59,7 +63,7 @@ export function setupAfterAuth(mstream, server) {
 
     connection.send(JSON.stringify({ code: code, token: req.jwt ? req.jwt : false }));
 
-    // user sent  message
+    // user sent message
     connection.on('message', (_message) => {
       connection.send(JSON.stringify({ code: code }));
     });
@@ -68,9 +72,10 @@ export function setupAfterAuth(mstream, server) {
       delete clients[code];
       if (codeTokenMap[code])  { delete codeTokenMap[code]; }
       if (codeStartTime[code]) { delete codeStartTime[code]; }
+      delete playlistCache[code];
+      delete nowPlayingCache[code];
     });
   });
-
 
   // GET /api/v1/jukebox/sessions — admin-only list of all active jukebox sessions
   mstream.get('/api/v1/jukebox/sessions', (req, res) => {
@@ -89,9 +94,9 @@ export function setupAfterAuth(mstream, server) {
 
   mstream.post('/api/v1/jukebox/push-to-client', (req, res) => {
     const schema = Joi.object({
-      code: Joi.string().required(),
+      code:    Joi.string().required(),
       command: Joi.string().required(),
-      file: Joi.string().optional()
+      file:    Joi.string().optional()
     });
     joiValidate(schema, req.body);
 
@@ -103,24 +108,59 @@ export function setupAfterAuth(mstream, server) {
       throw new WebError('Command Not Recognized', 400);
     }
 
-    // Push commands to client
+    // Push command to client
     clients[req.body.code].send(JSON.stringify({ command: req.body.command, file: req.body.file ? req.body.file : '' }));
 
-    // Send confirmation back to user
-    res.json({ });
+    res.json({});
   });
 }
 
-// This part is run before the login code
+// This part is run before the login middleware
 export function setupBeforeAuth(mstream) {
+  // Player → server: cache the current playlist (no auth, code-validated)
+  mstream.post('/api/v1/jukebox/update-playlist', (req, res) => {
+    const schema = Joi.object({
+      code:   Joi.string().required(),
+      tracks: Joi.array().required(),
+      idx:    Joi.number().integer().min(0).required(),
+    });
+    joiValidate(schema, req.body);
+    if (!(req.body.code in clients)) { return res.status(404).json({ error: 'Code Not Found' }); }
+    playlistCache[req.body.code] = { tracks: req.body.tracks, idx: req.body.idx, ts: Date.now() };
+    res.json({});
+  });
+
+  // Player → server: cache now-playing state (no auth, code-validated)
+  mstream.post('/api/v1/jukebox/update-now-playing', (req, res) => {
+    const schema = Joi.object({
+      code:       Joi.string().required(),
+      nowPlaying: Joi.object().required(),
+    });
+    joiValidate(schema, req.body);
+    if (!(req.body.code in clients)) { return res.status(404).json({ error: 'Code Not Found' }); }
+    nowPlayingCache[req.body.code] = { ...req.body.nowPlaying, ts: Date.now() };
+    res.json({});
+  });
+
+  // Remote → server: read cached playlist
+  mstream.get('/api/v1/jukebox/get-playlist', (req, res) => {
+    const code = req.query.code;
+    if (!code || !(code in clients)) { return res.json({ tracks: [], idx: 0 }); }
+    res.json(playlistCache[code] || { tracks: [], idx: 0 });
+  });
+
+  // Remote → server: read cached now-playing
+  mstream.get('/api/v1/jukebox/get-now-playing', (req, res) => {
+    const code = req.query.code;
+    if (!code || !(code in clients)) { return res.json(null); }
+    res.json(nowPlayingCache[code] || null);
+  });
+
   mstream.post('/api/v1/jukebox/does-code-exist', (req, res) => {
     const clientCode = req.body.code;
-
-    // Check that code exists
     if (!(clientCode in clients) || !(clientCode in codeTokenMap)) {
       return res.json({ status: false });
     }
-
     res.json({ status: true, token: codeTokenMap[clientCode] });
   });
 

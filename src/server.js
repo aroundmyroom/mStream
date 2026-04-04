@@ -41,6 +41,7 @@ import * as smartPlaylistApi from './api/smart-playlists.js';
 import * as ytdlApi from './api/ytdl.js';
 import * as albumsBrowseApi from './api/albums-browse.js';
 import * as wrappedApi from './api/wrapped.js';
+import * as serverPlaybackApi from './api/server-playback.js';
 import WebError from './util/web-error.js';
 import { sanitizeFilename } from './util/validation.js';
 import { ensureFfmpeg } from './util/ffmpeg-bootstrap.js';
@@ -165,6 +166,7 @@ export async function serveIt(configFile) {
 
   // Public APIs
   remoteApi.setupBeforeAuth(mstream, server);
+  serverPlaybackApi.setupBeforeAuth(mstream);
   await sharedApi.setupBeforeSecurity(mstream);
 
   // Subsonic REST API — has its own auth, must be before authApi.setup()
@@ -199,6 +201,7 @@ export async function serveIt(configFile) {
   ytdlApi.setup(mstream);
   albumsBrowseApi.setup(mstream);
   wrappedApi.setup(mstream);
+  serverPlaybackApi.setup(mstream);
   // Kick off ffmpeg auto-download early so it's ready for radio-recorder,
   // discogs cover-art and ytdl use — non-blocking, safe to ignore errors here.
   ensureFfmpeg().catch(e => winston.warn('[ffmpeg-bootstrap] startup prefetch failed: ' + e.message));
@@ -307,6 +310,8 @@ export async function serveIt(configFile) {
     winston.info(`Access mStream locally: ${protocol}://localhost:${config.program.port}`);
 
     dbQueue.runAfterBoot();
+    // Boot mpv if server audio is enabled in config
+    serverPlaybackApi.startIfEnabled();
   });
 }
 

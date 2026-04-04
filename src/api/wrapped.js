@@ -107,6 +107,16 @@ export function setup(mstream) {
     return res.json({ ok: true });
   });
 
+  // ── play-pause (user-initiated pause — increments pause counter) ───────────
+  mstream.post('/api/v1/wrapped/pause', (req, res) => {
+    const schema = Joi.object({
+      eventId: Joi.number().integer().positive().required(),
+    });
+    joiValidate(schema, req.body);
+    db.incrementPauseCount(req.body.eventId, req.user.username);
+    return res.json({ ok: true });
+  });
+
   // ── play-skip ──────────────────────────────────────────────────────────────
   mstream.post('/api/v1/wrapped/play-skip', (req, res) => {
     const schema = Joi.object({

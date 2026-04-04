@@ -195,6 +195,7 @@ export function insertPlayEvent(e) { return backend.insertPlayEvent(e); }
 export function getPlayEventById(id, userId) { return backend.getPlayEventById(id, userId); }
 export function hasPlayEventBefore(userId, hash, beforeMs) { return backend.hasPlayEventBefore(userId, hash, beforeMs); }
 export function updatePlayEvent(id, userId, fields) { return backend.updatePlayEvent(id, userId, fields); }
+export function incrementPauseCount(id, userId) { return backend.incrementPauseCount(id, userId); }
 export function upsertListeningSession(s) { return backend.upsertListeningSession(s); }
 export function updateListeningSession(sid, uid, fields) { return backend.updateListeningSession(sid, uid, fields); }
 export function getWrappedPeriods(userId) { return backend.getWrappedPeriods(userId); }

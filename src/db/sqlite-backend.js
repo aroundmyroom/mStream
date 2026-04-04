@@ -265,6 +265,8 @@ export function init(dbDirectory) {
   try { db.exec('ALTER TABLE podcast_feeds ADD COLUMN sort_order INTEGER DEFAULT 0'); } catch (_e) {}
   // Migration: add trackOf (track total) for complete-album detection
   try { db.exec('ALTER TABLE files ADD COLUMN trackOf INTEGER'); } catch (_e) {}
+  // Migration: add pause_count to play_events to track user-initiated pauses
+  try { db.exec('ALTER TABLE play_events ADD COLUMN pause_count INTEGER DEFAULT 0'); } catch (_e) {}
   // Ensure indexes exist (IF NOT EXISTS is idempotent — safe on every startup)
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_artist_id ON files(artist_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_album_id ON files(album_id)');
@@ -2194,6 +2196,10 @@ export function updatePlayEvent(id, userId, { ended_at, played_ms, completed, sk
   ).run(ended_at ?? Date.now(), played_ms ?? null, completed ? 1 : 0, skipped ? 1 : 0, id, userId);
 }
 
+export function incrementPauseCount(id, userId) {
+  db.prepare('UPDATE play_events SET pause_count = pause_count + 1 WHERE id = ? AND user_id = ?').run(id, userId);
+}
+
 export function upsertListeningSession({ session_id, user_id, started_at }) {
   db.prepare(
     `INSERT INTO listening_sessions (session_id, user_id, started_at, total_tracks)
@@ -2231,7 +2237,7 @@ export function getWrappedDataInRange(userId, fromMs, toMs) {
     SELECT
       pe.id, pe.file_hash, pe.started_at, pe.ended_at,
       pe.duration_ms, pe.played_ms, pe.completed, pe.skipped,
-      pe.source, pe.session_id,
+      pe.source, pe.session_id, pe.pause_count,
       f.title, f.artist, f.album, f.year, f.genre,
       f.aaFile, f.artist_id, f.album_id
     FROM play_events pe

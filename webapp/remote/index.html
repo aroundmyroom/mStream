@@ -4,20 +4,29 @@
   <meta charset="utf-8">
   <title>mStream Remote</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <link rel="apple-touch-icon" sizes="180x180" href="/assets/fav/apple-touch-icon.png">
-  <link rel="icon" type="image/png" sizes="32x32" href="/assets/fav/favicon-32x32.png">
-  <link rel="icon" type="image/png" sizes="16x16" href="/assets/fav/favicon-16x16.png">
-  <link rel="shortcut icon" href="/assets/fav/favicon.ico">
+  <script>
+    (function(){
+      var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="72 33 76 89"><defs><linearGradient id="ri-o" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c4b5fd"/><stop offset="100%" stop-color="#6d28d9" stop-opacity=".85"/></linearGradient><linearGradient id="ri-i" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#4c1d95"/><stop offset="100%" stop-color="#a78bfa"/></linearGradient></defs><polygon fill="url(#ri-o)" points="75,118.5 75,35.5 96,48.5 96,118.5"/><polygon fill="url(#ri-i)" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/><polygon fill="url(#ri-o)" points="124,118.5 124,48.5 145,35.5 145,118.5"/></svg>';
+      var href = 'data:image/svg+xml,' + encodeURIComponent(svg);
+      var l = document.createElement('link'); l.rel = 'icon'; l.type = 'image/svg+xml'; l.href = href;
+      document.head.appendChild(l);
+    }());
+  </script>
 
   <!-- Server replaces this tag with: var remoteProperties = { code, token } -->
   <script></script>
 
   <script>
-    (function(){var l=localStorage.getItem('ms2_theme')==='light';if(l)document.documentElement.classList.add('light');}());
+    (function() {
+      var t = localStorage.getItem('ms2_theme');
+      if (t === 'light') document.documentElement.classList.add('light');
+      else if (t === 'dark') document.documentElement.classList.add('dark');
+    }());
   </script>
   <style>
-    :root{--bg:#1a1a2e;--surface:#16213e;--raised:#0f3460;--accent:#6c8ebf;--t1:#e0e0f0;--t2:#a0a8c0;--t3:#6070a0;--border:#2a3a5e;--r:10px;--primary:#8b5cf6;--primary-h:#7c3aed;--primary-d:rgba(139,92,246,.15);--primary-g:rgba(139,92,246,.4);--red:#f87171}
-    html.light{--bg:#f0f2f7;--surface:#ffffff;--raised:#e4e8f0;--accent:#3a6bc8;--t1:#111827;--t2:#4b5563;--t3:#9ca3af;--border:#d1d5db;--primary:#6d3ce6;--primary-h:#5b28d4;--primary-d:rgba(109,60,230,.12);--primary-g:rgba(109,60,230,.35);--red:#dc2626}
+    :root{--bg:#1a1a2e;--surface:#16213e;--raised:#0f3460;--card:#1e2d4a;--border:#2a3a5e;--r:7px;--primary:#8b5cf6;--primary-h:#7c3aed;--primary-d:rgba(139,92,246,.15);--primary-g:rgba(139,92,246,.4);--accent:#60a5fa;--red:#f87171;--t1:#eeeeff;--t2:#8888b0;--t3:#7e8ec0}
+    :root.dark{--bg:#000000;--surface:#0d0d0d;--raised:#1c1c1e;--card:#141414;--border:rgba(255,255,255,.09);--primary:#a78bfa;--primary-h:#9061f9;--primary-d:rgba(167,139,250,.14);--primary-g:rgba(167,139,250,.38);--accent:#60a5fa;--red:#f87171;--t1:#f1f1f1;--t2:#8a8a9a;--t3:#707082}
+    :root.light{--bg:#e8e8f2;--surface:#f2f2fa;--raised:#e4e4ef;--card:#dcdcec;--border:rgba(0,0,0,.10);--primary:#6d3ce6;--primary-h:#5b28d4;--primary-d:rgba(109,60,230,.12);--primary-g:rgba(109,60,230,.35);--accent:#2563eb;--red:#dc2626;--t1:#0c0c1a;--t2:#42425e;--t3:#7878a0}
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--t1);min-height:100dvh;display:flex;flex-direction:column}
     .topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
@@ -25,9 +34,11 @@
     .topbar-label{font-size:11px;color:var(--t3);font-weight:400;margin-top:1px}
     .theme-btn{background:none;border:1px solid var(--border);border-radius:20px;padding:5px 10px;color:var(--t2);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:5px}
     #login-screen{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(139,92,246,.18),transparent)}
-    html.light #login-screen{background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(109,60,230,.10),transparent)}
+    :root.light #login-screen{background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(109,60,230,.10),transparent)}
+    :root.dark  #login-screen{background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(167,139,250,.12),transparent)}
     .login-card{background:var(--surface);border:1px solid var(--border);border-radius:22px;padding:36px 28px;width:100%;max-width:360px;box-shadow:0 28px 70px rgba(0,0,0,.55),0 0 100px rgba(139,92,246,.08)}
-    html.light .login-card{box-shadow:0 12px 48px rgba(0,0,0,.13),0 0 60px rgba(109,60,230,.07)}
+    :root.light .login-card{box-shadow:0 12px 48px rgba(0,0,0,.13),0 0 60px rgba(109,60,230,.07)}
+    :root.dark  .login-card{box-shadow:0 28px 70px rgba(0,0,0,.85),0 0 100px rgba(167,139,250,.05)}
     .login-brand{text-align:center;margin-bottom:28px}
     .login-brand h2{font-size:20px;font-weight:700;letter-spacing:-.3px;margin-bottom:4px}
     .login-brand p{color:var(--t2);font-size:13px}
@@ -47,7 +58,8 @@
     .ctrl-btn:active{transform:scale(.9)}
     .ctrl-nav{width:44px;height:44px;color:var(--t1)}
     .ctrl-nav:hover{background:rgba(255,255,255,.08)}
-    html.light .ctrl-nav:hover{background:rgba(0,0,0,.06)}
+    :root.light .ctrl-nav:hover{background:rgba(0,0,0,.06)}
+    :root.dark  .ctrl-nav:hover{background:rgba(255,255,255,.05)}
     .play-main{width:56px;height:56px;background:var(--primary);color:#fff!important;box-shadow:0 0 0 0 var(--primary-g);transition:background .15s,box-shadow .2s,transform .1s}
     .play-main:hover{background:var(--primary-h);box-shadow:0 0 0 8px var(--primary-d),0 4px 18px rgba(139,92,246,.45)}
     .play-main:active{transform:scale(.9);box-shadow:0 0 0 4px var(--primary-d)}
@@ -70,16 +82,22 @@
     #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--raised);color:var(--t1);border:1px solid var(--border);border-radius:20px;padding:8px 18px;font-size:13px;transition:transform .25s ease;pointer-events:none;white-space:nowrap;z-index:100}
     #toast.show{transform:translateX(-50%) translateY(0)}
     #error-screen{flex:1;display:flex;align-items:center;justify-content:center;padding:24px;background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(248,113,113,.12),transparent)}
-    html.light #error-screen{background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(220,38,38,.08),transparent)}
+    :root.light #error-screen{background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(220,38,38,.08),transparent)}
+    :root.dark  #error-screen{background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(248,113,113,.08),transparent)}
     .error-card{background:var(--surface);border:1px solid var(--border);border-radius:22px;padding:40px 28px;width:100%;max-width:360px;box-shadow:0 28px 70px rgba(0,0,0,.55);text-align:center}
-    html.light .error-card{box-shadow:0 12px 48px rgba(0,0,0,.13)}
+    :root.light .error-card{box-shadow:0 12px 48px rgba(0,0,0,.13)}
+    :root.dark  .error-card{box-shadow:0 28px 70px rgba(0,0,0,.9)}
     .error-icon{margin:0 auto 20px;width:60px;height:60px;border-radius:50%;background:rgba(248,113,113,.15);display:flex;align-items:center;justify-content:center;color:#f87171}
-    html.light .error-icon{background:rgba(220,38,38,.1);color:#dc2626}
+    :root.light .error-icon{background:rgba(220,38,38,.1);color:#dc2626}
     .error-card h2{font-size:20px;font-weight:700;color:var(--t1);margin-bottom:10px;letter-spacing:-.3px}
     .error-card p{color:var(--t2);font-size:14px;line-height:1.65;margin-bottom:28px}
     .error-back{display:inline-block;padding:10px 28px;background:var(--primary);color:#fff;border-radius:var(--r);font-size:14px;font-weight:600;text-decoration:none;transition:background .18s,box-shadow .18s,transform .1s}
     .error-back:hover{background:var(--primary-h);box-shadow:0 4px 22px var(--primary-g)}
     .error-back:active{transform:scale(.97)}
+    .np-strip{display:none;align-items:center;gap:12px;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--border);flex-shrink:0}
+    .queue-panel{display:none;padding:0 14px 4px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+    .queue-toggle-btn{margin-top:10px;width:100%;padding:7px;background:var(--raised);border:1px solid var(--border);color:var(--t2);border-radius:8px;cursor:pointer;font-size:13px;-webkit-tap-highlight-color:transparent}
+    .queue-toggle-btn:active{background:var(--border)}
   </style>
 </head>
 <body>
@@ -110,9 +128,13 @@
     <div class="login-card">
       <div class="login-brand">
         <svg width="36" height="36" viewBox="72 33 76 89" style="display:block;margin:0 auto 12px">
-          <polygon fill="#6684B2" points="75,118.5 75,35.5 96,48.5 96,118.5"/>
-          <polygon fill="#26477B" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/>
-          <polygon fill="#6684B2" points="124,118.5 124,48.5 145,35.5 145,118.5"/>
+          <defs>
+            <linearGradient id="lc-vg-o" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c4b5fd"/><stop offset="100%" stop-color="#6d28d9" stop-opacity=".85"/></linearGradient>
+            <linearGradient id="lc-vg-i" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#4c1d95"/><stop offset="100%" stop-color="#a78bfa"/></linearGradient>
+          </defs>
+          <polygon fill="url(#lc-vg-o)" points="75,118.5 75,35.5 96,48.5 96,118.5"/>
+          <polygon fill="url(#lc-vg-i)" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/>
+          <polygon fill="url(#lc-vg-o)" points="124,118.5 124,48.5 145,35.5 145,118.5"/>
         </svg>
         <h2>Remote Control</h2>
         <p>Enter the code shown on the Jukebox screen.</p>
@@ -136,6 +158,17 @@
   </div>
 
   <div id="remote-screen" style="display:none">
+    <div class="np-strip" id="np-strip">
+      <img id="np-art" src="" alt="" style="width:88px;height:88px;border-radius:6px;object-fit:cover;background:var(--raised);flex-shrink:0;display:none" onerror="this.style.display='none'">
+      <div style="flex:1;min-width:0;">
+        <div id="np-title" style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px;color:var(--t1);">—</div>
+        <div id="np-artist" style="font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+        <div style="height:3px;background:var(--raised);border-radius:2px;margin-top:6px;">
+          <div id="np-prog" style="height:100%;background:var(--accent);border-radius:2px;width:0%;transition:width 1s linear;"></div>
+        </div>
+      </div>
+      <div id="np-badge" style="font-size:16px;color:var(--t3);flex-shrink:0;">▶</div>
+    </div>
     <div class="controls">
       <div class="ctrl-row">
         <button class="ctrl-btn ctrl-nav" title="Previous" onclick="sendCommand('previous')">
@@ -150,6 +183,12 @@
         </button>
       </div>
       <div class="ctrl-toast" id="ctrl-toast"></div>
+      <button class="queue-toggle-btn" id="queue-toggle-btn" onclick="toggleQueue()">▤ Queue</button>
+    </div>
+    <div class="queue-panel" id="queue-panel">
+      <div style="font-size:11px;color:var(--t3);padding:10px 0 6px;font-weight:600;letter-spacing:.06em;">QUEUE</div>
+      <div id="rmt-queue-list" style="display:flex;flex-direction:column;gap:2px;max-height:260px;overflow-y:auto;"></div>
+      <button onclick="refreshQueueRemote()" style="margin:6px 0 8px;width:100%;padding:5px;background:var(--raised);border:none;color:var(--t3);border-radius:6px;cursor:pointer;font-size:12px;">↻ Refresh</button>
     </div>
     <div class="browser-header">
       <button class="back-btn" id="back-btn" onclick="goBack()" disabled>
@@ -166,23 +205,38 @@
 
   <script>
     var _token = '', _code = '', _pathStack = [], _toastTimer = null, _isPlaying = false;
+    var _npTimer = null, _queueVisible = false;
+
+    function esc(s) {
+      return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
 
     function updatePlayBtn() {
       document.getElementById('play-icon').style.display  = _isPlaying ? 'none'  : '';
       document.getElementById('pause-icon').style.display = _isPlaying ? '' : 'none';
     }
 
-    function applyTheme(light) {
-      document.documentElement.classList.toggle('light', light);
-      document.getElementById('theme-label').textContent = light ? 'Light' : 'Dark';
+    function applyTheme(theme) {
+      document.documentElement.classList.remove('dark', 'light');
+      if (theme === 'dark')  document.documentElement.classList.add('dark');
+      if (theme === 'light') document.documentElement.classList.add('light');
+      var labels = { velvet: 'Velvet', dark: 'Dark', light: 'Light' };
+      document.getElementById('theme-label').textContent = labels[theme] || 'Velvet';
       var icon = document.getElementById('theme-icon');
-      icon.innerHTML = light
-        ? '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'
-        : '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
-      localStorage.setItem('ms2_theme', light ? 'light' : 'dark');
+      if (theme === 'light') {
+        icon.innerHTML = '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
+      } else if (theme === 'dark') {
+        icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+      } else {
+        icon.innerHTML = '<polygon points="12,2 15,9 22,9 16.5,14 18.5,21 12,17 5.5,21 7.5,14 2,9 9,9"/>';
+      }
+      localStorage.setItem('ms2_theme', theme);
     }
-    function toggleTheme() { applyTheme(!document.documentElement.classList.contains('light')); }
-    applyTheme(localStorage.getItem('ms2_theme') === 'light');
+    function toggleTheme() {
+      var cur = localStorage.getItem('ms2_theme') || 'velvet';
+      applyTheme(cur === 'velvet' ? 'dark' : cur === 'dark' ? 'light' : 'velvet');
+    }
+    applyTheme(localStorage.getItem('ms2_theme') || 'velvet');
 
     function toast(msg, ms) {
       var el = document.getElementById('toast');
@@ -198,7 +252,7 @@
 
     function sendCommand(command, file) {
       var body = { code: _code, command: command };
-      if (file) body.file = file;
+      if (file !== undefined) body.file = file;
       fetch('/api/v1/jukebox/push-to-client', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-access-token': _token },
@@ -213,6 +267,78 @@
       }).catch(function(){ toast('Connection error'); });
     }
 
+    // ── Now Playing polling ──────────────────────────────────────────────────
+    function startPolling() {
+      pollNowPlaying(); pollPlaylist();
+      if (_npTimer) clearInterval(_npTimer);
+      _npTimer = setInterval(pollNowPlaying, 2500);
+    }
+    function stopPolling() { if (_npTimer) { clearInterval(_npTimer); _npTimer = null; } }
+
+    function pollNowPlaying() {
+      fetch('/api/v1/jukebox/get-now-playing?code=' + encodeURIComponent(_code))
+        .then(function(r){ return r.json(); })
+        .then(function(np) {
+          var strip = document.getElementById('np-strip');
+          if (!np || !np.filepath) { strip.style.display = 'none'; return; }
+          strip.style.display = 'flex';
+          document.getElementById('np-title').textContent  = np.title  || np.filepath.split('/').pop();
+          document.getElementById('np-artist').textContent = np.artist || '';
+          var art = document.getElementById('np-art');
+          if (np.albumArt) { art.src = '/album-art/' + np.albumArt; art.style.display = ''; } else { art.style.display = 'none'; }
+          document.getElementById('np-prog').style.width = (np.duration > 0 ? (np.currentTime / np.duration * 100).toFixed(1) : 0) + '%';
+          document.getElementById('np-badge').textContent = np.playing ? '\u25b6' : '\u23f8';
+          _isPlaying = !!np.playing; updatePlayBtn();
+        }).catch(function(){});
+    }
+
+    // ── Queue panel ──────────────────────────────────────────────────────────
+    function toggleQueue() {
+      _queueVisible = !_queueVisible;
+      document.getElementById('queue-panel').style.display = _queueVisible ? 'block' : 'none';
+      document.getElementById('queue-toggle-btn').textContent = _queueVisible ? '\u25a4 Hide Queue' : '\u25a4 Queue';
+      if (_queueVisible) refreshQueueRemote();
+    }
+
+    function refreshQueueRemote() {
+      sendCommand('getPlaylist');
+      setTimeout(pollPlaylist, 450);
+    }
+
+    function pollPlaylist() {
+      fetch('/api/v1/jukebox/get-playlist?code=' + encodeURIComponent(_code))
+        .then(function(r){ return r.json(); })
+        .then(function(pl) {
+          var list = document.getElementById('rmt-queue-list');
+          if (!pl || !pl.tracks || pl.tracks.length === 0) {
+            list.innerHTML = '<div style="color:var(--t3);font-size:12px;padding:8px 0;">Queue is empty</div>'; return;
+          }
+          list.innerHTML = pl.tracks.map(function(t, i) {
+            var active = (i === pl.idx);
+            var name = t.title || t.filepath.split('/').pop();
+            var sub  = t.artist || '';
+            return '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;background:' + (active?'var(--raised)':'transparent') + ';' + (active?'color:var(--accent);font-weight:600;':'color:var(--t1);') + '">' +
+              '<div style="flex:1;min-width:0;cursor:pointer;" onclick="goToSongRemote(' + i + ')">' +
+                '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;">' + (active?'\u25b6 ':'') + esc(name) + '</div>' +
+                (sub ? '<div style="font-size:11px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(sub) + '</div>' : '') +
+              '</div>' +
+              '<button onclick="removeSongRemote(' + i + ')" style="flex-shrink:0;background:none;border:none;color:var(--t3);cursor:pointer;font-size:18px;padding:2px 5px;line-height:1;">&times;</button>' +
+            '</div>';
+          }).join('');
+        }).catch(function(){});
+    }
+
+    function goToSongRemote(idx) {
+      sendCommand('goToSong', String(idx));
+      setTimeout(function(){ sendCommand('getNowPlaying'); setTimeout(pollNowPlaying, 500); }, 300);
+      setTimeout(refreshQueueRemote, 600);
+    }
+    function removeSongRemote(idx) {
+      sendCommand('removeSong', String(idx));
+      setTimeout(refreshQueueRemote, 450);
+    }
+
+    // ── File browser ─────────────────────────────────────────────────────────
     function loadDirectory() {
       var list = document.getElementById('browser-list');
       list.innerHTML = '<div class="browser-loading"><div class="spinner"></div></div>';
@@ -260,6 +386,8 @@
       document.getElementById('login-screen').style.display = 'none';
       document.getElementById('remote-screen').style.display = 'flex';
       loadDirectory();
+      startPolling();
+      sendCommand('getNowPlaying');
     }
 
     function connectWithCode() {
@@ -286,6 +414,8 @@
     document.getElementById('code-input').addEventListener('keydown', function(e){
       if (e.key === 'Enter') connectWithCode();
     });
+
+    window.addEventListener('pagehide', stopPolling);
 
     // Auto-connect or show error when server pre-injects state via the /remote/:code route
     if (typeof remoteProperties !== 'undefined') {
