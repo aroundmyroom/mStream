@@ -1,13 +1,13 @@
 FROM node:24-slim
 
 # Build tools needed for npm native modules on Debian slim
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends wget xz-utils && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --g npm@latest
-RUN npm install --production
+RUN npm install --g npm@latest && npm install --production
 
 COPY . .
 

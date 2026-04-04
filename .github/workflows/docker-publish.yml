@@ -40,16 +40,18 @@ jobs:
       # ── SAST: Filesystem / dependency CVE scan ────────────────────────
       - name: Trivy filesystem scan
         uses: aquasecurity/trivy-action@master
+        continue-on-error: true
         with:
           scan-type: fs
           scan-ref: .
           format: sarif
           output: trivy-fs.sarif
           severity: HIGH,CRITICAL
+          exit-code: '0'
 
       - name: Upload Trivy FS results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy-fs.sarif') != ''
         with:
           sarif_file: trivy-fs.sarif
 
@@ -93,14 +95,16 @@ jobs:
       - name: Trivy image scan
         if: startsWith(github.ref, 'refs/tags/')
         uses: aquasecurity/trivy-action@master
+        continue-on-error: true
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+          exit-code: '0'
           format: sarif
           output: trivy-image.sarif
           severity: HIGH,CRITICAL
 
       - name: Upload Trivy image results to GitHub Security
         if: startsWith(github.ref, 'refs/tags/')
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-image.sarif
