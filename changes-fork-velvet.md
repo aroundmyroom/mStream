@@ -1,5 +1,12 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.3.1-velvet — April 2026
+
+### fix: Server Remote — three bugs in /server-remote after initial release
+- Fixed 404 on boot: replaced non-existent `/api/v1/playlist/getall/vpaths-meta` with `/api/v1/ping` (the real endpoint returning `{ vpaths, vpathMetaData }`).
+- Fixed Auto-DJ queuing songs with blank title/artist/album: `random-songs` returns nested `{ filepath, metadata: { title, artist, album, "album-art" } }` — was reading flat `song.title` etc. Now correctly reads `song.metadata.title` etc.
+- Fixed Browse "+ Queue" adding songs with blank metadata: same nested shape issue with `db/metadata` response. Also fixed `resolveAbsPath` in `src/api/server-playback.js` stripping a leading `/` from paths returned by the file-explorer API so files actually resolve on disk.
+
 ## v6.3.0-velvet — April 2026
 
 ### feat: Server Audio — mpv plays through server speakers, browser is remote control

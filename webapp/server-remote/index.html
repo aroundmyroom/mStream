@@ -376,9 +376,9 @@
           _noAuth = true; _token = '';
           return r.json().then(function(s){
             // Get vpaths from playlist API
-            return fetch('/api/v1/playlist/getall/vpaths-meta', { headers: { 'x-access-token':'' } })
+            return fetch('/api/v1/ping', { headers: { 'x-access-token':'' } })
               .then(function(r2){ return r2.ok ? r2.json() : {}; })
-              .then(function(vm){ _vpaths = Object.keys(vm||{}); startApp(); })
+              .then(function(d){ _vpaths = d.vpaths || []; startApp(); })
               .catch(function(){ _vpaths = []; startApp(); });
           });
         }
@@ -585,12 +585,13 @@
       if (!data || !data.songs || !data.songs.length) throw new Error('No songs');
       _djIgnore = data.ignoreList || _djIgnore;
       var song = data.songs[0];
+      var meta = song.metadata || {};
       return api('POST','api/v1/server-playback/queue/add',{
-        filepath: song.filepath || song.filePath,
-        title:    song.title   || '',
-        artist:   song.artist  || '',
-        album:    song.album   || '',
-        albumArt: song.albumArt|| '',
+        filepath: song.filepath,
+        title:    meta.title              || '',
+        artist:   meta.artist             || '',
+        album:    meta.album              || '',
+        albumArt: meta['album-art']       || '',
       });
     }).then(function(){
       _djFetching = false;
@@ -631,12 +632,13 @@
                 // Look up metadata from DB first
                 api('POST','api/v1/db/metadata',{ filepath: fp })
                   .then(function(meta){
+                    var m = meta.metadata || {};
                     return api('POST','api/v1/server-playback/queue/add',{
                       filepath: meta.filepath || fp,
-                      title:    meta.title   || nm,
-                      artist:   meta.artist  || '',
-                      album:    meta.album   || '',
-                      albumArt: meta.albumArt|| '',
+                      title:    m.title              || nm,
+                      artist:   m.artist             || '',
+                      album:    m.album              || '',
+                      albumArt: m['album-art']       || '',
                     });
                   }).catch(function(){
                     return api('POST','api/v1/server-playback/queue/add',{ filepath: fp, title: nm });

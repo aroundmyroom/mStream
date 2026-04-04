@@ -227,10 +227,11 @@ export async function getStatus() {
 
 // ── File path resolution ───────────────────────────────────────────────────
 function resolveAbsPath(relPath) {
+  const normPath = relPath.replace(/^\//, ''); // strip leading slash if present
   const folders = config.program.folders || {};
   for (const [vname, folder] of Object.entries(folders)) {
-    if (relPath === vname || relPath.startsWith(vname + '/')) {
-      const rel = relPath.slice(vname.length + 1);
+    if (normPath === vname || normPath.startsWith(vname + '/')) {
+      const rel = normPath.slice(vname.length + 1);
       const abs = path.join(folder.root, rel);
       try {
         fs.accessSync(abs, fs.constants.R_OK);
