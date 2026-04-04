@@ -54,6 +54,7 @@ jobs:
         if: always() && hashFiles('trivy-fs.sarif') != ''
         with:
           sarif_file: trivy-fs.sarif
+          category: trivy-fs
 
       # ── Docker build ──────────────────────────────────────────────────
       - name: Set up QEMU (multi-arch support)
@@ -108,3 +109,4 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-image.sarif
+          category: trivy-image
