@@ -1,5 +1,21 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.2.2-velvet — April 2026
+
+### refactor: drop fluent-ffmpeg dependency; use child_process.spawn directly
+- Ported from upstream `new-sqlite` branch commit `80212fe`
+- `src/api/transcode.js` and `src/api/waveform.js` now invoke the ffmpeg binary directly via `node:child_process` `spawn` instead of the `fluent-ffmpeg` wrapper
+- `fluent-ffmpeg` removed from `package.json` and uninstalled from `node_modules`
+- Behaviour is identical: transcoding and waveform generation work as before
+
+### cleanup: remove obsolete Save Interval and Pause scanner UI controls
+- Ported from upstream `new-sqlite` branch commit `32718e9`
+- "Save Interval" and "Pause Between Files" rows removed from the Admin scanner settings table
+- Corresponding `editSaveIntervalView` and `editPauseModal` Vue components removed from `webapp/admin/index.js`
+- `POST /api/v1/admin/db/params/save-interval` and `POST /api/v1/admin/db/params/pause` endpoints removed from `src/api/admin.js`
+- `editSaveInterval()` and `editPause()` removed from `src/util/admin.js`
+- These settings were LokiJS-era artefacts; `saveInterval` no longer applies with SQLite (writes are atomic), and `pause` can still be set manually in `default.json` if throttling is needed
+
 ## v6.2.1-velvet — April 2026
 
 ### fix: Your Stats — play-start not fired after server restart / page reload

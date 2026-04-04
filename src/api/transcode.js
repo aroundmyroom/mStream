@@ -1,10 +1,10 @@
 import path from 'path';
-import ffmpeg from 'fluent-ffmpeg';
+import { spawn } from 'node:child_process';
+import { Readable } from 'node:stream';
 import winston from 'winston';
 import * as vpath from '../util/vpath.js';
 import * as config from '../state/config.js';
-import { Readable } from 'stream';
-import { ensureFfmpeg, ffmpegBin, ffprobeBin } from '../util/ffmpeg-bootstrap.js';
+import { ensureFfmpeg, ffmpegBin } from '../util/ffmpeg-bootstrap.js';
 
 const codecMap = {
   'mp3': { codec: 'libmp3lame', contentType: 'audio/mpeg' },
@@ -39,22 +39,9 @@ function initHeaders(res, audioTypeId, contentLength) {
 let lockInit = false;
 
 async function init() {
-  // Ensure binaries are present (auto-downloads on first run if needed)
   await ensureFfmpeg();
-
-  const bin   = ffmpegBin();
-  const probe = ffprobeBin();
-
-  // Verify the executables are actually accessible now
   const { access } = await import('node:fs/promises');
-  try {
-    await Promise.all([access(bin), access(probe)]);
-  } catch {
-    throw new Error(`FFmpeg binaries not found — check${bin} or wait for auto-download to complete`);
-  }
-
-  ffmpeg.setFfmpegPath(bin);
-  ffmpeg.setFfprobePath(probe);
+  await access(ffmpegBin());
   lockInit = true;
   winston.info('FFmpeg OK!');
 }
@@ -76,19 +63,14 @@ export async function downloadedFFmpeg() {
 }
 
 const transCache = {};
-function ffmpegIt(pathInfo, codec, bitrate) {
-  return ffmpeg(pathInfo.fullPath)
-    .noVideo()
-    .format(codec)
-    .audioCodec(codecMap[codec].codec)
-    .audioBitrate(bitrate)
-    .on('end', () => {
-      winston.info('FFmpeg: file has been converted successfully');
-    })
-    .on('error', err => {
-      winston.error('Transcoding Error!', { stack: err });
-      winston.error(pathInfo.fullPath);
-    });
+function spawnTranscode(inputPath, codec, bitrate) {
+  return spawn(ffmpegBin(), [
+    '-i', inputPath, '-vn',
+    '-f', codec,
+    '-acodec', codecMap[codec].codec,
+    '-ab', bitrate,
+    '-'
+  ], { stdio: ['ignore', 'pipe', 'ignore'] });
 }
 
 export function setup(mstream) {
@@ -130,27 +112,29 @@ export function setup(mstream) {
       }
 
       if (algo === 'stream') {
-        return ffmpegIt(pathInfo, codec, bitrate).pipe(res);
+        const proc = spawnTranscode(pathInfo.fullPath, codec, bitrate);
+        proc.on('error', err => {
+          winston.error('Transcoding Error!', { stack: err });
+          winston.error(pathInfo.fullPath);
+        });
+        return proc.stdout.pipe(res);
       }
 
+      // Buffer mode
       const bufs = [];
       let contentLength = 0;
-      const ffstream = ffmpegIt(pathInfo, codec, bitrate).pipe();
-
-      ffstream.on('data', (chunk) => {
+      const proc = spawnTranscode(pathInfo.fullPath, codec, bitrate);
+      proc.on('error', err => {
+        winston.error('Transcoding Error!', { stack: err });
+        winston.error(pathInfo.fullPath);
+      });
+      proc.stdout.on('data', chunk => {
         bufs.push(chunk);
         contentLength += chunk.length;
       });
-
-      ffstream.on('end', (_chunk) => {
-        // const contentLength = bufs.reduce((sum, buf) => {
-        //   return sum + buf.length;
-        // }, 0);
+      proc.stdout.on('end', () => {
         initHeaders(res, codec, contentLength);
-
-        transCache[`${pathInfo.fullPath}|${bitrate}|${codec}`] = new WeakRef({
-          contentLength, bufs
-        });
+        transCache[`${pathInfo.fullPath}|${bitrate}|${codec}`] = new WeakRef({ contentLength, bufs });
         Readable.from(bufs).pipe(res);
       });
 

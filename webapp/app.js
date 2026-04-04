@@ -5820,6 +5820,31 @@ async function viewHome() {
   mostPlayed     = mostPlayed.map(s => { const n = norm(s); n._playCount = s.metadata?.['play-count']; return n; });
   if (podcastFeeds.length) _podcastFeeds = podcastFeeds;
 
+  // ── "Because you listened to" shelves (requires Last.fm API key) ────────────
+  let becauseShelves = [];  // [{ artist: string, songs: norm[] }]
+  if (S.lastfmHasApiKey && mostPlayed.length) {
+    // Build pool of up to 10 most-played unique artists, then pick 2 at random
+    // so the shelves rotate on each Home visit instead of always showing the same pair.
+    const artistPool = [...new Set(mostPlayed.map(s => s.artist).filter(Boolean))].slice(0, 10);
+    // Fisher-Yates shuffle the pool, then take first 2
+    for (let i = artistPool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [artistPool[i], artistPool[j]] = [artistPool[j], artistPool[i]];
+    }
+    const topArtists = artistPool.slice(0, 2);
+    const becauseData = await Promise.all(topArtists.map(async artist => {
+      try {
+        const sim = await api('GET', `api/v1/lastfm/similar-artists?artist=${encodeURIComponent(artist)}`, undefined, sig).catch(() => ({ artists: [] }));
+        if (!sim.artists?.length) return null;
+        const songs = await api('POST', 'api/v1/db/songs-by-artists', { artists: sim.artists.slice(0, 15), limit: _limit }, sig).catch(() => []);
+        if (!songs.length) return null;
+        return { artist, songs: songs.map(norm) };
+      } catch(_) { return null; }
+    }));
+    becauseShelves = becauseData.filter(Boolean);
+  }
+  if (S.view !== 'home') return;
+
   // ── helpers ─────────────────────────────────────────────────
 
   // Art card — radio & podcast: 88×88 image on top, name + sub below
@@ -5936,9 +5961,18 @@ async function viewHome() {
   const recentShelf = shelf('recent', 'Recently Played', recentlyPlayed.map(s => songCard(s, false)).join('') || null);
   const mostShelf   = shelf('most',   'Most Played',     mostPlayed.map(s => songCard(s, true)).join('')  || null);
 
+  // 6. "Because you listened to …" shelves
+  const becauseShelfEntries = becauseShelves.map(({ artist, songs }) => {
+    const key   = `bec:${artist}`;
+    const cards = songs.map(s => songCard(s, false)).join('');
+    return [key, shelf(key, `Because you listened to ${esc(artist)}`, cards)];
+  });
+  const becauseSongsList = becauseShelves.flatMap(b => b.songs);
+
   // ── render (restore saved shelf order) ──────────────────────
   const _shelfMap  = { radio: radioShelf, podcasts: podcastShelf, playlists: playlistShelf, recent: recentShelf, most: mostShelf };
-  const _defOrder  = ['radio', 'podcasts', 'playlists', 'recent', 'most'];
+  becauseShelfEntries.forEach(([k, v]) => { _shelfMap[k] = v; });
+  const _defOrder  = ['radio', 'podcasts', 'playlists', 'recent', 'most', ...becauseShelfEntries.map(([k]) => k)];
   const _order     = (_savedOrder() || _defOrder).filter(id => _shelfMap[id]);
   _defOrder.forEach(id => { if (!_order.includes(id)) _order.push(id); });
   const _orderedHtml = _order.map(id => _shelfMap[id] || '').join('');
@@ -5967,7 +6001,7 @@ async function viewHome() {
   body.querySelectorAll('.home-song').forEach(card => {
     card.addEventListener('click', () => {
       const fp = card.dataset.fp;
-      const s = recentlyPlayed.concat(mostPlayed).find(x => x.filepath === fp);
+      const s = recentlyPlayed.concat(mostPlayed).concat(becauseSongsList).find(x => x.filepath === fp);
       if (s) { _setPlaySource('home', 'Home'); Player.queueAndPlay(s); }
     });
   });
@@ -7913,14 +7947,16 @@ async function _renderWrapped() {
   // Build a 24×7 grid from per-hour and per-weekday data (approximated)
   // We only have 1D data from the server, so we show two separate 1D bar charts
   const hourBars = stats.listening_by_hour.map((c, h) => {
-    const intensity = c === 0 ? 0 : c < heatmapMax * 0.25 ? 1 : c < heatmapMax * 0.6 ? 2 : 3;
-    return `<div class="hm-cell i${intensity}" title="${h}:00 — ${c} plays"></div>`;
+    if (c === 0) return `<div class="hr-bar-cell" title="${h}:00 — no plays"><div class="hr-bar-fill bar-zero"></div></div>`;
+    const pct = Math.max(6, Math.round(c / heatmapMax * 100));
+    return `<div class="hr-bar-cell" title="${h}:00 — ${c} play${c !== 1 ? 's' : ''}"><div class="hr-bar-fill bar-val" style="--bar-h:${pct}%"></div></div>`;
   }).join('');
 
   const wdMax = Math.max(1, ...stats.listening_by_weekday);
   const wdBars = stats.listening_by_weekday.map((c, d) => {
-    const intensity = c === 0 ? 0 : c < wdMax * 0.33 ? 1 : c < wdMax * 0.67 ? 2 : 3;
-    return `<div class="hm-wd-cell" style="--bar-h:${Math.round(c/wdMax*100)}%;"><div class="hm-wd-bar i${intensity}"></div><div class="hm-wd-label">${dayLabels[d]}</div></div>`;
+    if (c === 0) return `<div class="hm-wd-cell"><div class="hm-wd-bar bar-zero"></div><div class="hm-wd-label">${dayLabels[d]}</div></div>`;
+    const pct = Math.max(8, Math.round(c / wdMax * 100));
+    return `<div class="hm-wd-cell"><div class="hm-wd-bar bar-val" style="--bar-h:${pct}%"></div><div class="hm-wd-label">${dayLabels[d]}</div></div>`;
   }).join('');
 
   // Top listening day
@@ -10906,6 +10942,17 @@ function _doXfadeHandoff(nextIdx) {
   VU_NEEDLE.start();
   syncPlayIcons();
 
+  // Wrapped: the outgoing track completed naturally through crossfade/gapless.
+  // _onAudioEnded returned early so play-end was never sent — do it now.
+  if (_wrappedEventId) {
+    const eid = _wrappedEventId;
+    _wrappedEventId = null;
+    api('POST', 'api/v1/wrapped/play-end', {
+      eventId:  eid,
+      playedMs: Math.max(0, Math.round(((oldEl.duration || 0) - _wrappedTrackStartOffset) * 1000)),
+    }).catch(() => {});
+  }
+
   if (!s) return;
 
   // Apply ReplayGain and load waveform for the incoming track
@@ -10922,6 +10969,14 @@ function _doXfadeHandoff(nextIdx) {
   (function(){ const el = document.getElementById('np-scrobble-status'); if (el) { el.textContent = ''; el.className = 'np-scrobble-status'; } })();
   if (!s.isRadio && !s.isPodcast) {
     api('POST', 'api/v1/db/stats/log-play', { filePath: s.filepath }).catch(() => {});
+    // Wrapped: start tracking the incoming crossfade track
+    _wrappedEndedNaturally = false;
+    _wrappedTrackStartOffset = 0;
+    api('POST', 'api/v1/wrapped/play-start', {
+      filePath:  s.filepath,
+      sessionId: _wrappedSessionId,
+      source:    _wrappedSource(),
+    }).then(r => { _wrappedEventId = r?.eventId ?? null; }).catch(() => {});
   }
   if ((S.lastfmEnabled || (S.listenbrainzEnabled && S.listenbrainzLinked)) && !s.isRadio && !s.isPodcast) {
     if (S.listenbrainzEnabled && S.listenbrainzLinked) {

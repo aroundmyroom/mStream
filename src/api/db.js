@@ -402,6 +402,32 @@ export function setup(mstream) {
     res.json(songs);
   });
 
+  mstream.post('/api/v1/db/songs-by-artists', (req, res) => {
+    const schema = Joi.object({
+      artists: Joi.array().items(Joi.string()).min(1).max(50).required(),
+      limit:   Joi.number().integer().min(1).max(50).default(20),
+    });
+    joiValidate(schema, req.body);
+    const { artists, limit } = req.body;
+    const results = db.getAllFilesWithMetadata(req.user.vpaths, req.user.username, { artists });
+    if (!results.length) return res.json([]);
+    // Fisher-Yates shuffle
+    for (let i = results.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = results[i]; results[i] = results[j]; results[j] = t;
+    }
+    // Cap at 2 songs per artist so no single artist dominates the shelf
+    const artistCount = {};
+    const deduped = [];
+    for (const row of results) {
+      const key = (row.artist || '').toLowerCase();
+      artistCount[key] = (artistCount[key] || 0) + 1;
+      if (artistCount[key] <= 2) deduped.push(row);
+      if (deduped.length >= limit) break;
+    }
+    res.json(deduped.map(renderMetadataObj));
+  });
+
   mstream.post('/api/v1/db/stats/reset-play-counts', (req, res) => {
     db.resetPlayCounts(req.user.username);
     db.saveUserDB();

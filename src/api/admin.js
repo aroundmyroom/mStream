@@ -161,16 +161,6 @@ export function setup(mstream) {
     res.json({});
   });
 
-  mstream.post("/api/v1/admin/db/params/save-interval", async (req, res) => {
-    const schema = Joi.object({
-      saveInterval: Joi.number().integer().min(0).required()
-    });
-    joiValidate(schema, req.body);
-
-    await admin.editSaveInterval(req.body.saveInterval);
-    res.json({});
-  });
-
   mstream.post("/api/v1/admin/db/params/skip-img", async (req, res) => {
     const schema = Joi.object({
       skipImg: Joi.boolean().required()
@@ -178,16 +168,6 @@ export function setup(mstream) {
     joiValidate(schema, req.body);
 
     await admin.editSkipImg(req.body.skipImg);
-    res.json({});
-  });
-
-  mstream.post("/api/v1/admin/db/params/pause", async (req, res) => {
-    const schema = Joi.object({
-      pause:  Joi.number().integer().min(0).required()
-    });
-    joiValidate(schema, req.body);
-
-    await admin.editPause(req.body.pause);
     res.json({});
   });
 

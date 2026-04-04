@@ -1,8 +1,9 @@
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
-import ffmpeg from 'fluent-ffmpeg';
+import { spawn } from 'node:child_process';
 import * as config from '../state/config.js';
+import { ffmpegBin } from '../util/ffmpeg-bootstrap.js';
 import * as db from '../db/manager.js';
 import { getVPathInfo } from '../util/vpath.js';
 import WebError from '../util/web-error.js';
@@ -117,14 +118,7 @@ export function setup(mstream) {
       } catch (_e) { /* corrupt cache — fall through to regenerate */ }
     }
 
-    // Locate ffmpeg binary (same directory used by transcode module)
-    const binaryExt  = process.platform === 'win32' ? '.exe' : '';
-    const ffmpegDir  = config.program.transcode?.ffmpegDirectory;
-    const ffmpegPath = ffmpegDir
-      ? path.join(ffmpegDir, `ffmpeg${binaryExt}`)
-      : null;
-
-    if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
+    if (!fs.existsSync(ffmpegBin())) {
       throw new WebError(
         'FFmpeg not available — enable transcoding in config to use the waveform scrubber',
         503
@@ -134,18 +128,16 @@ export function setup(mstream) {
     // Run ffmpeg: decode to mono f32le PCM at SAMPLE_RATE Hz, pipe stdout
     const chunks = [];
     await new Promise((resolve, reject) => {
-      const stream = ffmpeg(pathInfo.fullPath)
-        .setFfmpegPath(ffmpegPath)
-        .noVideo()
-        .audioChannels(1)
-        .audioFrequency(SAMPLE_RATE)
-        .format('f32le')
-        .on('error', reject)
-        .pipe();   // returns a PassThrough stream
+      const proc = spawn(ffmpegBin(), [
+        '-i', pathInfo.fullPath,
+        '-vn', '-ac', '1', '-ar', String(SAMPLE_RATE),
+        '-f', 'f32le', '-'
+      ], { stdio: ['ignore', 'pipe', 'ignore'] });
 
-      stream.on('data',  chunk => chunks.push(chunk));
-      stream.on('end',   resolve);
-      stream.on('error', reject);
+      proc.on('error', reject);
+      proc.stdout.on('data',  chunk => chunks.push(chunk));
+      proc.stdout.on('end',   resolve);
+      proc.stdout.on('error', reject);
     });
 
     const buf      = Buffer.concat(chunks);

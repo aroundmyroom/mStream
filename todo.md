@@ -431,6 +431,15 @@ Audit completed 2026-03-26. Strategy: **Option A — separate `mobile.css`** loa
 
 ## FUTURE — Home, Analytics & Discovery
 
+### Artist Metadata & Discovery — Needs More Analysis
+
+> Found by analysing Musicseerr. Each item below needs deeper investigation before implementation.
+
+- [ ] **TheAudioDB — artist imagery (fanart, banners, logos, CD art)** — Free public API (30 req/min), no auth needed. Investigate: API response shape, cache TTL strategy, where/how to surface in the UI (artist cards, Now Playing modal, future Artist page). See `docs/technology-choices.md` for existing stance.
+- [ ] **Wikidata — artist biography text** — Fully open, no API key, no rate limits. Investigate: query format (SPARQL or entity lookup), language fallback, how to cache per-artist, and whether bio fits in a Now Playing panel expansion or a future Artist page.
+- [ ] **MusicBrainz — artist MBID + structured discography** — Already in the AcoustID fingerprint todo (line ~382). Investigate: MBID lookup by artist name, discography endpoint, release types (studio/live/EP), rate-limit (1 req/sec). Prerequisite for a full Artist page.
+- [ ] **Artist page** — Biography (Wikidata), discography (MusicBrainz), hero image/logo (TheAudioDB), similar artists (Last.fm). Depends on items above. Investigate: route/nav pattern, which parts are feasible without all three services being configured, fallback behaviour.
+
 ### Home Screen
 - [ ] **Time-based play stats** — `play_log` table; songs played today/week/month/year; listening streak
 - [ ] Time-aware greeting with contextual suggested playlist

@@ -286,15 +286,6 @@ export async function editScanInterval(val) {
   dbQueue.resetScanInterval();
 }
 
-export async function editSaveInterval(val) {
-  const loadConfig = await loadFile(config.configFile);
-  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
-  loadConfig.scanOptions.saveInterval = val;
-  await saveFile(loadConfig, config.configFile);
-
-  config.program.scanOptions.saveInterval = val;
-}
-
 export async function editSkipImg(val) {
   const loadConfig = await loadFile(config.configFile);
   if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
@@ -302,15 +293,6 @@ export async function editSkipImg(val) {
   await saveFile(loadConfig, config.configFile);
 
   config.program.scanOptions.skipImg = val;
-}
-
-export async function editPause(val) {
-  const loadConfig = await loadFile(config.configFile);
-  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
-  loadConfig.scanOptions.pause = val;
-  await saveFile(loadConfig, config.configFile);
-
-  config.program.scanOptions.pause = val;
 }
 
 export async function editBootScanDelay(val) {

@@ -1978,21 +1978,9 @@ const dbView = Vue.component('db-view', {
                       </td>
                     </tr>
                     <tr>
-                    <td><b>Save Interval:</b> {{dbParams.saveInterval}} files</td>
-                      <td>
-                        <a v-on:click="openModal('edit-save-interval-modal')" class="btn-sm btn-sm-edit">edit</a>
-                      </td>
-                    </tr>
-                    <tr>
                       <td><b>Boot Scan Delay:</b> {{dbParams.bootScanDelay}} seconds</td>
                       <td>
                         <a v-on:click="openModal('edit-boot-scan-delay-modal')" class="btn-sm btn-sm-edit">edit</a>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td><b>Pause Between Files:</b> {{dbParams.pause}} milliseconds</td>
-                      <td>
-                        <a v-on:click="openModal('edit-pause-modal')" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
@@ -4639,62 +4627,6 @@ const editMaxScanModal = Vue.component('edit-max-scans-modal', {
   }
 });
 
-const editPauseModal = Vue.component('edit-pause-modal', {
-  data() {
-    return {
-      params: ADMINDATA.dbParams,
-      submitPending: false,
-      editValue: ADMINDATA.dbParams.pause
-    };
-  },
-  template: `
-    <form @submit.prevent="updateParam">
-      ${mHead('Scan Pause', 'Delay between file scan iterations (ms)')}
-      <div class="modal-body">
-        <div class="field-group">
-          <label for="edit-db-pause">Pause (ms)</label>
-          <input v-model="editValue" id="edit-db-pause" required type="number" min="1">
-        </div>
-      </div>
-      ${mFoot('Update', 'Updating')}
-    </form>`,
-  mounted: function () {
-  },
-  methods: {
-    updateParam: async function() {
-      try {
-        this.submitPending = true;
-
-        await API.axios({
-          method: 'POST',
-          url: `${API.url()}/api/v1/admin/db/params/pause`,
-          data: { pause: this.editValue }
-        });
-
-        // update frontend data
-        Vue.set(ADMINDATA.dbParams, 'pause', this.editValue);
-  
-        // close & reset the modal
-        modVM.closeModal();
-
-        iziToast.success({
-          title: 'Updated Successfully',
-          position: 'topCenter',
-          timeout: 3500
-        });
-      } catch(err) {
-        iziToast.error({
-          title: 'Update Failed',
-          position: 'topCenter',
-          timeout: 3500
-        });
-      }finally {
-        this.submitPending = false;
-      }
-    }
-  }
-});
-
 const editBootScanView = Vue.component('edit-boot-scan-delay-modal', {
   data() {
     return {
@@ -4729,62 +4661,6 @@ const editBootScanView = Vue.component('edit-boot-scan-delay-modal', {
 
         // update frontend data
         Vue.set(ADMINDATA.dbParams, 'bootScanDelay', this.editValue);
-  
-        // close & reset the modal
-        modVM.closeModal();
-
-        iziToast.success({
-          title: 'Updated Successfully',
-          position: 'topCenter',
-          timeout: 3500
-        });
-      } catch(err) {
-        iziToast.error({
-          title: 'Update Failed',
-          position: 'topCenter',
-          timeout: 3500
-        });
-      }finally {
-        this.submitPending = false;
-      }
-    }
-  }
-});
-
-const editSaveIntervalView = Vue.component('edit-save-interval-modal', {
-  data() {
-    return {
-      params: ADMINDATA.dbParams,
-      submitPending: false,
-      editValue: ADMINDATA.dbParams.saveInterval
-    };
-  },
-  template: `
-    <form @submit.prevent="updateParam">
-      ${mHead('Save Interval', 'Number of files processed between each save')}
-      <div class="modal-body">
-        <div class="field-group">
-          <label for="edit-save-interval">Interval (files)</label>
-          <input v-model="editValue" id="edit-save-interval" required type="number" min="1">
-        </div>
-      </div>
-      ${mFoot('Update', 'Updating')}
-    </form>`,
-  mounted: function () {
-  },
-  methods: {
-    updateParam: async function() {
-      try {
-        this.submitPending = true;
-
-        await API.axios({
-          method: 'POST',
-          url: `${API.url()}/api/v1/admin/db/params/save-interval`,
-          data: { saveInterval: this.editValue }
-        });
-
-        // update frontend data
-        Vue.set(ADMINDATA.dbParams, 'saveInterval', this.editValue);
   
         // close & reset the modal
         modVM.closeModal();
@@ -5314,12 +5190,10 @@ const modVM = new Vue({
     'edit-request-size-modal': editRequestSizeModal,
     'edit-address-modal': editAddressModal,
     'edit-scan-interval-modal': editScanIntervalView,
-    'edit-save-interval-modal': editSaveIntervalView,
     'edit-boot-scan-delay-modal': editBootScanView,
     'edit-transcode-codec-modal': editTranscodeCodecModal,
     'edit-transcode-bitrate-modal': editTranscodeDefaultBitrate,
     'edit-transcode-algorithm-modal': editTranscodeDefaultAlgorithm,
-    'edit-pause-modal': editPauseModal,
     'edit-max-scan-modal': editMaxScanModal,
     'edit-ssl-modal': editSslModal,
     'federation-generate-invite-modal': federationGenerateInvite,
