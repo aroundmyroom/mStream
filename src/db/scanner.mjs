@@ -7,12 +7,16 @@ import Joi from 'joi';
 import sharp from 'sharp';
 import mime from 'mime-types';
 import axios from 'axios';
+import http from 'http';
 import https from 'https';
 
+// Disable keep-alive on both agents: between batch flushes the server-side
+// keep-alive timeout can expire, leaving a stale socket in the pool. When
+// axios reuses that dead socket the next write raises EPIPE. Creating a fresh
+// connection per request is cheap compared to metadata parsing overhead.
 const ax = axios.create({
-  httpsAgent: new https.Agent({  
-    rejectUnauthorized: false
-  })
+  httpAgent:  new http.Agent({  keepAlive: false }),
+  httpsAgent: new https.Agent({ keepAlive: false, rejectUnauthorized: false }),
 });
 
 let loadJson;

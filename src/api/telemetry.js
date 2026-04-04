@@ -1,5 +1,5 @@
 /**
- * Anonymous instance ping — sends { id, version, platform } to the
+ * Anonymous instance ping — sends { id, version, platform, runtime } to the
  * mStream Velvet Cloudflare Worker once at boot (60 s delay) then every 24 h.
  *
  * The instance UUID is generated once and persisted in save/conf/instance-id.
@@ -9,9 +9,19 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import winston from 'winston';
 import * as config from '../state/config.js';
+
+// Detect whether we're running inside a Docker container.
+// Docker always creates /.dockerenv on container startup.
+function _detectRuntime() {
+  try { fs.accessSync('/.dockerenv'); return 'docker'; } catch (_) {}
+  return 'node';
+}
+
+const RUNTIME = _detectRuntime();
 
 const PING_URL   = 'https://mstream-velvet.aroundmyroom.workers.dev/ping';
 const INTERVAL   = 24 * 60 * 60 * 1000; // 24 h
@@ -38,7 +48,7 @@ async function _ping(version) {
   if (config.program.telemetry === false) return;
   try {
     const id = await _getOrCreateId();
-    const body = JSON.stringify({ id, version, platform: os.platform() });
+    const body = JSON.stringify({ id, version, platform: os.platform(), runtime: RUNTIME });
     await fetch(PING_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

@@ -1,16 +1,23 @@
 # mStream Velvet Fork — Combined Change Log
 
-## unreleased
+## v6.3.3-velvet — April 2026
 
-### feat: ffmpeg-bootstrap — SHA256 checksum verification, Windows + macOS support, daily update check
+### feat(radio): smarter library matching + clickable badge
 
-Merged upstream commit `80212fec` improvements into our ffmpeg-bootstrap.js:
+- **Combined FTS5 query** — `primaryArtist + bareTitle` must both match, eliminating false positives where any track by the same artist would trigger the badge regardless of title (e.g. `JAMES HYPE & TITA LAU - DISCONNECTED` now correctly matches `James Hype - Disconnected (Remix)` and no other unrelated James Hype tracks)
+- **Primary artist extraction** strips featured artists (`& / feat / ft / vs / x`) so `JAMES HYPE & TITA LAU` searches as `JAMES HYPE`
+- **Bare title extraction** strips all parenthetical/bracketed suffixes (`(Remix)`, `[Radio Edit]`, …) so all versions match
+- **Candidate chain**: (1) `artist+title` normal order, (2) `artist+title` reversed order, (3) title-only fallback, (4) other half fallback
+- **Clickable badge**: clicking the cylinder icon opens Search pre-filled with the matched query; `stopPropagation` isolates it from the NP modal trigger
+- **CSS**: badge cursor changed to pointer, hover brightness effect added; tooltip updated to "Found in your library — click to search"
 
-- **SHA256 checksum verification**: downloads BtbN's `checksums.sha256` and verifies the archive before extraction — protects against tampered or corrupted downloads
-- **Windows x64 support**: downloads `ffmpeg-master-latest-win64-gpl.zip` and extracts via PowerShell
-- **macOS support**: downloads signed static binaries from `ffmpeg.martin-riedl.de` (both Intel x86_64 and Apple Silicon arm64)
-- **Daily update check**: persists the verified checksum to `.ffmpeg-checksum`, checks BtbN daily and auto-updates if a new build is available; timer uses `unref()` so it never blocks server shutdown
-- **CI test workflow**: added `.github/workflows/test-ffmpeg-bootstrap.yml` — tests download + execution on all four platforms (Linux x64, Linux arm64, Windows x64, macOS) on every velvet tag push and on-demand
+### feat(ffmpeg-bootstrap): SHA256 checksum, Windows/macOS support, daily update check
+
+- SHA256 checksum verification before extraction (BtbN `checksums.sha256`)
+- Windows x64 support via PowerShell extraction
+- macOS support: signed static binaries from `ffmpeg.martin-riedl.de` (x86_64 + arm64)
+- Daily update check with `unref()`'d timer; checksum persisted to `.ffmpeg-checksum`
+- CI workflow: `.github/workflows/test-ffmpeg-bootstrap.yml` — 4-platform matrix on every velvet tag
 
 ---
 

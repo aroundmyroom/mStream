@@ -896,7 +896,8 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .player-artist{font-size:15px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .player-album{font-size:13px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
 .player-radio-np{font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;display:flex;align-items:center;gap:4px;}
-.player-radio-db-badge{display:inline-flex;align-items:center;line-height:1;color:var(--primary);opacity:.75;flex-shrink:0;cursor:default;vertical-align:middle;position:relative;top:2px;}
+.player-radio-db-badge{display:inline-flex;align-items:center;line-height:1;color:var(--primary);opacity:.75;flex-shrink:0;cursor:pointer;vertical-align:middle;position:relative;top:2px;transition:opacity .15s;}
+.player-radio-db-badge:hover{opacity:1;}
 .player-radio-db-badge svg{display:block;}
 .player-title-row{display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;}
 .player-title-row .player-title{flex:0 1 auto;min-width:0;}

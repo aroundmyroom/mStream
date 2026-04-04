@@ -8556,28 +8556,59 @@ function _stopRadioNowPlaying() {
 
 // Build fuzzy search candidates from a raw ICY StreamTitle.
 // Stations use "ARTIST - TITLE" or "TITLE - ARTIST" (either order).
-// Strategy: split on first ' - ', then for each half generate:
-//   1. The half minus any parenthetical text  (e.g. "GET DOWN (RADIO EDIT)" → "GET DOWN")
-//   2. Content inside the first parentheses   (e.g. "BOTA (BADDEST OF THEM ALL)" → "BADDEST OF THEM ALL")
-// All candidates are stripped to alphanumeric + spaces so special chars
-// like & ( ) . never reach the FTS5 query parser.
+//
+// Key principle: when there is a " - " separator we build a COMBINED query
+// (primary artist + bare title) so FTS5 must match BOTH sides.  This prevents
+// a false positive when e.g. only the artist half matches any random track.
+//
+// Candidate order:
+//   1. primaryArtist(left) + bareTitle(right)  — "james hype disconnected"
+//   2. primaryArtist(right) + bareTitle(left)  — reversed-order stations
+//   3. bareTitle(right) alone                  — title-only fallback
+//   4. bareTitle(left) alone                   — title-only fallback (reversed)
+//
+// Primary artist: first name before & , feat / ft / vs / x separators.
+// Bare title: strip ALL parenthetical/bracketed blocks (Remix, Radio Edit, …).
+// All candidates use alphanumeric+space only so special chars never reach FTS5.
 function _buildRadioSearchCandidates(raw) {
-  const clean = s => s.replace(/[^a-zA-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const clean      = s => s.replace(/[^a-zA-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const bareTitle  = s => clean(s.replace(/\s*\([^)]*\)/g, '').replace(/\s*\[[^\]]*\]/g, ''));
+  const primaryArtist = s => clean(s.split(/\s*[&,]\s*|\s+(?:feat|ft|vs|x)\.?\s+/i)[0]);
+
   const dashIdx = raw.indexOf(' - ');
-  const parts = dashIdx > 0 ? [raw.slice(0, dashIdx), raw.slice(dashIdx + 3)] : [raw];
-  const candidates = [];
-  for (const part of parts) {
-    const stripped = clean(part.replace(/\([^)]*\)/g, ''));
-    if (stripped.length > 2) candidates.push(stripped);
-    const m = part.match(/\(([^)]+)\)/);
-    if (m) {
-      const inside = clean(m[1]);
-      if (inside.length > 2) candidates.push(inside);
-    }
+  if (dashIdx > 0) {
+    const left  = raw.slice(0, dashIdx).trim();
+    const right = raw.slice(dashIdx + 3).trim();
+
+    const seen = new Set();
+    const cands = [];
+    const push = c => {
+      const k = c.toLowerCase();
+      if (c.length > 2 && !seen.has(k)) { seen.add(k); cands.push(c); }
+    };
+
+    const artL = primaryArtist(left);   // "JAMES HYPE"  (& TITA LAU stripped)
+    const titR = bareTitle(right);      // "DISCONNECTED" ((Remix) stripped)
+    const artR = primaryArtist(right);  // handles reversed "TITLE - ARTIST" stations
+    const titL = bareTitle(left);
+
+    // Combined queries — FTS5 must find all tokens across any indexed field
+    if (artL && titR) push(`${artL} ${titR}`);   // normal order
+    if (artR && titL) push(`${artR} ${titL}`);   // reversed order
+    // Title-alone fallbacks (handles tracks with no/different artist metadata in DB)
+    if (titR) push(titR);
+    if (titL && titL !== titR) push(titL);
+
+    return cands;
   }
-  // deduplicate (case-insensitive), preserve order
-  const seen = new Set();
-  return candidates.filter(c => { const k = c.toLowerCase(); return seen.has(k) ? false : seen.add(k); });
+
+  // No " - " separator — whole string (stripped of parens) + parenthetical content
+  const cands = [];
+  const whole = bareTitle(raw);
+  if (whole.length > 2) cands.push(whole);
+  const m = raw.match(/\(([^)]+)\)/);
+  if (m) { const inside = clean(m[1]); if (inside.length > 2 && inside !== whole) cands.push(inside); }
+  return cands;
 }
 
 async function _pollRadioNowPlaying(station) {
@@ -8607,14 +8638,18 @@ async function _pollRadioNowPlaying(station) {
           _radioDbLookupTimer = setTimeout(async () => { // 3 s delay
             try {
               let found = false;
+              let matchedQuery = null;
               for (const q of candidates) {
                 if (found) break;
                 const res = await api('POST', 'api/v1/db/search', { search: q, noArtists: true, noAlbums: true, noFiles: true });
-                if (res.title?.length > 0) found = true;
+                if (res.title?.length > 0) { found = true; matchedQuery = q; }
               }
               if (found && _radioNpLastText === newText) {
                 const b = document.getElementById('player-radio-db-badge');
-                if (b) b.classList.remove('hidden');
+                if (b) {
+                  b.classList.remove('hidden');
+                  b.dataset.searchQuery = matchedQuery || (data.title || '').trim();
+                }
               }
             } catch(_) {}
           }, 3000);
@@ -11811,6 +11846,15 @@ document.getElementById('dj-light').addEventListener('click', () => {
 
 // Back button
 document.getElementById('back-btn').addEventListener('click', () => S.backFn?.());
+
+// Radio "found in library" badge — click to open search pre-filled with track title
+document.getElementById('player-radio-db-badge').addEventListener('click', e => {
+  e.stopPropagation(); // badge is inside #np-open-btn — prevent NP modal from opening
+  const q = document.getElementById('player-radio-db-badge').dataset.searchQuery || '';
+  if (!q) return;
+  S.lastSearch = q;
+  viewSearch();
+});
 
 // Player controls
 document.getElementById('play-btn').addEventListener('click', () => Player.toggle());

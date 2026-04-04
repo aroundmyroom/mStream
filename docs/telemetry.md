@@ -13,7 +13,8 @@ Once at startup (after a 60-second delay) and then once every 24 hours, mStream 
   "id": "a3b4c5d6-e7f8-...",
   "version": "5.16.29-velvet",
   "platform": "linux",
-  "lastSeen": 1774595289943
+  "runtime": "docker",
+  "lastSeen": "2026-04-04T12:34:49.943Z"
 }
 ```
 
@@ -22,7 +23,8 @@ Once at startup (after a 60-second delay) and then once every 24 hours, mStream 
 | `id` | A random UUID generated once on first boot and stored in `save/conf/instance-id`. Not linked to any user or system identity. |
 | `version` | The mStream Velvet version string from `package.json`. |
 | `platform` | The result of `os.platform()` — e.g. `linux`, `darwin`, `win32`. |
-| `lastSeen` | Unix timestamp (ms) of the ping time, added server-side. |
+| `runtime` | `"docker"` if running inside a Docker container (detected via `/.dockerenv`), otherwise `"node"`. |
+| `lastSeen` | ISO 8601 timestamp of the ping time, added server-side by the Cloudflare Worker. |
 
 **Nothing else is collected.** No IP addresses, no usernames, no file paths, no media library contents, no playback history.
 
