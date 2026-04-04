@@ -1,5 +1,19 @@
 # mStream Velvet Fork — Combined Change Log
 
+## unreleased
+
+### feat: ffmpeg-bootstrap — SHA256 checksum verification, Windows + macOS support, daily update check
+
+Merged upstream commit `80212fec` improvements into our ffmpeg-bootstrap.js:
+
+- **SHA256 checksum verification**: downloads BtbN's `checksums.sha256` and verifies the archive before extraction — protects against tampered or corrupted downloads
+- **Windows x64 support**: downloads `ffmpeg-master-latest-win64-gpl.zip` and extracts via PowerShell
+- **macOS support**: downloads signed static binaries from `ffmpeg.martin-riedl.de` (both Intel x86_64 and Apple Silicon arm64)
+- **Daily update check**: persists the verified checksum to `.ffmpeg-checksum`, checks BtbN daily and auto-updates if a new build is available; timer uses `unref()` so it never blocks server shutdown
+- **CI test workflow**: added `.github/workflows/test-ffmpeg-bootstrap.yml` — tests download + execution on all four platforms (Linux x64, Linux arm64, Windows x64, macOS) on every velvet tag push and on-demand
+
+---
+
 ## v6.3.2-velvet — April 2026
 
 ### ci: Mea Culpa release — CI/CD and git hygiene fixes
