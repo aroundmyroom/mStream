@@ -1,5 +1,18 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.3.2-velvet — April 2026
+
+### ci: Mea Culpa release — CI/CD and git hygiene fixes
+
+- Fixed Trivy SARIF duplicate category error causing Docker builds to fail (`category: trivy-fs` / `category: trivy-image`)
+- Disabled Electron build workflow (velvet is server-only, Electron not published)
+- Scrubbed `save/db/default.json` from entire git history (contained secrets)
+- Added `save/db/*.json` and `save/db/*.sqlite` to `.gitignore`
+- Rebased master onto `upstream/sqlite` baseline (0 commits behind)
+- Cleaned up all stale remote branches
+
+---
+
 ## v6.3.1-velvet — April 2026
 
 ### fix: Server Remote — three bugs in /server-remote after initial release
