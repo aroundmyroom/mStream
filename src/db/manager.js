@@ -39,37 +39,72 @@ export function saveShareDB() { backend.saveShareDB(); }
 
 // File Operations
 export function findFileByPath(filepath, vpath) { return backend.findFileByPath(filepath, vpath); }
+export function findFilesByPaths(filepaths, vpath) { return backend.findFilesByPaths(filepaths, vpath); }
 export function updateFileScanId(file, scanId) { return backend.updateFileScanId(file, scanId); }
+export function batchUpdateScanIds(filepaths, vpath, scanId) { return backend.batchUpdateScanIds(filepaths, vpath, scanId); }
 export function insertFile(fileData) { return backend.insertFile(fileData); }
+export function beginTransaction() { if (backend.beginTransaction) backend.beginTransaction(); }
+export function commitTransaction() { if (backend.commitTransaction) backend.commitTransaction(); }
+export function vacuumInto(destPath) { if (backend.vacuumInto) backend.vacuumInto(destPath); }
 export function removeFileByPath(filepath, vpath) { return backend.removeFileByPath(filepath, vpath); }
+export function getLiveArtFilenames() { return backend.getLiveArtFilenames(); }
+export function getLiveHashes() { return backend.getLiveHashes(); }
+export function getStaleFileHashes(vpath, scanId) { return backend.getStaleFileHashes(vpath, scanId); }
 export function removeStaleFiles(vpath, scanId) { return backend.removeStaleFiles(vpath, scanId); }
 export function removeFilesByVpath(vpath) { return backend.removeFilesByVpath(vpath); }
 export function countFilesByVpath(vpath) { return backend.countFilesByVpath(vpath); }
+export function getStats() { return backend.getStats(); }
+export function getLastScannedMs() { return backend.getLastScannedMs(); }
+export function rebuildFolderIndex() { if (backend.rebuildFolderIndex) backend.rebuildFolderIndex(); }
+export function rebuildArtistIndex() { if (backend.rebuildArtistIndex) backend.rebuildArtistIndex(); }
 
 // Metadata Queries
+export function updateFileArt(filepath, vpath, aaFile, scanId, artSource) { return backend.updateFileArt(filepath, vpath, aaFile, scanId, artSource); }
+export function countArtUsage(aaFile) { return backend.countArtUsage(aaFile); }
+export function updateFileCue(filepath, vpath, cuepoints) { return backend.updateFileCue(filepath, vpath, cuepoints); }
+export function updateFileDuration(filepath, vpath, duration) { return backend.updateFileDuration(filepath, vpath, duration); }
+export function getFileDuration(filepath) { return backend.getFileDuration(filepath); }
+export function updateFileTags(filepath, vpath, tags) { return backend.updateFileTags(filepath, vpath, tags); }
 export function getFileWithMetadata(filepath, vpath, username) { return backend.getFileWithMetadata(filepath, vpath, username); }
-export function getArtists(vpaths, ignoreVPaths) { return backend.getArtists(vpaths, ignoreVPaths); }
-export function getArtistAlbums(artist, vpaths, ignoreVPaths) { return backend.getArtistAlbums(artist, vpaths, ignoreVPaths); }
-export function getAlbums(vpaths, ignoreVPaths) { return backend.getAlbums(vpaths, ignoreVPaths); }
+export function getArtists(vpaths, ignoreVPaths, excludeFilepathPrefixes) { return backend.getArtists(vpaths, ignoreVPaths, excludeFilepathPrefixes); }
+export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) { return backend.getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes); }
+export function getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) { return backend.getArtistAlbumsMulti ? backend.getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) : []; }
+export function getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) { return backend.getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes); }
 export function getAlbumSongs(album, vpaths, username, opts) { return backend.getAlbumSongs(album, vpaths, username, opts); }
-export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths) { return backend.searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths); }
+export function getFilesForAlbumsBrowse(sources) { return backend.getFilesForAlbumsBrowse ? backend.getFilesForAlbumsBrowse(sources) : []; }
+export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
+export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
+export function searchFolders(query, vpaths, ignoreVPaths) { return backend.searchFolders ? backend.searchFolders(query, vpaths, ignoreVPaths) : []; }
+export function searchArtistsNormalized(query, vpaths, ignoreVPaths) { return backend.searchArtistsNormalized ? backend.searchArtistsNormalized(query, vpaths, ignoreVPaths) : []; }
 export function getRatedSongs(vpaths, username, ignoreVPaths) { return backend.getRatedSongs(vpaths, username, ignoreVPaths); }
-export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths) { return backend.getRecentlyAdded(vpaths, username, limit, ignoreVPaths); }
-export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths) { return backend.getRecentlyPlayed(vpaths, username, limit, ignoreVPaths); }
-export function getMostPlayed(vpaths, username, limit, ignoreVPaths) { return backend.getMostPlayed(vpaths, username, limit, ignoreVPaths); }
+export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts); }
+export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts); }
+export function getMostPlayed(vpaths, username, limit, ignoreVPaths, opts) { return backend.getMostPlayed(vpaths, username, limit, ignoreVPaths, opts); }
 export function getAllFilesWithMetadata(vpaths, username, opts) { return backend.getAllFilesWithMetadata(vpaths, username, opts); }
+export function countFilesForRandom(vpaths, username, opts) { return backend.countFilesForRandom(vpaths, username, opts); }
+export function pickFileAtOffset(vpaths, username, opts, offset) { return backend.pickFileAtOffset(vpaths, username, opts, offset); }
+export function getGenres(vpaths, ignoreVPaths, opts) { return backend.getGenres(vpaths, ignoreVPaths, opts); }
+export function getSongsByGenre(genre, vpaths, username, ignoreVPaths, opts) { return backend.getSongsByGenre(genre, vpaths, username, ignoreVPaths, opts); }
+export function getSongsByGenreRaw(rawGenres, vpaths, username, ignoreVPaths) { return backend.getSongsByGenreRaw(rawGenres, vpaths, username, ignoreVPaths); }
+export function getDecades(vpaths, ignoreVPaths) { return backend.getDecades(vpaths, ignoreVPaths); }
+export function getAlbumsByDecade(decade, vpaths, ignoreVPaths, excludeFilepathPrefixes) { return backend.getAlbumsByDecade(decade, vpaths, ignoreVPaths, excludeFilepathPrefixes); }
+export function getSongsByDecade(decade, vpaths, username, ignoreVPaths) { return backend.getSongsByDecade(decade, vpaths, username, ignoreVPaths); }
+export function getAlbumsByGenre(rawGenres, vpaths, ignoreVPaths, excludeFilepathPrefixes) { return backend.getAlbumsByGenre(rawGenres, vpaths, ignoreVPaths, excludeFilepathPrefixes); }
 
 // User Metadata
 export function findUserMetadata(hash, username) { return backend.findUserMetadata(hash, username); }
 export function insertUserMetadata(obj) { return backend.insertUserMetadata(obj); }
 export function updateUserMetadata(obj) { return backend.updateUserMetadata(obj); }
 export function removeUserMetadataByUser(username) { return backend.removeUserMetadataByUser(username); }
+export function resetPlayCounts(username) { return backend.resetPlayCounts(username); }
+export function resetRecentlyPlayed(username) { return backend.resetRecentlyPlayed(username); }
 
 // Playlists
 export function getUserPlaylists(username) { return backend.getUserPlaylists(username); }
 export function findPlaylist(username, playlistName) { return backend.findPlaylist(username, playlistName); }
 export function createPlaylistEntry(entry) { return backend.createPlaylistEntry(entry); }
 export function deletePlaylist(username, playlistName) { return backend.deletePlaylist(username, playlistName); }
+export function renamePlaylist(username, oldName, newName) { return backend.renamePlaylist(username, oldName, newName); }
 export function getPlaylistEntryById(id) { return backend.getPlaylistEntryById(id); }
 export function removePlaylistEntryById(id) { return backend.removePlaylistEntryById(id); }
 export function loadPlaylistEntries(username, playlistName) { return backend.loadPlaylistEntries(username, playlistName); }
@@ -83,3 +118,96 @@ export function removeSharedPlaylistById(playlistId) { return backend.removeShar
 export function removeExpiredSharedPlaylists() { return backend.removeExpiredSharedPlaylists(); }
 export function removeEternalSharedPlaylists() { return backend.removeEternalSharedPlaylists(); }
 export function removeSharedPlaylistsByUser(username) { return backend.removeSharedPlaylistsByUser(username); }
+// Scan Error Audit
+export function insertScanError(guid, filepath, vpath, errorType, errorMsg, stack) { return backend.insertScanError(guid, filepath, vpath, errorType, errorMsg, stack); }
+export function getScanErrors(limit) { return backend.getScanErrors(limit); }
+export function getScanErrorByGuid(guid) { return backend.getScanErrorByGuid(guid); }
+export function clearScanErrors() { return backend.clearScanErrors(); }
+export function pruneScanErrors(retentionHours) { return backend.pruneScanErrors(retentionHours); }
+export function clearResolvedErrors(vpath, scanStartTs) { return backend.clearResolvedErrors(vpath, scanStartTs); }
+export function getScanErrorCount() { return backend.getScanErrorCount(); }
+export function markScanErrorFixed(guid, fixAction) { return backend.markScanErrorFixed(guid, fixAction); }
+export function confirmScanErrorOk(filepath, vpath) { return backend.confirmScanErrorOk(filepath, vpath); }
+export function markFileArtChecked(filepath, vpath) { return backend.markFileArtChecked(filepath, vpath); }
+export function markFileCueChecked(filepath, vpath) { return backend.markFileCueChecked(filepath, vpath); }
+
+// Subsonic queries
+export function getFilesByArtistId(artistId, vpaths, username, opts) { return backend.getFilesByArtistId(artistId, vpaths, username, opts); }
+export function getFilesByAlbumId(albumId, vpaths, username, opts) { return backend.getFilesByAlbumId(albumId, vpaths, username, opts); }
+export function getSongByHash(hash, username) { return backend.getSongByHash(hash, username); }
+export function getAaFileById(id) { return backend.getAaFileById(id); }
+export function getAaFileForDir(vpath, dirRelPath) { return backend.getAaFileForDir(vpath, dirRelPath); }
+export function clearAaFileForDirCache() { if (backend.clearAaFileForDirCache) backend.clearAaFileForDirCache(); }
+export function getStarredSongs(vpaths, username, opts) { return backend.getStarredSongs(vpaths, username, opts); }
+export function getStarredAlbums(vpaths, username, opts) { return backend.getStarredAlbums(vpaths, username, opts); }
+export function setStarred(hash, username, starred) { return backend.setStarred(hash, username, starred); }
+export function getRandomSongs(vpaths, username, opts) { return backend.getRandomSongs(vpaths, username, opts); }
+export function getAlbumsByArtistId(artistId, vpaths, opts) { return backend.getAlbumsByArtistId(artistId, vpaths, opts); }
+export function getAllAlbumIds(vpaths, opts) { return backend.getAllAlbumIds(vpaths, opts); }
+export function getAllArtistIds(vpaths, opts) { return backend.getAllArtistIds(vpaths, opts); }
+export function getDirectoryContents(vpath, dirRelPath, username) { return backend.getDirectoryContents(vpath, dirRelPath, username); }
+// User settings sync
+export function getUserSettings(username) { return backend.getUserSettings(username); }
+export function saveUserSettings(username, patch) { return backend.saveUserSettings(username, patch); }
+// Radio stations
+export function getRadioStations(username) { return backend.getRadioStations(username); }
+// Radio schedules
+export function getRadioSchedules(username) { return backend.getRadioSchedules(username); }
+export function createRadioSchedule(data) { return backend.createRadioSchedule(data); }
+export function deleteRadioSchedule(id, username) { return backend.deleteRadioSchedule(id, username); }
+export function toggleRadioSchedule(id, username, enabled) { return backend.toggleRadioSchedule(id, username, enabled); }
+export function toggleRadioScheduleById(id, enabled) { return backend.toggleRadioScheduleById(id, enabled); }
+export function getAllEnabledRadioSchedules() { return backend.getAllEnabledRadioSchedules(); }
+export function createRadioStation(username, data) { return backend.createRadioStation(username, data); }
+export function updateRadioStation(id, username, data) { return backend.updateRadioStation(id, username, data); }
+export function deleteRadioStation(id, username) { return backend.deleteRadioStation(id, username); }
+export function getRadioStationImgUsageCount(img) { return backend.getRadioStationImgUsageCount(img); }
+export function reorderRadioStations(username, orderedIds) { return backend.reorderRadioStations(username, orderedIds); }
+// Podcast feeds
+export function getPodcastFeeds(username) { return backend.getPodcastFeeds(username); }
+export function getPodcastFeed(id, username) { return backend.getPodcastFeed(id, username); }
+export function createPodcastFeed(username, data) { return backend.createPodcastFeed(username, data); }
+export function deletePodcastFeed(id, username) { return backend.deletePodcastFeed(id, username); }
+export function updatePodcastFeedFetched(id, username, ts) { return backend.updatePodcastFeedFetched(id, username, ts); }
+export function updatePodcastFeedTitle(id, username, title) { return backend.updatePodcastFeedTitle(id, username, title); }
+export function updatePodcastFeedImg(id, username, img) { return backend.updatePodcastFeedImg(id, username, img); }
+export function updatePodcastFeedUrl(id, username, url) { return backend.updatePodcastFeedUrl(id, username, url); }
+export function reorderPodcastFeeds(username, orderedIds) { return backend.reorderPodcastFeeds(username, orderedIds); }
+export function getPodcastFeedImgUsageCount(img) { return backend.getPodcastFeedImgUsageCount(img); }
+// Podcast episodes
+export function getPodcastEpisode(id) { return backend.getPodcastEpisode(id); }
+export function getPodcastEpisodes(feedId) { return backend.getPodcastEpisodes(feedId); }
+export function upsertPodcastEpisodes(feedId, episodes) { return backend.upsertPodcastEpisodes(feedId, episodes); }
+export function saveEpisodeProgress(episodeId, feedId, position, played) { return backend.saveEpisodeProgress(episodeId, feedId, position, played); }
+// Smart Playlists
+export function runSmartPlaylist(filters, sort, limitN, vpaths, username, ignoreVPaths, filepathPrefix) { return backend.runSmartPlaylist(filters, sort, limitN, vpaths, username, ignoreVPaths, filepathPrefix); }
+export function countSmartPlaylist(filters, vpaths, username, ignoreVPaths, filepathPrefix) { return backend.countSmartPlaylist(filters, vpaths, username, ignoreVPaths, filepathPrefix); }
+export function getSmartPlaylists(username) { return backend.getSmartPlaylists(username); }
+export function getSmartPlaylist(id, username) { return backend.getSmartPlaylist(id, username); }
+export function saveSmartPlaylist(username, name, filters, sort, limitN) { return backend.saveSmartPlaylist(username, name, filters, sort, limitN); }
+export function updateSmartPlaylist(id, username, data) { return backend.updateSmartPlaylist(id, username, data); }
+export function deleteSmartPlaylist(id, username) { return backend.deleteSmartPlaylist(id, username); }
+// Genre Groups
+export function getGenreGroups() { return backend.getGenreGroups(); }
+export function saveGenreGroups(groups) { return backend.saveGenreGroups(groups); }
+// Wrapped / Play Events
+export function insertPlayEvent(e) { return backend.insertPlayEvent(e); }
+export function getPlayEventById(id, userId) { return backend.getPlayEventById(id, userId); }
+export function hasPlayEventBefore(userId, hash, beforeMs) { return backend.hasPlayEventBefore(userId, hash, beforeMs); }
+export function updatePlayEvent(id, userId, fields) { return backend.updatePlayEvent(id, userId, fields); }
+export function incrementPauseCount(id, userId) { return backend.incrementPauseCount(id, userId); }
+export function upsertListeningSession(s) { return backend.upsertListeningSession(s); }
+export function updateListeningSession(sid, uid, fields) { return backend.updateListeningSession(sid, uid, fields); }
+export function getWrappedPeriods(userId) { return backend.getWrappedPeriods(userId); }
+export function getWrappedDataInRange(userId, from, to) { return backend.getWrappedDataInRange(userId, from, to); }
+export function getWrappedSessionsInRange(userId, from, to) { return backend.getWrappedSessionsInRange(userId, from, to); }
+export function getTotalFileCount(vpaths) { return backend.getTotalFileCount(vpaths); }
+export function getWrappedAdminStats() { return backend.getWrappedAdminStats(); }
+export function purgePlayEvents(userId, beforeMs) { return backend.purgePlayEvents(userId, beforeMs); }
+// Radio / Podcast Play Events
+export function insertRadioPlayEvent(e) { return backend.insertRadioPlayEvent(e); }
+export function updateRadioPlayEvent(id, userId, fields) { return backend.updateRadioPlayEvent(id, userId, fields); }
+export function getRadioStatsInRange(userId, from, to) { return backend.getRadioStatsInRange(userId, from, to); }
+export function insertPodcastPlayEvent(e) { return backend.insertPodcastPlayEvent(e); }
+export function updatePodcastPlayEvent(id, userId, fields) { return backend.updatePodcastPlayEvent(id, userId, fields); }
+export function getPodcastStatsInRange(userId, from, to) { return backend.getPodcastStatsInRange(userId, from, to); }

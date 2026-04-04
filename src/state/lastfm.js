@@ -1,7 +1,7 @@
 // Scrobbler code shamelessly stolen from
 // https://github.com/dittodhole/node-scribble-js
 
-import http from 'http';
+import https from 'https';
 import crypto from 'crypto';
 import querystring from 'querystring';
 
@@ -13,6 +13,14 @@ Scribble.prototype.addUser = function (username, password) {
   this.users[username] = {
     password: password,
     sessionKey: null
+  }
+}
+
+// Restore a user from a persisted session key — password never stored
+Scribble.prototype.addUserWithSession = function (username, sessionKey) {
+  this.users[username] = {
+    password: null,
+    sessionKey: sessionKey
   }
 }
 
@@ -79,7 +87,7 @@ Scribble.prototype.MakeSession = function (username, callback) {
 }
 
 Scribble.prototype.GetArtistInfo = function (artist, callback) {
-  const path = '/2.0/?method=artist.getInfo&artist=' + artist + '&api_key=' + this.apiKey + '&format=json'
+  const path = '/2.0/?method=artist.getInfo&artist=' + encodeURIComponent(artist) + '&api_key=' + this.apiKey + '&format=json'
   sendGet(path, function (ret) {
     if (typeof (callback) === 'function')
       {callback(ret)}
@@ -88,7 +96,7 @@ Scribble.prototype.GetArtistInfo = function (artist, callback) {
 
 Scribble.prototype.GetSimilarArtists = function (artist, callback, limit) {
   const amt = limit || 50;
-  const path = '/2.0/?method=artist.getSimilar&artist=' + artist + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
+  const path = '/2.0/?method=artist.getSimilar&artist=' + encodeURIComponent(artist) + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
   sendGet(path, function (ret) {
     if (typeof (callback) === 'function')
       {callback(ret)}
@@ -97,7 +105,7 @@ Scribble.prototype.GetSimilarArtists = function (artist, callback, limit) {
 
 Scribble.prototype.GetArtistEvents = function (artist, callback, limit) {
   const amt = limit || 50;
-  const path = '/2.0/?method=artist.getevents&artist=' + artist + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
+  const path = '/2.0/?method=artist.getevents&artist=' + encodeURIComponent(artist) + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
   sendGet(path, function (ret) {
     if (typeof (callback) === 'function')
       {callback(ret)}
@@ -106,7 +114,7 @@ Scribble.prototype.GetArtistEvents = function (artist, callback, limit) {
 
 Scribble.prototype.GetArtistTopAlbums = function (artist, callback, limit) {
   const amt = limit || 50;
-  const path = '/2.0/?method=artist.gettopalbums&artist=' + artist + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
+  const path = '/2.0/?method=artist.gettopalbums&artist=' + encodeURIComponent(artist) + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
   sendGet(path, function (ret) {
     if (typeof (callback) === 'function')
       {callback(ret)}
@@ -115,7 +123,7 @@ Scribble.prototype.GetArtistTopAlbums = function (artist, callback, limit) {
 
 Scribble.prototype.GetArtistTopTracks = function (artist, callback, limit) {
   const amt = limit || 50;
-  const path = '/2.0/?method=artist.gettoptracks&artist=' + artist + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
+  const path = '/2.0/?method=artist.gettoptracks&artist=' + encodeURIComponent(artist) + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
   sendGet(path, function (ret) {
     if (typeof (callback) === 'function')
       {callback(ret)}
@@ -124,7 +132,7 @@ Scribble.prototype.GetArtistTopTracks = function (artist, callback, limit) {
 
 Scribble.prototype.GetSimilarSongs = function (song, callback, limit) {
   const amt = limit || 50;
-  const path = '/2.0/?method=track.getSimilar&artist=' + song.artist + '&track=' + song.track + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
+  const path = '/2.0/?method=track.getSimilar&artist=' + encodeURIComponent(song.artist) + '&track=' + encodeURIComponent(song.track) + '&api_key=' + this.apiKey + '&format=json&limit=' + amt
   sendGet(path, function (ret) {
     if (typeof (callback) === 'function')
       {callback(ret)}
@@ -211,10 +219,10 @@ function sendPost(data, callback) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
-      'Content-Length': data.length
+      'Content-Length': Buffer.byteLength(data)
     }
   }
-    , doPOST = http.request(options, function (request) {
+    , doPOST = https.request(options, function (request) {
       let reqReturn = ''
       request.setEncoding('utf8')
       request.on('data', function (chunk) {
@@ -225,7 +233,7 @@ function sendPost(data, callback) {
           {callback(reqReturn)}
       })
     }).on('error', function (_err) {
-      // TODO
+      if (typeof (callback) === 'function') { callback(null); }
     })
   doPOST.write(data)
   doPOST.end()
@@ -235,31 +243,24 @@ function sendGet(path, callback) {
   let response = '';
   const apiCall = {
       host: 'ws.audioscrobbler.com',
-      port: 80,
       path: path
     }
-  http.get(apiCall, function (res) {
+  https.get(apiCall, function (res) {
     res.on('data', function (chunk) {
-      try {
-        response += chunk
-      } catch (_err) {
-        // TODO
-      }
+      response += chunk;
     })
     res.on('end', function () {
       try {
         const ret = JSON.parse(response)
-        //var ret = response
-        if (typeof (callback) === 'function')
-          {callback(ret)}
-      } catch (err) {
-        // TODO
-        console.log(err)
-        console.log('[INVALID RETURN] the return was invalid JSON: ' + err)
+        if (typeof (callback) === 'function') { callback(ret); }
+      } catch (_err) {
+        console.warn('[lastfm] non-JSON response from Last.fm API');
+        if (typeof (callback) === 'function') { callback(null); }
       }
     })
   }).on('error', function (err) {
-    console.log(err.message)
+    console.warn('[lastfm] network error:', err.message);
+    if (typeof (callback) === 'function') { callback(null); }
   })
 }
 

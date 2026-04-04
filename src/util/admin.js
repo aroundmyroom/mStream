@@ -21,7 +21,7 @@ export function saveFile(saveData, file) {
   return fs.writeFile(file, JSON.stringify(saveData, null, 2), 'utf8');
 }
 
-export async function addDirectory(directory, vpath, autoAccess, isAudioBooks, mstream) {
+export async function addDirectory(directory, vpath, autoAccess, isAudioBooks, mstream, isRecording = false, allowRecordDelete = false, isYoutube = false) {
   // confirm directory is real
   const stat = await fs.stat(directory);
   if (!stat.isDirectory()) { throw new Error(`${directory} is not a directory`); }
@@ -34,6 +34,16 @@ export async function addDirectory(directory, vpath, autoAccess, isAudioBooks, m
   const memClone = JSON.parse(JSON.stringify(config.program.folders));
   memClone[vpath] = { root: directory };
   if (isAudioBooks) { memClone[vpath].type = 'audio-books'; }
+  if (isRecording) {
+    memClone[vpath].type = 'recordings';
+  }
+  // Only use 'youtube' type when youtube-only (not combined with radio recordings)
+  if (isYoutube && !isRecording) {
+    memClone[vpath].type = 'youtube';
+  }
+  if ((isRecording || isYoutube) && allowRecordDelete) {
+    memClone[vpath].allowRecordDelete = true;
+  }
 
   // add directory to config file
   const loadConfig = await loadFile(config.configFile);
@@ -154,6 +164,19 @@ export async function editUserPassword(username, password) {
   config.program.users[username].salt = hash.salt;
 }
 
+export async function editSubsonicPassword(username, password) {
+  if (!config.program.users[username]) { throw new Error(`'${username}' does not exist`); }
+
+  const memClone = JSON.parse(JSON.stringify(config.program.users));
+  memClone[username]['subsonic-password'] = password;
+
+  const loadConfig = await loadFile(config.configFile);
+  loadConfig.users = memClone;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.users[username]['subsonic-password'] = password;
+}
+
 export async function editUserVPaths(username, vpaths) {
   if (!config.program.users[username]) { throw new Error(`'${username}' does not exist`); }
 
@@ -178,6 +201,21 @@ export async function editUserAccess(username, admin) {
   await saveFile(loadConfig, config.configFile);
 
   config.program.users[username].admin = admin;
+}
+
+export async function setUserLastFM(username, lastfmUser, lastfmPassword) {
+  if (!config.program.users[username]) { throw new Error(`'${username}' does not exist`); }
+
+  const memClone = JSON.parse(JSON.stringify(config.program.users));
+  memClone[username]['lastfm-user'] = lastfmUser;
+  memClone[username]['lastfm-password'] = lastfmPassword;
+
+  const loadConfig = await loadFile(config.configFile);
+  loadConfig.users = memClone;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.users[username]['lastfm-user'] = lastfmUser;
+  config.program.users[username]['lastfm-password'] = lastfmPassword;
 }
 
 export async function editPort(port) {
@@ -248,15 +286,6 @@ export async function editScanInterval(val) {
   dbQueue.resetScanInterval();
 }
 
-export async function editSaveInterval(val) {
-  const loadConfig = await loadFile(config.configFile);
-  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
-  loadConfig.scanOptions.saveInterval = val;
-  await saveFile(loadConfig, config.configFile);
-
-  config.program.scanOptions.saveInterval = val;
-}
-
 export async function editSkipImg(val) {
   const loadConfig = await loadFile(config.configFile);
   if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
@@ -264,15 +293,6 @@ export async function editSkipImg(val) {
   await saveFile(loadConfig, config.configFile);
 
   config.program.scanOptions.skipImg = val;
-}
-
-export async function editPause(val) {
-  const loadConfig = await loadFile(config.configFile);
-  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
-  loadConfig.scanOptions.pause = val;
-  await saveFile(loadConfig, config.configFile);
-
-  config.program.scanOptions.pause = val;
 }
 
 export async function editBootScanDelay(val) {
@@ -300,6 +320,60 @@ export async function editCompressImages(val) {
   await saveFile(loadConfig, config.configFile);
 
   config.program.scanOptions.compressImage = val;
+}
+
+export async function editAllowId3Edit(val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
+  loadConfig.scanOptions.allowId3Edit = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.scanOptions.allowId3Edit = val;
+}
+
+export async function editMaxRecordingMinutes(val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
+  loadConfig.scanOptions.maxRecordingMinutes = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.scanOptions.maxRecordingMinutes = val;
+}
+
+export async function editMaxZipMb(val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
+  loadConfig.scanOptions.maxZipMb = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.scanOptions.maxZipMb = val;
+}
+
+export async function editAllowRadioRecording(username, val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.users || !loadConfig.users[username]) { throw new Error(`User '${username}' not found`); }
+  loadConfig.users[username]['allow-radio-recording'] = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.users[username]['allow-radio-recording'] = val;
+}
+
+export async function editAllowYoutubeDownload(username, val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.users || !loadConfig.users[username]) { throw new Error(`User '${username}' not found`); }
+  loadConfig.users[username]['allow-youtube-download'] = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.users[username]['allow-youtube-download'] = val;
+}
+
+export async function editScanErrorRetention(hours) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
+  loadConfig.scanOptions.scanErrorRetentionHours = hours;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.scanOptions.scanErrorRetentionHours = hours;
 }
 
 export async function editWriteLogs(val) {

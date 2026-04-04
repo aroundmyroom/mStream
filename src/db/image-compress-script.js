@@ -1,4 +1,4 @@
-import { Jimp } from 'jimp';
+import sharp from 'sharp';
 import Joi from 'joi';
 import fs from 'fs/promises';
 import path from 'path';
@@ -45,9 +45,8 @@ async function run() {
       if (!mimeType.startsWith('image')) { continue; }
       if (file.startsWith('zs-') || file.startsWith('zl-') || file.startsWith('zm-')) { continue; }
 
-      const img = await Jimp.read(filepath);
-      await img.scaleToFit({ w: 256, h: 256 }).write(path.join(loadJson.albumArtDirectory, 'zl-' + file));
-      await img.scaleToFit({ w: 92, h: 92 }).write(path.join(loadJson.albumArtDirectory, 'zs-' + file));
+      await sharp(filepath).resize(256, 256, { fit: 'inside', withoutEnlargement: true }).toFile(path.join(loadJson.albumArtDirectory, 'zl-' + file));
+      await sharp(filepath).resize(92, 92, { fit: 'inside', withoutEnlargement: true }).toFile(path.join(loadJson.albumArtDirectory, 'zs-' + file));
     } catch (error) {
       console.log('error on file: ' + filepath);
       console.error(error);

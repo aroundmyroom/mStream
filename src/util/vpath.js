@@ -17,10 +17,19 @@ export function getVPathInfo(url, user) {
   }
 
   const baseDir = config.program.folders[vpath].root;
-  return {
+  const result = {
     vpath: vpath,
     basePath: baseDir,
     relativePath: path.relative(vpath, url),
     fullPath: path.join(baseDir, path.relative(vpath, url))
   };
+
+  // Ensure the resolved path stays within the vpath root (CWE-22 fix).
+  // Use a trailing separator so '/media/music-extra' can't pass a '/media/music' check.
+  const normalizedBase = baseDir.endsWith(path.sep) ? baseDir : baseDir + path.sep;
+  if (result.fullPath !== baseDir && !result.fullPath.startsWith(normalizedBase)) {
+    throw new Error(`Access to path not allowed: ${result.fullPath}`);
+  }
+
+  return result;
 }

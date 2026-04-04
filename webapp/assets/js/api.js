@@ -23,17 +23,24 @@ const API = (() => {
   }
 
   module.logout = () => {
+    try { new BroadcastChannel('mstream').postMessage({ type: 'logout' }); } catch(e) {}
     localStorage.removeItem('token');
+    localStorage.removeItem('ms2_token');
     Cookies.remove('x-access-token');
-    document.location.assign(window.location.href.replace('/admin', '') + (window.location.href.slice(-1) === '/' ? '' : '/') + 'login');
+    document.location.assign(window.location.origin + '/');
   }
 
   module.goToPlayer = () => {
-    window.location.assign(window.location.href.replace('/admin', ''));
+    window.location.assign(window.location.origin + '/');
   }
 
-  module.axios = axios.create({
-    headers: { 'x-access-token': module.token() }
+  module.axios = axios.create();
+
+  // Always attach the latest token so a page refresh after login never sends null
+  module.axios.interceptors.request.use(config => {
+    const tok = module.token() || localStorage.getItem('ms2_token');
+    if (tok) { config.headers['x-access-token'] = tok; }
+    return config;
   });
 
   return module;

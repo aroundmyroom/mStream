@@ -1,7 +1,7 @@
 {
   "name": "mstream",
-  "version": "5.13.1",
-  "description": "music streaming server",
+  "version": "6.3.1-velvet",
+  "description": "mStream Velvet — fork of mStream 5.14.3 (branch: sqlite) by aroundmyroom",
   "type": "module",
   "main": "cli-boot-wrapper.js",
   "bin": {
@@ -20,7 +20,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/IrosTheBeggar/mStream"
+    "url": "https://github.com/aroundmyroom/mStream"
   },
   "author": {
     "name": "Paul Sori",
@@ -50,8 +50,7 @@
       ],
       "category": "public.app-category.music",
       "binaries": [
-        "frp/mstream-ddns-osx",
-        "sync/syncthing-osx"
+        "bin/syncthing/syncthing-osx"
       ]
     },
     "win": {
@@ -69,7 +68,7 @@
     },
     "linux": {
       "files": [
-        "bin/syncthng/syncthing-linux"
+        "bin/syncthing/syncthing-linux"
       ],
       "target": [
         {
@@ -85,40 +84,39 @@
     "publish": {
       "provider": "github",
       "repo": "mStream",
-      "owner": "IrosTheBeggar"
+      "owner": "aroundmyroom"
     }
   },
   "dependencies": {
+    "@distube/ytdl-core": "^4.16.12",
     "archiver": "^7.0.1",
-    "axios": "^1.13.4",
+    "axios": "^1.14.0",
     "busboy": "^1.6.0",
-    "commander": "^13.1.0",
+    "commander": "^14.0.3",
     "cookie-parser": "^1.4.7",
     "electron-updater": "^6.7.3",
     "escape-string-regexp": "^5.0.0",
     "express": "^5.0.1",
-    "fast-xml-parser": "^4.5.3",
-    "ffbinaries": "^1.1.6",
-    "fluent-ffmpeg": "^2.1.3",
+    "fast-xml-parser": "^5.5.9",
     "http-proxy": "^1.18.1",
-    "jimp": "^1.6.0",
-    "joi": "^17.13.3",
+    "joi": "^18.1.1",
     "jsonwebtoken": "^9.0.3",
     "lokijs": "^1.5.12",
     "m3u8-parser": "^7.2.0",
     "make-dir": "^5.0.0",
-    "mime-types": "^2.1.35",
-    "music-metadata": "^11.11.1",
-    "nanoid": "^5.0.9",
+    "mime-types": "^3.0.2",
+    "music-metadata": "^11.12.3",
+    "nanoid": "^5.1.7",
+    "sharp": "^0.34.5",
     "tree-kill": "^1.2.2",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0",
-    "ws": "^8.19.0"
+    "ws": "^8.20.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.19.0",
-    "electron-builder": "^26.4.0",
-    "eslint": "^9.19.0",
-    "globals": "^15.14.0"
+    "@eslint/js": "^10.0.1",
+    "electron-builder": "^26.7.0",
+    "eslint": "^10.1.0",
+    "globals": "^17.3.0"
   }
 }

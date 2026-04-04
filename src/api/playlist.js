@@ -2,6 +2,9 @@ import Joi from 'joi';
 import * as config from '../state/config.js';
 import * as db from '../db/manager.js';
 import { joiValidate } from '../util/validation.js';
+import { createRequire } from 'module';
+const _require = createRequire(import.meta.url);
+const _pkg = _require('../../package.json');
 
 export function setup(mstream) {
   // TODO: This is a legacy endpoint that should be improved
@@ -19,16 +22,43 @@ export function setup(mstream) {
       vpaths: req.user.vpaths,
       playlists: db.getUserPlaylists(req.user.username),
       transcode,
+      noUpload: config.program.noUpload === true,
+      supportedAudioFiles: config.program.supportedAudioFiles,
       vpathMetaData: {}
     };
 
+    const allFolders = config.program.folders;
+    const allKeys = Object.keys(allFolders);
     req.user.vpaths.forEach(p => {
-      if (config.program.folders[p]) {
-        returnThis.vpathMetaData[p] = {
-          type: config.program.folders[p].type
-        };
-      }
+      if (!allFolders[p]) { return; }
+      const myRoot = allFolders[p].root.replace(/\/?$/, '/');
+      // Find if this vpath's root sits inside another vpath the user has access to
+      const parentVpath = req.user.vpaths.find(other =>
+        other !== p &&
+        allFolders[other] &&
+        myRoot.startsWith(allFolders[other].root.replace(/\/?$/, '/')) &&
+        allFolders[other].root.replace(/\/?$/, '/') !== myRoot
+      );
+      returnThis.vpathMetaData[p] = {
+        type: allFolders[p].type,
+        // parentVpath: the vpath that physically covers this folder's files in the DB
+        // filepathPrefix: the relative path prefix to filter by inside the parent vpath
+        parentVpath: parentVpath || null,
+        // Normalize child root with a trailing slash before slicing so the
+        // prefix always ends with '/' (e.g. "Disco/" not "Disco").
+        // Without the slash, SQLite LIKE 'Disco%' would incorrectly match
+        // sibling folders like "Disco Mix Club Series/".
+        filepathPrefix: parentVpath
+          ? allFolders[p].root.replace(/\/?$/, '/').slice(allFolders[parentVpath].root.replace(/\/?$/, '/').length)
+          : null,
+        allowRecordDelete: allFolders[p].allowRecordDelete === true,
+        albumsOnly: allFolders[p].albumsOnly === true
+      };
     });
+
+    returnThis.allowRadioRecording = req.user['allow-radio-recording'] === true;
+    returnThis.allowYoutubeDownload = req.user['allow-youtube-download'] === true;
+    returnThis.version = _pkg.version;
 
     res.json(returnThis);
   });
@@ -38,6 +68,22 @@ export function setup(mstream) {
     joiValidate(schema, req.body);
 
     db.deletePlaylist(req.user.username, req.body.playlistname);
+    db.saveUserDB();
+    res.json({});
+  });
+
+  mstream.post('/api/v1/playlist/rename', (req, res) => {
+    const schema = Joi.object({
+      oldName: Joi.string().required(),
+      newName: Joi.string().required()
+    });
+    joiValidate(schema, req.body);
+
+    if (db.findPlaylist(req.user.username, req.body.newName) !== null) {
+      return res.status(400).json({ error: 'Playlist name already in use' });
+    }
+
+    db.renamePlaylist(req.user.username, req.body.oldName, req.body.newName);
     db.saveUserDB();
     res.json({});
   });

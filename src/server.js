@@ -18,6 +18,8 @@ import * as adminApi from './api/admin.js';
 import * as remoteApi from './api/remote.js';
 import * as sharedApi from './api/shared.js';
 import * as scrobblerApi from './api/scrobbler.js';
+import * as discogsApi from './api/discogs.js';
+import * as waveformApi from './api/waveform.js';
 import * as config from './state/config.js';
 import * as logger from './logger.js';
 import * as transcode from './api/transcode.js';
@@ -26,8 +28,23 @@ import * as dbQueue from './db/task-queue.js';
 import * as syncthing from './state/syncthing.js';
 import * as federationApi from './api/federation.js';
 import * as scannerApi from './api/scanner.js';
+import * as subsonicApi from './api/subsonic.js';
+import * as userSettingsApi from './api/user-settings.js';
+import * as lyricsApi from './api/lyrics.js';
+import * as radioApi from './api/radio.js';
+import * as radioRecorderApi from './api/radio-recorder.js';
+import * as radioSchedulerApi from './api/radio-scheduler.js';
+import * as backupApi from './api/backup.js';
+import * as telemetryApi from './api/telemetry.js';
+import * as podcastApi from './api/podcasts.js';
+import * as smartPlaylistApi from './api/smart-playlists.js';
+import * as ytdlApi from './api/ytdl.js';
+import * as albumsBrowseApi from './api/albums-browse.js';
+import * as wrappedApi from './api/wrapped.js';
+import * as serverPlaybackApi from './api/server-playback.js';
 import WebError from './util/web-error.js';
 import { sanitizeFilename } from './util/validation.js';
+import { ensureFfmpeg } from './util/ffmpeg-bootstrap.js';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
@@ -102,7 +119,7 @@ export async function serveIt(configFile) {
     next();
   });
 
-  // Block access to admin page if necessary
+  // Admin panel (webapp/admin/) — auth guard
   mstream.get('/admin', (req, res, next) => {
     if (config.program.lockAdmin === true) {
       return res.send('<p>Admin Page Disabled</p>');
@@ -110,12 +127,11 @@ export async function serveIt(configFile) {
     if (Object.keys(config.program.users).length === 0) {
       return next();
     }
-
     try {
       jwt.verify(req.cookies['x-access-token'], config.program.secret);
       next();
     } catch (_err) {
-      return res.redirect(302, '/login');
+      return res.redirect(302, '/');
     }
   });
 
@@ -126,38 +142,38 @@ export async function serveIt(configFile) {
     next();
   });
 
-  mstream.get('/', (req, res, next) => {
-    if (Object.keys(config.program.users).length === 0) {
-      return next();
-    }
+  // Main UI — served directly at root
+  mstream.get('/', (_req, res) => res.sendFile(path.join(config.program.webAppDirectory, 'index.html')));
 
-    try {
-      jwt.verify(req.cookies['x-access-token'], config.program.secret);
-      next();
-    } catch (_err) {
-      return res.redirect(302, '/login');
-    }
-  });
+  // Classic UI has been removed. /classic returns 410 Gone.
+  mstream.get('/classic', (_req, res) => res.status(410).send('<p>Classic UI has been removed.</p>'));
+  mstream.get('/login', (_req, res) => res.redirect(301, '/'));
+  mstream.get('/login/', (_req, res) => res.redirect(301, '/'));
 
-  mstream.get('/login', (req, res, next) => {
-    if (Object.keys(config.program.users).length === 0) {
-      return res.redirect(302, '..');
-    }
-
-    try {
-      jwt.verify(req.cookies['x-access-token'], config.program.secret);
-      return res.redirect(302, '..');
-    } catch (_err) {
-      next();
-    }
-  });
+  // Mount admin panel (webapp/admin/) at /admin — must be before general static
+  mstream.use('/admin', express.static(path.join(config.program.webAppDirectory, 'admin')));
 
   // Give access to public folder
   mstream.use('/', express.static(config.program.webAppDirectory));
 
+  // Serve browser-standard paths without auth
+  mstream.get('/favicon.ico', (_req, res) => res.redirect(301, '/assets/fav/favicon.ico'));
+  mstream.get('/robots.txt', (_req, res) => {
+    res.type('text/plain').send('User-agent: *\nDisallow: /\n');
+  });
+  const manifestFile = path.join(config.program.webAppDirectory, 'assets/fav/site.webmanifest');
+  mstream.get('/assets/fav/site.webmanifest', (_req, res) => res.sendFile(manifestFile));
+
   // Public APIs
   remoteApi.setupBeforeAuth(mstream, server);
+  serverPlaybackApi.setupBeforeAuth(mstream);
   await sharedApi.setupBeforeSecurity(mstream);
+
+  // Subsonic REST API — has its own auth, must be before authApi.setup()
+  subsonicApi.setup(mstream);
+
+  // Public lightweight ping — reachability check without credentials
+  mstream.get('/api/v1/ping/public', (_req, res) => res.json({ status: 'ok' }));
 
   // Everything below this line requires authentication
   authApi.setup(mstream);
@@ -170,6 +186,25 @@ export async function serveIt(configFile) {
   fileExplorerApi.setup(mstream);
   transcode.setup(mstream);
   scrobblerApi.setup(mstream);
+  scrobblerApi.setupListenBrainz(mstream);
+  discogsApi.setup(mstream);
+  waveformApi.setup(mstream);
+  userSettingsApi.setup(mstream);
+  lyricsApi.setup(mstream);
+  radioApi.setup(mstream);
+  radioRecorderApi.setup(mstream);
+  radioSchedulerApi.setup(mstream);
+  backupApi.setup(mstream);
+  telemetryApi.setup(packageJson.version);
+  podcastApi.setup(mstream);
+  smartPlaylistApi.setup(mstream);
+  ytdlApi.setup(mstream);
+  albumsBrowseApi.setup(mstream);
+  wrappedApi.setup(mstream);
+  serverPlaybackApi.setup(mstream);
+  // Kick off ffmpeg auto-download early so it's ready for radio-recorder,
+  // discogs cover-art and ytdl use — non-blocking, safe to ignore errors here.
+  ensureFfmpeg().catch(e => winston.warn('[ffmpeg-bootstrap] startup prefetch failed: ' + e.message));
   remoteApi.setupAfterAuth(mstream, server);
   sharedApi.setupAfterSecurity(mstream);
   syncthing.setup();
@@ -179,12 +214,25 @@ export async function serveIt(configFile) {
   mstream.get('/api/', (req, res) => res.json({ "server": packageJson.version, "apiVersions": ["1"] }));
 
   // album art folder
-  mstream.get('/album-art/:file', (req, res) => {
-    if (!req.params.file) {
-      throw new WebError('Missing Error', 404);
-    }
+  // Rule: NEVER return 404. If the file is in the DB but missing from disk
+  // (cache cleared, partial scan, manual deletion) serve a neutral SVG placeholder
+  // so the browser shows something consistent instead of a broken-image icon.
+  const ALBUM_ART_FALLBACK_SVG = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">' +
+    '<rect width="1" height="1" fill="#1e1e2e"/>' +
+    '<circle cx=".5" cy=".5" r=".28" fill="none" stroke="#45475a" stroke-width=".06"/>' +
+    '<circle cx=".5" cy=".5" r=".08" fill="#45475a"/>' +
+    '</svg>'
+  );
+  function sendArtFallback(res) {
+    res.set('Content-Type', 'image/svg+xml');
+    res.set('Cache-Control', 'no-store');
+    res.end(ALBUM_ART_FALLBACK_SVG);
+  }
 
-    // ideally we should be checking this filename against a DB entry
+  mstream.get('/album-art/:file', (req, res) => {
+    if (!req.params.file) { return sendArtFallback(res); }
+
     const filename = sanitizeFilename(req.params.file);
 
     const compressedFilePath = path.join(config.program.storage.albumArtDirectory, `z${req.query.compress}-${filename}`);
@@ -192,7 +240,11 @@ export async function serveIt(configFile) {
       return res.sendFile(compressedFilePath);
     }
 
-    res.sendFile(path.join(config.program.storage.albumArtDirectory, filename));
+    const fullPath = path.join(config.program.storage.albumArtDirectory, filename);
+    if (!fs.existsSync(fullPath)) { return sendArtFallback(res); }
+    res.sendFile(fullPath, err => {
+      if (err && !res.headersSent) sendArtFallback(res);
+    });
   });
 
   // TODO: determine if user has access to the exact file
@@ -209,7 +261,29 @@ export async function serveIt(configFile) {
 
   // error handling
   mstream.use((error, req, res, _next) => {
-    winston.error(`Server error on route ${req.originalUrl}`, { stack: error });
+    // Honour .status from any HTTP-aware error (e.g. send module's
+    // RangeNotSatisfiableError has status=416). Fall back to 500 only when
+    // there is no explicit status.
+    const status = (error.status && Number.isInteger(error.status))
+      ? error.status
+      : 500;
+
+    if (status === 401 || status === 403) {
+      // Auth failures on unknown paths are internet scanner noise — log at debug only.
+      // Real mStream routes all start with /api/, /rest/, /media/, /album-art/, /waveform/.
+      const isMstreamPath = /^\/(api|rest|media|album-art|waveform)(\/|$)/i.test(req.originalUrl);
+      if (isMstreamPath) {
+        winston.warn(`Auth failure on route ${req.originalUrl} [${status}]`);
+      } else {
+        winston.debug(`Auth probe (ignored) on ${req.originalUrl} [${status}]`);
+      }
+    } else if (status === 416) {
+      // Range Not Satisfiable — happens when the client cached a byte-offset
+      // from before a file was rewritten. Not a server bug; log at debug level.
+      winston.debug(`Range not satisfiable on ${req.originalUrl} [416] — client will retry from 0`);
+    } else {
+      winston.error(`Server error on route ${req.originalUrl}: ${error.message}`, { stack: error });
+    }
 
     // Check for validation error
     if (error instanceof Joi.ValidationError) {
@@ -218,6 +292,12 @@ export async function serveIt(configFile) {
 
     if (error instanceof WebError) {
       return res.status(error.status).json({ error: error.message });
+    }
+
+    // For errors that carry their own HTTP status (send, multer, etc.) return
+    // that status so the browser can handle it correctly.
+    if (status !== 500) {
+      return res.status(status).end();
     }
 
     res.status(500).json({ error: 'Server Error' });
@@ -230,6 +310,8 @@ export async function serveIt(configFile) {
     winston.info(`Access mStream locally: ${protocol}://localhost:${config.program.port}`);
 
     dbQueue.runAfterBoot();
+    // Boot mpv if server audio is enabled in config
+    serverPlaybackApi.startIfEnabled();
   });
 }
 

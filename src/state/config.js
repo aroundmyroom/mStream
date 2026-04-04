@@ -10,6 +10,7 @@ const __dirname = getDirname(import.meta.url);
 
 const storageJoi = Joi.object({
   albumArtDirectory: Joi.string().default(path.join(__dirname, '../../image-cache')),
+  waveformDirectory: Joi.string().default(path.join(__dirname, '../../waveform-cache')),
   dbDirectory: Joi.string().default(path.join(__dirname, '../../save/db')),
   logsDirectory: Joi.string().default(path.join(__dirname, '../../save/logs')),
   syncConfigDirectory:  Joi.string().default(path.join(__dirname, '../../save/sync')),
@@ -22,12 +23,15 @@ const scanOptions = Joi.object({
   pause: Joi.number().min(0).default(0),
   bootScanDelay: Joi.number().default(3),
   maxConcurrentTasks: Joi.number().integer().min(1).default(1),
-  compressImage: Joi.boolean().default(true)
+  compressImage: Joi.boolean().default(true),
+  scanErrorRetentionHours: Joi.number().integer().valid(12, 24, 48, 72, 168, 336, 720).default(48),
+  maxRecordingMinutes: Joi.number().integer().min(1).default(180),
+  maxZipMb: Joi.number().integer().min(1).default(500)
 });
 
 const dbOptions = Joi.object({
   clearSharedInterval: Joi.number().integer().min(0).default(24),
-  engine: Joi.string().valid('loki', 'sqlite').default('loki')
+  engine: Joi.string().valid('loki', 'sqlite').default('sqlite')
 });
 
 const transcodeOptions = Joi.object({
@@ -48,14 +52,32 @@ const rpnOptions = Joi.object({
 });
 
 const lastFMOptions = Joi.object({
-  apiKey: Joi.string().default('25627de528b6603d6471cd331ac819e0'),
-  apiSecret: Joi.string().default('a9df934fc504174d4cb68853d9feb143')
+  enabled:   Joi.boolean().default(true),
+  apiKey:    Joi.string().allow('').default(''),
+  apiSecret: Joi.string().allow('').default('')
+});
+
+const listenBrainzOptions = Joi.object({
+  enabled: Joi.boolean().default(false),
+});
+
+const discogsOptions = Joi.object({
+  enabled:        Joi.boolean().default(false),
+  allowArtUpdate: Joi.boolean().default(false),
+  apiKey:         Joi.string().allow('').default(''),
+  apiSecret:      Joi.string().allow('').default(''),
+  userAgentTag:   Joi.string().allow('').pattern(/^[a-zA-Z0-9]{0,4}$/).default(''),
 });
 
 const federationOptions = Joi.object({
   enabled: Joi.boolean().default(false),
   folder: Joi.string().optional(),
   federateUsersMode: Joi.boolean().default(false),
+});
+
+const serverAudioOptions = Joi.object({
+  enabled: Joi.boolean().default(false),
+  mpvBin:  Joi.string().default('mpv'),
 });
 
 const schema = Joi.object({
@@ -69,6 +91,8 @@ const schema = Joi.object({
     "opus": true, "m3u": false
   }),
   lastFM: lastFMOptions.default(lastFMOptions.validate({}).value),
+  listenBrainz: listenBrainzOptions.default(listenBrainzOptions.validate({}).value),
+  discogs: discogsOptions.default(discogsOptions.validate({}).value),
   scanOptions: scanOptions.default(scanOptions.validate({}).value),
   noUpload: Joi.boolean().default(false),
   writeLogs: Joi.boolean().default(false),
@@ -84,7 +108,9 @@ const schema = Joi.object({
     Joi.string(),
     Joi.object({
       root: Joi.string().required(),
-      type: Joi.string().valid('music', 'audio-books').default('music'),
+      type: Joi.string().valid('music', 'audio-books', 'recordings', 'youtube').default('music'),
+      allowRecordDelete: Joi.boolean().default(false),
+      albumsOnly: Joi.boolean().default(false),
     })
   ).default({}),
   users: Joi.object().pattern(
@@ -96,6 +122,10 @@ const schema = Joi.object({
       vpaths: Joi.array().items(Joi.string()),
       'lastfm-user': Joi.string().optional(),
       'lastfm-password': Joi.string().optional(),
+      'lastfm-session': Joi.string().optional(),
+      'listenbrainz-token': Joi.string().allow('').optional(),
+      'allow-radio-recording': Joi.boolean().optional(),
+      'allow-youtube-download': Joi.boolean().optional(),
     })
   ).default({}),
   ssl: Joi.object({
@@ -103,6 +133,7 @@ const schema = Joi.object({
     cert: Joi.string().allow('').optional()
   }).optional(),
   federation: federationOptions.default(federationOptions.validate({}).value),
+  serverAudio: serverAudioOptions.default(serverAudioOptions.validate({}).value),
 });
 
 export let program;
@@ -118,11 +149,12 @@ export function asyncRandom(numBytes) {
 }
 
 export async function setup(configFileArg) {
-  // Create config if none exists
+  // Create config directory + file if they don't exist
   try {
     await fs.access(configFileArg);
   } catch (_err) {
     winston.info('Config File does not exist. Attempting to create file');
+    await fs.mkdir(path.dirname(configFileArg), { recursive: true });
     await fs.writeFile(configFileArg, JSON.stringify({}), 'utf8');
   }
 

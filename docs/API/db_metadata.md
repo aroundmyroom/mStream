@@ -35,11 +35,13 @@
       "metadata":{
         "artist": "Artist",
         "album": "Album",
-        "track": 1,
+        "track": 3,
+        "track-of": 12,
         "title": "Song Title",
         "year": 1990,
         "album-art": "hash.jpg",
-        "hash": "md5 hash"
+        "hash": "md5 hash",
+        "duration": 237.431
       }
     }
     ```

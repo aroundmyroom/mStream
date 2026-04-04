@@ -113,15 +113,37 @@ export function setup(mstream) {
     const pathInfo = vpath.getVPathInfo(decodeURI(req.headers['data-location']), req.user);
     makeDirectorySync(pathInfo.fullPath);
 
+    let acceptedCount = 0;
+    let firstRejectedExt = null;
     const bb = busboy({ headers: req.headers });
     bb.on('file', (fieldname, file, info) => {
-      const { filename } = info;
-      const saveTo = path.join(pathInfo.fullPath, filename);
+      // Use path.basename() to strip any directory components from the
+      // client-supplied filename before joining it to the upload path (CWE-22 fix).
+      const safeFilename = path.basename(info.filename);
+      if (!safeFilename || safeFilename.startsWith('.')) {
+        file.resume(); // drain and discard the stream
+        return;
+      }
+      // Only allow supported audio file types — reject everything else (PDFs, TXTs, etc.)
+      const ext = fileExplorer.getFileType(safeFilename).toLowerCase();
+      if (!config.program.supportedAudioFiles[ext]) {
+        winston.warn(`Upload rejected from ${req.user.username}: unsupported file type '.${ext}' (${safeFilename})`);
+        if (!firstRejectedExt) firstRejectedExt = ext;
+        file.resume(); // drain and discard the stream
+        return;
+      }
+      acceptedCount++;
+      const saveTo = path.join(pathInfo.fullPath, safeFilename);
       winston.info(`Uploading from ${req.user.username} to: ${saveTo}`);
       file.pipe(fsOld.createWriteStream(saveTo));
     });
 
-    bb.on('close', () => { res.json({}); });
+    bb.on('close', () => {
+      if (firstRejectedExt && acceptedCount === 0) {
+        return res.status(400).json({ error: `File type not allowed: .${firstRejectedExt}` });
+      }
+      res.json({});
+    });
     req.pipe(bb);
   });
 
