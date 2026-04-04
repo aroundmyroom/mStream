@@ -1,9 +1,10 @@
 name: build-electron
 
 on:
-  push:
-    tags:        
-      - '*'  
+  workflow_dispatch:
+    # Electron builds are not published for the velvet fork.
+    # This workflow is disabled (no automatic triggers).
+    # Run manually only if needed.
 
 jobs:
   release:
