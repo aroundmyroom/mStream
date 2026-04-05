@@ -3727,6 +3727,8 @@ const discogsView = Vue.component('discogs-view', {
       apiKey: '',
       apiSecret: '',
       userAgentTag: '',
+      itunesEnabled: true,
+      deezerEnabled: true,
       pending: false,
     };
   },
@@ -3781,7 +3783,21 @@ const discogsView = Vue.component('discogs-view', {
                     <td><b>Instance Tag</b></td>
                     <td>
                       <input v-model="userAgentTag" type="text" maxlength="4" placeholder="e.g. amr" autocomplete="off" spellcheck="false" style="margin:0;width:80px;text-transform:lowercase" />
-                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">Optional. Up to 4 letters/digits. Your tag is appended to the User-Agent sent to Discogs: <code>mStreamVelvet/dev/{{ userAgentTag || 'tag' }} +…</code></div>
+                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">Optional. Up to 4 letters/digits. Your tag is appended to the User-Agent sent to Discogs: <code>mStreamVelvet/dev/{{ userAgentTag || 'tag' }} +&hellip;</code></div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><b>iTunes</b></td>
+                    <td>
+                      <input type="checkbox" v-model="itunesEnabled" style="margin:0;width:auto;height:auto;" /> Enable iTunes album art search
+                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">No API key required. Searches the iTunes Search API for album covers.</div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><b>Deezer</b></td>
+                    <td>
+                      <input type="checkbox" v-model="deezerEnabled" style="margin:0;width:auto;height:auto;" /> Enable Deezer album art search
+                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">No API key required. Searches the Deezer API for album covers.</div>
                     </td>
                   </tr>
                 </tbody>
@@ -3804,6 +3820,8 @@ const discogsView = Vue.component('discogs-view', {
       this.apiKey         = res.data.apiKey       || '';
       this.apiSecret      = res.data.apiSecret    || '';
       this.userAgentTag   = res.data.userAgentTag || '';
+      this.itunesEnabled  = res.data.itunesEnabled !== false;
+      this.deezerEnabled  = res.data.deezerEnabled !== false;
     } catch(e) { /* ignore */ }
   },
   methods: {
@@ -3813,7 +3831,15 @@ const discogsView = Vue.component('discogs-view', {
         await API.axios({
           method: 'POST',
           url: `${API.url()}/api/v1/admin/discogs/config`,
-          data: { enabled: this.enabled, allowArtUpdate: this.allowArtUpdate, apiKey: this.apiKey.trim(), apiSecret: this.apiSecret.trim(), userAgentTag: this.userAgentTag.trim().slice(0,4).replace(/[^a-zA-Z0-9]/g,'') }
+          data: {
+            enabled: this.enabled,
+            allowArtUpdate: this.allowArtUpdate,
+            apiKey: this.apiKey.trim(),
+            apiSecret: this.apiSecret.trim(),
+            userAgentTag: this.userAgentTag.trim().slice(0,4).replace(/[^a-zA-Z0-9]/g,''),
+            itunesEnabled: this.itunesEnabled,
+            deezerEnabled: this.deezerEnabled,
+          }
         });
         iziToast.success({ title: 'Discogs settings saved', position: 'topCenter', timeout: 3000 });
       } catch(err) {

@@ -66,6 +66,8 @@ const discogsOptions = Joi.object({
   apiKey:         Joi.string().allow('').default(''),
   apiSecret:      Joi.string().allow('').default(''),
   userAgentTag:   Joi.string().allow('').pattern(/^[a-zA-Z0-9]{0,4}$/).default(''),
+  itunesEnabled:  Joi.boolean().default(true),
+  deezerEnabled:  Joi.boolean().default(true),
 });
 
 const federationOptions = Joi.object({

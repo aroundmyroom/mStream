@@ -1,5 +1,29 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.5.0-velvet — April 2026
+
+### fix(streaming): FLAC files with ID3v2 preamble now play correctly in Chromium
+
+Some FLAC files produced by iTunes, MusicBrainz Picard, and similar taggers embed a large ID3v2 tag (often containing cover art) **before** the native `fLaC` sync word. ffprobe and most desktop players handle this transparently, but Chromium's built-in FLAC demuxer requires `fLaC` at byte 0 exactly — it throws `DEMUXER_ERROR_NO_SUPPORTED_STREAMS: FFmpegDemuxer: no supported streams` otherwise.
+
+- New middleware in `src/server.js` intercepts every `/media/…/*.flac` request before `express.static`
+- Reads the first 10 bytes; parses the ID3v2 syncsafe-integer size to compute `skip` offset
+- If `skip === 0` (clean fLaC file): `next()` immediately — zero overhead for the typical case
+- If ID3 preamble present: serves the file from the `fLaC` offset with correct `Content-Length` and `Content-Range` so byte-range seeking still works perfectly
+- Also fixes the MIME type for all FLAC files: `audio/x-flac` (the `mime` npm package default) is rejected by Chromium; changed to the IANA-registered `audio/flac` via `setHeaders` on `express.static`
+- Not present in upstream mStream
+
+### feat(album-art): Discogs, iTunes, and Deezer album art services — per-service admin toggles
+
+- Added **iTunes** as a third album art source alongside Discogs and Deezer in the Now Playing modal
+- New server-side proxy endpoint `GET /api/v1/itunes/search?artist=&album=` — calls the iTunes Search API, upgrades artwork to 3000×3000 px (highest quality), returns thumbnail grid at 250×250 px
+- Each service can now be independently enabled or disabled in the admin panel (Discogs config page)
+- Config keys: `discogs.itunesEnabled` (default `true`), `discogs.deezerEnabled` (default `true`)
+- Service buttons in the NP modal are rendered conditionally — disabled services are invisible
+- Empty query (song has no tags) returns a helpful message instead of a 400 error
+
+---
+
 ## v6.4.0-velvet — April 2026
 
 ### refactor(db): remove Loki backend — SQLite only

@@ -126,6 +126,8 @@ See [docs/your-stats.md](your-stats.md) for full schema and field reference.
 
 [Discogs cover art — search, embed, admin config](API/discogs.md) *(GitHub Copilot, 2026-03-07)*
 
+[iTunes album art proxy — `GET /api/v1/itunes/search?artist=&album=`](API/discogs.md#get-apiv1itunessearch) — server-side proxy for iTunes Search API; per-service admin toggles *(v6.5.0-velvet)*
+
 ## Admin — Directory Flags
 
 [/admin/directory/flags — PATCH albumsOnly and allowRecordDelete per folder](API/admin_directory-flags.md) *(GitHub Copilot, 2026-03-29)*

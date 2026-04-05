@@ -413,6 +413,31 @@ export function setup(mstream) {
     }
   });
 
+  // ── GET /api/v1/itunes/search ──────────────────────────────────
+  // Server-side proxy for the iTunes Search API (album art lookup).
+  // Returns up to 10 album results with 600×600 artwork URLs.
+  mstream.get('/api/v1/itunes/search', async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const artist = (req.query.artist || '').trim();
+    const album  = (req.query.album  || '').trim();
+    const q = [artist, album].filter(Boolean).join(' ');
+    if (!q) return res.json({ results: [] });
+    try {
+      const url = `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=album&limit=10`;
+      const resp = await axios.get(url, { headers: { 'User-Agent': UA_BASE } });
+      const results = (resp.data.results || [])
+        .filter(r => r.artworkUrl100)
+        .map(r => ({
+          coverUrl: r.artworkUrl100.replace('100x100bb', '3000x3000bb'),
+          label:    `${r.collectionName}` + (r.releaseDate ? ` (${r.releaseDate.substring(0,4)})` : ''),
+          thumb:    r.artworkUrl100.replace('100x100bb', '250x250bb'),
+        }));
+      res.json({ results });
+    } catch (e) {
+      res.status(502).json({ error: 'iTunes request failed: ' + e.message });
+    }
+  });
+
   // ── POST /api/v1/discogs/embed ─────────────────────────────────
   // Admin only. Downloads full-res cover from Discogs and embeds
   // it into the audio file using ffmpeg (no cover.jpg written to disk).

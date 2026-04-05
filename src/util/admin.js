@@ -67,7 +67,11 @@ export async function addDirectory(directory, vpath, autoAccess, isAudioBooks, m
   }
 
   // add directory to server routing
-  mstream.use(`/media/${vpath}/`, express.static(directory));
+  // audio/flac is the correct MIME type; audio/x-flac causes DEMUXER_ERROR_NO_SUPPORTED_STREAMS in Chromium.
+  const setMediaHeaders = (res, filePath) => {
+    if (filePath.toLowerCase().endsWith('.flac')) res.setHeader('Content-Type', 'audio/flac');
+  };
+  mstream.use(`/media/${vpath}/`, express.static(directory, { setHeaders: setMediaHeaders }));
 }
 
 export async function removeDirectory(vpath) {

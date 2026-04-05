@@ -252,10 +252,87 @@ export async function serveIt(configFile) {
   //   next();
   // });
 
+  // ── FLAC ID3-preamble stripper ─────────────────────────────────
+  // Some FLAC files (typically from iTunes / Picard) have an ID3v2 tag
+  // prepended before the native fLaC marker.  ffprobe handles them fine,
+  // but Chromium's built-in FFmpeg demuxer requires fLaC at byte 0 and
+  // throws DEMUXER_ERROR_NO_SUPPORTED_STREAMS otherwise.
+  //
+  // This middleware intercepts any /media/…/*.flac request, detects the
+  // ID3 preamble, and serves the file from the fLaC offset with correct
+  // Content-Length / Content-Range so seeking still works.
+  // Non-ID3 files are passed straight through to express.static below.
+
+  /** Parse a syncsafe-integer ID3v2 header and return the number of bytes to skip. */
+  function flacId3Skip(buf) {
+    if (buf.length < 10 || buf.slice(0, 3).toString('ascii') !== 'ID3') return 0;
+    const hasFooter = (buf[5] & 0x10) !== 0;
+    const tagSize = ((buf[6] & 0x7f) << 21) | ((buf[7] & 0x7f) << 14) |
+                    ((buf[8] & 0x7f) << 7)  |  (buf[9] & 0x7f);
+    return 10 + tagSize + (hasFooter ? 10 : 0);
+  }
+
+  mstream.use('/media/', async (req, res, next) => {
+    if (!req.path.toLowerCase().endsWith('.flac')) return next();
+    // Reconstruct the absolute file path from the vpath + relative path.
+    const parts = req.path.split('/').filter(Boolean);
+    if (parts.length < 2) return next();
+    const vpath = decodeURIComponent(parts[0]);
+    const folder = config.program.folders[vpath]?.root;
+    if (!folder) return next();
+    const relPath = parts.slice(1).map(p => decodeURIComponent(p)).join('/');
+    const filePath = path.join(folder, relPath);
+
+    try {
+      // Read just the first 10 bytes to check for ID3 preamble.
+      const fh = await fs.promises.open(filePath, 'r');
+      const hdr = Buffer.alloc(10);
+      await fh.read(hdr, 0, 10, 0);
+      await fh.close();
+      const skip = flacId3Skip(hdr);
+      if (skip === 0) return next(); // clean fLaC file — let express.static handle it
+
+      const stat = await fs.promises.stat(filePath);
+      const effectiveSize = stat.size - skip;
+      const rangeHeader = req.headers['range'];
+
+      res.setHeader('Content-Type', 'audio/flac');
+      res.setHeader('Accept-Ranges', 'bytes');
+
+      if (rangeHeader) {
+        const m = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+        if (!m) { res.status(416).end(); return; }
+        const start = m[1] ? parseInt(m[1], 10) : 0;
+        const end   = m[2] ? parseInt(m[2], 10) : effectiveSize - 1;
+        if (start > effectiveSize - 1) {
+          res.setHeader('Content-Range', `bytes */${effectiveSize}`);
+          res.status(416).end(); return;
+        }
+        const clampedEnd = Math.min(end, effectiveSize - 1);
+        res.setHeader('Content-Range', `bytes ${start}-${clampedEnd}/${effectiveSize}`);
+        res.setHeader('Content-Length', clampedEnd - start + 1);
+        res.status(206);
+        fs.createReadStream(filePath, { start: skip + start, end: skip + clampedEnd }).pipe(res);
+      } else {
+        res.setHeader('Content-Length', effectiveSize);
+        res.status(200);
+        fs.createReadStream(filePath, { start: skip }).pipe(res);
+      }
+    } catch {
+      next(); // file not found / unreadable → let express.static return 404
+    }
+  });
+
+  // audio/flac is the IANA-registered MIME type; audio/x-flac (the mime package
+  // default) is rejected by Chromium's FFmpeg demuxer → DEMUXER_ERROR_NO_SUPPORTED_STREAMS.
+  const setMediaHeaders = (res, filePath) => {
+    if (filePath.toLowerCase().endsWith('.flac')) res.setHeader('Content-Type', 'audio/flac');
+  };
+
   Object.keys(config.program.folders).forEach(key => {
     mstream.use(
       '/media/' + key + '/',
-      express.static(config.program.folders[key].root)
+      express.static(config.program.folders[key].root, { setHeaders: setMediaHeaders })
     );
   });
 

@@ -171,3 +171,60 @@ When **Allow Art Update** is enabled in the admin panel (`allowArtUpdate: true`)
 | 403    | Not an admin or path access denied |
 | 404    | File not found on disk, or release has no cover image on Discogs |
 | 500    | ffmpeg error or Discogs API error |
+
+---
+
+## iTunes Album Art Proxy *(v6.5.0-velvet)*
+
+### `GET /api/v1/itunes/search`
+
+Server-side proxy for the [iTunes Search API](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/). No Apple developer credentials required.
+
+**Auth**: admin token required.
+
+**Query parameters**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `artist`  | optional | Artist name |
+| `album`   | optional | Album title |
+
+At least one of `artist` or `album` must be non-empty; if both are empty the response is `{ "results": [] }`.
+
+**Response**
+```json
+{
+  "results": [
+    {
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/.../3000x3000bb.jpg",
+      "label": "Album Name (2012)",
+      "thumb": "https://is1-ssl.mzstatic.com/image/thumb/.../250x250bb.jpg"
+    }
+  ]
+}
+```
+
+- `coverUrl` — 3000×3000 px full-res artwork URL (highest quality Apple provides)
+- `thumb` — 250×250 px thumbnail for the picker grid
+- `label` — `"Collection Name (YYYY)"` suitable for display
+
+**Error responses**
+
+| Status | Meaning |
+|--------|---------|
+| 403    | Not an admin |
+| 502    | iTunes API request failed |
+
+### Per-service admin toggles
+
+Each art service (Discogs, Deezer, iTunes) can be enabled or disabled independently in the admin panel (Discogs config page).
+
+Config keys stored in `default.json` under the `discogs` block:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `discogs.itunesEnabled` | `true` | Show iTunes art picker in Now Playing modal |
+| `discogs.deezerEnabled` | `true` | Show Deezer art picker in Now Playing modal |
+
+These are read/written via `GET /api/v1/admin/discogs/config` and `POST /api/v1/admin/discogs/config`.
+

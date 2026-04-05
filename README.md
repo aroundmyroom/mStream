@@ -2,7 +2,7 @@
 
 > **A heavily extended fork of [mStream](https://github.com/IrosTheBeggar/mStream) by [aroundmyroom](https://github.com/aroundmyroom).**
 
-**Current version: [6.4.0-velvet](releases/v6.4.0-velvet.md)** — April 2026
+**Current version: [6.5.0-velvet](releases/v6.5.0-velvet.md)** — April 2026
 
 [![Discord](https://img.shields.io/badge/Discord-mStream%20Velvet-5865F2?logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/KfsTCYrTkS)
 

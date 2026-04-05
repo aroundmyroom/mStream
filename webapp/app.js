@@ -10,6 +10,8 @@ const S = {
   username: _u,
   isAdmin:  false,
   discogsEnabled: false,
+  itunesEnabled: false,
+  deezerEnabled: false,
   radioEnabled: false,
   feedsEnabled: false,
   audiobooksEnabled: false,
@@ -1859,12 +1861,13 @@ function renderNPModal() {
         _dsEl.dataset.songFp = s.filepath || '';
         const _ext = (s.filepath || '').split('.').pop().toLowerCase();
         const _wavLike = ['wav','aiff','aif','w64'].includes(_ext);
-        const _btn = `<button class="np-discogs-btn" id="np-discogs-search-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search Album Art on Discogs</button>`;
-        const _dzbtn = `<button class="np-discogs-btn" id="np-deezer-search-btn" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search Album Art on Deezer</button>`;
+        const _btn    = S.discogsEnabled ? `<button class="np-discogs-btn" id="np-discogs-search-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search Album Art on Discogs</button>` : '';
+        const _dzbtn  = S.deezerEnabled  ? `<button class="np-discogs-btn" id="np-deezer-search-btn" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search Album Art on Deezer</button>` : '';
+        const _itbtn  = S.itunesEnabled  ? `<button class="np-discogs-btn" id="np-itunes-search-btn" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search Album Art on iTunes</button>` : '';
         const _urlbtn = `<button class="np-discogs-btn" id="np-url-paste-btn" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Paste Image URL</button>`;
         _dsEl.innerHTML = _wavLike
-          ? _btn + _dzbtn + _urlbtn + `<span class="np-discogs-note" style="margin-top:5px;display:block">WAV files can\'t store embedded art — art will be saved to the database only.<br>It is lost on a DB reset or album-art cache delete.</span>`
-          : _btn + _dzbtn + _urlbtn;
+          ? _btn + _dzbtn + _itbtn + _urlbtn + `<span class="np-discogs-note" style="margin-top:5px;display:block">WAV files can\'t store embedded art — art will be saved to the database only.<br>It is lost on a DB reset or album-art cache delete.</span>`
+          : _btn + _dzbtn + _itbtn + _urlbtn;
       }
     } else {
       _dsEl.classList.add('hidden');
@@ -1893,6 +1896,54 @@ function hideNPModal() {
   // Force the Discogs section to re-render its initial button state on next open
   const _dsEl = document.getElementById('np-discogs-section');
   if (_dsEl) _dsEl.dataset.songFp = '';
+}
+
+// ── ITUNES ART IN NP MODAL ──────────────────────────────────
+async function _npItunesSearch(song) {
+  const dsEl   = document.getElementById('np-discogs-section');
+  const npLeft = document.getElementById('np-left');
+  if (!dsEl || !song) return;
+  dsEl.innerHTML = `<span class="np-discogs-status">Searching iTunes…</span>`;
+  npLeft?.classList.add('np-left--picking');
+  try {
+    const params = new URLSearchParams();
+    if (song.artist) params.set('artist', song.artist);
+    if (song.album)  params.set('album',  song.album);
+    if (!song.artist && !song.album && song.title) params.set('album', song.title);
+    if (!params.toString()) {
+      dsEl.innerHTML =
+        `<span class="np-discogs-status">No artist or album info available for search</span>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
+      return;
+    }
+    const d = await api('GET', `api/v1/itunes/search?${params}`);
+    if (!d.results || !d.results.length) {
+      dsEl.innerHTML =
+        `<span class="np-discogs-status">No results found on iTunes</span>` +
+        `<button class="np-discogs-btn" id="np-itunes-search-btn" style="margin-top:8px">Try again</button>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
+      return;
+    }
+    const thumbsHtml = d.results.map(r =>
+      `<img class="np-discogs-thumb np-deezer-thumb"
+        src="${r.thumb}" alt=""
+        title="${esc(r.label)}"
+        data-cover-url="${esc(r.coverUrl)}"
+        data-filepath="${esc(song.filepath || '')}">`
+    ).join('');
+    dsEl.innerHTML =
+      `<div class="np-discogs-pick-header">` +
+        `<span class="np-discogs-pick-title">Pick a cover (iTunes)</span>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn">← Cancel</button>` +
+      `</div>` +
+      `<div class="np-discogs-choices">${thumbsHtml}</div>` +
+      `<span class="np-discogs-note">via iTunes</span>`;
+    dsEl.dataset.songFp = song.filepath || '';
+  } catch(e) {
+    dsEl.innerHTML =
+      `<span class="np-discogs-status">iTunes search failed</span>` +
+      `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
+  }
 }
 
 // ── DEEZER ART IN NP MODAL ────────────────────────────────
@@ -11411,8 +11462,8 @@ async function tryLogin(username, password) {
   try {
     await api('GET', 'api/v1/admin/directories');
     S.isAdmin = true;
-    try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
-  } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
+    try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; S.itunesEnabled = dc?.itunesEnabled !== false; S.deezerEnabled = dc?.deezerEnabled !== false; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; S.itunesEnabled = false; S.deezerEnabled = false; }
+  } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; S.itunesEnabled = false; S.deezerEnabled = false; }
   try { const ls = await api('GET', 'api/v1/lastfm/status'); S.lastfmEnabled = ls?.serverEnabled !== false; S.lastfmHasApiKey = ls?.hasApiKey === true; } catch(_) { S.lastfmEnabled = true; S.lastfmHasApiKey = false; }
   // If similar-artists was saved on but there's no API key, clear it so AutoDJ doesn't try to use it
   if (!S.lastfmHasApiKey && S.djSimilar) { S.djSimilar = false; localStorage.removeItem(_uKey('dj_similar')); }
@@ -11441,8 +11492,8 @@ async function checkSession() {
       try {
         await api('GET', 'api/v1/admin/directories');
         S.isAdmin = true;
-        try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
-      } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
+        try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; S.itunesEnabled = dc?.itunesEnabled !== false; S.deezerEnabled = dc?.deezerEnabled !== false; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; S.itunesEnabled = false; S.deezerEnabled = false; }
+      } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; S.itunesEnabled = false; S.deezerEnabled = false; }
       const [ls, lb, rd] = await Promise.all([
         api('GET', 'api/v1/lastfm/status').catch(() => null),
         api('GET', 'api/v1/listenbrainz/status').catch(() => null),
@@ -11499,8 +11550,8 @@ async function checkSession() {
       try {
         await api('GET', 'api/v1/admin/directories');
         S.isAdmin = true;
-        try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
-      } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; }
+        try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; S.itunesEnabled = dc?.itunesEnabled !== false; S.deezerEnabled = dc?.deezerEnabled !== false; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; S.itunesEnabled = false; S.deezerEnabled = false; }
+      } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; S.itunesEnabled = false; S.deezerEnabled = false; }
       const [ls2, lb2, rd2] = await Promise.all([
         api('GET', 'api/v1/lastfm/status').catch(() => null),
         api('GET', 'api/v1/listenbrainz/status').catch(() => null),
@@ -13007,6 +13058,11 @@ document.getElementById('np-left').addEventListener('click', async e => {
   // Search button — Deezer
   if (e.target.closest('#np-deezer-search-btn')) {
     _npDeezerSearch(S.queue[S.idx]);
+    return;
+  }
+  // Search button — iTunes
+  if (e.target.closest('#np-itunes-search-btn')) {
+    _npItunesSearch(S.queue[S.idx]);
     return;
   }
   // Paste URL button

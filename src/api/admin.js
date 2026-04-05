@@ -901,6 +901,8 @@ export function setup(mstream) {
       apiKey:         config.program.discogs?.apiKey         || '',
       apiSecret:      config.program.discogs?.apiSecret      || '',
       userAgentTag:   config.program.discogs?.userAgentTag   || '',
+      itunesEnabled:  config.program.discogs?.itunesEnabled  !== false,
+      deezerEnabled:  config.program.discogs?.deezerEnabled  !== false,
     });
   });
 
@@ -912,6 +914,8 @@ export function setup(mstream) {
       apiKey:         Joi.string().allow('').required(),
       apiSecret:      Joi.string().allow('').required(),
       userAgentTag:   Joi.string().allow('').pattern(/^[a-zA-Z0-9]{0,4}$/).required(),
+      itunesEnabled:  Joi.boolean().required(),
+      deezerEnabled:  Joi.boolean().required(),
     });
     joiValidate(schema, req.body);
 
@@ -922,6 +926,8 @@ export function setup(mstream) {
     loadConfig.discogs.apiKey         = req.body.apiKey;
     loadConfig.discogs.apiSecret      = req.body.apiSecret;
     loadConfig.discogs.userAgentTag   = req.body.userAgentTag;
+    loadConfig.discogs.itunesEnabled  = req.body.itunesEnabled;
+    loadConfig.discogs.deezerEnabled  = req.body.deezerEnabled;
     await admin.saveFile(loadConfig, config.configFile);
 
     config.program.discogs.enabled        = req.body.enabled;
@@ -929,6 +935,8 @@ export function setup(mstream) {
     config.program.discogs.apiKey         = req.body.apiKey;
     config.program.discogs.apiSecret      = req.body.apiSecret;
     config.program.discogs.userAgentTag   = req.body.userAgentTag;
+    config.program.discogs.itunesEnabled  = req.body.itunesEnabled;
+    config.program.discogs.deezerEnabled  = req.body.deezerEnabled;
 
     res.json({});
   });
