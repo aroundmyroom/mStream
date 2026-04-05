@@ -1,5 +1,25 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.5.1-velvet — April 2026
+
+### fix(admin): purge endpoint returned 403 when keepMonths: 0 was sent
+Redesigned play-stats purge API: replaced `keepMonths` with a `fromMs`/`toMs` time-range. Radio and podcast events are now also purged in the same call. Minimum value is 0 so any timestamp is accepted.
+
+### fix(admin): backfill endpoint returned 500 (`db.transaction is not a function`)
+`node:sqlite` `DatabaseSync` has no `.transaction()` helper. Replaced with `db.exec('BEGIN')` / `db.exec('COMMIT')` consistent with the rest of the codebase.
+
+### fix(admin): HTML tags shown as literal text in confirm dialog
+Changed Vue `{{message}}` to `v-html="message"` in the confirm modal so bold text and `<br>` render correctly.
+
+### feat: folder-name metadata fallback for untagged files
+Files with no embedded tags now get artist/album/title derived from the parent folder name pattern "Artist - Release info":
+- Scanner applies this automatically for new/modified files on every scan
+- Admin "Fix Missing Metadata (DB only)" backfill button updates all existing null-artist rows and rebuilds the artist search index
+- DB-only: audio files on disk are never modified; derived values survive rescans of unchanged files
+- See `docs/metadata-fallback.md`
+
+---
+
 ## v6.5.0-velvet — April 2026
 
 ### fix(streaming): FLAC files with ID3v2 preamble now play correctly in Chromium

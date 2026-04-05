@@ -1164,13 +1164,27 @@ export function setup(mstream) {
 
   mstream.post('/api/v1/admin/wrapped/purge', (req, res) => {
     const schema = Joi.object({
-      userId:     Joi.string().required(),
-      keepMonths: Joi.number().integer().min(1).max(60).required(),
+      userId: Joi.string().required(),
+      fromMs: Joi.number().integer().min(0).required(),
+      toMs:   Joi.number().integer().min(0).required(),
     });
-    joiValidate(schema, req.body);
-    const beforeMs = Date.now() - req.body.keepMonths * 30 * 24 * 60 * 60 * 1000;
-    const deleted = db.purgePlayEvents(req.body.userId, beforeMs);
+    const { value } = joiValidate(schema, req.body);
+    if (value.toMs < value.fromMs) return res.status(400).json({ error: 'toMs must be >= fromMs' });
+    const deleted = db.purgePlayEvents(value.userId, value.fromMs, value.toMs);
     res.json({ ok: true, deleted });
+  });
+
+  // POST /api/v1/admin/wrapped/backfill-folder-metadata
+  // For files with no artist tag, derive artist/album/title from the folder name.
+  mstream.post('/api/v1/admin/wrapped/backfill-folder-metadata', async (req, res) => {
+    try {
+      const updated = db.backfillFolderMetadata();
+      db.rebuildArtistIndex();
+      res.json({ ok: true, updated });
+    } catch (err) {
+      winston.error(err);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // ── Server Audio (mpv) Admin API ──────────────────────────────────────────

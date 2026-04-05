@@ -194,7 +194,7 @@
       <div class="modal-dialog confirm-dialog" @click.stop>
         <div style="padding:1.5rem 1.5rem .75rem;">
           <h5 style="margin:0 0 .6rem;font-size:1.1rem;" v-html="title"></h5>
-          <p v-if="message" style="color:var(--t2);margin:0;font-size:.92rem;">{{message}}</p>
+          <p v-if="message" style="color:var(--t2);margin:0;font-size:.92rem;" v-html="message"></p>
         </div>
         <div style="display:flex;justify-content:flex-end;gap:.75rem;padding:.75rem 1.5rem 1.25rem;">
           <button class="btn-flat" @click="cancel">Go Back</button>

@@ -502,6 +502,40 @@ async function parseMyFile(thisSong, modified) {
     ? Math.round(fmtInfo.duration * 1000) / 1000
     : null;
 
+  // ── Folder-name fallback for missing tags ─────────────────────────────────
+  // When a file has no embedded artist/album/title tags the parent folder name
+  // is usually "Artist - Release info …" (dash or en-dash separator).
+  // Extract the artist from the first segment and derive title from filename.
+  //
+  // NOTE: This writes ONLY to the mStream database — the audio files on disk
+  // are never modified. Derived values survive rescans: if a file is unchanged
+  // on disk the scanner skips full re-parsing and the DB values are preserved.
+  // Only files whose content changes (new modTime/hash) trigger a re-parse,
+  // which will re-derive the same values if no embedded tags are found.
+  if (!songInfo.artist && !songInfo.albumartist) {
+    const segments = songInfo.filePath.split('/');
+    const parentFolder = segments.length >= 2 ? segments[segments.length - 2] : null;
+    if (parentFolder) {
+      const m = parentFolder.match(/^(.+?)\s+[-–]\s+/);
+      if (m) songInfo.artist = m[1].trim();
+    }
+  }
+  if (!songInfo.album) {
+    const segments = songInfo.filePath.split('/');
+    const parentFolder = segments.length >= 2 ? segments[segments.length - 2] : null;
+    if (parentFolder) {
+      // Album = everything before the catalogue number at the end (SP5-… / -cd- etc.)
+      const clean = parentFolder.replace(/\s*[-–]\s*(SP\d[-\d]*|[A-Z]{2,}-\d[\w-]*|-cd-|-\d+).*$/i, '').trim();
+      songInfo.album = clean;
+    }
+  }
+  if (!songInfo.title) {
+    // Title = filename without extension, stripped of leading track numbers
+    const base = path.basename(thisSong, path.extname(thisSong));
+    songInfo.title = base.replace(/^[\d\s._-]+/, '').trim() || base;
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   try {
     songInfo.hash = await withTimeout(calculateHash(thisSong), PARSE_TIMEOUT_MS);
   } catch (err) {

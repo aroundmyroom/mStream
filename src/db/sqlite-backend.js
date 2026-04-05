@@ -2295,9 +2295,9 @@ export function getWrappedAdminStats() {
   return { total_events: total, total_radio: totalRadio, total_podcast: totalPodcast, storage_bytes: storageBytes, per_user: perUser };
 }
 
-export function purgePlayEvents(userId, beforeMs) {
-  // Delete events for a specific user older than beforeMs
-  const evRes = db.prepare('DELETE FROM play_events WHERE user_id = ? AND started_at < ?').run(userId, beforeMs);
+export function purgePlayEvents(userId, fromMs, toMs) {
+  // Delete events for a specific user within the [fromMs, toMs] time window (inclusive)
+  const evRes = db.prepare('DELETE FROM play_events WHERE user_id = ? AND started_at >= ? AND started_at <= ?').run(userId, fromMs, toMs);
   // Prune sessions that have no remaining events
   db.prepare(`
     DELETE FROM listening_sessions
@@ -2305,7 +2305,66 @@ export function purgePlayEvents(userId, beforeMs) {
       SELECT DISTINCT session_id FROM play_events WHERE session_id IS NOT NULL
     )
   `).run(userId);
+  // Also purge radio and podcast events for the same user/period
+  db.prepare('DELETE FROM radio_play_events WHERE user_id = ? AND started_at >= ? AND started_at <= ?').run(userId, fromMs, toMs);
+  db.prepare('DELETE FROM podcast_play_events WHERE user_id = ? AND started_at >= ? AND started_at <= ?').run(userId, fromMs, toMs);
   return evRes.changes;
+}
+
+/**
+ * Backfill artist / album / title for files whose tags are null.
+ * Derives values from the folder name pattern "Artist - Release info".
+ * Returns the number of rows updated.
+ */
+export function backfillFolderMetadata() {
+  function _deriveArtist(filepath) {
+    const parts = filepath.split('/');
+    const folder = parts.length >= 2 ? parts[parts.length - 2] : null;
+    if (!folder) return null;
+    const m = folder.match(/^(.+?)\s+[-\u2013]\s+/);
+    return m ? m[1].trim() : null;
+  }
+  function _deriveAlbum(filepath) {
+    const parts = filepath.split('/');
+    const folder = parts.length >= 2 ? parts[parts.length - 2] : null;
+    if (!folder) return folder;
+    // Strip trailing catalogue number / format tag
+    return folder.replace(/\s*[-\u2013]\s*(SP\d[\d-]*|[A-Z]{2,}-\d[\w-]*|-cd-|-\d+)[^/]*$/i, '').trim();
+  }
+  function _deriveTitle(filepath) {
+    const base = filepath.split('/').pop().replace(/\.[^.]+$/, '');
+    return base.replace(/^[\d\s._-]+/, '').trim() || base;
+  }
+
+  const rows = db.prepare(
+    "SELECT rowid, filepath, artist, album, title FROM files WHERE (artist IS NULL OR artist = '') AND filepath IS NOT NULL"
+  ).all();
+
+  const _md5 = s => createHash('md5').update((s || '').toLowerCase().trim()).digest('hex');
+
+  const upd = db.prepare(
+    'UPDATE files SET artist=?, album=?, title=?, artist_id=?, album_id=? WHERE rowid=?'
+  );
+
+  let updated = 0;
+  db.exec('BEGIN');
+  try {
+    for (const row of rows) {
+      const artist = _deriveArtist(row.filepath);
+      if (!artist) continue; // can't derive — skip
+      const album  = row.album  || _deriveAlbum(row.filepath);
+      const title  = row.title  || _deriveTitle(row.filepath);
+      const aid = _md5(artist).slice(0, 16);
+      const alid = _md5(`${artist}|||${album || ''}`).slice(0, 16);
+      upd.run(artist, album, title, aid, alid, row.rowid);
+      updated++;
+    }
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  return updated;
 }
 
 // ── Radio Play Events ─────────────────────────────────────────────────────────

@@ -197,7 +197,8 @@ export function getWrappedDataInRange(userId, from, to) { return backend.getWrap
 export function getWrappedSessionsInRange(userId, from, to) { return backend.getWrappedSessionsInRange(userId, from, to); }
 export function getTotalFileCount(vpaths) { return backend.getTotalFileCount(vpaths); }
 export function getWrappedAdminStats() { return backend.getWrappedAdminStats(); }
-export function purgePlayEvents(userId, beforeMs) { return backend.purgePlayEvents(userId, beforeMs); }
+export function purgePlayEvents(userId, fromMs, toMs) { return backend.purgePlayEvents(userId, fromMs, toMs); }
+export function backfillFolderMetadata() { return backend.backfillFolderMetadata(); }
 // Radio / Podcast Play Events
 export function insertRadioPlayEvent(e) { return backend.insertRadioPlayEvent(e); }
 export function updateRadioPlayEvent(id, userId, fields) { return backend.updateRadioPlayEvent(id, userId, fields); }

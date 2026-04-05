@@ -269,13 +269,18 @@ Vue.mixin({
 // ── Wrapped Play Stats Admin View ──────────────────────────────────────────
 const wrappedAdminView = Vue.component('wrapped-admin-view', {
   data() {
+    const pad = n => String(n).padStart(2, '0');
+    const fmtLocal = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const now = new Date();
     return {
       loading:    false,
       loaded:     false,
-      stats:      null,   // { total_events, storage_bytes, per_user: [...] }
+      stats:      null,
       purgeUser:  '',
-      keepMonths: 12,
+      fromDt:     fmtLocal(new Date(now.getTime() - 3600000)), // 1h ago
+      toDt:       fmtLocal(now),
       purging:    false,
+      backfilling: false,
     };
   },
   computed: {
@@ -285,13 +290,31 @@ const wrappedAdminView = Vue.component('wrapped-admin-view', {
   },
   mounted() { this.load(); },
   methods: {
+    // Format a Date as the value expected by <input type="datetime-local">: "YYYY-MM-DDTHH:MM"
+    _fmtLocal(d) {
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    },
+    setPreset(hoursAgo) {
+      const now = new Date();
+      this.toDt   = this._fmtLocal(now);
+      this.fromDt = this._fmtLocal(new Date(now.getTime() - hoursAgo * 3600000));
+    },
+    setPresetDay(daysAgo) {
+      const d = new Date();
+      d.setDate(d.getDate() - daysAgo);
+      d.setHours(0, 0, 0, 0);
+      const end = new Date(d);
+      end.setHours(23, 59, 59, 0);
+      this.fromDt = this._fmtLocal(d);
+      this.toDt   = this._fmtLocal(daysAgo === 0 ? new Date() : end);
+    },
     async load() {
       this.loading = true;
       try {
         const r = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/wrapped/stats` });
         this.stats = r.data;
         this.loaded = true;
-        // Pre-fill purge user with first in list
         if (this.stats.per_user.length) this.purgeUser = this.stats.per_user[0].user_id;
       } catch (e) {
         iziToast.error({ title: 'Failed to load play stats', position: 'topCenter', timeout: 3000 });
@@ -300,23 +323,34 @@ const wrappedAdminView = Vue.component('wrapped-admin-view', {
       }
     },
     doPurge() {
-      if (!this.purgeUser) return;
+      if (!this.purgeUser || !this.fromDt || !this.toDt) return;
+      const fromMs = new Date(this.fromDt).getTime();
+      const toMs   = new Date(this.toDt).getTime();
+      if (isNaN(fromMs) || isNaN(toMs)) {
+        iziToast.error({ title: 'Invalid date', position: 'topCenter', timeout: 3000 });
+        return;
+      }
+      if (toMs < fromMs) {
+        iziToast.error({ title: '"To" must be after "From"', position: 'topCenter', timeout: 3000 });
+        return;
+      }
+      const fmt = dt => new Date(dt).toLocaleString();
       adminConfirm(
-        `Purge play events for <b>${this.purgeUser}</b>?`,
-        `Events older than ${this.keepMonths} month(s) will be permanently deleted.`,
-        'Purge',
+        `Delete events for <b>${this.purgeUser}</b>?`,
+        `Song, radio, and podcast events between<br><b>${fmt(fromMs)}</b> and <b>${fmt(toMs)}</b> will be permanently deleted.`,
+        'Delete',
         async () => {
           this.purging = true;
           try {
             const r = await API.axios({
               method: 'POST',
               url: `${API.url()}/api/v1/admin/wrapped/purge`,
-              data: { userId: this.purgeUser, keepMonths: this.keepMonths },
+              data: { userId: this.purgeUser, fromMs, toMs },
             });
-            iziToast.success({ title: `Deleted ${r.data.deleted} events`, position: 'topCenter', timeout: 3000 });
+            iziToast.success({ title: `Deleted ${r.data.deleted} song events`, position: 'topCenter', timeout: 3000 });
             this.load();
           } catch (e) {
-            iziToast.error({ title: 'Purge failed', message: e.message, position: 'topCenter', timeout: 4000 });
+            iziToast.error({ title: 'Delete failed', message: e.message, position: 'topCenter', timeout: 4000 });
           } finally {
             this.purging = false;
           }
@@ -328,6 +362,24 @@ const wrappedAdminView = Vue.component('wrapped-admin-view', {
       const h = Math.floor(ms / 3600000);
       const m = Math.floor((ms % 3600000) / 60000);
       return h ? `${h}h ${m}m` : `${m} min`;
+    },
+    doBackfill() {
+      adminConfirm(
+        'Derive missing artist/album/title from folder names?',
+        'Files with no embedded tags will be updated using the pattern <b>"Artist - Release info"</b> in the parent folder name. This cannot be undone without a full rescan.',
+        'Apply',
+        async () => {
+          this.backfilling = true;
+          try {
+            const r = await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/wrapped/backfill-folder-metadata` });
+            iziToast.success({ title: `Updated ${r.data.updated} files`, position: 'topCenter', timeout: 4000 });
+          } catch (e) {
+            iziToast.error({ title: 'Backfill failed', message: e.message, position: 'topCenter', timeout: 4000 });
+          } finally {
+            this.backfilling = false;
+          }
+        }
+      );
     },
   },
   template: `
@@ -377,23 +429,59 @@ const wrappedAdminView = Vue.component('wrapped-admin-view', {
 
       <div class="card" v-if="loaded && stats && stats.per_user.length">
         <div class="card-content">
-          <span class="card-title">Purge Old Events</span>
-          <p class="grey-text">Delete play events older than N months for a specific user.</p>
-          <div style="display:flex;gap:1rem;align-items:flex-end;flex-wrap:wrap;">
-            <div class="input-field" style="margin:0;">
-              <select v-model="purgeUser" style="display:block;padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg);">
-                <option v-for="u in stats.per_user" :key="u.user_id" :value="u.user_id">{{ u.user_id }}</option>
-              </select>
-              <label style="position:static;font-size:.8rem;color:var(--fg-muted);">User</label>
-            </div>
-            <div class="input-field" style="margin:0;">
-              <input type="number" v-model.number="keepMonths" min="1" max="60" style="width:5rem;" />
-              <label style="position:static;font-size:.8rem;color:var(--fg-muted);">Keep months</label>
-            </div>
-            <button class="btn red darken-1" :disabled="purging" @click="doPurge">
-              {{ purging ? 'Purging…' : 'Purge' }}
-            </button>
+          <span class="card-title">Delete Events in Range</span>
+          <p class="grey-text">Deletes all song, radio, and podcast events for the selected user that fall within the chosen time window.</p>
+
+          <div style="margin-bottom:1rem;">
+            <div style="font-size:.8rem;color:var(--fg-muted);margin-bottom:.4rem;">User</div>
+            <select v-model="purgeUser" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg);">
+              <option v-for="u in stats.per_user" :key="u.user_id" :value="u.user_id">{{ u.user_id }}</option>
+            </select>
           </div>
+
+          <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem;">
+            <div>
+              <div style="font-size:.8rem;color:var(--fg-muted);margin-bottom:.3rem;">From</div>
+              <input type="datetime-local" v-model="fromDt" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg);" />
+            </div>
+            <div>
+              <div style="font-size:.8rem;color:var(--fg-muted);margin-bottom:.3rem;">To</div>
+              <input type="datetime-local" v-model="toDt" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg);" />
+            </div>
+          </div>
+
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:1.2rem;">
+            <span style="font-size:.8rem;color:var(--fg-muted);">Quick select:</span>
+            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPreset(1)">Last 1h</button>
+            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPreset(6)">Last 6h</button>
+            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPreset(12)">Last 12h</button>
+            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPresetDay(0)">Today</button>
+            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPresetDay(1)">Yesterday</button>
+          </div>
+
+          <button class="btn red darken-1" :disabled="purging" @click="doPurge">
+            {{ purging ? 'Deleting…' : 'Delete events in range' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-content">
+          <span class="card-title">Fix Missing Metadata (DB only)</span>
+          <p class="grey-text">
+            For files that have <b>no embedded tags at all</b>, this derives artist, album, and title values from
+            the parent folder name using the pattern <b>"Artist - Release info"</b> and writes them to the
+            <b>mStream database only</b> — the audio files on disk are not modified and their ID3/Vorbis tags
+            are left untouched.
+          </p>
+          <p class="grey-text" style="margin-top:.5rem;">
+            These derived values are <b>safe through rescans</b>: if a file is unchanged on disk, the scanner
+            skips full re-parsing and will not overwrite them. Only files whose content changes trigger a
+            re-parse, which will re-apply the same folder-name fallback if no embedded tags are found.
+          </p>
+          <button class="btn" :disabled="backfilling" @click="doBackfill" style="margin-top:.5rem;">
+            {{ backfilling ? 'Applying…' : 'Derive metadata from folder names' }}
+          </button>
         </div>
       </div>
     </div>
