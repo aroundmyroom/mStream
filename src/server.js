@@ -172,8 +172,10 @@ export async function serveIt(configFile) {
   // Subsonic REST API — has its own auth, must be before authApi.setup()
   subsonicApi.setup(mstream);
 
-  // Public lightweight ping — reachability check without credentials
-  mstream.get('/api/v1/ping/public', (_req, res) => res.json({ status: 'ok' }));
+  // Public lightweight ping — reachability check without credentials.
+  // Also returns instanceId so the client can detect server identity changes
+  // and wipe stale localStorage from a previous instance.
+  mstream.get('/api/v1/ping/public', (_req, res) => res.json({ status: 'ok', instanceId: config.program.instanceId }));
 
   // Everything below this line requires authentication
   authApi.setup(mstream);

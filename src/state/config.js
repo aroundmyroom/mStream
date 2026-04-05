@@ -136,6 +136,7 @@ const schema = Joi.object({
   federation: federationOptions.default(federationOptions.validate({}).value),
   serverAudio: serverAudioOptions.default(serverAudioOptions.validate({}).value),
   ui: Joi.string().valid('velvet', 'velvet-dark', 'velvet-light').default('velvet'),
+  instanceId: Joi.string().optional(),
 });
 
 export let program;
@@ -170,10 +171,18 @@ export async function setup(configFileArg) {
     }
   }
 
-  // Setup Secret for JWT
+  // Generate any missing secure identifiers and persist once
+  let _needsSave = false;
   if (!programData.secret) {
     winston.info('Config file does not have secret.  Generating a secret and saving');
     programData.secret = await asyncRandom(128);
+    _needsSave = true;
+  }
+  if (!programData.instanceId) {
+    programData.instanceId = crypto.randomUUID();
+    _needsSave = true;
+  }
+  if (_needsSave) {
     await fs.writeFile(configFileArg, JSON.stringify(programData, null, 2), 'utf8');
   }
 

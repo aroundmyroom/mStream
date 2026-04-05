@@ -1,5 +1,14 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.5.2-velvet — April 2026
+
+### fix: localStorage cross-instance contamination (server identity guard)
+When visiting a second mStream server (or a reinstalled server) at the same browser origin, the browser's localStorage from the previous instance bled through — settings, theme, queue, and login credentials (`ms2_token` / `ms2_user`) all appeared from the old server.
+
+Fix: on first boot `src/state/config.js` generates a stable UUID and writes it to `save/db/default.json` as `instanceId`. `GET /api/v1/ping/public` now returns this ID. An IIFE at the top of `webapp/app.js` fetches the public ping immediately on page load; if the stored `ms2_server_id` differs from the server's `instanceId`, `localStorage.clear()` + `location.reload()` fires before any settings or credentials are applied — giving the user a completely clean session on the new server.
+
+---
+
 ## v6.5.1-velvet — April 2026
 
 ### fix(admin): purge endpoint returned 403 when keepMonths: 0 was sent

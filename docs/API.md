@@ -211,6 +211,7 @@ Login Functions:
 
 * [/login](API/login.md)
 * [/ping](API/ping.md) — now returns `supportedAudioFiles` map *(GitHub Copilot, 2026-02-27)*
+* `/api/v1/ping/public` — unauthenticated; returns `{ status: 'ok', instanceId }` — used by the client-side server identity guard to detect cross-instance localStorage contamination *(v6.5.2-velvet)*
 * /change-password - Coming Soon
 
 Failure Endpoints:

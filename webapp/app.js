@@ -1,4 +1,33 @@
 'use strict';
+// ── SERVER IDENTITY GUARD ────────────────────────────────────────────────────
+// Detects when this browser's localStorage belongs to a different mStream
+// instance (fresh install, IP change, reverse-proxy swap, second server).
+// Wipes localStorage and reloads so settings and credentials from the old
+// server never bleed into the new one — including ms2_token and ms2_user,
+// which would otherwise pre-fill the login form on a clean server.
+// Runs async — the rest of the page initialises in parallel, but a mismatch
+// triggers location.reload() before the user can meaningfully interact.
+(function () {
+  try {
+    const _sid = localStorage.getItem('ms2_server_id');
+    fetch('/api/v1/ping/public', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.instanceId) return;
+        if (_sid && _sid !== d.instanceId) {
+          // Different server — wipe all stored settings and reload clean.
+          localStorage.clear();
+          location.reload();
+          return;
+        }
+        if (!_sid) {
+          // First visit to this server — record its identity.
+          localStorage.setItem('ms2_server_id', d.instanceId);
+        }
+      })
+      .catch(function () {});
+  } catch (_) {}
+})();
 // Feature detection — Web Animations API required for the dice throw
 const _webAnimSupported = typeof Element.prototype.animate === 'function';
 // ── STATE ─────────────────────────────────────────────────────
