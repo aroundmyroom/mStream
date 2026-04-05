@@ -1,5 +1,29 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.4.0-velvet — April 2026
+
+### refactor(db): remove Loki backend — SQLite only
+
+- Deleted `src/db/loki-backend.js` (1,428 lines of dead code)
+- Removed `lokijs` from `package.json` dependencies (-3.1 MB from `node_modules`)
+- `src/db/manager.js` — replaced runtime `if/else` engine branch with a static `import * as backend from './sqlite-backend.js'`; removed all `if (backend.x)` optional guards and ternary fallbacks that existed only for Loki compatibility
+- `src/state/config.js` — removed `engine` field from `dbOptions` schema; added `.unknown(true)` so existing `default.json` files with `"engine": "sqlite"` continue to boot without validation errors
+- `src/api/admin.js` — removed `POST /api/v1/admin/db/engine` endpoint and `engine` field from the `GET /api/v1/admin/db/params` response
+- `src/util/admin.js` — removed `editDbEngine()` helper
+- `webapp/admin/index.js` — removed "DB Engine" table row, `editDbEngineModal` component, and its registration
+- `save/db/default.json` — removed `"engine": "sqlite"` from `db` block
+
+### feat(admin): admin-configurable server-side default theme
+
+- New `ui` config key (`velvet` | `velvet-dark` | `velvet-light`, default `velvet`) added to `default.json` and validated in the Joi schema
+- `/api/v1/ping` now includes `defaultTheme` (strips the `velvet-` prefix so the existing `applyTheme()` receives `velvet`/`dark`/`light`) so the client knows the server preference immediately after login
+- New `POST /api/v1/admin/config/theme` endpoint (admin-only) to update the default UI live, backed by `editUi()` in `src/util/admin.js`
+- `GET /api/v1/admin/config` now exposes `ui` alongside the other server settings
+- **Admin panel** → Advanced → new "User Interface" card with Velvet / Dark / Light pill buttons — active selection is highlighted, change takes effect instantly without a page reload
+- **Client logic**: after login, if a user has no personally stored theme preference, the server default is applied automatically; users who have previously made a choice keep their saved preference unchanged
+
+---
+
 ## v6.3.3-velvet — April 2026
 
 ### feat(radio): smarter library matching + clickable badge

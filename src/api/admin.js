@@ -140,16 +140,7 @@ export function setup(mstream) {
   });
 
   mstream.get("/api/v1/admin/db/params", (req, res) => {
-    res.json({ ...config.program.scanOptions, engine: config.program.db.engine });
-  });
-
-  mstream.post("/api/v1/admin/db/engine", async (req, res) => {
-    const schema = Joi.object({
-      engine: Joi.string().valid('loki', 'sqlite').required()
-    });
-    joiValidate(schema, req.body);
-    await admin.editDbEngine(req.body.engine);
-    res.json({});
+    res.json({ ...config.program.scanOptions });
   });
 
   mstream.post("/api/v1/admin/db/params/scan-interval", async (req, res) => {
@@ -703,8 +694,16 @@ export function setup(mstream) {
       ssl: config.program.ssl,
       storage: config.program.storage,
       maxRequestSize: config.program.maxRequestSize,
-      federation: config.program.federation
+      federation: config.program.federation,
+      ui: config.program.ui || 'velvet'
     });
+  });
+
+  mstream.post("/api/v1/admin/config/theme", async (req, res) => {
+    const schema = Joi.object({ ui: Joi.string().valid('velvet', 'velvet-dark', 'velvet-light').required() });
+    joiValidate(schema, req.body);
+    await admin.editUi(req.body.ui);
+    res.json({});
   });
 
   mstream.post("/api/v1/admin/config/max-request-size", async (req, res) => {

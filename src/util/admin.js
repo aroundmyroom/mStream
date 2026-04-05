@@ -248,6 +248,14 @@ export async function editUpload(val) {
   config.program.noUpload = val;
 }
 
+export async function editUi(val) {
+  const loadConfig = await loadFile(config.configFile);
+  loadConfig.ui = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.ui = val;
+}
+
 
 export async function editAddress(val) {
   const loadConfig = await loadFile(config.configFile);
@@ -263,15 +271,6 @@ export async function editSecret(val) {
   await saveFile(loadConfig, config.configFile);
 
   config.program.secret = val;
-}
-
-export async function editDbEngine(engine) {
-  const loadConfig = await loadFile(config.configFile);
-  if (!loadConfig.db) { loadConfig.db = {}; }
-  loadConfig.db.engine = engine;
-  await saveFile(loadConfig, config.configFile);
-
-  mStreamServer.reboot();
 }
 
 export async function editScanInterval(val) {

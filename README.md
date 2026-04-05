@@ -2,7 +2,7 @@
 
 > **A heavily extended fork of [mStream](https://github.com/IrosTheBeggar/mStream) by [aroundmyroom](https://github.com/aroundmyroom).**
 
-**Current version: [6.3.3-velvet](releases/v6.3.3-velvet.md)** — April 2026
+**Current version: [6.4.0-velvet](releases/v6.4.0-velvet.md)** — April 2026
 
 [![Discord](https://img.shields.io/badge/Discord-mStream%20Velvet-5865F2?logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/KfsTCYrTkS)
 
@@ -223,7 +223,7 @@ Open **http://localhost:3000** — on a fresh install with no users the admin pa
 Or pin to a specific release:
 
 ```shell
-docker pull ghcr.io/aroundmyroom/mstream-velvet:v6.3.3-velvet
+docker pull ghcr.io/aroundmyroom/mstream-velvet:v6.4.0-velvet
 ```
 
 **Build from source** (optional):
@@ -316,6 +316,5 @@ Full combined changelog: [`changes-fork-velvet.md`](changes-fork-velvet.md)
 mStream Velvet is built on [mStream](https://github.com/IrosTheBeggar/mStream) by IrosTheBeggar and on these open-source libraries:
 
 - [music-metadata](https://github.com/Borewit/music-metadata) — metadata parser for Node.js
-- [LokiJS](https://github.com/techfort/LokiJS) — in-memory JS database (legacy/fallback mode)
 - [Butterchurn](https://github.com/jberg/butterchurn) — Milkdrop visualizer in JavaScript
 - [audioMotion-analyzer](https://github.com/hvianna/audioMotion-analyzer) — Audio spectrum visualizer

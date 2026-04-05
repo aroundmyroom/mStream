@@ -1,16 +1,10 @@
 import winston from 'winston';
 import * as config from '../state/config.js';
+import * as backend from './sqlite-backend.js';
 
-let backend;
 let clearShared;
 
 export async function initDB() {
-  if (config.program.db.engine === 'sqlite') {
-    backend = await import('./sqlite-backend.js');
-  } else {
-    backend = await import('./loki-backend.js');
-  }
-
   await backend.init(config.program.storage.dbDirectory, config.program.db);
 
   // Shared playlist cleanup interval
@@ -43,9 +37,9 @@ export function findFilesByPaths(filepaths, vpath) { return backend.findFilesByP
 export function updateFileScanId(file, scanId) { return backend.updateFileScanId(file, scanId); }
 export function batchUpdateScanIds(filepaths, vpath, scanId) { return backend.batchUpdateScanIds(filepaths, vpath, scanId); }
 export function insertFile(fileData) { return backend.insertFile(fileData); }
-export function beginTransaction() { if (backend.beginTransaction) backend.beginTransaction(); }
-export function commitTransaction() { if (backend.commitTransaction) backend.commitTransaction(); }
-export function vacuumInto(destPath) { if (backend.vacuumInto) backend.vacuumInto(destPath); }
+export function beginTransaction() { backend.beginTransaction(); }
+export function commitTransaction() { backend.commitTransaction(); }
+export function vacuumInto(destPath) { backend.vacuumInto(destPath); }
 export function removeFileByPath(filepath, vpath) { return backend.removeFileByPath(filepath, vpath); }
 export function getLiveArtFilenames() { return backend.getLiveArtFilenames(); }
 export function getLiveHashes() { return backend.getLiveHashes(); }
@@ -55,8 +49,8 @@ export function removeFilesByVpath(vpath) { return backend.removeFilesByVpath(vp
 export function countFilesByVpath(vpath) { return backend.countFilesByVpath(vpath); }
 export function getStats() { return backend.getStats(); }
 export function getLastScannedMs() { return backend.getLastScannedMs(); }
-export function rebuildFolderIndex() { if (backend.rebuildFolderIndex) backend.rebuildFolderIndex(); }
-export function rebuildArtistIndex() { if (backend.rebuildArtistIndex) backend.rebuildArtistIndex(); }
+export function rebuildFolderIndex() { backend.rebuildFolderIndex(); }
+export function rebuildArtistIndex() { backend.rebuildArtistIndex(); }
 
 // Metadata Queries
 export function updateFileArt(filepath, vpath, aaFile, scanId, artSource) { return backend.updateFileArt(filepath, vpath, aaFile, scanId, artSource); }
@@ -68,14 +62,14 @@ export function updateFileTags(filepath, vpath, tags) { return backend.updateFil
 export function getFileWithMetadata(filepath, vpath, username) { return backend.getFileWithMetadata(filepath, vpath, username); }
 export function getArtists(vpaths, ignoreVPaths, excludeFilepathPrefixes) { return backend.getArtists(vpaths, ignoreVPaths, excludeFilepathPrefixes); }
 export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) { return backend.getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes); }
-export function getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) { return backend.getArtistAlbumsMulti ? backend.getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) : []; }
+export function getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) { return backend.getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes); }
 export function getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) { return backend.getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes); }
 export function getAlbumSongs(album, vpaths, username, opts) { return backend.getAlbumSongs(album, vpaths, username, opts); }
-export function getFilesForAlbumsBrowse(sources) { return backend.getFilesForAlbumsBrowse ? backend.getFilesForAlbumsBrowse(sources) : []; }
+export function getFilesForAlbumsBrowse(sources) { return backend.getFilesForAlbumsBrowse(sources); }
 export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
 export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
-export function searchFolders(query, vpaths, ignoreVPaths) { return backend.searchFolders ? backend.searchFolders(query, vpaths, ignoreVPaths) : []; }
-export function searchArtistsNormalized(query, vpaths, ignoreVPaths) { return backend.searchArtistsNormalized ? backend.searchArtistsNormalized(query, vpaths, ignoreVPaths) : []; }
+export function searchFolders(query, vpaths, ignoreVPaths) { return backend.searchFolders(query, vpaths, ignoreVPaths); }
+export function searchArtistsNormalized(query, vpaths, ignoreVPaths) { return backend.searchArtistsNormalized(query, vpaths, ignoreVPaths); }
 export function getRatedSongs(vpaths, username, ignoreVPaths) { return backend.getRatedSongs(vpaths, username, ignoreVPaths); }
 export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts); }
 export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts); }
@@ -137,7 +131,7 @@ export function getFilesByAlbumId(albumId, vpaths, username, opts) { return back
 export function getSongByHash(hash, username) { return backend.getSongByHash(hash, username); }
 export function getAaFileById(id) { return backend.getAaFileById(id); }
 export function getAaFileForDir(vpath, dirRelPath) { return backend.getAaFileForDir(vpath, dirRelPath); }
-export function clearAaFileForDirCache() { if (backend.clearAaFileForDirCache) backend.clearAaFileForDirCache(); }
+export function clearAaFileForDirCache() { backend.clearAaFileForDirCache(); }
 export function getStarredSongs(vpaths, username, opts) { return backend.getStarredSongs(vpaths, username, opts); }
 export function getStarredAlbums(vpaths, username, opts) { return backend.getStarredAlbums(vpaths, username, opts); }
 export function setStarred(hash, username, starred) { return backend.setStarred(hash, username, starred); }

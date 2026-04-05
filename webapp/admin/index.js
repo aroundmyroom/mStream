@@ -1791,7 +1791,8 @@ const advancedView = Vue.component('advanced-view', {
   data() {
     return {
       params: ADMINDATA.serverParams,
-      paramsTS: ADMINDATA.serverParamsUpdated
+      paramsTS: ADMINDATA.serverParamsUpdated,
+      uiSelect: ADMINDATA.serverParams.ui || 'velvet'
     };
   },
   template: `
@@ -1801,6 +1802,28 @@ const advancedView = Vue.component('advanced-view', {
     <div v-else>
       <div class="container">
         <div class="row">
+          <div class="col s12">
+            <div class="card">
+              <div class="card-content">
+                <span class="card-title">User Interface</span>
+                <table>
+                  <tbody>
+                    <tr>
+                      <td><b>Default Theme:</b></td>
+                      <td>
+                        <select v-model="uiSelect" v-on:change="setUi(uiSelect)" style="width:auto;padding:4px 8px">
+                          <option value="velvet">Velvet (Default)</option>
+                          <option value="velvet-dark">Velvet Dark</option>
+                          <option value="velvet-light">Velvet Light</option>
+                        </select>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p style="color:#888;font-size:12px;margin-top:8px">Sets the theme shown to users who have not yet chosen a personal preference.</p>
+              </div>
+            </div>
+          </div>
           <div class="col s12">
             <div class="card">
               <div class="card-content">
@@ -1934,6 +1957,20 @@ const advancedView = Vue.component('advanced-view', {
                     });
       });
     },
+    setUi: function(ui) {
+      API.axios({
+        method: 'POST',
+        url: `${API.url()}/api/v1/admin/config/theme`,
+        data: { ui }
+      }).then(() => {
+        Vue.set(ADMINDATA.serverParams, 'ui', ui);
+        this.uiSelect = ui;
+        iziToast.success({ title: 'Default theme updated', position: 'topCenter', timeout: 3000 });
+      }).catch(() => {
+        this.uiSelect = ADMINDATA.serverParams.ui || 'velvet';
+        iziToast.error({ title: 'Failed', position: 'topCenter', timeout: 3000 });
+      });
+    },
     toggleFileUpload: function() {
             adminConfirm(`<b>${this.params.noUpload === false ? 'Disable' : 'Enable'} File Uploading?</b>`, '', `${this.params.noUpload === false ? 'Disable' : 'Enable'}`, () => {
         API.axios({
@@ -2021,12 +2058,6 @@ const dbView = Vue.component('db-view', {
                       <td><b>Max Concurrent Scans:</b> {{dbParams.maxConcurrentTasks}}</td>
                       <td>
                         <a v-on:click="openModal('edit-max-scan-modal')" class="btn-sm btn-sm-edit">edit</a>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td><b>DB Engine:</b> {{dbParams.engine}}</td>
-                      <td>
-                        <a v-on:click="openModal('edit-db-engine-modal')" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
@@ -5297,68 +5328,6 @@ const federationGenerateInvite = Vue.component('federation-generate-invite-modal
 });
 
 
-const editDbEngineModal = Vue.component('edit-db-engine-modal', {
-  data() {
-    return {
-      params: ADMINDATA.dbParams,
-      submitPending: false,
-      editValue: ADMINDATA.dbParams.engine,
-      selectInstance: null
-    };
-  },
-  template: `
-    <form @submit.prevent="updateParam">
-      ${mHead('Database Engine', '⚠ Requires a server reboot to apply')}
-      <div class="modal-body">
-        <div class="field-group">
-          <label for="db-engine-dropdown">Engine</label>
-          <select v-model="editValue" id="db-engine-dropdown">
-            <option value="loki">LokiJS — in-memory, fast</option>
-            <option value="sqlite">SQLite — persistent, reliable</option>
-          </select>
-        </div>
-      </div>
-      ${mFoot('Update', 'Updating')}
-    </form>`,
-  mounted: function () {
-  },
-  beforeDestroy: function() {
-  },
-  methods: {
-    updateParam: async function() {
-      try {
-        this.submitPending = true;
-
-        await API.axios({
-          method: 'POST',
-          url: `${API.url()}/api/v1/admin/db/engine`,
-          data: { engine: this.editValue }
-        });
-
-        // update frontend data
-        Vue.set(ADMINDATA.dbParams, 'engine', this.editValue);
-
-        // close & reset the modal
-        modVM.closeModal();
-
-        iziToast.success({
-          title: 'Server Rebooting',
-          position: 'topCenter',
-          timeout: 3500
-        });
-      } catch(err) {
-        iziToast.error({
-          title: 'Update Failed',
-          position: 'topCenter',
-          timeout: 3500
-        });
-      } finally {
-        this.submitPending = false;
-      }
-    }
-  }
-});
-
 const nullModal = Vue.component('null-modal', {
   template: '<div>NULL MODAL ERROR: How did you get here?</div>'
 });
@@ -5382,7 +5351,6 @@ const modVM = new Vue({
     'edit-max-scan-modal': editMaxScanModal,
     'edit-ssl-modal': editSslModal,
     'federation-generate-invite-modal': federationGenerateInvite,
-    'edit-db-engine-modal': editDbEngineModal,
     'edit-max-zip-mb-modal': editMaxZipMbModal,
     'dir-access-test-modal': dirAccessTestModal,
     'null-modal': nullModal

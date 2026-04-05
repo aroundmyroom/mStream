@@ -11756,6 +11756,10 @@ function showApp() {
     }
     // Upload capability
     S.canUpload = !d.noUpload;
+    // Apply the server's default theme if the user hasn't stored a personal choice
+    if (d.defaultTheme && !localStorage.getItem(_uKey('theme'))) {
+      applyTheme(d.defaultTheme, false);
+    }
     if (d.supportedAudioFiles) S.supportedAudioFiles = d.supportedAudioFiles;
     // Per-user permission to record radio streams
     S.allowRadioRecording = d.allowRadioRecording === true;

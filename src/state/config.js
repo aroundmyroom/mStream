@@ -31,8 +31,7 @@ const scanOptions = Joi.object({
 
 const dbOptions = Joi.object({
   clearSharedInterval: Joi.number().integer().min(0).default(24),
-  engine: Joi.string().valid('loki', 'sqlite').default('sqlite')
-});
+}).unknown(true);
 
 const transcodeOptions = Joi.object({
   algorithm: Joi.string().valid(...getTransAlgos()).default('stream'),
@@ -134,6 +133,7 @@ const schema = Joi.object({
   }).optional(),
   federation: federationOptions.default(federationOptions.validate({}).value),
   serverAudio: serverAudioOptions.default(serverAudioOptions.validate({}).value),
+  ui: Joi.string().valid('velvet', 'velvet-dark', 'velvet-light').default('velvet'),
 });
 
 export let program;
