@@ -1,5 +1,24 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.6.0-velvet — April 2026
+
+### fix(radio): ICY stream metadata reliability
+- **Windows-1252 encoding** — reverse-map mojibake (e.g. `Ã‰` → `É`) by detecting CP1252 special-char fingerprint
+- **Empty tag recovery (ads)** — reset `_radioNpLastText` on empty ICY; schedule 8 s retry so display recovers after ad break
+- **Pause/unpause blank title** — `_onAudioPlay` now immediately polls now-playing for radio tracks on resume
+
+### fix(radio): automatic stream recovery after server restart
+- When all fallback links exhausted: reset to link 0, retry after 10 s (toast: "retrying in 10s…")
+- `Player.toggle()`: if `audioEl.error` is set on a radio track, reload src from scratch before calling `play()`
+
+### feat(admin): exclude folder from music index
+New `excluded` vpath type. Scanner skips the directory; `finish-scan` purges pre-existing DB rows; type change triggers immediate parent rescan.
+- Admin UI: 🚫 badge, mutual-exclusion checkboxes in Add + Edit forms, Albums Only hidden for excluded type
+
+### fix(auth): duplicate httpOnly/secure cookie properties removed
+
+---
+
 ## v6.5.2-velvet — April 2026 (patch 4)
 
 ### feat(admin): exclude folder from music index
