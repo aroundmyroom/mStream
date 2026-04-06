@@ -8608,6 +8608,7 @@ let _radioNowPlayingStation = null;
 let _radioPlayStart = 0;         // Date.now() when current radio stream started playing
 let _radioDbLookupTimer = null;  // delayed DB-check after now-playing changes
 let _radioNpLastText    = null;  // last seen now-playing string, to detect changes
+let _radioRetryTimer    = null;  // short-retry when ICY is empty (ads)
 let _radioSpectrumEnabled = false; // toggled by clicking the progress bar during radio
 
 const _RADIO_ART_PLACEHOLDER = `<div style="width:48px;height:48px;background:var(--card);border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M7.76 7.76a6 6 0 0 0 0 8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/></svg></div>`;
@@ -8622,6 +8623,7 @@ function _radioArtHtml(imgUrl) {
 function _stopRadioNowPlaying() {
   if (_radioNowPlayingTimer) { clearInterval(_radioNowPlayingTimer); _radioNowPlayingTimer = null; }
   if (_radioDbLookupTimer)  { clearTimeout(_radioDbLookupTimer);  _radioDbLookupTimer = null; }
+  if (_radioRetryTimer)     { clearTimeout(_radioRetryTimer);     _radioRetryTimer = null; }
   _radioNowPlayingStation = null;
   _radioNpLastText = null;
   const el = document.getElementById('player-radio-np');
@@ -8737,6 +8739,16 @@ async function _pollRadioNowPlaying(station) {
       }
     } else {
       el.classList.add('hidden');
+      // Reset last-text so the same song re-triggers the DB badge after an ad
+      _radioNpLastText = null;
+      // Schedule a fast retry so the display recovers as soon as the ad ends
+      // (rather than waiting the full 30-second poll interval)
+      if (!_radioRetryTimer) {
+        _radioRetryTimer = setTimeout(() => {
+          _radioRetryTimer = null;
+          if (_radioNowPlayingStation === station) _pollRadioNowPlaying(station);
+        }, 8000);
+      }
     }
     const kbpsEl = document.getElementById('player-radio-kbps');
     const npKbpsEl = document.getElementById('np-radio-kbps');
@@ -9325,7 +9337,7 @@ function _renderPodcastFeedsView() {
         <div class="pf-info">
           <div class="pf-title">${esc(f.title || f.url)}</div>
           ${f.author ? `<div class="pf-author">${esc(f.author)}</div>` : ''}
-          <div class="pf-stats">${f.episode_count ?? 0} episode${(f.episode_count ?? 0) !== 1 ? 's' : ''}${f.latest_pub_date ? ` · latest <span class="pf-latest-date">${_fmtPubDate(f.latest_pub_date)}</span>` : ''}${f.last_fetched ? ` · refreshed ${_fmtPubDate(f.last_fetched)}` : ''}</div>
+          <div class="pf-stats">${f.episode_count ?? 0} episode${(f.episode_count ?? 0) !== 1 ? 's' : ''}${f.latest_pub_date ? ` · latest <span class="pf-latest-date">${_fmtPubDate(f.latest_pub_date)}</span>` : ''}${f.last_fetched ? ` · last refreshed ${_fmtPubDate(f.last_fetched)}` : ''}</div>
           ${f.description ? `<div class="pf-desc">${esc(f.description)}</div>` : ''}
         </div>
         <div class="pf-btns pf-no-open">
@@ -12566,7 +12578,7 @@ const _TabFav = (() => {
 })();
 
 // ── AUDIO EVENT HANDLERS (named so they can be moved to a swapped element) ──
-function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); _startWaveformRaf(); document.body.classList.add('audio-playing'); _TabFav.play(); _startPositionSync(); if (S.queue[S.idx]?.isRadio) { _radioPlayStart = Date.now(); } if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'playing'; } catch(_e) {} }
+function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); _startWaveformRaf(); document.body.classList.add('audio-playing'); _TabFav.play(); _startPositionSync(); if (S.queue[S.idx]?.isRadio) { _radioPlayStart = Date.now(); if (_radioNowPlayingStation) _pollRadioNowPlaying(_radioNowPlayingStation); } if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'playing'; } catch(_e) {} }
 function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  _stopWaveformRaf(); document.body.classList.remove('audio-playing'); _TabFav.pause(); _stopPositionSync(); if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'paused';  } catch(_e) {} }
 function _onAudioEnded() {
   // Radio stream ended unexpectedly — try to reconnect on the same link

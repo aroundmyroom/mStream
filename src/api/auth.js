@@ -24,6 +24,8 @@ export function setup(mstream) {
       res.cookie('x-access-token', token, {
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in ms
         sameSite: 'Strict',
+        httpOnly: true,   // not readable by JavaScript — reduces XSS exposure
+        secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
       });
 
       res.json({

@@ -109,7 +109,56 @@ async function _fetchIcyMeta(rawUrl) {
               if (--metaWait === 0) {
                 req.destroy();
                 clearTimeout(timeout);
-                const text  = Buffer.from(metaBuf).toString('utf8');
+                // ICY metadata encoding is not standardised.
+                //
+                // Case 1 — clean UTF-8: no action needed.
+                //
+                // Case 2 — raw Latin-1/Windows-1252 bytes: some bytes are
+                //   invalid UTF-8 → Node inserts U+FFFD; re-decode as latin1.
+                //
+                // Case 3 — Windows-1252 double-encoding mojibake: the station
+                //   took UTF-8 bytes, misread each byte as a Windows-1252 char,
+                //   then re-encoded those chars as UTF-8.
+                //   e.g. É (U+00C9) → UTF-8 bytes C3 89 → read as Win-1252
+                //   chars Ã (0xC3) + ‰ (0x89→U+2030) → wire bytes C3 83 E2 80 B0
+                //   → we decode as "Ã‰" instead of É.
+                //   Fingerprint: presence of Windows-1252 0x80-0x9F special chars
+                //   (€ ‰ ‹ — ™ etc.) which never appear in real track titles.
+                //   Fix: map each char back to a CP1252 byte, decode those bytes
+                //   as UTF-8.  Accepted only when the result is shorter (double-
+                //   encoding always inflates) and contains no replacement chars.
+                const rawBuf = Buffer.from(metaBuf);
+                let text = rawBuf.toString('utf8');
+
+                // Case 2 — raw invalid UTF-8 bytes
+                if (text.includes('\uFFFD')) {
+                  text = rawBuf.toString('latin1');
+                }
+
+                // Case 3 — Windows-1252 double-encoding
+                if (/[\u20AC\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178]/.test(text)) {
+                  // CP1252 byte value for each special char in the 0x80-0x9F range
+                  const _w = new Map([[0x20AC,0x80],[0x201A,0x82],[0x0192,0x83],[0x201E,0x84],
+                    [0x2026,0x85],[0x2020,0x86],[0x2021,0x87],[0x02C6,0x88],[0x2030,0x89],
+                    [0x0160,0x8A],[0x2039,0x8B],[0x0152,0x8C],[0x017D,0x8E],[0x2018,0x91],
+                    [0x2019,0x92],[0x201C,0x93],[0x201D,0x94],[0x2022,0x95],[0x2013,0x96],
+                    [0x2014,0x97],[0x02DC,0x98],[0x2122,0x99],[0x0161,0x9A],[0x203A,0x9B],
+                    [0x0153,0x9C],[0x017E,0x9E],[0x0178,0x9F]]);
+                  const bytes = []; let ok = true;
+                  for (const ch of text) {
+                    const cp = ch.codePointAt(0);
+                    if (_w.has(cp))    { bytes.push(_w.get(cp)); }
+                    else if (cp < 0x100) { bytes.push(cp); }
+                    else               { ok = false; break; }
+                  }
+                  if (ok) {
+                    const fixed = Buffer.from(bytes).toString('utf8');
+                    if (!fixed.includes('\uFFFD') && [...fixed].length < [...text].length) {
+                      text = fixed;
+                    }
+                  }
+                }
+
                 const m     = text.match(/StreamTitle='(.*?)(?:';|'\0|'$)/s);
                 const title = m ? (m[1].replace(/\0+$/, '').trim() || null) : null;
                 resolve({ title, bitrate: icyBr });

@@ -1,5 +1,24 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.5.2-velvet — April 2026 (patch 2)
+
+### fix(radio): ICY stream metadata encoding (Windows-1252 mojibake)
+Some stations double-encode their stream titles: they take the UTF-8 bytes of a character (e.g. É = `C3 89`), treat each byte as a Windows-1252 character, then re-encode as UTF-8 — producing garbled output like `Ã‰` instead of `É`. Fixed by detecting the Windows-1252 special-character fingerprint (bytes 0x80–0x9F: €, ‰, ‹, —, ™ etc.), reverse-mapping each char to its CP1252 byte, and UTF-8 decoding the result. Accepted only when the result is shorter and contains no replacement characters.
+
+### fix(radio): ICY now-playing display doesn't recover after empty tag (advertisement)
+When the station sends an empty `StreamTitle` (e.g. during an ad), the now-playing label was hidden and `_radioNpLastText` was not reset — so when the next song came in it wasn't treated as a change and the DB badge didn't re-fire. Fixed: reset `_radioNpLastText` to `null` on empty ICY, and schedule an 8-second retry so the display recovers as soon as the ad ends rather than waiting the full 30-second poll interval.
+
+### fix(radio): ICY label blank after pause/unpause
+After pausing and resuming a radio stream, the now-playing title was blank until the next 30-second poll fired. Fixed by triggering an immediate `_pollRadioNowPlaying` call inside `_onAudioPlay` whenever the current track is a radio stream.
+
+### fix(podcasts): "refreshed" label changed to "last refreshed"
+Podcast feed cards showed `refreshed [date]`; changed to `last refreshed [date]` to make it clear this is the time the user last pulled the feed.
+
+### fix(auth): remove duplicate httpOnly/secure cookie options
+The login cookie was setting `httpOnly` and `secure` twice due to a copy-paste error from a previous session. Removed the duplicate entries (functionally harmless since JS last-value-wins, but cleaner).
+
+---
+
 ## v6.5.2-velvet — April 2026
 
 ### fix: localStorage cross-instance contamination (server identity guard)
