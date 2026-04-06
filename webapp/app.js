@@ -11744,6 +11744,9 @@ function showApp() {
   let _lastVisRefresh = Date.now();
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState !== 'visible') return;
+    // Always re-poll scan progress immediately on tab focus (timer is throttled in background)
+    if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
+    pollScan();
     const now = Date.now();
     if (now - _lastVisRefresh < 30000) return;
     _lastVisRefresh = now;

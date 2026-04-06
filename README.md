@@ -336,7 +336,7 @@ The built-in Subsonic REST API also lets you use any Subsonic-compatible app:
 
 - **Node.js:** v22 or greater (v24 used in Docker image; tested on v22.22.0)
 - **Database:** SQLite via Node.js built-in `node:sqlite` (`DatabaseSync`) — default engine
-- **Docker base image:** `node:24-alpine`
+- **Docker base image:** `node:24-slim` (Debian slim)
 - **Supported audio formats:** flac, mp3, mp4, wav, ogg, opus, aac, m4a, w64, aiff
 - **ffmpeg:** auto-downloaded to `bin/ffmpeg/` at startup if missing or below v6 (bare-metal and Docker); waveform generation, radio recording, YouTube tagging, and transcoding all use this bundled binary
 - **Cross-platform:** Linux, macOS, Windows, FreeBSD, ARM (Raspberry Pi)
