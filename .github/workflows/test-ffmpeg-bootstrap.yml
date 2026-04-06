@@ -1,10 +1,7 @@
 name: Test FFmpeg Bootstrap
 
 on:
-  workflow_dispatch:
-  push:
-    tags:
-      - 'v*-velvet'
+  workflow_dispatch: # disabled — ffmpeg bootstrap test not needed for this fork
 
 jobs:
   test:

@@ -2,8 +2,7 @@
 name: Update Website
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch: # disabled — upstream website update not used in this fork
 
 jobs:
   update-website:

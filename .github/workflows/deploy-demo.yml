@@ -2,8 +2,7 @@
 name: Deploy Demo Site
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch: # disabled — demo deployment not used in this fork
 
 jobs:
   deploy-demo:
