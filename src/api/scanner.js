@@ -198,6 +198,23 @@ export function setup(mstream) {
       }
     } catch (_e) { /* non-critical — waveform cleanup must not abort scan */ }
     db.removeStaleFiles(req.body.vpath, req.body.scanId);
+    // Purge any files that belong to excluded-type VCHILDs of this ROOT vpath.
+    // These are sub-directories the user has marked as "excluded from index".
+    try {
+      const rootDir = config.program.folders[req.body.vpath]?.root;
+      if (rootDir) {
+        for (const [vk, vf] of Object.entries(config.program.folders)) {
+          if (vk === req.body.vpath || vf.type !== 'excluded') continue;
+          // Is vk a VCHILD of the scanned vpath? Its root must be a sub-path of rootDir.
+          const childRoot = vf.root.replace(/\/?$/, '/');
+          const parentRoot = rootDir.replace(/\/?$/, '/');
+          if (!childRoot.startsWith(parentRoot)) continue;
+          // Compute relative prefix (e.g. "DJ Mixes/") and purge from DB
+          const relPrefix = path.relative(rootDir, vf.root);
+          if (relPrefix) db.removeFilesByPrefix(req.body.vpath, relPrefix + '/');
+        }
+      }
+    } catch (_e) { /* non-critical — purge errors must not abort scan */ }
     // Clear errors that were NOT re-encountered this scan — they are resolved.
     if (req.body.scanStartTs) {
       try { db.clearResolvedErrors(req.body.vpath, req.body.scanStartTs); } catch (_e) { /* non-critical */ }

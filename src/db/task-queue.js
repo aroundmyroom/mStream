@@ -44,6 +44,7 @@ function scanAll() {
   const children = childVpaths();
   Object.keys(config.program.folders).forEach((vpath) => {
     if (config.program.folders[vpath]?.type === 'recordings') { return; } // recordings folders are never scanned
+    if (config.program.folders[vpath]?.type === 'excluded') { return; } // excluded folders are never scanned
     if (!children.has(vpath)) { addScanTask(vpath); }
   });
 }
@@ -73,6 +74,9 @@ function runScan(scanObj) {
     compressImage: config.program.scanOptions.compressImage,
     otherRoots: Object.keys(config.program.folders)
       .filter(v => v !== scanObj.vpath && !isChildOf(scanObj.vpath, v))
+      .map(v => config.program.folders[v].root),
+    excludedPaths: Object.keys(config.program.folders)
+      .filter(v => v !== scanObj.vpath && isChildOf(scanObj.vpath, v) && config.program.folders[v].type === 'excluded')
       .map(v => config.program.folders[v].root)
   };
 

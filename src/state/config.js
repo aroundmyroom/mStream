@@ -109,7 +109,7 @@ const schema = Joi.object({
     Joi.string(),
     Joi.object({
       root: Joi.string().required(),
-      type: Joi.string().valid('music', 'audio-books', 'recordings', 'youtube').default('music'),
+      type: Joi.string().valid('music', 'audio-books', 'recordings', 'youtube', 'excluded').default('music'),
       allowRecordDelete: Joi.boolean().default(false),
       albumsOnly: Joi.boolean().default(false),
     })

@@ -43,7 +43,8 @@ const schema = Joi.object({
   supportedFiles: Joi.object().pattern(
     Joi.string(), Joi.boolean()
   ).required(),
-  otherRoots: Joi.array().items(Joi.string()).required()
+  otherRoots: Joi.array().items(Joi.string()).required(),
+  excludedPaths: Joi.array().items(Joi.string()).default([])
 });
 
 const { error: validationError } = schema.validate(loadJson);
@@ -389,6 +390,7 @@ async function recursiveScan(dir) {
 
     if (stat.isDirectory()) {
       if (loadJson.otherRoots.includes(filepath)) { continue; }
+      if (loadJson.excludedPaths.includes(filepath)) { continue; }
       await recursiveScan(filepath);
     } else if (stat.isFile()) {
       if (!loadJson.supportedFiles[getFileType(file).toLowerCase()]) { continue; }

@@ -710,6 +710,12 @@ export function removeFilesByVpath(vpath) {
   _s.ftsRebuild.run();
 }
 
+export function removeFilesByPrefix(vpath, prefix) {
+  const escaped = prefix.replace(/[%_\\]/g, '\\$&');
+  db.prepare("DELETE FROM files WHERE vpath = ? AND filepath LIKE ? ESCAPE '\\'").run(vpath, escaped + '%');
+  _s.ftsRebuild.run();
+}
+
 export function countFilesByVpath(vpath) {
   const row = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE vpath = ?').get(vpath);
   return row.cnt;

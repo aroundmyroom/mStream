@@ -1187,7 +1187,8 @@ const foldersView = Vue.component('folders-view', {
               </label>
 
               <label style="display:flex;align-items:flex-start;gap:.6rem;cursor:pointer;">
-                <input id="folder-is-audiobooks" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;" />
+                <input id="folder-is-audiobooks" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;"
+                  @change="if ($event.target.checked) { document.getElementById('folder-is-excluded').checked = false; document.getElementById('folder-is-excluded').dispatchEvent(new Event('change')); }" />
                 <span>
                   <span style="color:var(--t1);font-weight:600;">Audiobooks &amp; Podcasts</span><br>
                   <small style="color:var(--t2);font-size:.82rem;">Mark this directory as an Audiobooks / Podcasts library. Files will be scanned and displayed separately from your main music collection, allowing you to browse and stream spoken-word content independently.</small>
@@ -1195,8 +1196,28 @@ const foldersView = Vue.component('folders-view', {
               </label>
 
               <label style="display:flex;align-items:flex-start;gap:.6rem;cursor:pointer;">
+                <input id="folder-is-excluded" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;"
+                  @change="
+                    const excl = $event.target.checked;
+                    if (excl) {
+                      document.getElementById('folder-auto-access').checked = false;
+                      document.getElementById('folder-is-audiobooks').checked = false;
+                      document.getElementById('folder-is-recordings').checked = false;
+                      document.getElementById('folder-is-youtube').checked = false;
+                      document.getElementById('folder-allow-record-delete').checked = false;
+                      document.getElementById('folder-allow-record-delete-row').style.display = 'none';
+                    }
+                    ['folder-is-audiobooks','folder-is-recordings','folder-is-youtube'].forEach(id => document.getElementById(id).disabled = excl);" />
+                <span>
+                  <span style="color:var(--t1);font-weight:600;">Excluded from index</span><br>
+                  <small style="color:var(--t2);font-size:.82rem;">Files in this folder will not be scanned into the music library. Any existing indexed entries will be removed on the next scan of the parent folder.</small>
+                </span>
+              </label>
+
+              <label style="display:flex;align-items:flex-start;gap:.6rem;cursor:pointer;">
                 <input id="folder-is-recordings" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;"
                   @change="
+                    if ($event.target.checked) { document.getElementById('folder-is-excluded').checked = false; document.getElementById('folder-is-excluded').dispatchEvent(new Event('change')); }
                     const any = $event.target.checked || document.getElementById('folder-is-youtube').checked;
                     document.getElementById('folder-allow-record-delete-row').style.display = any ? 'flex' : 'none';
                     if (!any) document.getElementById('folder-allow-record-delete').checked = false;" />
@@ -1209,6 +1230,7 @@ const foldersView = Vue.component('folders-view', {
               <label style="display:flex;align-items:flex-start;gap:.6rem;cursor:pointer;">
                 <input id="folder-is-youtube" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;"
                   @change="
+                    if ($event.target.checked) { document.getElementById('folder-is-excluded').checked = false; document.getElementById('folder-is-excluded').dispatchEvent(new Event('change')); }
                     const any = $event.target.checked || document.getElementById('folder-is-recordings').checked;
                     document.getElementById('folder-allow-record-delete-row').style.display = any ? 'flex' : 'none';
                     if (!any) document.getElementById('folder-allow-record-delete').checked = false;" />
@@ -1258,10 +1280,12 @@ const foldersView = Vue.component('folders-view', {
                   (v.type === 'recordings' ? 'background:rgba(99,102,241,.15);color:#818cf8;' :
                    v.type === 'youtube'    ? 'background:rgba(220,50,50,.12);color:#e05555;' :
                    v.type === 'audio-books'? 'background:rgba(245,158,11,.12);color:#f59e0b;' :
+                   v.type === 'excluded'   ? 'background:rgba(156,163,175,.12);color:#9ca3af;' :
                                             'background:rgba(16,185,129,.12);color:#10b981;')">
                   {{ v.type === 'recordings' ? '⏺ Radio Recordings' :
                      v.type === 'youtube'    ? '▶ YouTube Downloads' :
-                     v.type === 'audio-books'? '📖 Audiobooks' : '🎵 Music' }}
+                     v.type === 'audio-books'? '📖 Audiobooks' :
+                     v.type === 'excluded'   ? '🚫 Excluded from index' : '🎵 Music' }}
                 </span>
                 <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;">
                   <button class="btn-small" type="button" @click="toggleEditFolder(k)">
@@ -1273,7 +1297,7 @@ const foldersView = Vue.component('folders-view', {
                     @click="toggleRecordDelete(k)">
                     {{v.allowRecordDelete ? 'Delete: On' : 'Delete: Off'}}
                   </button>
-                  <button v-if="v.type !== 'recordings' && v.type !== 'youtube'" class="btn-small" type="button"
+                  <button v-if="v.type !== 'recordings' && v.type !== 'youtube' && v.type !== 'excluded'" class="btn-small" type="button"
                     :style="v.albumsOnly ? 'background:var(--primary);color:#fff;' : ''"
                     :title="v.albumsOnly ? 'Albums Only ON — click to disable' : 'Albums Only OFF — click to enable'"
                     @click="toggleAlbumsOnly(k)">
@@ -1330,19 +1354,27 @@ const foldersView = Vue.component('folders-view', {
                   <label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:6px;">Folder Type</label>
                   <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;">
                     <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--t1);">
-                      <input type="checkbox" v-model="editForm.isRecording" style="width:auto;" />
+                      <input type="checkbox" v-model="editForm.isRecording" style="width:auto;" :disabled="editForm.isExcluded"
+                        @change="if (editForm.isRecording) editForm.isExcluded = false;" />
                       ⏺ Radio Recordings
                     </label>
                     <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--t1);">
-                      <input type="checkbox" v-model="editForm.isYoutube" style="width:auto;" />
+                      <input type="checkbox" v-model="editForm.isYoutube" style="width:auto;" :disabled="editForm.isExcluded"
+                        @change="if (editForm.isYoutube) editForm.isExcluded = false;" />
                       ▶ YouTube Downloads
                     </label>
                     <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--t1);">
-                      <input type="checkbox" v-model="editForm.isAudioBooks" style="width:auto;" />
+                      <input type="checkbox" v-model="editForm.isAudioBooks" style="width:auto;" :disabled="editForm.isExcluded"
+                        @change="if (editForm.isAudioBooks) editForm.isExcluded = false;" />
                       📖 Audiobooks
                     </label>
+                    <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--t1);">
+                      <input type="checkbox" v-model="editForm.isExcluded" style="width:auto;"
+                        @change="if (editForm.isExcluded) { editForm.isRecording=false; editForm.isYoutube=false; editForm.isAudioBooks=false; }" />
+                      🚫 Excluded from index
+                    </label>
                   </div>
-                  <small style="color:var(--t3);font-size:.78rem;">Check one or both. Both checked = Radio+YouTube combined folder.</small>
+                  <small style="color:var(--t3);font-size:.78rem;">Check one or both. Both checked = Radio+YouTube combined folder. Excluded = never scanned or indexed.</small>
                 </div>
 
                 <!-- User access (non-admin users only) -->
@@ -1420,7 +1452,8 @@ const foldersView = Vue.component('folders-view', {
               isAudioBooks: document.getElementById('folder-is-audiobooks').checked,
               isRecording: document.getElementById('folder-is-recordings').checked,
               isYoutube: document.getElementById('folder-is-youtube').checked,
-              allowRecordDelete: document.getElementById('folder-allow-record-delete').checked
+              allowRecordDelete: document.getElementById('folder-allow-record-delete').checked,
+              isExcluded: document.getElementById('folder-is-excluded').checked
             }
           });
 
@@ -1430,7 +1463,20 @@ const foldersView = Vue.component('folders-view', {
             });
           }
 
-          Vue.set(ADMINDATA.folders, this.dirName, { root: this.folder.value });
+          const isExcl = document.getElementById('folder-is-excluded').checked;
+          const isAB   = document.getElementById('folder-is-audiobooks').checked;
+          const isRec  = document.getElementById('folder-is-recordings').checked;
+          const isYT   = document.getElementById('folder-is-youtube').checked;
+          const isARD  = document.getElementById('folder-allow-record-delete').checked;
+          let addedType = 'music';
+          if (isExcl) addedType = 'excluded';
+          else if (isAB) addedType = 'audio-books';
+          else if (isRec && isYT) addedType = 'recordings';
+          else if (isYT) addedType = 'youtube';
+          else if (isRec) addedType = 'recordings';
+          const addedFolder = { root: this.folder.value, type: addedType };
+          if ((isRec || isYT) && isARD) addedFolder.allowRecordDelete = true;
+          Vue.set(ADMINDATA.folders, this.dirName, addedFolder);
           this.dirName = '';
           this.folder.value = '';
           this.$nextTick(() => {
@@ -1497,6 +1543,7 @@ const foldersView = Vue.component('folders-view', {
           isRecording: folder.type === 'recordings' || (folder.type === 'youtube' && folder.allowRecordDelete),
           isYoutube: folder.type === 'youtube' || (folder.type === 'recordings' && folder.allowRecordDelete),
           isAudioBooks: folder.type === 'audio-books',
+          isExcluded: folder.type === 'excluded',
           users: currentUsers
         };
         this.editingFolder = vpath;
@@ -1513,7 +1560,9 @@ const foldersView = Vue.component('folders-view', {
 
         // 1. Save type if changed (checkbox logic)
         let newType = 'music';
-        if (this.editForm.isAudioBooks) {
+        if (this.editForm.isExcluded) {
+          newType = 'excluded';
+        } else if (this.editForm.isAudioBooks) {
           newType = 'audio-books';
         } else if (this.editForm.isRecording && this.editForm.isYoutube) {
           newType = 'recordings';
@@ -1533,7 +1582,7 @@ const foldersView = Vue.component('folders-view', {
             // Clear flags incompatible with new type
             const isRecordLike = newType === 'recordings' || newType === 'youtube';
             if (!isRecordLike) Vue.delete(ADMINDATA.folders[vpath], 'allowRecordDelete');
-            if (isRecordLike) Vue.delete(ADMINDATA.folders[vpath], 'albumsOnly');
+            if (isRecordLike || newType === 'excluded') Vue.delete(ADMINDATA.folders[vpath], 'albumsOnly');
           } catch (_e) {
             errors.push('type');
           }

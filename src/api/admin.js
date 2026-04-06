@@ -234,7 +234,8 @@ export function setup(mstream) {
       isAudioBooks: Joi.boolean().default(false),
       isRecording: Joi.boolean().default(false),
       isYoutube: Joi.boolean().default(false),
-      allowRecordDelete: Joi.boolean().default(false)
+      allowRecordDelete: Joi.boolean().default(false),
+      isExcluded: Joi.boolean().default(false)
     });
     const input = joiValidate(schema, req.body);
 
@@ -246,13 +247,14 @@ export function setup(mstream) {
       mstream,
       input.value.isRecording,
       input.value.allowRecordDelete,
-      input.value.isYoutube);
+      input.value.isYoutube,
+      input.value.isExcluded);
     res.json({});
 
     try {
-      // Skip scan for recordings/youtube folders — must not be indexed in the music library.
+      // Skip scan for recordings/youtube/excluded folders — must not be indexed in the music library.
       const folderType = config.program.folders[input.value.vpath]?.type || 'music';
-      if (folderType !== 'recordings' && folderType !== 'youtube') {
+      if (folderType !== 'recordings' && folderType !== 'youtube' && folderType !== 'excluded') {
         const isChild = Object.keys(config.program.folders).some(
           other => other !== input.value.vpath && dbQueue.isChildOf(other, input.value.vpath)
         );
@@ -315,7 +317,7 @@ export function setup(mstream) {
   mstream.patch("/api/v1/admin/directory/type", async (req, res) => {
     const schema = Joi.object({
       vpath: Joi.string().pattern(/[a-zA-Z0-9-]+/).required(),
-      type: Joi.string().valid('music', 'audio-books', 'recordings', 'youtube').required(),
+      type: Joi.string().valid('music', 'audio-books', 'recordings', 'youtube', 'excluded').required(),
     });
     const input = joiValidate(schema, req.body);
     const { vpath, type } = input.value;
@@ -325,14 +327,29 @@ export function setup(mstream) {
     config.program.folders[vpath].type = type;
     // Clear flags that are incompatible with the new type
     if (type !== 'recordings' && type !== 'youtube') delete config.program.folders[vpath].allowRecordDelete;
-    if (type === 'recordings' || type === 'youtube') delete config.program.folders[vpath].albumsOnly;
+    if (type === 'recordings' || type === 'youtube' || type === 'excluded') delete config.program.folders[vpath].albumsOnly;
 
     const loadConfig = await admin.loadFile(config.configFile);
     if (!loadConfig.folders?.[vpath]) return res.status(404).json({ error: 'vpath not in config' });
     loadConfig.folders[vpath].type = type;
     if (type !== 'recordings' && type !== 'youtube') delete loadConfig.folders[vpath].allowRecordDelete;
-    if (type === 'recordings' || type === 'youtube') delete loadConfig.folders[vpath].albumsOnly;
+    if (type === 'recordings' || type === 'youtube' || type === 'excluded') delete loadConfig.folders[vpath].albumsOnly;
     await admin.saveFile(loadConfig, config.configFile);
+    // When a folder is marked as excluded, trigger a scan of its parent ROOT
+    // so that any already-indexed files under it get purged from the DB.
+    if (type === 'excluded') {
+      try {
+        const thisRoot = config.program.folders[vpath]?.root;
+        if (thisRoot) {
+          const parentVpath = Object.keys(config.program.folders).find(other => {
+            if (other === vpath) return false;
+            const otherRoot = config.program.folders[other].root.replace(/\/?$/, '/');
+            return thisRoot.replace(/\/?$/, '/').startsWith(otherRoot);
+          });
+          if (parentVpath) dbQueue.scanVPath(parentVpath);
+        }
+      } catch (_e) { /* non-critical */ }
+    }
     res.json({});
   });
 

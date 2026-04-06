@@ -46,6 +46,7 @@ export function getLiveHashes() { return backend.getLiveHashes(); }
 export function getStaleFileHashes(vpath, scanId) { return backend.getStaleFileHashes(vpath, scanId); }
 export function removeStaleFiles(vpath, scanId) { return backend.removeStaleFiles(vpath, scanId); }
 export function removeFilesByVpath(vpath) { return backend.removeFilesByVpath(vpath); }
+export function removeFilesByPrefix(vpath, prefix) { return backend.removeFilesByPrefix(vpath, prefix); }
 export function countFilesByVpath(vpath) { return backend.countFilesByVpath(vpath); }
 export function getStats() { return backend.getStats(); }
 export function getLastScannedMs() { return backend.getLastScannedMs(); }

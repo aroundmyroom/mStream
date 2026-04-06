@@ -1,5 +1,21 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.5.2-velvet — April 2026 (patch 4)
+
+### feat(admin): exclude folder from music index
+New `excluded` vpath type in the Directories admin. Mark any sub-folder (VCHILD) as "Excluded from index" to prevent its files from being scanned into the music library. Already-indexed entries under the excluded path are automatically purged the next time the parent ROOT vpath is scanned.
+
+- New `type: "excluded"` valid in config schema (`src/state/config.js`)
+- `removeFilesByPrefix(vpath, prefix)` added to `sqlite-backend.js` / `manager.js` — `DELETE WHERE vpath=? AND filepath LIKE 'prefix/%'` with FTS5 rebuild
+- Scanner child process (`scanner.mjs`) skips `excludedPaths` directories in `recursiveScan`
+- `task-queue.js` builds `excludedPaths` (excluded-type VCHILDs of the scanned ROOT) and passes them in `loadJson`; `scanAll` skips excluded-type roots like recordings
+- `scanner.js` `finish-scan` handler: purges remaining indexed files for all excluded VCHILDs after stale-file cleanup
+- `admin.js` `PATCH /api/v1/admin/directory/type`: accepts `excluded`, clears incompatible flags, triggers parent ROOT re-scan immediately
+- `util/admin.js` `addDirectory`: handles `isExcluded` param
+- Admin UI: "🚫 Excluded from index" badge (grey), "Excluded from index" checkbox in Add and Edit forms, Albums Only button hidden for excluded folders
+
+---
+
 ## v6.5.2-velvet — April 2026 (patch 3)
 
 ### fix(radio): stream does not recover after server restart

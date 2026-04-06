@@ -55,6 +55,14 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 | ZIP download | ❌ | ✅ Download current album or playlist as a ZIP with configurable server-side size guard |
 | ListenBrainz | ❌ | ✅ Scrobbling + instant "listening now" ping; runs alongside Last.fm |
 | On-demand album art | ❌ | ✅ Art extracted from embedded tags for unscanned files — shown in player bar, queue, file list, and recordings view without needing a scan |
+| Album Library | ❌ | ✅ DB-driven album grid with automatic series detection, multi-disc tabs, and intelligent art resolution; no filesystem walking at load time |
+| Playlist rename | ❌ | ✅ Rename any playlist directly from the sidebar |
+| Listening stats | ❌ | ✅ Privacy-first "Your Stats" — top songs/artists/albums, listening clock, personality card, radio & podcast summaries; fully local, no external calls |
+| Server Audio | ❌ | ✅ Play through the server's speakers via mpv; any browser becomes a remote with queue, Auto-DJ, and browse tabs |
+| Default theme | Per-user only | ✅ Admin sets server-wide default; each user's personal choice always wins |
+| Album art services | Discogs only | ✅ Discogs + Deezer + iTunes; each service independently toggled in admin |
+| Metadata fallback | ❌ | ✅ Untagged files get artist/album derived from folder name; admin one-shot backfill for existing entries |
+| Exclude folder | ❌ | ✅ Mark any sub-folder as "Excluded from index" — never scanned; existing entries purged on next scan |
 
 ---
 
@@ -89,6 +97,33 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 - **vpath filter** — Restrict picks to specific music folders
 - **Crossfade integration** — Shared slider with Playback Settings
 
+### Album Library
+
+- **DB-driven, no filesystem walking** — entire album tree built in memory from the indexed `files` table; ~60 ms first load, instant thereafter (5-minute cache)
+- **Automatic structure detection** from folder layout: standalone album, multi-disc album (disc naming patterns → tabs), or series (sub-folders that are not discs → grouped under a series banner)
+- **Cover art resolution** — on-disk image file → disc sub-folder image → embedded DB art (`aaFile`), in priority order
+- **Library grid** — series cards and standalone album cards with live search filter
+- **Series drill-down** → album detail with disc tabs, full track list, per-track and batch play/queue controls
+- **Queue disc separators** — multi-disc albums show a labelled divider (CD 1, CD 2, …) in the queue panel
+
+### Your Stats
+
+- **Local listening history** — every play, skip, podcast episode, and radio session recorded in your own SQLite DB; no external calls, no telemetry
+- **Period picker** — Week / Month / Quarter / Half-Year / Year with ← / → navigation
+- **Summary strip** — total plays, unique songs, total listening time
+- **Top Songs / Top Artists / Top Albums** — with album art
+- **Listening clock** — hour-of-day and day-of-week bar charts
+- **Personality card** — inferred listening archetype (Night Owl, Explorer, Loyalist, …)
+- **Radio card** and **Podcast card** — top stations and top shows when used
+- **Admin tools** — per-user event count, storage estimate, per-user purge (precise date-range window)
+
+### Server Audio
+
+- Play music **through the server's own speakers** via [mpv](https://mpv.io/) controlled by mStream's JSON IPC socket
+- Any browser that can reach the server becomes a **remote control** at `/server-remote` — no app needed
+- Remote includes: Now Playing bar with seek, transport controls, volume (0–130 incl. software boost), Queue tab, Auto-DJ tab (Random + Similar Artists), Browse tab
+- **Admin → Config → Server Audio** — enable toggle, mpv binary path, Detect button, Start/Stop, Open Remote link
+
 ### Subsonic API
 
 - Full **Subsonic REST 1.16.1** with Open Subsonic extensions (`openSubsonic: true`)
@@ -104,19 +139,23 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 - Fully restyled with GUIv2 CSS variables (no Materialize)
 - Rich library stats: tracks, artists, albums, genres, formats, art coverage, ReplayGain, decades, per-vpath breakdowns
 - Scan error log with type filter, retention setting, in-place FLAC/MP3/WAV repair (stream-copy + frame-level re-encode fallback), unrecoverable file detection, gone-from-library indicator, and post-rescan confirmation status
-- Live scan progress polling (admin + player header)
+- Live scan progress polling ("files checked" + "added to DB" counters, shown in admin and player header)
 - Directory access test (read/write per vpath, OS-specific advice)
-- Discogs: allow-update toggle
+- **Excluded from index** — mark any sub-folder as excluded; files are skipped during scan and existing entries purged on the next scan of the parent folder
+- Discogs: allow-update toggle; cover art sources (Discogs / Deezer / iTunes) each independently toggleable
 - Last.fm: server-side enable/disable toggle
 - ID3 tag editor toggle (per-installation setting)
+- **Server-wide default theme** — admin sets the starting theme for new users; each user's personal choice always wins
 - Logout confirmation + BroadcastChannel to stop player in all open tabs
 - Genre Groups ("Groups & Genres") — define named buckets that map raw genre tags into display groups; used in genre browsing sidebar and as filter options in smart playlists; drag-to-reorder, inline add/delete, auto-seeded with defaults on first visit
+- **Metadata fallback** — untagged files get artist/album derived from folder name at scan time; one-shot admin backfill for existing null-artist rows
 
 ### Internet Radio
 
 - Stream any HTTP/HTTPS radio station through the built-in proxy (required for ICY headers in modern browsers)
 - Station artwork fetched and cached on subscribe; SSRF-protected (no private IPs)
-- ICY `icy-title` now-playing metadata polled and shown in the player bar; stream bitrate badge (kbps) shown when advertised
+- ICY `icy-title` now-playing metadata polled and shown in the player bar; stream bitrate badge (kbps) shown when advertised; **library badge is clickable** — navigates directly to a search for the current track
+- ICY metadata auto-recovers after empty tags (ads) and after server restarts
 - Admin enable/disable toggle; per-user station list with add/edit/delete/reorder
 - Drag-to-reorder stations; filter pills by Genre and Country
 - **On-demand recording** — users with the `allow-radio-recording` permission (admin-granted per user) can record any stream to a configured Recordings folder; file naming includes station name, date, and time; station logo embedded as cover art; write-permission checked before start
@@ -137,7 +176,7 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 - **Filter builder** — combine genre group, year range, minimum rating, play status (played / unplayed), artist name search, and library (vpath) selection into a single rule-based playlist
 - **Fresh Picks** — per-playlist toggle for daily-shuffle mode: auto-shuffles once per day on first open, "New picks" button to reshuffle at any time; shuffle icon shown in the nav sidebar
 - **Library filter** — narrow picks to one or more configured music directories; child vpaths resolved to filepath prefix automatically
-- **CRUD management** — create, rename, edit filters, delete; each playlist remembers its own sort order
+- **CRUD management** — create, **rename**, edit filters, delete; each playlist remembers its own sort order
 - **Inline preview** — run a playlist before saving to see the live track count
 
 ### ZIP Download
@@ -223,7 +262,7 @@ Open **http://localhost:3000** — on a fresh install with no users the admin pa
 Or pin to a specific release:
 
 ```shell
-docker pull ghcr.io/aroundmyroom/mstream-velvet:v6.5.1-velvet
+docker pull ghcr.io/aroundmyroom/mstream-velvet:v6.5.2-velvet
 ```
 
 **Build from source** (optional):
