@@ -1,5 +1,16 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.5.2-velvet — April 2026 (patch 3)
+
+### fix(radio): stream does not recover after server restart
+When the server restarts mid-stream, the proxy connection drops. The existing error handler tried each fallback link once then gave up with "stream unavailable". The play button also did nothing because `audioEl.error` was set and `play()` on a broken src silently fails.
+
+Two fixes:
+- When all fallback links are exhausted, reset to link 0 and retry automatically after 10 seconds (toast: "retrying in 10s…")
+- In `Player.toggle()`, if the audio element is in an error state on a radio track, reload the src from scratch before calling `play()` — so the play button always works as a manual reconnect
+
+---
+
 ## v6.5.2-velvet — April 2026 (patch 2)
 
 ### fix(radio): ICY stream metadata encoding (Windows-1252 mojibake)

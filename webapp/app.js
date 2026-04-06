@@ -807,7 +807,16 @@ const Player = {
     // (queue may have been cleared while a song was already loaded)
     if (audioEl.paused) {
       VIZ.initAudio();
-      // If no wrapped event is active (e.g. after restoreQueue without autoResume), fire play-start now
+      // For radio: if the element is in an error state (e.g. server restarted),
+      // reload the src before playing so the browser makes a fresh connection.
+      const _ts = S.queue[S.idx];
+      if (_ts?.isRadio && audioEl.error) {
+        const _streamUrl = mediaUrl((_ts._radioLinks && _ts._radioLinks[_ts._radioLinkIdx || 0]) || _ts.filepath);
+        audioEl.src = _streamUrl;
+        audioEl.load();
+        audioEl.play().catch(() => {});
+        return;
+      }
       if (!_wrappedEventId && !_wrappedRadioEventId && !_wrappedPodcastEventId) {
         const _ts = S.queue[S.idx];
         if (_ts && !_ts.isRadio && !_ts.isPodcast) {
@@ -12633,7 +12642,7 @@ function _onAudioError() {
   if (!err || !audioEl.src) return;
   console.warn(`Audio error code ${err.code}: ${err.message || '(no message)'}`);
 
-  // Radio stream error — try next fallback link
+  // Radio stream error — try next fallback link, or retry from start after delay
   const _radioSong = S.queue[S.idx];
   if (_radioSong?.isRadio) {
     const nextIdx = (_radioSong._radioLinkIdx || 0) + 1;
@@ -12643,7 +12652,15 @@ function _onAudioError() {
       audioEl.load(); audioEl.play().catch(() => {});
       toast(`Radio: trying fallback link ${nextIdx + 1}…`);
     } else {
-      toast(`⚠ Radio stream unavailable: ${_radioSong.title}`);
+      // All links exhausted (e.g. server restarting) — reset to link 0 and retry after a delay
+      _radioSong._radioLinkIdx = 0;
+      toast(`⚠ Radio stream unavailable — retrying in 10s…`);
+      setTimeout(() => {
+        if (S.queue[S.idx] === _radioSong) {
+          audioEl.src = mediaUrl(_radioSong._radioLinks[0]);
+          audioEl.load(); audioEl.play().catch(() => {});
+        }
+      }, 10000);
     }
     return;
   }
