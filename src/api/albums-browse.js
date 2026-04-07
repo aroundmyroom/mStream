@@ -22,7 +22,7 @@ import * as db from '../db/manager.js';
 // Strict disc-folder pattern: keyword + optional space/dash + digit(s)
 // Requires the FIRST character after the keyword to be whitespace, dash, or digit.
 // 'Disconet' does NOT match because 'o' != whitespace/dash/digit.
-const DISC_RE         = /^(CD|Disc|DISC)\s*[-–]?\s*\d/;
+const DISC_RE         = /^(cd|disc)\s*[-–]?\s*\d/i;
 const NUMERIC_DISC_RE = /^\d{1,2}$/;
 
 const ART_NAMES = [

@@ -1,8 +1,23 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.6.6-velvet — April 2026 — The Devil's Release
+
+### fix: album CD-folder detection handles mixed-case "Cd 1 / Cd 2" naming
+- Folders named `Cd 1` / `Cd 2` (capital C, lowercase d, space before digit) were not recognised as disc sub-folders, causing them to appear as separate album entries
+- Updated `DISC_RE` in `albums-browse.js` and `_normaliseAlbumDir` in `sqlite-backend.js` to match all capitalisation variants with or without a space before the disc number
+
 ## v6.6.5-velvet — April 2026
 
-### fix: several small fixes for Subsonic
+### fix: Subsonic album list restricts to albumsOnly vpaths when no folder selected
+- New `resolveAlbumListScope()`: when no `musicFolderId` is specified, album-list queries now filter to albumsOnly vpaths only, preventing singles/flat folders from polluting the album view
+- Falls back to all vpaths when no albumsOnly vpaths are configured; explicit `musicFolderId` always takes priority
+
+### fix: Subsonic getCoverArt generates thumbnails on-demand with dedup
+- Concurrent requests for the same missing thumbnail no longer race to write the same file; a shared `thumbInProgress` map ensures only one `sharp` resize runs at a time
+- Thumbnail size cutoff revised: `size ≤ 160` → `zs-` (92 px), `size > 160` → `zl-` (256 px)
+
+### feat: Subsonic stream pre-warms art thumbnails before returning audio bytes
+- Stream handler now generates `zs-`/`zl-` thumbnails asynchronously when a song has art; awaits `zs-` completion before sending audio so iOS art renders before the now-playing screen appears
 
 ## v6.6.4-velvet — April 2026
 
