@@ -96,7 +96,8 @@ const ADMINDATA = (() => {
     });
 
     Object.keys(res.data).forEach(key=>{
-      module.folders[key] = res.data[key];
+      // Use Vue.set so each folder object enters Vue's reactive system immediately.
+      Vue.set(module.folders, key, res.data[key]);
     });
 
     module.foldersUpdated.ts = Date.now();
@@ -109,7 +110,16 @@ const ADMINDATA = (() => {
     });
 
     Object.keys(res.data).forEach(key=>{
-      module.users[key] = res.data[key];
+      const u = res.data[key];
+      // Normalise permission flags so keys always exist as explicit booleans.
+      // Vue 2 cannot reactively track a property that was never defined on the object.
+      if (!Object.prototype.hasOwnProperty.call(u, 'allow-upload')) u['allow-upload'] = true;
+      if (!Object.prototype.hasOwnProperty.call(u, 'allow-radio-recording')) u['allow-radio-recording'] = false;
+      if (!Object.prototype.hasOwnProperty.call(u, 'allow-youtube-download')) u['allow-youtube-download'] = false;
+      // Use Vue.set so each user object enters Vue's reactive system.
+      // Plain assignment (module.users[key] = u) bypasses reactivity — subsequent
+      // Vue.set() calls on the child object would never trigger template updates.
+      Vue.set(module.users, key, u);
     });
 
     module.usersUpdated.ts = Date.now();
@@ -1771,17 +1781,24 @@ const usersView = Vue.component('users-view', {
                   <div style="display:flex;flex-direction:column;gap:.3rem;">
                     <button type="button" class="btn-small btn-flat"
                       :title="v['allow-radio-recording'] ? 'Click to disable radio recording' : 'Click to enable radio recording'"
-                      :style="v['allow-radio-recording'] ? 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);font-weight:600;' : ''"
+                      :style="v['allow-radio-recording'] ? 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);font-weight:600;' : 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);font-weight:600;'"
                       style="text-align:left;width:100%;"
                       @click="toggleRadioRecording(k, v)">
                       &#9679;&nbsp;Record&nbsp;<span style="opacity:.6;font-size:.68rem;">{{v['allow-radio-recording'] ? 'ON' : 'off'}}</span>
                     </button>
                     <button type="button" class="btn-small btn-flat"
                       :title="v['allow-youtube-download'] ? 'Click to disable YouTube download' : 'Click to enable YouTube download'"
-                      :style="v['allow-youtube-download'] ? 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);font-weight:600;' : ''"
+                      :style="v['allow-youtube-download'] ? 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);font-weight:600;' : 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);font-weight:600;'"
                       style="text-align:left;width:100%;"
                       @click="toggleYoutubeDownload(k, v)">
                       &#9654;&nbsp;YouTube&nbsp;<span style="opacity:.6;font-size:.68rem;">{{v['allow-youtube-download'] ? 'ON' : 'off'}}</span>
+                    </button>
+                    <button type="button" class="btn-small btn-flat"
+                      :title="v['allow-upload'] !== false ? 'Click to disable file upload' : 'Click to enable file upload'"
+                      :style="v['allow-upload'] === false ? 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);font-weight:600;' : 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);font-weight:600;'"
+                      style="text-align:left;width:100%;"
+                      @click="toggleUpload(k, v)">
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" style="vertical-align:-.15em;margin-right:3px"><path d="m3.75 2.75h8.5m-8.5 6.5 4-3.5 4 3.5m-4 5v-8.5"/></svg>Upload&nbsp;<span style="opacity:.6;font-size:.68rem;">{{v['allow-upload'] === false ? 'off' : 'ON'}}</span>
                     </button>
                   </div>
                 </td>
@@ -1917,6 +1934,20 @@ const usersView = Vue.component('users-view', {
           });
           Vue.set(ADMINDATA.users[username], 'allow-youtube-download', newVal);
           iziToast.success({ title: newVal ? 'YouTube download enabled' : 'YouTube download disabled', position: 'topCenter', timeout: 3000 });
+        } catch (err) {
+          iziToast.error({ title: 'Failed to update', position: 'topCenter', timeout: 3500 });
+        }
+      },
+      toggleUpload: async function (username, user) {
+        const newVal = user['allow-upload'] === false ? true : false;
+        try {
+          await API.axios({
+            method: 'POST',
+            url: `${API.url()}/api/v1/admin/users/allow-upload`,
+            data: { username, allow: newVal }
+          });
+          Vue.set(ADMINDATA.users[username], 'allow-upload', newVal);
+          iziToast.success({ title: newVal ? 'Upload enabled' : 'Upload disabled', position: 'topCenter', timeout: 3000 });
         } catch (err) {
           iziToast.error({ title: 'Failed to update', position: 'topCenter', timeout: 3500 });
         }

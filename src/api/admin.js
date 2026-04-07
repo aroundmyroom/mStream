@@ -701,6 +701,17 @@ export function setup(mstream) {
     res.json({});
   });
 
+  mstream.post("/api/v1/admin/users/allow-upload", async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const schema = Joi.object({
+      username: Joi.string().required(),
+      allow: Joi.boolean().required()
+    });
+    joiValidate(schema, req.body);
+    await admin.editAllowUpload(req.body.username, req.body.allow);
+    res.json({});
+  });
+
   mstream.get("/api/v1/admin/config", (req, res) => {
     res.json({
       address: config.program.address,

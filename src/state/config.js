@@ -127,6 +127,7 @@ const schema = Joi.object({
       'listenbrainz-token': Joi.string().allow('').optional(),
       'allow-radio-recording': Joi.boolean().optional(),
       'allow-youtube-download': Joi.boolean().optional(),
+      'allow-upload': Joi.boolean().optional(),
     })
   ).default({}),
   ssl: Joi.object({

@@ -58,6 +58,9 @@ export function setup(mstream) {
 
     returnThis.allowRadioRecording = req.user['allow-radio-recording'] === true;
     returnThis.allowYoutubeDownload = req.user['allow-youtube-download'] === true;
+    // upload: disabled globally (noUpload) or per-user (allow-upload === false) — applies to all users including admin
+    returnThis.allowUpload = config.program.noUpload !== true &&
+      req.user['allow-upload'] !== false;
     returnThis.version = _pkg.version;
     returnThis.defaultTheme = (config.program.ui || 'velvet').replace(/^velvet-/, '') || 'velvet';
 

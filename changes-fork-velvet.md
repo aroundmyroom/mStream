@@ -1,5 +1,24 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.6.2-velvet — April 2026
+
+### feat(admin): per-user file upload permission
+- New **Upload** toggle per user in Admin → Users (green = ON, red = OFF; default ON)
+- `allow-upload: false` disables the upload button in the file explorer for that user — including admin accounts
+- Server enforces it: `/api/v1/file-explorer/upload` returns 403 when disabled; `/api/v1/playlist/getall` exposes `allowUpload` so the client hides the button without a round-trip
+- Config schema: `allow-upload: Joi.boolean().optional()` added to user object
+
+### fix(admin): permission toggles now update instantly without page refresh
+- Root cause: `getUsers()` and `getFolders()` used plain `object[key] = value` assignments, which bypass Vue 2's reactivity system — subsequent `Vue.set()` toggle calls had nothing to observe
+- Fixed: both loaders now use `Vue.set(module.users/folders, key, value)` so every object is reactive from load time
+- Also normalised `allow-upload`, `allow-radio-recording`, `allow-youtube-download` to explicit booleans on load (missing key → correct default), preventing Vue 2 from missing `undefined → boolean` transitions
+
+### fix(admin): Record and YouTube permission pills now show green=ON / red=OFF
+- Previously both defaulted to an unstyled button (OFF) and turned red when enabled — inverted logic
+- All three permission pills (Record, YouTube, Upload) now consistently show green when enabled and red when disabled
+
+---
+
 ## v6.6.1-velvet — April 2026
 
 ### feat(radio): radio-browser.info station search

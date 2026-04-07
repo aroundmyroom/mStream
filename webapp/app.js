@@ -12027,8 +12027,8 @@ function showApp() {
       S.audiobooksEnabled = abVpaths.length > 0 || recVpaths.length > 0;
       _updateListenSection();
     }
-    // Upload capability
-    S.canUpload = !d.noUpload;
+    // Upload capability — driven by server-side allowUpload (combines global noUpload + per-user flag)
+    S.canUpload = d.allowUpload === true;
     // Apply the server's default theme if the user hasn't stored a personal choice
     if (d.defaultTheme && !localStorage.getItem(_uKey('theme'))) {
       applyTheme(d.defaultTheme, false);

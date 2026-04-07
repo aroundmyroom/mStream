@@ -4,32 +4,6 @@
 
 ## NOW — In Progress / Remaining
 
-### [x] 📡 Remote Control — Now Playing + Queue Panel — **DONE** (v6.2.2-velvet)
-
-All 5 steps implemented:
-- Theme system: 3-state cycle Velvet/Dark/Light, `--card` variable added, `html.light` → `:root.light`
-- `src/api/remote.js`: `playlistCache`, `nowPlayingCache`, 4 new endpoints, `getNowPlaying`+`goToSong` commands, cache cleanup on WS close
-- `webapp/app.js`: WS handlers for `removeSong`, `goToSong`, `getPlaylist`, `getNowPlaying`
-- `webapp/remote/index.html`: NP strip with art/title/artist/progress, Queue panel with jump/remove, 2.5 s NP polling, on-demand queue poll
-
----
-
-### Per-user File Upload Permission — PLANNED
-
-Currently upload is gated only by the server-wide `config.program.noUpload` flag. No per-user toggle exists.
-Model: admin always has upload; regular users need explicit `allowUpload` permission (default: true).
-
-- [ ] `src/state/config.js` — add `allowUpload: Joi.boolean().default(true)` to user schema
-- [ ] `src/util/admin.js` — `addUser()` / `editUserAccess()` save `allowUpload`
-- [ ] `src/api/file-explorer.js` — upload endpoint checks `req.user.allowUpload === false` → 403
-- [ ] Admin UI (`webapp/admin/index.js`) — toggle button per user (same pattern as allow-radio-recording button)
-- [ ] `GET /api/v1/ping` — expose `noUpload` per user so client can hide the upload button
-- [ ] Update `changes-fork-velvet.md`
-
-> Note: ytdl download is a **separate** endpoint and permission — do NOT gate it with `allowUpload`.
-
----
-
 ### yt-dlp year from `release_year` — LOW PRIORITY / OPTIONAL
 
 - [ ] In `src/api/ytdl.js` line ~299: `const year = info.release_year || (info.release_date ? info.release_date.substring(0,4) : null) || (info.upload_date ? info.upload_date.slice(0,4) : '');`
@@ -155,7 +129,6 @@ Audit completed 2026-03-26. Strategy: **Option A — separate `mobile.css`** loa
 - [ ] **Mood quick-picks** — Energy / Chill / Nostalgia from own play history
 
 ### Listening Analytics — Play Events
-- [x] **Your Stats (Wrapped)** — `play_events` + `listening_sessions` tables; play-start/end/skip/stop API hooks wired into the player; per-period stats (top songs/artists, heatmaps, personality, fun facts); user "Your Stats" nav view; admin "Play Stats" panel with purge tool — **DONE**
 - [ ] **"Unplayed gems"** — tracks with 0 play events, filterable by decade/genre
 
 ### Smart Auto-DJ — Personal Weights

@@ -371,6 +371,15 @@ export async function editAllowYoutubeDownload(username, val) {
   config.program.users[username]['allow-youtube-download'] = val;
 }
 
+export async function editAllowUpload(username, val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.users || !loadConfig.users[username]) { throw new Error(`User '${username}' not found`); }
+  loadConfig.users[username]['allow-upload'] = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.users[username]['allow-upload'] = val;
+}
+
 export async function editScanErrorRetention(hours) {
   const loadConfig = await loadFile(config.configFile);
   if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
