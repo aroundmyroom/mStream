@@ -306,7 +306,9 @@ function buildSong(row, vpaths) {
 
 function buildAlbum(albumRow, songs) {
   const songCount = songs ? songs.length : (albumRow.songCount || 0);
-  const duration = songs ? songs.reduce((s, r) => s + (r.duration || 0), 0) : null;
+  const duration = songs
+    ? songs.reduce((s, r) => s + (r.duration || 0), 0)
+    : (albumRow.totalDuration != null ? albumRow.totalDuration : null);
   const album = {
     id: albumRow.album_id,
     name: albumRow.album || '(Unknown)',
@@ -365,6 +367,9 @@ function subsonicAuth(req, res, next) {
 }
 
 // ── Route handler factory ────────────────────────────────────────────────────
+
+// In-memory now-playing store: key = username, value = { id, playerId, playerName, startedAt }
+const nowPlayingStore = new Map();
 
 export function setup(mstream) {
   // ── Debug request logger ────────────────────────────────────────────────────
@@ -726,16 +731,24 @@ export function setup(mstream) {
 
     // Deduplicate by album_id
     const seen = {};
-    const albumObjs = [];
+    const albumRows = [];
     for (const r of rows) {
       if (!r.album_id || seen[r.album_id]) continue;
       seen[r.album_id] = true;
-      albumObjs.push(buildAlbum({
-        album_id: r.album_id, album: r.album, artist: r.artist,
-        artist_id: r.artist_id, aaFile: r.aaFile, year: r.year
-      }, null));
-      if (albumObjs.length >= size) break;
+      albumRows.push(r);
+      if (albumRows.length >= size) break;
     }
+
+    // Fetch songCount + totalDuration for these albums in one query
+    const statsMap = db.getAlbumStatsByIds(albumRows.map(r => r.album_id));
+    const albumObjs = albumRows.map(r => {
+      const stats = statsMap[r.album_id] || {};
+      return buildAlbum({
+        album_id: r.album_id, album: r.album, artist: r.artist,
+        artist_id: r.artist_id, aaFile: r.aaFile, year: r.year,
+        songCount: stats.songCount || 0, totalDuration: stats.totalDuration || 0
+      }, null);
+    });
 
     const key = req.path.includes('2') ? 'albumList2' : 'albumList';
     sendResponse(req, res, makeResponse('ok', { [key]: { album: albumObjs.slice(offset) } }));
@@ -785,8 +798,22 @@ export function setup(mstream) {
 
   // ── getNowPlaying ────────────────────────────────────────────────────────────
   router('getNowPlaying', (req, res) => {
-    // mStream doesn't track now-playing server-side; return empty
-    sendResponse(req, res, makeResponse('ok', { nowPlaying: {} }));
+    const cutoff = Date.now() - 30 * 60 * 1000; // 30 minutes
+    const entries = [];
+    for (const [username, np] of nowPlayingStore) {
+      if (np.startedAt < cutoff) { nowPlayingStore.delete(username); continue; }
+      const row = db.getSongByHash(np.id, username);
+      if (!row) continue;
+      const song = buildSong(row, req.subsonicVpaths);
+      entries.push({
+        ...song,
+        username,
+        minutesAgo: Math.floor((Date.now() - np.startedAt) / 60000),
+        playerId:   np.playerId,
+        playerName: np.playerName,
+      });
+    }
+    sendResponse(req, res, makeResponse('ok', { nowPlaying: { entry: entries } }));
   });
 
   // ── getStarred / getStarred2 ──────────────────────────────────────────────
@@ -858,7 +885,16 @@ export function setup(mstream) {
     const id = [].concat(req.query.id || req.body?.id || []).flat().filter(Boolean)[0];
     const submission = String(req.query.submission || req.body?.submission || 'true') !== 'false';
 
+    if (id && !submission) {
+      // submission=false means "now playing" — track it for getNowPlaying
+      const playerName = req.query.c || req.body?.c || 'Unknown';
+      const playerId   = req.query.c || req.body?.c || 'Unknown';
+      nowPlayingStore.set(req.subsonicUser, { id, playerName, playerId, startedAt: Date.now() });
+    }
+
     if (id && submission) {
+      // Clear now-playing entry when submission is complete
+      nowPlayingStore.delete(req.subsonicUser);
       const existing = db.findUserMetadata(id, req.subsonicUser);
       const now = Math.floor(Date.now() / 1000);
       if (existing) {
@@ -875,8 +911,10 @@ export function setup(mstream) {
   // Serve the audio file directly — do NOT redirect to /media/ because that
   // route is behind JWT auth and Subsonic clients don't carry a JWT token.
   const handleStream = (req, res) => {
-    const id = req.query.id || req.body?.id;
+    let id = req.query.id || req.body?.id;
     if (!id) return sendResponse(req, res, makeError(ERRORS.MISSING_PARAM.code, 'id required'));
+    // Strip Sonora/OpenSubsonic preview suffix (e.g. "<hash>-preview-0")
+    id = String(id).replace(/-preview-\d+$/, '');
 
     const row = db.getSongByHash(id, req.subsonicUser);
     if (!row || !req.subsonicVpaths.includes(row.vpath)) {
@@ -887,6 +925,21 @@ export function setup(mstream) {
     if (!folder) return sendResponse(req, res, makeError(ERRORS.NOT_FOUND.code, ERRORS.NOT_FOUND.message));
 
     const fullPath = path.join(folder.root, row.filepath);
+
+    // Set explicit Content-Type using the DB format field so iOS AVFoundation gets
+    // the correct IANA MIME type. Express's mime module maps .flac → audio/x-flac
+    // and .wav → audio/x-wav, both of which iOS rejects. We need audio/flac + audio/wav.
+    const streamMimeMap = {
+      mp3: 'audio/mpeg', flac: 'audio/flac', ogg: 'audio/ogg',
+      opus: 'audio/opus', aac: 'audio/aac', m4a: 'audio/mp4',
+      wav: 'audio/wav', wma: 'audio/x-ms-wma', aiff: 'audio/aiff',
+      aif: 'audio/aiff', ape: 'audio/ape', wv: 'audio/x-wavpack',
+      mpc: 'audio/musepack'
+    };
+    const fmt = (row.format || path.extname(fullPath).slice(1)).toLowerCase();
+    const mime = streamMimeMap[fmt];
+    if (mime) res.set('Content-Type', mime);
+
     res.sendFile(fullPath, err => {
       if (err && !res.headersSent) {
         sendResponse(req, res, makeError(ERRORS.NOT_FOUND.code, 'File not found on disk'));
@@ -942,8 +995,24 @@ export function setup(mstream) {
     }
     // Sanitize to prevent path traversal
     filename = path.basename(filename);
-    const fullPath = path.join(config.program.storage.albumArtDirectory, filename);
+    const artDir = config.program.storage.albumArtDirectory;
+
+    // Honour the ?size= parameter by serving a pre-generated thumbnail when available.
+    // The scanner writes zs-<hash>.ext (92px) and zl-<hash>.ext (256px) alongside the
+    // full-resolution original. Serving a small thumbnail dramatically reduces transfer
+    // time and prevents a race condition on first play where the stream starts before
+    // the full-res image has finished loading.
+    const reqSize = parseInt(req.query.size || req.body?.size || '0', 10);
+    let fullPath = path.join(artDir, filename);
+    if (reqSize > 0) {
+      const thumbPrefix = reqSize <= 92 ? 'zs-' : 'zl-';
+      const thumbPath = path.join(artDir, thumbPrefix + filename);
+      if (fs.existsSync(thumbPath)) {
+        fullPath = thumbPath;
+      }
+    }
     if (!fs.existsSync(fullPath)) return res.status(404).end();
+    res.set('Cache-Control', 'public, max-age=86400');
     res.sendFile(fullPath, err => {
       if (err && !res.headersSent) res.status(500).end();
     });
@@ -1023,6 +1092,7 @@ export function setup(mstream) {
     const id = req.query.id || req.body?.id;
     if (!id) return sendResponse(req, res, makeError(ERRORS.MISSING_PARAM.code, 'id required'));
 
+    const vpathMeta = req.subsonicVpathMeta || {};
     const entries = db.loadPlaylistEntries(req.subsonicUser, id);
     const songs = [];
     for (const entry of entries) {
@@ -1033,7 +1103,13 @@ export function setup(mstream) {
       const vp = entry.filepath.slice(0, sep);
       const fp = entry.filepath.slice(sep + 1);
       if (!req.subsonicVpaths.includes(vp)) continue;
-      const row = db.getFileWithMetadata(fp, vp, req.subsonicUser);
+      // Resolve child vpath → root DB vpath + filepathPrefix
+      // (songs added by the web client via a child vpath are stored with the
+      //  child vpath name, but the DB only has the root parent vpath)
+      const meta = vpathMeta[vp] || {};
+      const dbVpath = meta.parentVpath || vp;
+      const dbFp    = meta.filepathPrefix ? meta.filepathPrefix + fp : fp;
+      const row = db.getFileWithMetadata(dbFp, dbVpath, req.subsonicUser);
       if (row) songs.push(buildSong(row));
     }
     const duration = songs.reduce((s, r) => s + (r.duration || 0), 0);

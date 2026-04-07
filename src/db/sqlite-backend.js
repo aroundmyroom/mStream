@@ -1796,13 +1796,29 @@ export function getAlbumsByArtistId(artistId, vpaths, opts = {}) {
   const pf = prefixClause(opts.filepathPrefix);
   const rows = db.prepare(`
     SELECT DISTINCT album_id, artist_id, album, artist,
-           MAX(year) AS year, MAX(aaFile) AS aaFile, COUNT(*) AS songCount
+           MAX(year) AS year, MAX(aaFile) AS aaFile, COUNT(*) AS songCount,
+           CAST(SUM(duration) AS INTEGER) AS totalDuration
     FROM files
     WHERE artist_id = ? AND ${vIn.sql}${pf.sql}
     GROUP BY album_id
     ORDER BY year DESC, album COLLATE NOCASE
   `).all(artistId, ...vIn.params, ...pf.params);
   return rows;
+}
+
+export function getAlbumStatsByIds(albumIds) {
+  if (!albumIds || albumIds.length === 0) return {};
+  const placeholders = albumIds.map(() => '?').join(',');
+  const rows = db.prepare(`
+    SELECT album_id, COUNT(*) AS songCount,
+           CAST(SUM(duration) AS INTEGER) AS totalDuration
+    FROM files
+    WHERE album_id IN (${placeholders})
+    GROUP BY album_id
+  `).all(...albumIds);
+  const map = {};
+  for (const r of rows) map[r.album_id] = r;
+  return map;
 }
 
 export function getAllAlbumIds(vpaths, opts = {}) {
@@ -1812,7 +1828,8 @@ export function getAllAlbumIds(vpaths, opts = {}) {
   const pf = prefixClause(opts.filepathPrefix);
   const rows = db.prepare(`
     SELECT DISTINCT album_id, artist_id, album, artist,
-           MAX(year) AS year, MAX(aaFile) AS aaFile, COUNT(*) AS songCount, MAX(ts) AS ts
+           MAX(year) AS year, MAX(aaFile) AS aaFile, COUNT(*) AS songCount,
+           CAST(SUM(duration) AS INTEGER) AS totalDuration, MAX(ts) AS ts
     FROM files
     WHERE ${vIn.sql}${pf.sql} AND album IS NOT NULL
     GROUP BY album_id

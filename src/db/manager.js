@@ -139,6 +139,7 @@ export function setStarred(hash, username, starred) { return backend.setStarred(
 export function getRandomSongs(vpaths, username, opts) { return backend.getRandomSongs(vpaths, username, opts); }
 export function getAlbumsByArtistId(artistId, vpaths, opts) { return backend.getAlbumsByArtistId(artistId, vpaths, opts); }
 export function getAllAlbumIds(vpaths, opts) { return backend.getAllAlbumIds(vpaths, opts); }
+export function getAlbumStatsByIds(albumIds) { return backend.getAlbumStatsByIds(albumIds); }
 export function getAllArtistIds(vpaths, opts) { return backend.getAllArtistIds(vpaths, opts); }
 export function getDirectoryContents(vpath, dirRelPath, username) { return backend.getDirectoryContents(vpath, dirRelPath, username); }
 // User settings sync

@@ -1,5 +1,36 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.6.4-velvet — April 2026
+
+### fix: Subsonic stream Content-Type — FLAC and WAV now play on iOS
+- Express mapped `.flac` → `audio/x-flac` and `.wav` → `audio/x-wav`; iOS AVFoundation only accepts `audio/flac` / `audio/wav` (IANA types) and silently refused to play
+- Stream handler now sets `Content-Type` explicitly from the DB `format` field
+
+### fix: Subsonic getCoverArt honours `?size=` parameter
+- Previously always served full-resolution image regardless of `size=`; large images (some >3 MB) hadn't finished transferring before stream started (~8 ms), so iOS never showed art on first play
+- Now serves pre-generated thumbnails: `zs-` (92 px) for `size ≤ 92`, `zl-` (256 px) for `size > 92`
+- Added `Cache-Control: public, max-age=86400` to all getCoverArt responses
+- One-time backfill generated missing thumbnails for 316 existing art files
+
+### fix: Subsonic getAlbumList shows correct song count and duration
+- Recently Added/Played/Frequent album objects had `songCount: 0` and no duration (displayed as "0.01 sec" in Sonora)
+- Added `getAlbumStatsByIds()` — single `GROUP BY album_id` query injecting `COUNT(*)`/`SUM(duration)` per album
+- `getAlbumsByArtistId` and `getAllAlbumIds` also now include `SUM(duration)`
+
+### feat: Subsonic getNowPlaying implemented
+- Previously returned empty list; now tracks current song per user via `scrobble?submission=false`
+- Entries expire after 30 minutes; completed plays clear the entry
+
+### fix: Subsonic stream accepts Sonora preview IDs (`<hash>-preview-0`)
+- Sonora appends `-preview-N` suffix; DB hash lookup failed with 404
+- Stream handler now strips `-preview-N` before lookup
+
+### fix: Subsonic getPlaylist resolves child-vpath song entries
+- Entries stored with child vpath name (e.g. `12-inches/...`) failed DB lookup since DB only has root vpath (`Music`)
+- Handler now remaps via `vpathMeta`: `parentVpath + filepathPrefix + relative_path`
+
+---
+
 ## v6.6.3-velvet — April 2026
 
 ### fix(security): M3U zip download path traversal
