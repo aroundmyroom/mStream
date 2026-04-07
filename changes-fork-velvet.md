@@ -1,5 +1,9 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.6.5-velvet — April 2026
+
+### fix: several small fixes for Subsonic
+
 ## v6.6.4-velvet — April 2026
 
 ### fix: Subsonic stream Content-Type — FLAC and WAV now play on iOS

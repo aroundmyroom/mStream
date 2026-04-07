@@ -14,6 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
 import winston from 'winston';
+import sharp from 'sharp';
 import * as config from '../state/config.js';
 import * as db from '../db/manager.js';
 
@@ -692,13 +693,70 @@ export function setup(mstream) {
   router('search3', handleSearch);
 
   // ── getAlbumList / getAlbumList2 ─────────────────────────────────────────────
+  /**
+   * Resolve effective vpaths + filepathPrefix for album-list queries.
+   * When musicFolderId is provided, honour it exactly (existing behaviour).
+   * When no folder is selected, restrict to albumsOnly vpaths so flat non-album
+   * folders (Top-40, Disco, etc.) don't pollute the album list with singles.
+   * Falls back to the full vpath list when no albumsOnly vpaths are configured.
+   */
+  function resolveAlbumListScope(req) {
+    const rawFolderId = req.query.musicFolderId ?? req.body?.musicFolderId;
+    if (rawFolderId !== undefined && rawFolderId !== null && rawFolderId !== '') {
+      return { vp: resolveVpaths(req), pfxValue: resolvePrefix(req) };
+    }
+
+    const allowed = new Set(req.subsonicVpaths);
+    const folders = config.program.folders || {};
+    const entries = Object.entries(folders).filter(([n]) => allowed.has(n));
+
+    // Build parentOf map (same logic as albums-browse.js / playlist.js)
+    const parentOf = {};
+    for (const [name, folder] of entries) {
+      const myRoot = folder.root.replace(/\/?$/, '/');
+      const parent = entries.find(([other, otherF]) =>
+        other !== name &&
+        myRoot.startsWith(otherF.root.replace(/\/?$/, '/')) &&
+        otherF.root.replace(/\/?$/, '/') !== myRoot
+      );
+      parentOf[name] = parent ? parent[0] : null;
+    }
+
+    const aoEntries = entries.filter(([, f]) => f.albumsOnly === true);
+    if (aoEntries.length === 0) {
+      // No albumsOnly configured — return everything
+      return { vp: resolveVpaths(req), pfxValue: null };
+    }
+
+    if (aoEntries.length === 1) {
+      const [name, folder] = aoEntries[0];
+      const parent = parentOf[name];
+      if (parent) {
+        // Child vpath — files are indexed under parent, filter by prefix
+        const parentRoot = folders[parent].root.replace(/\/?$/, '/');
+        const myRoot     = folder.root.replace(/\/?$/, '/');
+        return { vp: [parent], pfxValue: myRoot.slice(parentRoot.length) };
+      }
+      // Root vpath marked albumsOnly — include all its files
+      return { vp: [name], pfxValue: null };
+    }
+
+    // Multiple albumsOnly sources — union their DB vpaths; prefix filtering
+    // is not viable across sources with different prefixes, so show all.
+    const dbVpathSet = new Set();
+    for (const [name] of aoEntries) {
+      dbVpathSet.add(parentOf[name] || name);
+    }
+    return { vp: [...dbVpathSet], pfxValue: null };
+  }
+
   const handleAlbumList = (req, res) => {
     const type   = req.query.type   || req.body?.type   || 'newest';
     const size   = Math.min(parseInt(req.query.size   || req.body?.size   || '10', 10), 500);
     const offset = parseInt(req.query.offset || req.body?.offset || '0', 10);
     const user   = req.subsonicUser;
-    const vp     = resolveVpaths(req);
-    const pfx    = { filepathPrefix: resolvePrefix(req) };
+    const { vp, pfxValue } = resolveAlbumListScope(req);
+    const pfx    = { filepathPrefix: pfxValue };
 
     let rows = [];
     const limit = size + offset;
@@ -910,7 +968,12 @@ export function setup(mstream) {
   // ── stream / download ────────────────────────────────────────────────────────
   // Serve the audio file directly — do NOT redirect to /media/ because that
   // route is behind JWT auth and Subsonic clients don't carry a JWT token.
-  const handleStream = (req, res) => {
+  // Dedup concurrent thumbnail generation: shared between handleStream (pre-warm) and
+  // getCoverArt (on-demand). If two requests arrive for the same thumb before it exists,
+  // the second waits for the first's promise rather than spawning a parallel sharp instance.
+  const thumbInProgress = new Map();
+
+  const handleStream = async (req, res) => {
     let id = req.query.id || req.body?.id;
     if (!id) return sendResponse(req, res, makeError(ERRORS.MISSING_PARAM.code, 'id required'));
     // Strip Sonora/OpenSubsonic preview suffix (e.g. "<hash>-preview-0")
@@ -925,6 +988,37 @@ export function setup(mstream) {
     if (!folder) return sendResponse(req, res, makeError(ERRORS.NOT_FOUND.code, ERRORS.NOT_FOUND.message));
 
     const fullPath = path.join(folder.root, row.filepath);
+
+    // Pre-warm thumbnail tiers before audio starts flowing.
+    // iSub fires getCoverArt (size=160) and stream within ~5ms of each other.
+    // Generating both tiers here ensures that by the time size=160 arrives,
+    // the zs- thumbnail already exists on disk → getCoverArt responds in < 1 ms.
+    // iOS AVFoundation needs > 100 ms of buffering before actual playback starts,
+    // so even a 24 KB zs- file at LAN speeds arrives and renders well before audio.
+    if (row.aaFile) {
+      const artDir = config.program.storage.albumArtDirectory;
+      const fullArtPath = path.join(artDir, row.aaFile);
+      if (fs.existsSync(fullArtPath)) {
+        for (const [prefix, px] of [['zs-', 92], ['zl-', 256]]) {
+          const thumbPath = path.join(artDir, prefix + row.aaFile);
+          if (!fs.existsSync(thumbPath) && !thumbInProgress.has(thumbPath)) {
+            const gen = sharp(fullArtPath)
+              .resize(px, px, { fit: 'inside', withoutEnlargement: true })
+              .toFile(thumbPath)
+              .catch(() => {})
+              .finally(() => thumbInProgress.delete(thumbPath));
+            thumbInProgress.set(thumbPath, gen);
+          }
+        }
+        // Await zs- only if it is currently being generated (first-ever play).
+        // For cached thumbnails this returns instantly. No artificial extra delay —
+        // at LAN speeds a 2–24 KB zs- file transfers in < 1 ms; iOS AVFoundation
+        // needs > 100 ms of audio buffering before playback starts, so art always
+        // arrives first even without extra padding.
+        const zsPath = path.join(artDir, 'zs-' + row.aaFile);
+        try { await thumbInProgress.get(zsPath); } catch (_) { /* non-fatal */ }
+      }
+    }
 
     // Set explicit Content-Type using the DB format field so iOS AVFoundation gets
     // the correct IANA MIME type. Express's mime module maps .flac → audio/x-flac
@@ -951,7 +1045,7 @@ export function setup(mstream) {
 
   // ── getCoverArt ──────────────────────────────────────────────────────────────
   // Serve directly — do NOT redirect to /album-art/ (JWT-protected route).
-  router('getCoverArt', (req, res) => {
+  router('getCoverArt', async (req, res) => {
     const id = req.query.id || req.body?.id;
     if (!id) return res.status(404).end();
 
@@ -1002,18 +1096,54 @@ export function setup(mstream) {
     // full-resolution original. Serving a small thumbnail dramatically reduces transfer
     // time and prevents a race condition on first play where the stream starts before
     // the full-res image has finished loading.
+    // If the thumbnail is missing, generate it on-demand so future requests are instant.
     const reqSize = parseInt(req.query.size || req.body?.size || '0', 10);
-    let fullPath = path.join(artDir, filename);
+    const fullPath = path.join(artDir, filename);
+    if (!fs.existsSync(fullPath)) return res.status(404).end();
+    let servePath = fullPath;
     if (reqSize > 0) {
-      const thumbPrefix = reqSize <= 92 ? 'zs-' : 'zl-';
-      const thumbPath = path.join(artDir, thumbPrefix + filename);
+      // Two-tier thumbnail selection:
+      //   size <= 160 → zs- (92px, 4–24 KB)  — now-playing bar
+      //     This is the timing-critical request: arrives simultaneously with stream.
+      //     Must be small enough to transfer before iSub renders the now-playing screen.
+      //   size > 160  → zl- (256px, 60–170 KB) — full-screen art
+      //     The prefetch (size=2160) fires ~1s before stream starts; zl- easily
+      //     completes in that window now that thumbnails are always pre-generated.
+      const useZs    = reqSize <= 160;
+      const prefix   = useZs ? 'zs-' : 'zl-';
+      const px       = useZs ? 92 : 256;
+      const thumbPath = path.join(artDir, prefix + filename);
       if (fs.existsSync(thumbPath)) {
-        fullPath = thumbPath;
+        servePath = thumbPath;
+      } else {
+        if (!thumbInProgress.has(thumbPath)) {
+          const gen = sharp(fullPath)
+            .resize(px, px, { fit: 'inside', withoutEnlargement: true })
+            .toFile(thumbPath)
+            .catch(() => {})
+            .finally(() => thumbInProgress.delete(thumbPath));
+          thumbInProgress.set(thumbPath, gen);
+        }
+        // Also generate the other tier fire-and-forget so it's ready immediately.
+        const otherPath = path.join(artDir, (useZs ? 'zl-' : 'zs-') + filename);
+        if (!fs.existsSync(otherPath) && !thumbInProgress.has(otherPath)) {
+          const gen = sharp(fullPath)
+            .resize(useZs ? 256 : 92, useZs ? 256 : 92, { fit: 'inside', withoutEnlargement: true })
+            .toFile(otherPath)
+            .catch(() => {})
+            .finally(() => thumbInProgress.delete(otherPath));
+          thumbInProgress.set(otherPath, gen);
+        }
+        try {
+          await thumbInProgress.get(thumbPath);
+          if (fs.existsSync(thumbPath)) servePath = thumbPath;
+        } catch (e) {
+          // fall back to full-res — not fatal
+        }
       }
     }
-    if (!fs.existsSync(fullPath)) return res.status(404).end();
     res.set('Cache-Control', 'public, max-age=86400');
-    res.sendFile(fullPath, err => {
+    res.sendFile(servePath, err => {
       if (err && !res.headersSent) res.status(500).end();
     });
   });
