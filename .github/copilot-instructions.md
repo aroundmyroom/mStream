@@ -17,7 +17,7 @@
 - When implementing a new feature, always cross-check `releases/` + `changes-fork-velvet.md` to confirm it is not already documented. If a feature exists in code but has no release note, add it to the current patch entry.
 - `sqlite3` CLI is not installed on this system; SQLite is accessed via the Node.js built-in `node:sqlite` module (`DatabaseSync`) — Node v24.14.0
 - **Database file**: `save/db/mstream.sqlite` — this is the ONLY active DB. `save/db/files.sqlite` is an empty placeholder, ignore it.
-- **Config file**: `save/db/default.json` — this is the active config. Never reference `config.json` or `save/conf/config.json`; they do not exist.
+- **Config file**: `save/conf/default.json` — this is the active config. Never reference `config.json` or `save/db/default.json`; they do not exist or are stale copies.
 - **Main table**: `files` (not `songs`, not `tracks`)
 - **To query the DB from CLI**, always write a `.cjs` file and run it with `node /home/mStream/yourscript.cjs` — never use `--eval` or heredoc (`<< 'EOF'`) as the shell mangles multi-line `--eval` strings and causes `ReferenceError: x is not defined`. Example:
   ```js
