@@ -1,5 +1,19 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.6.1-velvet — April 2026
+
+### feat(radio): radio-browser.info station search
+- **+ Add Channel** now opens a search panel (Find a Station) before the manual form
+- Search by name, country (code or name), and genre/tag; Enter key triggers search
+- Results deduplicated by station name — best quality pre-selected (MP3 > OGG > AAC, highest bitrate first)
+- Alternative streams hidden behind a ▾ toggle per station row
+- Thumbnail column shows station favicon/logo (40 px); broken images fall back to radio-wave placeholder
+- Clicking **Select** pre-fills the form: name, genre, country, stream URL; image only if favicon is `.svg` or `.png`
+- **Enter manually** skips search and opens blank form unchanged
+- No backend changes — browser calls radio-browser.info directly (public CORS API)
+
+---
+
 ## v6.6.0-velvet — April 2026
 
 ### fix(radio): ICY stream metadata reliability

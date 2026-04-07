@@ -1891,6 +1891,20 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .rs-meta span{display:inline;}
 .rs-actions{display:flex;align-items:center;justify-content:center;gap:4px;width:100%;}
 .rs-queue-notice{margin:10px 18px 14px;padding:8px 12px;border-radius:var(--r);background:var(--raised);border:1px solid var(--border);font-size:12px;color:var(--t1);text-align:center;}
+/* ── Radio station search results ──────────────────────────────── */
+.rs-results{margin:6px 0 2px;display:flex;flex-direction:column;gap:4px;}
+.rs-result-row{border:1px solid var(--border);border-radius:var(--r);background:var(--raised);overflow:hidden;}
+.rs-result-main{display:flex;align-items:center;gap:10px;padding:8px 10px;}
+.rs-result-info{flex:1;min-width:0;}
+.rs-result-name{font-size:13px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rs-result-meta{font-size:11px;color:var(--t3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rs-result-actions{display:flex;align-items:center;gap:5px;flex-shrink:0;}
+.rs-result-row:hover{background:var(--hover);}
+.rs-alts{border-top:1px solid var(--border);background:var(--bg);}
+.rs-alt-row{display:flex;align-items:center;gap:8px;padding:5px 10px;font-size:12px;border-bottom:1px solid var(--border);}
+.rs-alt-row:last-child{border-bottom:none;}
+.rs-alt-badge{flex-shrink:0;font-size:11px;font-weight:600;color:var(--t2);background:var(--surface);border:1px solid var(--border2);border-radius:4px;padding:1px 6px;min-width:70px;text-align:center;}
+.rs-alt-url{flex:1;min-width:0;color:var(--t3);font-family:monospace;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 /* ── Smart Playlists ───────────────────────────────────────────── */
 .spl-builder{padding:14px 18px 24px;max-width:720px;}
 .spl-section{margin-bottom:18px;}

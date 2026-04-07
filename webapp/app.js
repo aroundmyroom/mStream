@@ -8822,6 +8822,174 @@ async function viewRadio() {
   _renderRadioView();
 }
 
+function _radioSearchPanel() {
+  return `
+    <div class="playback-section" id="rs-search-panel" style="margin:8px 0;border-radius:var(--r);border-color:var(--primary) !important;">
+      <div class="playback-section-hdr">
+        <div class="playback-section-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        </div>
+        <div>
+          <div class="playback-section-title">Find a Station</div>
+          <div style="font-size:.8rem;color:var(--t3)">Powered by radio-browser.info</div>
+        </div>
+      </div>
+      <div class="playback-row">
+        <label class="playback-row-label" for="rs-search-q" style="min-width:130px"><div class="playback-row-name">Name / keyword</div></label>
+        <input type="text" id="rs-search-q" class="settings-input" style="max-width:320px" placeholder="e.g. 538, 3FM, BBC Radio 2">
+      </div>
+      <div class="playback-row">
+        <label class="playback-row-label" for="rs-search-country" style="min-width:130px"><div class="playback-row-name">Country</div><div class="playback-row-hint">Name or code, e.g. NL, Netherlands</div></label>
+        <input type="text" id="rs-search-country" class="settings-input" style="max-width:200px" placeholder="Optional">
+      </div>
+      <div class="playback-row">
+        <label class="playback-row-label" for="rs-search-tag" style="min-width:130px"><div class="playback-row-name">Genre / tag</div></label>
+        <input type="text" id="rs-search-tag" class="settings-input" style="max-width:200px" placeholder="e.g. pop, dance, jazz">
+      </div>
+      <div class="playback-row" style="justify-content:flex-end;gap:.75rem">
+        <button class="btn-flat" id="rs-manual-btn">Enter manually</button>
+        <button class="btn-primary" id="rs-search-btn">Search</button>
+      </div>
+      <div id="rs-search-results"></div>
+    </div>`;
+}
+
+async function _execRadioSearch() {
+  const q       = (document.getElementById('rs-search-q')?.value || '').trim();
+  const country = (document.getElementById('rs-search-country')?.value || '').trim();
+  const tag     = (document.getElementById('rs-search-tag')?.value || '').trim();
+  const resultsEl = document.getElementById('rs-search-results');
+  if (!resultsEl) return;
+
+  if (!q && !country && !tag) {
+    resultsEl.innerHTML = `<div style="padding:.75rem 1rem;color:var(--t3);font-size:.87rem">Enter at least a name, country or genre to search.</div>`;
+    return;
+  }
+
+  const btn = document.getElementById('rs-search-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Searching…'; }
+  resultsEl.innerHTML = '';
+
+  try {
+    const params = new URLSearchParams({ hidebroken: 'true', order: 'bitrate', reverse: 'true', limit: '200' });
+    if (q) params.set('name', q);
+    if (tag) params.set('tagList', tag);
+    if (country) {
+      // 2-letter code → countrycode, otherwise country name search
+      if (/^[A-Za-z]{2}$/.test(country)) params.set('countrycode', country.toUpperCase());
+      else params.set('country', country);
+    }
+
+    const resp = await fetch(`https://de1.api.radio-browser.info/json/stations/search?${params}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    if (!data.length) {
+      resultsEl.innerHTML = `<div style="padding:.75rem 1rem;color:var(--t3);font-size:.87rem">No stations found — try a different search.</div>`;
+      return;
+    }
+
+    // Group by normalised name
+    const groups = new Map();
+    for (const s of data) {
+      const key = s.name.toLowerCase().trim();
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(s);
+    }
+
+    // Sort group: MP3 > OGG > AAC > other, then bitrate desc
+    const codecRank = c => { const u = (c || '').toUpperCase(); return u === 'MP3' ? 0 : u === 'OGG' || u === 'VORBIS' ? 1 : u === 'AAC' ? 2 : 3; };
+    const sortGroup = arr => arr.slice().sort((a, b) => {
+      const cp = codecRank(a.codec) - codecRank(b.codec);
+      return cp !== 0 ? cp : (b.bitrate || 0) - (a.bitrate || 0);
+    });
+
+    const grouped = [...groups.values()].map(arr => {
+      const sorted = sortGroup(arr);
+      return { best: sorted[0], rest: sorted.slice(1) };
+    }).sort((a, b) => (b.best.bitrate || 0) - (a.best.bitrate || 0));
+
+    const codecLabel = s => [(s.codec || '').toUpperCase(), s.bitrate ? `${s.bitrate}kbps` : ''].filter(Boolean).join(' ');
+
+    const radioThumb = (favicon) => {
+      if (favicon) return `<img src="${esc(favicon)}" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:6px;flex-shrink:0;" onerror="_radioImgErr(this)">`;
+      return `<div style="width:40px;height:40px;background:var(--card);border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M7.76 7.76a6 6 0 0 0 0 8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/></svg></div>`;
+    };
+
+    const rows = grouped.map(({ best, rest }) => {
+      const altId = `rs-alts-${best.stationuuid}`;
+      const altRows = rest.map(r => `
+        <div class="rs-alt-row">
+          <span class="rs-alt-badge">${esc(codecLabel(r))}</span>
+          <span class="rs-alt-url" title="${esc(r.url_resolved)}">${esc(r.url_resolved)}</span>
+          <button class="btn-flat rs-pick-btn" style="padding:.2rem .55rem;font-size:.8rem;flex-shrink:0" data-station="${esc(encodeURIComponent(JSON.stringify(r)))}">Use</button>
+        </div>`).join('');
+      return `
+        <div class="rs-result-row">
+          <div class="rs-result-main">
+            ${radioThumb(best.favicon)}
+            <div class="rs-result-info">
+              <div class="rs-result-name">${esc(best.name)}</div>
+              <div class="rs-result-meta">${esc(codecLabel(best))}${best.country ? ' · ' + esc(best.country) : ''}${best.tags ? ' · ' + esc(best.tags.split(',').slice(0, 2).map(t => t.trim()).filter(Boolean).join(', ')) : ''}</div>
+            </div>
+            <div class="rs-result-actions">
+              ${rest.length ? `<button class="btn-flat rs-alts-toggle" data-target="${altId}" style="font-size:.8rem;padding:.2rem .5rem" title="${rest.length} alternative stream${rest.length > 1 ? 's' : ''}">▾ ${rest.length}</button>` : ''}
+              <button class="btn-primary rs-pick-btn" style="padding:.3rem .75rem;font-size:.85rem" data-station="${esc(encodeURIComponent(JSON.stringify(best)))}">Select</button>
+            </div>
+          </div>
+          ${rest.length ? `<div class="rs-alts" id="${altId}" style="display:none">${altRows}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    resultsEl.innerHTML = `<div class="rs-results">${rows}</div>`;
+
+    resultsEl.querySelectorAll('.rs-alts-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const el = document.getElementById(btn.dataset.target);
+        if (!el) return;
+        const open = el.style.display !== 'none';
+        el.style.display = open ? 'none' : 'block';
+        btn.textContent = (open ? '▾ ' : '▴ ') + btn.title.split(' ')[0];
+        btn.title = btn.title; // preserve title
+      });
+    });
+
+    resultsEl.querySelectorAll('.rs-pick-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const s = JSON.parse(decodeURIComponent(btn.dataset.station));
+        const isSvg = /\.(svg|png)(\?.*)?$/i.test(s.favicon || '');
+        const station = {
+          name:    s.name,
+          genre:   (s.tags || '').split(',').map(t => t.trim()).filter(Boolean).slice(0, 3).join(', ') || null,
+          country: s.country || null,
+          link_a:  s.url_resolved || s.url || null,
+          img:     isSvg ? s.favicon : null,
+        };
+        document.getElementById('rs-edit-area').innerHTML = _radioEditForm(station);
+        _attachRadioFormHandlers();
+        document.getElementById('rs-edit-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+
+  } catch (e) {
+    if (resultsEl) resultsEl.innerHTML = `<div style="padding:.75rem 1rem;color:var(--err,#f38ba8);font-size:.87rem">Search failed: ${esc(e.message)}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Search'; }
+  }
+}
+
+function _attachRadioSearchHandlers() {
+  document.getElementById('rs-manual-btn').addEventListener('click', () => {
+    document.getElementById('rs-edit-area').innerHTML = _radioEditForm(null);
+    _attachRadioFormHandlers();
+  });
+  document.getElementById('rs-search-btn').addEventListener('click', _execRadioSearch);
+  ['rs-search-q', 'rs-search-country', 'rs-search-tag'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') _execRadioSearch(); });
+  });
+}
+
 function _radioEditForm(station) {
   // returns HTML for add/edit form
   const s = station || {};
@@ -8927,11 +9095,12 @@ function _renderRadioView() {
       </div>
     </div>`;
 
-  // Add Channel button
+  // Add Channel button — show search panel first
   body.querySelector('#rs-add-btn').addEventListener('click', () => {
-    document.getElementById('rs-edit-area').innerHTML = _radioEditForm(null);
-    _attachRadioFormHandlers();
+    document.getElementById('rs-edit-area').innerHTML = _radioSearchPanel();
+    _attachRadioSearchHandlers();
     document.getElementById('rs-edit-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('rs-search-q').focus();
   });
 
   // Filter pills
