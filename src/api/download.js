@@ -34,8 +34,13 @@ export function setup(mstream) {
 
     res.attachment(`${path.basename(req.body.path)}.zip`);
     archive.pipe(res);
+    const normalizedBase = pathInfo.basePath.endsWith(path.sep) ? pathInfo.basePath : pathInfo.basePath + path.sep;
     for (const song of songs) {
-      const songPath = path.join(playlistParentDir, song);
+      const songPath = path.resolve(playlistParentDir, song);
+      if (songPath !== pathInfo.basePath && !songPath.startsWith(normalizedBase)) {
+        winston.warn(`M3U entry escaped library root: ${song}`);
+        continue;
+      }
       archive.file(songPath, { name: path.basename(song) });
     }
 

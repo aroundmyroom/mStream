@@ -10,7 +10,7 @@ export async function readPlaylistSongs(filePath) {
 
   let items = parser.manifest.segments.map(segment => { return segment.uri; });
   if (items.length === 0) {
-    items = fileContents.split(/\r?\n/).filter(Boolean);
+    items = fileContents.split(/\r?\n/).filter(line => line && !line.startsWith('#'));
   }
 
   return items.map(item => { return item.replace(/\\/g, "/"); });

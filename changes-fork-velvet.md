@@ -1,5 +1,17 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.6.3-velvet — April 2026
+
+### fix(security): M3U zip download path traversal
+- `POST /api/v1/download/m3u` now validates every entry in the playlist against the library root before adding it to the archive
+- A crafted `.m3u` file containing relative paths such as `../../etc/shadow` could previously have caused the server to include arbitrary files in the returned ZIP
+- Fix: `path.resolve()` + bounds check matching the pattern already used in `vpath.js` — entries that escape the library root are skipped with a warning log instead of being archived
+
+### fix: M3U fallback parser strips comment lines
+- The plain-text fallback in `src/util/m3u.js` (used when `m3u8-parser` returns no segments) now filters out `#EXTM3U`, `#EXTINF:` and any other `#`-prefixed lines instead of treating them as file paths
+
+---
+
 ## v6.6.2-velvet — April 2026
 
 ### feat(admin): per-user file upload permission
