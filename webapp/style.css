@@ -2060,8 +2060,44 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 /* Album detail header */
 .alb-detail-header{display:flex;gap:24px;align-items:flex-start;
   padding:0 0 24px;border-bottom:1px solid var(--border);margin-bottom:8px;}
+/* Art wrapper with edit overlay */
+.alb-art-wrap{position:relative;flex-shrink:0;border-radius:var(--r2);overflow:hidden;}
+.alb-art-edit-overlay{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.55);opacity:0;transition:opacity .15s;cursor:pointer;
+  color:#fff;border-radius:inherit;
+}
+.alb-art-editable:hover .alb-art-edit-overlay{opacity:1;}
+@media(hover:none){.alb-art-editable .alb-art-edit-overlay{opacity:.55;}}
 .alb-detail-art{width:180px;height:180px;flex-shrink:0;border-radius:var(--r2);
-  object-fit:cover;background:var(--raised);}
+  object-fit:cover;background:var(--raised);display:block;}
+/* Art picker panel — compact card matching the NP modal left-panel style */
+.albd-art-picker-section{
+  display:flex;margin-bottom:4px;
+}
+.albd-art-picker-section.hidden{display:none;}
+#albd-art-picker{
+  width:220px;
+  background:var(--raised);
+  border:1px solid var(--border2);
+  border-radius:var(--r2);
+  padding:14px 12px;
+  display:flex;flex-direction:column;gap:8px;
+  margin-bottom:16px;
+  box-sizing:border-box;
+}
+/* Use page-appropriate text colours inside the album art picker */
+#albd-art-picker .np-discogs-btn{border-color:var(--border2);color:var(--t2);}
+#albd-art-picker .np-discogs-btn:hover{border-color:var(--primary);color:var(--primary);}
+#albd-art-picker .np-discogs-cancel{border-color:var(--border2);color:var(--t2);}
+#albd-art-picker .np-discogs-cancel:hover{border-color:var(--primary);color:var(--primary);}
+#albd-art-picker .np-discogs-pick-title{color:var(--t2);}
+#albd-art-picker .np-discogs-note{color:var(--t3,var(--t2));font-size:10px;}
+#albd-art-picker .np-discogs-status{color:var(--t2);}
+#albd-art-picker .np-url-paste-inp{background:var(--bg);border-color:var(--border2);color:var(--t1);}
+#albd-art-picker .np-url-paste-inp:focus{border-color:var(--primary);}
+#albd-art-picker .np-embed-label{color:var(--t1);}
+#albd-art-picker .np-id3-inp{background:var(--bg);border-color:var(--border2);}
 .alb-detail-title{font-size:22px;font-weight:700;color:var(--t1);margin-bottom:4px;}
 .alb-detail-sub{font-size:13px;color:var(--t2);margin-bottom:16px;}
 .alb-detail-actions{display:flex;gap:10px;flex-wrap:wrap;}

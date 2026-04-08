@@ -1,5 +1,28 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.7.0-velvet — April 2026 — Album Library enhancements
+
+### feat: album art picker in album detail view (admin only)
+- Hover over the album cover in the detail header to reveal a pencil overlay; click to open the art picker
+- Sources: Discogs search, Deezer search, iTunes search, or paste any HTTPS image URL
+- Selected image is downloaded, converted to JPEG, and written as `cover.jpg` inside the album folder on disk
+- Detail header updates immediately; returning to the grid shows new art with automatic cache-bust
+
+### feat: CUE-sheet albums show individual track titles in Album Library
+- Albums stored as a single FLAC + `.cue` now expand all named CUE tracks in the detail view with correct track numbers, titles, and durations
+- Clicking a named CUE track seeks the FLAC to that track's start time instantly
+- Existing NP modal CUE markers and waveform behaviour unchanged
+
+### fix: Album Library overview renders instantly on back-navigation
+- Back from series or detail re-uses already-loaded data; no spinner or re-fetch until cache expires
+
+### fix: album cover art path resolution for child vpaths
+- `resolveArt()`, `set-art`, and `art-file` all resolved paths incorrectly for albums under a child vpath (e.g. `Albums/` registered as its own vpath), producing double-segment paths like `/media/music/Albums/Albums/Artist`
+- All three fixed to strip the vpath prefix before joining with `artRoot`
+
+### fix: replaced cover art bypasses browser cache
+- `art-file` URLs now include a `_v=<timestamp>` parameter after any art save, preventing the browser from serving the stale version
+
 ## v6.6.6-velvet — April 2026 — The Devil's Release
 
 ### fix: album CD-folder detection handles mixed-case "Cd 1 / Cd 2" naming

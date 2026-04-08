@@ -628,3 +628,18 @@ export function setup(mstream) {
     }
   });
 }
+
+/**
+ * Exported helper used by albums-browse set-art endpoint.
+ * Fetches the primary cover image buffer for a Discogs release ID.
+ */
+export async function getReleaseCoverBuf(releaseId) {
+  if (config.program.discogs?.enabled === false) {
+    throw new Error('Discogs not enabled');
+  }
+  const release = await discogsGet(`https://api.discogs.com/releases/${releaseId}`);
+  const images  = release.images || [];
+  const img     = images.find(i => i.type === 'primary') || images[0];
+  if (!img?.uri) throw new Error('No cover image for this release');
+  return fetchImageBuf(img.uri);
+}

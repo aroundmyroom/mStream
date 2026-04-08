@@ -14,8 +14,12 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
+import axios from 'axios';
+import Joi from 'joi';
 import * as config from '../state/config.js';
 import * as db from '../db/manager.js';
+import { joiValidate } from '../util/validation.js';
+import { getReleaseCoverBuf } from './discogs.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -187,16 +191,21 @@ function buildTrackListFromEntries(entries, source) {
       ((a.row.track || 999) - (b.row.track || 999)) ||
       a.parts.at(-1).localeCompare(b.parts.at(-1), undefined, { numeric: true })
     )
-    .map(e => ({
-      // Use dbVpath + original DB filepath so the URL always routes through the
-      // parent/root vpath's static mount (avoids spaces-in-vpathName encoding issues).
-      filepath : source.dbVpath + '/' + e.row.filepath,
-      title    : e.row.title   || cleanTrackName(e.parts.at(-1)),
-      artist   : e.row.artist  || null,
-      number   : e.row.track   || extractTrackNumber(e.parts.at(-1)),
-      duration : e.row.duration || null,
-      aaFile   : e.row.aaFile  || null,
-    }));
+    .map(e => {
+      let cuepoints = [];
+      try { if (e.row.cuepoints) cuepoints = JSON.parse(e.row.cuepoints); } catch { /* ignore */ }
+      return {
+        // Use dbVpath + original DB filepath so the URL always routes through the
+        // parent/root vpath's static mount (avoids spaces-in-vpathName encoding issues).
+        filepath  : source.dbVpath + '/' + e.row.filepath,
+        title     : e.row.title   || cleanTrackName(e.parts.at(-1)),
+        artist    : e.row.artist  || null,
+        number    : e.row.track   || extractTrackNumber(e.parts.at(-1)),
+        duration  : e.row.duration || null,
+        aaFile    : e.row.aaFile  || null,
+        cuepoints : cuepoints.length >= 2 ? cuepoints : [],
+      };
+    });
 }
 
 function buildAlbumFromEntries(albumPath, entries, partsBase, vpathName, seriesId, source) {
@@ -245,7 +254,7 @@ function buildAlbumFromEntries(albumPath, entries, partsBase, vpathName, seriesI
     if (e.row.aaFile) { aaFile = e.row.aaFile; break; }
   }
 
-  return { id, path: albumPath, displayName, artist, year, artFile: null, aaFile, seriesId: seriesId || null, discs, _artRoot: source?.artRoot || null };
+  return { id, path: albumPath, displayName, artist, year, artFile: null, aaFile, seriesId: seriesId || null, discs, _artRoot: source?.artRoot || null, _artPrefix: source?.prefix || null };
 }
 
 function buildTreeFromDB(dbRows, source) {
@@ -330,8 +339,12 @@ async function resolveArt(albums, series) {
     albums.map(async album => {
       const artRoot = album._artRoot;
       if (!artRoot) return;
-      // album.path is relative to artRoot (e.g. "Albums/Artist - Title")
-      const folderPath = path.join(artRoot, album.path);
+      // Strip source prefix before joining with artRoot to avoid double-segment path.
+      // e.g. artRoot=/media/music/Albums, album.path="Albums/Artist" → strip "Albums/" → "Artist"
+      const relPath    = (album._artPrefix && album.path.startsWith(album._artPrefix))
+        ? album.path.slice(album._artPrefix.length)
+        : album.path;
+      const folderPath = path.join(artRoot, relPath);
       for (const name of ART_NAMES) {
         try {
           await fsp.access(path.join(folderPath, name), fs.constants.R_OK);
@@ -392,8 +405,8 @@ export function setup(mstream) {
       // Resolve art files in parallel across all albums
       await resolveArt(allAlbums, allSeries);
 
-      // Strip internal _artRoot before sending to client
-      const albums = allAlbums.map(({ _artRoot, ...a }) => a);
+      // Strip internal fields before sending to client
+      const albums = allAlbums.map(({ _artRoot, _artPrefix, ...a }) => a);
       const series = allSeries;
 
       _cache   = { albums, series };
@@ -423,8 +436,13 @@ export function setup(mstream) {
       const sources = await resolveAlbumsSources();
 
       for (const source of sources) {
-        const artRoot     = source.artRoot;
-        const resolved    = path.resolve(artRoot, p);
+        const artRoot  = source.artRoot;
+        // Strip source prefix from p if present (same issue as set-art):
+        // p is e.g. "Albums/Artist/cover.jpg" but artRoot already points inside Albums/
+        const relP     = (source.prefix && p.startsWith(source.prefix))
+          ? p.slice(source.prefix.length)
+          : p;
+        const resolved     = path.resolve(artRoot, relP);
         const rootResolved = path.resolve(artRoot);
         // Security: stay inside this artRoot
         if (!resolved.startsWith(rootResolved + path.sep) && resolved !== rootResolved) {
@@ -440,5 +458,87 @@ export function setup(mstream) {
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // ── POST /api/v1/albums/set-art ───────────────────────────────────────────
+  // Admin only. Downloads a cover image and writes it as cover.jpg inside the
+  // album folder on disk.  albumPath is the `album.path` value from the browse
+  // response (relative to artRoot, e.g. "Albums/Artist - Title (1990)").
+  // Supply either releaseId (Discogs) or coverUrl (Deezer, iTunes, URL paste).
+  mstream.post('/api/v1/albums/set-art', async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+
+    const schema = Joi.object({
+      albumPath : Joi.string().required(),
+      releaseId : Joi.number().integer(),
+      coverUrl  : Joi.string().uri({ scheme: ['http', 'https'] }),
+    }).or('releaseId', 'coverUrl');
+
+    try {
+      joiValidate(schema, req.body);
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+
+    const albumPath = req.body.albumPath;
+
+    // Resolve album folder: iterate all albumsOnly artRoots.
+    // album.path is built in buildTreeFromDB as: prefix + l1 (e.g. "Albums/Artist Name").
+    // artRoot for a child vpath is the child's own root (e.g. /media/music/Albums).
+    // So we must strip the prefix before resolving against artRoot to avoid doubling it.
+    const sources   = await resolveAlbumsSources();
+    let albumDir    = null;
+    for (const source of sources) {
+      // Strip source prefix from albumPath if present so path is relative to artRoot
+      const relPath   = (source.prefix && albumPath.startsWith(source.prefix))
+        ? albumPath.slice(source.prefix.length)
+        : albumPath;
+      const candidate    = path.resolve(source.artRoot, relPath);
+      const rootResolved = path.resolve(source.artRoot);
+      // Security: path must stay within artRoot
+      if (candidate !== rootResolved && !candidate.startsWith(rootResolved + path.sep)) continue;
+      try {
+        const stat = await fsp.stat(candidate);
+        if (stat.isDirectory()) { albumDir = candidate; break; }
+      } catch { /* try next source */ }
+    }
+    if (!albumDir) return res.status(404).json({ error: 'Album folder not found' });
+
+    // Download the image
+    let imgBuf;
+    try {
+      if (req.body.releaseId) {
+        imgBuf = await getReleaseCoverBuf(req.body.releaseId);
+      } else {
+        const resp = await axios.get(req.body.coverUrl, {
+          responseType  : 'arraybuffer',
+          headers       : { 'User-Agent': 'mStreamVelvet/dev +https://github.com/aroundmyroom/mStream' },
+          maxContentLength: 20 * 1024 * 1024,
+          timeout       : 20000,
+        });
+        imgBuf = Buffer.from(resp.data);
+      }
+    } catch (e) {
+      return res.status(502).json({ error: 'Failed to download image: ' + e.message });
+    }
+
+    // Convert to JPEG and write as cover.jpg using sharp (on-demand import,
+    // same pattern as discogs.js so it works even if sharp is not a hard dep)
+    const coverPath = path.join(albumDir, 'cover.jpg');
+    try {
+      const { default: sharp } = await import('sharp');
+      await sharp(imgBuf)
+        .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 90 })
+        .toFile(coverPath);
+    } catch (e) {
+      return res.status(500).json({ error: 'Failed to save cover: ' + e.message });
+    }
+
+    // Invalidate browse cache so next request returns fresh artFile paths
+    invalidateCache();
+
+    const artFile = albumPath.replace(/\\/g, '/') + '/cover.jpg';
+    res.json({ artFile });
   });
 }

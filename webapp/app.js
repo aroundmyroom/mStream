@@ -685,10 +685,21 @@ const Player = {
     S.idx = idx;
     _resetXfade();  // new track starting — arm crossfade for this track
     const s = S.queue[idx];
+    const _cueSeek = _pendingCueSeek;
+    _pendingCueSeek = null;
     audioEl.src = mediaUrl(s.filepath);
     audioEl.load();
     VIZ.initAudio();   // ensure AudioContext + analysers exist BEFORE play fires
-    audioEl.play().catch(() => {});
+    if (_cueSeek != null && _cueSeek > 0) {
+      // CUE row click: seek to the cuepoint start, then play.
+      // Listen on 'canplay' (fires after load even if file was already buffered).
+      audioEl.addEventListener('canplay', () => {
+        audioEl.currentTime = _cueSeek;
+        audioEl.addEventListener('seeked', () => audioEl.play().catch(() => {}), { once: true });
+      }, { once: true });
+    } else {
+      audioEl.play().catch(() => {});
+    }
     if (!s.isRadio) {
       loadCuePoints(s.filepath);
       _applyRGGain(s);
@@ -5078,11 +5089,16 @@ async function viewArtistAlbums(displayName, variantsOrBackFn, backFn) {
 // ── ALBUM LIBRARY (Albums New) ────────────────────────────────────────────────
 // A filesystem-based browsable album grid backed by /api/v1/albums/browse.
 
-let _albLib = null;   // { albums: [], series: [], byId: {}, bySeriesId: {} }
+let _albLib      = null;   // { albums: [], series: [], byId: {}, bySeriesId: {} }
+let _albArtBust  = '';     // bumped after art save to force browser cache refresh
+let _pendingCueSeek = null; // seconds to seek to at start of next playAt (for CUE track rows)
 
 function _albArtUrl(artFile, aaFile) {
   if (aaFile) return artUrl(aaFile, 's');
-  if (artFile) return `/api/v1/albums/art-file?p=${encodeURIComponent(artFile)}&token=${S.token}`;
+  if (artFile) {
+    const bust = _albArtBust ? `&_v=${_albArtBust}` : '';
+    return `/api/v1/albums/art-file?p=${encodeURIComponent(artFile)}&token=${S.token}${bust}`;
+  }
   return null;
 }
 
@@ -5120,9 +5136,8 @@ async function _loadAlbLib() {
 }
 
 async function viewAlbumLibrary() {
-  _albLib = null;  // always re-fetch on entry so config changes / server restarts are reflected
   setTitle('Albums'); setBack(null); setNavActive('album-library'); S.view = 'album-library';
-  setBody('<div class="loading-state"></div>');
+  if (!_albLib) setBody('<div class="loading-state"></div>');
   try {
     await _loadAlbLib();
     const { albums, series } = _albLib;
@@ -5275,6 +5290,191 @@ async function viewAlbumSeries(seriesId) {
   } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
+// ── ALBUM ART PICKER (album detail view, admin only) ─────────────────────────
+
+let _albDetailAlbum = null; // album currently shown in viewAlbumDetail
+
+function _albArtPickerReset() {
+  const el = document.getElementById('albd-art-picker');
+  if (!el) return;
+  const sv = '\u{1F50D}';
+  const _dsbtn  = S.discogsEnabled ? `<button class="np-discogs-btn albd-art-src-btn" data-src="discogs"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search on Discogs</button>` : '';
+  const _dzbtn  = S.deezerEnabled  ? `<button class="np-discogs-btn albd-art-src-btn" data-src="deezer"  style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search on Deezer</button>`  : '';
+  const _itbtn  = S.itunesEnabled  ? `<button class="np-discogs-btn albd-art-src-btn" data-src="itunes"  style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search on iTunes</button>`  : '';
+  const _urlbtn = `<button class="np-discogs-btn albd-art-src-btn" data-src="url" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Paste Image URL</button>`;
+  el.innerHTML = (_dsbtn || _dzbtn || _itbtn ? '' : '<span class="np-discogs-status">No art sources enabled (enable Discogs/Deezer/iTunes in admin)</span>') +
+    _dsbtn + _dzbtn + _itbtn + _urlbtn;
+  document.getElementById('albd-art-picker-section')?.classList.remove('hidden');
+}
+
+async function _albDiscogsSearch() {
+  const album = _albDetailAlbum;
+  const el    = document.getElementById('albd-art-picker');
+  if (!el || !album) return;
+  el.innerHTML = `<span class="np-discogs-status">Searching Discogs\u2026</span>`;
+  try {
+    const params = new URLSearchParams();
+    if (album.artist)      params.set('artist', album.artist);
+    if (album.displayName) params.set('album',  album.displayName);
+    if (album.year)        params.set('year',   String(album.year));
+    const d = await api('GET', `api/v1/discogs/coverart?${params}`);
+    if (!d.choices || !d.choices.length) {
+      el.innerHTML = `<span class="np-discogs-status">No results found</span>
+        <button class="np-discogs-btn albd-art-src-btn" data-src="discogs" style="margin-top:8px">Try again</button>
+        <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
+      return;
+    }
+    el.innerHTML =
+      `<div class="np-discogs-pick-header">` +
+        `<span class="np-discogs-pick-title">Pick a cover (Discogs)</span>` +
+        `<button class="np-discogs-cancel" id="albd-art-back-btn">\u2190 Cancel</button>` +
+      `</div>` +
+      `<div class="np-discogs-choices">` +
+        d.choices.map(c =>
+          `<img class="np-discogs-thumb albd-discogs-thumb"
+            src="${c.thumbB64}" alt=""
+            title="${esc(c.releaseTitle)}${c.year ? ' (' + esc(c.year) + ')' : ''}"
+            data-release-id="${c.releaseId}">`
+        ).join('') +
+      `</div>` +
+      `<span class="np-discogs-note">via Discogs — click a cover to save as cover.jpg</span>`;
+  } catch(e) {
+    el.innerHTML = `<span class="np-discogs-status">${esc(e?.message || 'Search failed')}</span>
+      <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
+  }
+}
+
+async function _albDeezerSearch() {
+  const album = _albDetailAlbum;
+  const el    = document.getElementById('albd-art-picker');
+  if (!el || !album) return;
+  el.innerHTML = `<span class="np-discogs-status">Searching Deezer\u2026</span>`;
+  try {
+    const q = [album.artist, album.displayName].filter(Boolean).join(' ');
+    const d = await api('GET', `api/v1/deezer/search?q=${encodeURIComponent(q)}`);
+    const hits = (d.data || []).filter(h => h.cover_medium);
+    if (!hits.length) {
+      el.innerHTML = `<span class="np-discogs-status">No results found on Deezer</span>
+        <button class="np-discogs-btn albd-art-src-btn" data-src="deezer" style="margin-top:8px">Try again</button>
+        <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
+      return;
+    }
+    el.innerHTML =
+      `<div class="np-discogs-pick-header">` +
+        `<span class="np-discogs-pick-title">Pick a cover (Deezer)</span>` +
+        `<button class="np-discogs-cancel" id="albd-art-back-btn">\u2190 Cancel</button>` +
+      `</div>` +
+      `<div class="np-discogs-choices">` +
+        hits.map(h =>
+          `<img class="np-discogs-thumb albd-url-thumb"
+            src="${h.cover_medium}" alt=""
+            title="${esc(h.title)}${h.artist?.name ? ' \u2014 ' + esc(h.artist.name) : ''}"
+            data-cover-url="${esc(h.cover_xl || h.cover_big || h.cover_medium)}">`
+        ).join('') +
+      `</div>` +
+      `<span class="np-discogs-note">via Deezer — click a cover to save as cover.jpg</span>`;
+  } catch(e) {
+    el.innerHTML = `<span class="np-discogs-status">${esc(e?.message || 'Search failed')}</span>
+      <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
+  }
+}
+
+async function _albItunesSearch() {
+  const album = _albDetailAlbum;
+  const el    = document.getElementById('albd-art-picker');
+  if (!el || !album) return;
+  el.innerHTML = `<span class="np-discogs-status">Searching iTunes\u2026</span>`;
+  try {
+    const params = new URLSearchParams();
+    if (album.artist)      params.set('artist', album.artist);
+    if (album.displayName) params.set('album',  album.displayName);
+    const d = await api('GET', `api/v1/itunes/search?${params}`);
+    if (!d.results || !d.results.length) {
+      el.innerHTML = `<span class="np-discogs-status">No results found on iTunes</span>
+        <button class="np-discogs-btn albd-art-src-btn" data-src="itunes" style="margin-top:8px">Try again</button>
+        <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
+      return;
+    }
+    el.innerHTML =
+      `<div class="np-discogs-pick-header">` +
+        `<span class="np-discogs-pick-title">Pick a cover (iTunes)</span>` +
+        `<button class="np-discogs-cancel" id="albd-art-back-btn">\u2190 Cancel</button>` +
+      `</div>` +
+      `<div class="np-discogs-choices">` +
+        d.results.map(r =>
+          `<img class="np-discogs-thumb albd-url-thumb"
+            src="${r.thumb}" alt=""
+            title="${esc(r.label)}"
+            data-cover-url="${esc(r.coverUrl)}">`
+        ).join('') +
+      `</div>` +
+      `<span class="np-discogs-note">via iTunes — click a cover to save as cover.jpg</span>`;
+  } catch(e) {
+    el.innerHTML = `<span class="np-discogs-status">${esc(e?.message || 'Search failed')}</span>
+      <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
+  }
+}
+
+function _albUrlPaste() {
+  const el = document.getElementById('albd-art-picker');
+  if (!el) return;
+  el.innerHTML =
+    `<div class="np-discogs-pick-header">` +
+      `<span class="np-discogs-pick-title">Paste an image URL</span>` +
+      `<button class="np-discogs-cancel" id="albd-art-back-btn">\u2190 Cancel</button>` +
+    `</div>` +
+    `<div class="np-url-paste-row">` +
+      `<input class="np-url-paste-inp" id="albd-url-paste-inp" type="url" placeholder="https://\u2026" autocomplete="off" spellcheck="false">` +
+      `<button class="np-url-paste-go" id="albd-url-paste-go-btn">Use</button>` +
+    `</div>` +
+    `<span id="albd-url-paste-preview-wrap" class="np-url-paste-preview-wrap hidden">` +
+      `<img id="albd-url-paste-preview" class="np-url-paste-preview" alt="">` +
+    `</span>` +
+    `<span id="albd-url-paste-status" class="np-discogs-status" style="display:none"></span>`;
+  requestAnimationFrame(() => { document.getElementById('albd-url-paste-inp')?.focus(); });
+}
+
+async function _albSetArt(opts) {
+  // opts: { releaseId } | { coverUrl }
+  const album = _albDetailAlbum;
+  const el    = document.getElementById('albd-art-picker');
+  if (!el || !album) return;
+  el.innerHTML = `<div class="np-embed-spinner"></div><span class="np-embed-label">Saving cover.jpg\u2026</span>`;
+  try {
+    const result = await api('POST', 'api/v1/albums/set-art', { albumPath: album.path, ...opts });
+    // Update local album cache so the detail view refreshes immediately
+    if (_albLib?.byId[album.id]) {
+      _albLib.byId[album.id].artFile = result.artFile;
+      _albLib.byId[album.id].aaFile  = null;
+    }
+    // Invalidate full library cache so the grid reloads fresh art on next open
+    _albLib = null;
+    // Update the displayed art image in the detail header (live update)
+    const newUrl = `/api/v1/albums/art-file?p=${encodeURIComponent(result.artFile)}&token=${S.token}&_v=${Date.now()}`;
+    const artEl  = document.querySelector('.alb-detail-art');
+    if (artEl) {
+      if (artEl.tagName === 'IMG') {
+        artEl.src = newUrl;
+      } else {
+        // Replace placeholder div with a proper img
+        const img = document.createElement('img');
+        img.className = 'alb-detail-art';
+        img.alt       = album.displayName;
+        img.src       = newUrl;
+        artEl.replaceWith(img);
+      }
+    }
+    _albArtBust = Date.now();
+    document.getElementById('albd-art-picker-section')?.classList.add('hidden');
+    el.innerHTML = '';
+    toast('Cover saved \u2014 cover.jpg written to album folder');
+  } catch(err) {
+    el.innerHTML =
+      `<span class="np-discogs-status" style="color:rgba(255,100,100,.8)">Failed: ${esc(err?.message || 'error')}</span>` +
+      `<button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
+  }
+}
+
 async function viewAlbumDetail(albumId, activeDiscIdx) {
   setTitle('…'); setBack(null); setNavActive('album-library'); S.view = 'album-library';
   setBody('<div class="loading-state"></div>');
@@ -5283,6 +5483,7 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
     const album = _albLib.byId[albumId];
     if (!album) { setBody('<div class="empty-state">Album not found</div>'); return; }
 
+    _albDetailAlbum = album;
     setTitle(album.displayName);
 
     // Back: if belongs to a series → that series, else library
@@ -5301,12 +5502,24 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
     const allSongs   = discs.flatMap(disc => disc.tracks.map(t => _albSongObj(t, album, discLabel(disc), disc.discIndex)));
     const discSongs  = discs[discIdx] ? discs[discIdx].tracks.map(t => _albSongObj(t, album, discLabel(discs[discIdx]), discs[discIdx].discIndex)) : [];
 
+    const artEditOverlay = S.isAdmin
+      ? `<div class="alb-art-edit-overlay" id="albd-art-edit-btn" title="Change album art">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+        </div>`
+      : '';
+
     const body = document.getElementById('content-body');
     body.innerHTML = `
       <div class="alb-detail-header">
-        ${art
-          ? `<img class="alb-detail-art" src="${esc(art)}" alt="${esc(album.displayName)}" onerror="this.style.display='none'">`
-          : `<div class="alb-detail-art" style="display:flex;align-items:center;justify-content:center;">${noArtHtml()}</div>`}
+        <div class="alb-art-wrap${S.isAdmin ? ' alb-art-editable' : ''}">
+          ${art
+            ? `<img class="alb-detail-art" src="${esc(art)}" alt="${esc(album.displayName)}" onerror="this.style.display='none'">`
+            : `<div class="alb-detail-art" style="display:flex;align-items:center;justify-content:center;">${noArtHtml()}</div>`}
+          ${artEditOverlay}
+        </div>
         <div style="min-width:0;flex:1;">
           <div class="alb-detail-title">${esc(album.displayName)}</div>
           <div class="alb-detail-sub">${album.artist ? esc(album.artist) + (album.year ? ' · ' + album.year : '') : (album.year || '')}</div>
@@ -5316,6 +5529,9 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
           </div>
         </div>
       </div>
+      ${S.isAdmin ? `<div class="albd-art-picker-section hidden" id="albd-art-picker-section">
+        <div id="albd-art-picker"></div>
+      </div>` : ''}
       ${multiDisc ? `
       <div class="disc-tabs" id="albd-disc-tabs" style="display:flex;gap:6px;padding:16px 0 8px;flex-wrap:wrap;">
         ${discs.map((d, i) => `<button class="disc-tab-btn${i === discIdx ? ' active' : ''}" data-disc="${i}">${esc(d.label || ('Disc ' + (i+1)))}</button>`).join('')}
@@ -5328,17 +5544,37 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
       const disc = discs[dIdx];
       if (!disc) return;
       const tl = body.querySelector('#albd-tracklist');
-      tl.innerHTML = disc.tracks.length === 0
-        ? '<div class="empty-state">No tracks found</div>'
-        : disc.tracks.map((t, ti) => {
-            const dur = t.duration ? fmt(t.duration) : '';
-            return `<div class="alb-track-row" data-ti="${ti}" data-disc="${dIdx}">
-              <span class="alb-track-num">${t.number || (ti + 1)}</span>
-              <span class="alb-track-title">${esc(t.title || '?')}</span>
-              ${t.artist && t.artist !== album.artist ? `<span class="alb-track-artist">${esc(t.artist)}</span>` : '<span></span>'}
-              <span class="alb-track-dur">${dur}</span>
-            </div>`;
-          }).join('');
+      if (disc.tracks.length === 0) {
+        tl.innerHTML = '<div class="empty-state">No tracks found</div>';
+        return;
+      }
+      // CUE disc: single FLAC with embedded cuepoints — expand into named rows
+      if (disc.tracks.length === 1 && disc.tracks[0].cuepoints?.length >= 2) {
+        const cps      = disc.tracks[0].cuepoints;
+        const totalDur = disc.tracks[0].duration;
+        tl.innerHTML = cps.map((cp, ci) => {
+          const nextCp = cps[ci + 1];
+          const dur    = nextCp
+            ? fmt(Math.max(0, nextCp.t - cp.t))
+            : (totalDur ? fmt(Math.max(0, totalDur - cp.t)) : '');
+          return `<div class="alb-track-row" data-cue-disc="${dIdx}" data-cue-idx="${ci}">
+            <span class="alb-track-num">${cp.no || (ci + 1)}</span>
+            <span class="alb-track-title">${esc(cp.title || '?')}</span>
+            <span></span>
+            <span class="alb-track-dur">${dur}</span>
+          </div>`;
+        }).join('');
+        return;
+      }
+      tl.innerHTML = disc.tracks.map((t, ti) => {
+          const dur = t.duration ? fmt(t.duration) : '';
+          return `<div class="alb-track-row" data-ti="${ti}" data-disc="${dIdx}">
+            <span class="alb-track-num">${t.number || (ti + 1)}</span>
+            <span class="alb-track-title">${esc(t.title || '?')}</span>
+            ${t.artist && t.artist !== album.artist ? `<span class="alb-track-artist">${esc(t.artist)}</span>` : '<span></span>'}
+            <span class="alb-track-dur">${dur}</span>
+          </div>`;
+        }).join('');
     }
     renderTracks(discIdx);
 
@@ -5363,21 +5599,111 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
       });
     }
 
+    // Art edit overlay — show picker on click (admin only)
+    if (S.isAdmin) {
+      body.querySelector('#albd-art-edit-btn')?.addEventListener('click', () => {
+        _albArtPickerReset();
+      });
+
+      // Art picker: delegated clicks + input events
+      const pickerSection = body.querySelector('#albd-art-picker-section');
+      if (pickerSection) {
+        pickerSection.addEventListener('click', async e => {
+          // Back / cancel button
+          if (e.target.closest('#albd-art-back-btn')) { _albArtPickerReset(); return; }
+
+          // Source search buttons
+          const srcBtn = e.target.closest('.albd-art-src-btn');
+          if (srcBtn) {
+            const src = srcBtn.dataset.src;
+            if (src === 'discogs') { await _albDiscogsSearch(); return; }
+            if (src === 'deezer')  { await _albDeezerSearch();  return; }
+            if (src === 'itunes')  { await _albItunesSearch();  return; }
+            if (src === 'url')     { _albUrlPaste();            return; }
+          }
+
+          // URL paste "Use" button
+          if (e.target.closest('#albd-url-paste-go-btn')) {
+            const inp      = document.getElementById('albd-url-paste-inp');
+            const coverUrl = (inp?.value || '').trim();
+            const statEl   = document.getElementById('albd-url-paste-status');
+            if (!coverUrl) return;
+            if (!/^https?:\/\/.+/i.test(coverUrl)) {
+              if (statEl) { statEl.textContent = 'Please enter a valid https:// URL'; statEl.style.display = ''; }
+              return;
+            }
+            await _albSetArt({ coverUrl });
+            return;
+          }
+
+          // Discogs thumb click
+          const discogsThumb = e.target.closest('.albd-discogs-thumb');
+          if (discogsThumb) {
+            const releaseId = Number(discogsThumb.dataset.releaseId);
+            if (!releaseId) return;
+            await _albSetArt({ releaseId });
+            return;
+          }
+
+          // Deezer / iTunes thumb click
+          const urlThumb = e.target.closest('.albd-url-thumb');
+          if (urlThumb) {
+            const coverUrl = urlThumb.dataset.coverUrl;
+            if (!coverUrl) return;
+            await _albSetArt({ coverUrl });
+            return;
+          }
+        });
+
+        // Live image preview for URL paste input
+        pickerSection.addEventListener('input', e => {
+          const inp = e.target.closest('#albd-url-paste-inp');
+          if (!inp) return;
+          const url    = inp.value.trim();
+          const wrap   = document.getElementById('albd-url-paste-preview-wrap');
+          const imgEl  = document.getElementById('albd-url-paste-preview');
+          const statEl = document.getElementById('albd-url-paste-status');
+          if (!wrap || !imgEl) return;
+          if (!url || !/^https?:\/\/.+/i.test(url)) {
+            wrap.classList.add('hidden');
+            if (statEl) statEl.style.display = 'none';
+            return;
+          }
+          imgEl.onload  = () => { wrap.classList.remove('hidden'); if (statEl) statEl.style.display = 'none'; };
+          imgEl.onerror = () => { wrap.classList.add('hidden');    if (statEl) { statEl.textContent = 'Could not load image from that URL'; statEl.style.display = ''; } };
+          imgEl.src = url;
+        });
+      }
+    }
+
     // Click row to play from that track
     body.querySelector('#albd-tracklist').addEventListener('click', e => {
       const row = e.target.closest('.alb-track-row');
       if (!row) return;
+
+      // CUE row: seek the FLAC for that disc to the cuepoint position
+      if (row.dataset.cueDisc != null) {
+        const dIdx   = parseInt(row.dataset.cueDisc, 10);
+        const cpIdx  = parseInt(row.dataset.cueIdx,  10);
+        const disc   = discs[dIdx];
+        if (!disc) return;
+        const cp     = disc.tracks[0].cuepoints[cpIdx];
+        if (!cp) return;
+        // globalIdx = dIdx because each CUE disc = exactly 1 track in allSongs
+        if (cp.t > 0) _pendingCueSeek = cp.t;
+        Player.setQueue(allSongs, dIdx);
+        return;
+      }
+
+      // Normal row
       const dIdx  = parseInt(row.dataset.disc, 10);
       const ti    = parseInt(row.dataset.ti,   10);
       const disc  = discs[dIdx];
       if (!disc) return;
-      // Queue whole album from this track
-      const songs = allSongs;
-      // Find global index of this track
       let globalIdx = 0;
       for (let d = 0; d < dIdx; d++) globalIdx += discs[d].tracks.length;
       globalIdx += ti;
-      Player.setQueue(songs, globalIdx);
+      Player.setQueue(allSongs, globalIdx);
     });
 
   } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
