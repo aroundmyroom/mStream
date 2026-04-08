@@ -536,7 +536,8 @@ function _navCancel() {
 // don't cause even-number-of-toggles cancellation in customize mode.
 let _homeAC = null;
 // Queue drag-and-drop state — module-scoped so _initQueueListeners (one-time) can close over it.
-let _qDragSrc = null;
+let _qDragSrc  = null;
+let _qDragDisc = null; // disc label string when dragging an entire disc block
 
 // ── API ───────────────────────────────────────────────────────
 async function api(method, path, body, signal) {
@@ -1397,7 +1398,7 @@ function refreshQueueUI() {
     const isActive = i === S.idx;
     const prevLabel = i > 0 ? S.queue[i - 1]._discLabel : undefined;
     const sep = (s._discLabel && s._discLabel !== prevLabel)
-      ? `<div class="q-disc-sep"><span>${esc(s._discLabel)}</span></div>`
+      ? `<div class="q-disc-sep" draggable="true" data-disc-label="${esc(s._discLabel)}" title="Drag to move entire disc"><span>${esc(s._discLabel)}</span></div>`
       : '';
     return sep + `
       <div class="q-item${isActive ? ' q-active' : ''}" data-qi="${i}" draggable="true">
@@ -1458,32 +1459,93 @@ function _initQueueListeners() {
   });
 
   list.addEventListener('dragstart', e => {
+    const sep = e.target.closest('.q-disc-sep');
+    if (sep) {
+      _qDragDisc = sep.dataset.discLabel;
+      _qDragSrc  = null;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', 'disc:' + _qDragDisc);
+      setTimeout(() => sep.classList.add('q-dragging'), 0);
+      return;
+    }
     const item = e.target.closest('.q-item');
     if (!item) return;
-    _qDragSrc = parseInt(item.dataset.qi);
+    _qDragSrc  = parseInt(item.dataset.qi);
+    _qDragDisc = null;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', _qDragSrc);
     setTimeout(() => item.classList.add('q-dragging'), 0);
   });
   list.addEventListener('dragend', e => {
+    const sep  = e.target.closest('.q-disc-sep');
     const item = e.target.closest('.q-item');
+    if (sep)  sep.classList.remove('q-dragging');
     if (item) item.classList.remove('q-dragging');
     list.querySelectorAll('.q-drag-over').forEach(el => el.classList.remove('q-drag-over'));
   });
   list.addEventListener('dragover', e => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    const item = e.target.closest('.q-item');
-    if (!item || item.classList.contains('q-drag-over')) return;
+    const target = e.target.closest('.q-item, .q-disc-sep');
+    if (!target || target.classList.contains('q-drag-over')) return;
     list.querySelectorAll('.q-drag-over').forEach(el => el.classList.remove('q-drag-over'));
-    item.classList.add('q-drag-over');
+    target.classList.add('q-drag-over');
   });
   list.addEventListener('dragleave', e => {
-    const item = e.target.closest('.q-item');
-    if (item && !item.contains(e.relatedTarget)) item.classList.remove('q-drag-over');
+    const target = e.target.closest('.q-item, .q-disc-sep');
+    if (target && !target.contains(e.relatedTarget)) target.classList.remove('q-drag-over');
   });
   list.addEventListener('drop', e => {
     e.preventDefault();
+    list.querySelectorAll('.q-drag-over').forEach(el => el.classList.remove('q-drag-over'));
+
+    // ── Disc block drop ─────────────────────────────────────────
+    if (_qDragDisc !== null) {
+      const label = _qDragDisc;
+      _qDragDisc  = null;
+
+      // Accept drop on a q-item or q-disc-sep
+      const dropTarget = e.target.closest('.q-item, .q-disc-sep');
+      if (!dropTarget) return;
+
+      // Insertion index: first song of target disc, or the q-item index
+      let toIdx;
+      if (dropTarget.classList.contains('q-disc-sep')) {
+        const tLabel = dropTarget.dataset.discLabel;
+        toIdx = S.queue.findIndex(s => s._discLabel === tLabel);
+        if (toIdx < 0) toIdx = 0;
+      } else {
+        toIdx = parseInt(dropTarget.dataset.qi);
+      }
+
+      // Collect disc song indices
+      const discIdxs = S.queue.reduce((acc, s, i) => { if (s._discLabel === label) acc.push(i); return acc; }, []);
+      if (!discIdxs.length) return;
+
+      const curFilepath = S.queue[S.idx]?.filepath;
+      const discSongs   = discIdxs.map(i => S.queue[i]);
+
+      // Remove from highest to lowest
+      for (let i = discIdxs.length - 1; i >= 0; i--) S.queue.splice(discIdxs[i], 1);
+
+      // Adjust insertion point for removed items
+      const removedBefore = discIdxs.filter(i => i < toIdx).length;
+      const insertAt = Math.min(Math.max(0, toIdx - removedBefore), S.queue.length);
+      S.queue.splice(insertAt, 0, ...discSongs);
+
+      // Restore current index by filepath
+      if (curFilepath) {
+        const ni = S.queue.findIndex(s => s.filepath === curFilepath);
+        if (ni >= 0) S.idx = ni;
+      }
+
+      persistQueue();
+      _syncQueueToDb();
+      refreshQueueUI();
+      return;
+    }
+
+    // ── Single song drop ────────────────────────────────────────
     const item = e.target.closest('.q-item');
     if (!item) return;
     const to = parseInt(item.dataset.qi);
@@ -5497,10 +5559,20 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
     const multiDisc  = discs.length > 1;
     const art        = _albArtUrl(album.artFile, album.aaFile);
 
-    // Gather all tracks across all discs (for Play All)
     const discLabel  = disc => multiDisc ? (disc.label || ('Disc ' + disc.discIndex)) : null;
-    const allSongs   = discs.flatMap(disc => disc.tracks.map(t => _albSongObj(t, album, discLabel(disc), disc.discIndex)));
-    const discSongs  = discs[discIdx] ? discs[discIdx].tracks.map(t => _albSongObj(t, album, discLabel(discs[discIdx]), discs[discIdx].discIndex)) : [];
+
+    // Per-disc song list helper
+    const getDiscSongsFor = dIdx =>
+      discs[dIdx] ? discs[dIdx].tracks.map(t => _albSongObj(t, album, discLabel(discs[dIdx]), discs[dIdx].discIndex)) : [];
+
+    // Is any song from this album already in the queue?
+    const isAlbumInQueue = () => {
+      const fps = new Set(discs.flatMap(d => d.tracks.map(t => t.filepath)));
+      return S.queue.some(s => fps.has(s.filepath));
+    };
+
+    // Track which disc tab is currently visible (mutable)
+    let curDiscIdx = discIdx;
 
     const artEditOverlay = S.isAdmin
       ? `<div class="alb-art-edit-overlay" id="albd-art-edit-btn" title="Change album art">
@@ -5524,7 +5596,7 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
           <div class="alb-detail-title">${esc(album.displayName)}</div>
           <div class="alb-detail-sub">${album.artist ? esc(album.artist) + (album.year ? ' · ' + album.year : '') : (album.year || '')}</div>
           <div class="alb-detail-actions">
-            <button id="albd-play-all" class="primary-btn">▶ Play All</button>
+            <button id="albd-play-all" class="primary-btn">▶ Play</button>
             <button id="albd-add-all" class="secondary-btn">+ Add to Queue</button>
           </div>
         </div>
@@ -5533,10 +5605,15 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
         <div id="albd-art-picker"></div>
       </div>` : ''}
       ${multiDisc ? `
-      <div class="disc-tabs" id="albd-disc-tabs" style="display:flex;gap:6px;padding:16px 0 8px;flex-wrap:wrap;">
-        ${discs.map((d, i) => `<button class="disc-tab-btn${i === discIdx ? ' active' : ''}" data-disc="${i}">${esc(d.label || ('Disc ' + (i+1)))}</button>`).join('')}
+      <div class="disc-tabs" id="albd-disc-tabs" style="display:flex;gap:6px;padding:16px 0 8px;flex-wrap:wrap;align-items:center;">
+        ${discs.map((d, i) => {
+          const lbl = esc(d.label || ('Disc ' + (i+1)));
+          return `<div class="disc-tab-group">
+            <button class="disc-tab-btn${i === discIdx ? ' active' : ''}" data-disc="${i}">${lbl}</button><button class="disc-tab-add" data-disc="${i}" title="Add ${lbl} to queue">+</button>
+          </div>`;
+        }).join('')}
       </div>` : ''}
-      <div class="alb-play-hint">Clicking a track loads the full album into the queue and starts from that track${multiDisc ? ' — all discs are included' : ''}.</div>
+      <div class="alb-play-hint">Clicking a track plays that disc from that track${multiDisc ? ' — use <strong>+</strong> on a disc tab to append it to the queue' : ''}.</div>
       <div id="albd-tracklist" class="song-list"></div>`;
 
     // Render track list
@@ -5578,24 +5655,31 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
     }
     renderTracks(discIdx);
 
-    // Play All
+    // Play (current disc only)
     body.querySelector('#albd-play-all').onclick = () => {
-      if (!allSongs.length) return;
-      Player.setQueue(allSongs, 0);
+      const songs = getDiscSongsFor(curDiscIdx);
+      if (!songs.length) return;
+      Player.setQueue(songs, 0);
     };
-    // Add All
+    // Add (current disc) to queue
     body.querySelector('#albd-add-all').onclick = () => {
-      Player.addAll(allSongs);
+      Player.addAll(getDiscSongsFor(curDiscIdx));
     };
 
-    // Disc tabs
+    // Disc tabs — switch view + per-disc add buttons
     if (multiDisc) {
       body.querySelector('#albd-disc-tabs').addEventListener('click', e => {
+        // "+" add button
+        const addBtn = e.target.closest('.disc-tab-add');
+        if (addBtn) {
+          Player.addAll(getDiscSongsFor(parseInt(addBtn.dataset.disc, 10)));
+          return;
+        }
         const btn = e.target.closest('.disc-tab-btn');
         if (!btn) return;
-        const dIdx = parseInt(btn.dataset.disc, 10);
-        body.querySelectorAll('.disc-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.disc == dIdx));
-        renderTracks(dIdx);
+        curDiscIdx = parseInt(btn.dataset.disc, 10);
+        body.querySelectorAll('.disc-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.disc == curDiscIdx));
+        renderTracks(curDiscIdx);
       });
     }
 
@@ -5681,29 +5765,35 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
       const row = e.target.closest('.alb-track-row');
       if (!row) return;
 
-      // CUE row: seek the FLAC for that disc to the cuepoint position
+      // CUE row: seek the FLAC for that disc to the cuepoint offset
       if (row.dataset.cueDisc != null) {
-        const dIdx   = parseInt(row.dataset.cueDisc, 10);
-        const cpIdx  = parseInt(row.dataset.cueIdx,  10);
-        const disc   = discs[dIdx];
+        const dIdx  = parseInt(row.dataset.cueDisc, 10);
+        const cpIdx = parseInt(row.dataset.cueIdx,  10);
+        const disc  = discs[dIdx];
         if (!disc) return;
-        const cp     = disc.tracks[0].cuepoints[cpIdx];
+        const cp = disc.tracks[0].cuepoints[cpIdx];
         if (!cp) return;
-        // globalIdx = dIdx because each CUE disc = exactly 1 track in allSongs
-        if (cp.t > 0) _pendingCueSeek = cp.t;
-        Player.setQueue(allSongs, dIdx);
+        const songs = getDiscSongsFor(dIdx); // only this disc's FLAC
+        if (isAlbumInQueue()) {
+          Player.addAll(songs);
+        } else {
+          if (cp.t > 0) _pendingCueSeek = cp.t;
+          Player.setQueue(songs, 0);
+        }
         return;
       }
 
-      // Normal row
-      const dIdx  = parseInt(row.dataset.disc, 10);
-      const ti    = parseInt(row.dataset.ti,   10);
-      const disc  = discs[dIdx];
+      // Normal row — load only the disc that was clicked
+      const dIdx = parseInt(row.dataset.disc, 10);
+      const ti   = parseInt(row.dataset.ti,   10);
+      const disc = discs[dIdx];
       if (!disc) return;
-      let globalIdx = 0;
-      for (let d = 0; d < dIdx; d++) globalIdx += discs[d].tracks.length;
-      globalIdx += ti;
-      Player.setQueue(allSongs, globalIdx);
+      const songs = getDiscSongsFor(dIdx);
+      if (isAlbumInQueue()) {
+        Player.addAll(songs);
+      } else {
+        Player.setQueue(songs, ti);
+      }
     });
 
   } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }

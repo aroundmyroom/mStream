@@ -2103,14 +2103,21 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .alb-detail-actions{display:flex;gap:10px;flex-wrap:wrap;}
 
 /* Disc tab buttons */
+.disc-tab-group{display:inline-flex;align-items:stretch;border-radius:var(--r);overflow:hidden;border:1px solid var(--border2);}
 .disc-tab-btn{
-  padding:5px 14px;border-radius:var(--r);border:1px solid var(--border2);
+  padding:5px 14px;border-radius:0;border:none;border-right:1px solid var(--border2);
   background:transparent;color:var(--t2);font-size:13px;font-weight:500;
-  cursor:pointer;transition:background .12s,color .12s,border-color .12s;
+  cursor:pointer;transition:background .12s,color .12s;
   touch-action:manipulation;
 }
 .disc-tab-btn:hover{background:var(--raised);color:var(--t1);}
-.disc-tab-btn.active{background:var(--primary-d);color:var(--primary);border-color:var(--primary);}
+.disc-tab-btn.active{background:var(--primary-d);color:var(--primary);}
+.disc-tab-add{
+  padding:5px 9px;border:none;background:transparent;color:var(--t3);
+  font-size:15px;font-weight:700;line-height:1;cursor:pointer;
+  transition:background .12s,color .12s;touch-action:manipulation;
+}
+.disc-tab-add:hover{background:var(--raised);color:var(--t1);}
 
 /* Album detail track list */
 .alb-track-row{
@@ -2127,7 +2134,10 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 /* Album detail — play hint */
 .alb-play-hint{font-size:11.5px;color:var(--t3);padding:6px 0 10px;opacity:.75;}
 /* Queue panel — disc separator */
-.q-disc-sep{padding:10px 14px 4px;display:flex;align-items:center;gap:8px;}
+.q-disc-sep{padding:10px 14px 4px;display:flex;align-items:center;gap:8px;cursor:grab;}
+.q-disc-sep:active{cursor:grabbing;}
+.q-disc-sep.q-drag-over{background:var(--hover);}
+.q-disc-sep.q-dragging{opacity:.4;}
 .q-disc-sep span{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);background:var(--raised);padding:2px 8px;border-radius:4px;}
 .q-disc-sep:first-child{padding-top:4px;}
 

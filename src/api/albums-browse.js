@@ -248,13 +248,18 @@ function buildAlbumFromEntries(albumPath, entries, partsBase, vpathName, seriesI
     }
   }
 
-  // Pick aaFile from any row that has one
-  let aaFile = null;
+  // Pick aaFile and cover_file from any row that has one
+  let aaFile = null, coverFile = null;
   for (const e of entries) {
-    if (e.row.aaFile) { aaFile = e.row.aaFile; break; }
+    if (!aaFile && e.row.aaFile)        aaFile    = e.row.aaFile;
+    if (!coverFile && e.row.cover_file) coverFile = e.row.cover_file;
+    if (aaFile && coverFile) break;
   }
 
-  return { id, path: albumPath, displayName, artist, year, artFile: null, aaFile, seriesId: seriesId || null, discs, _artRoot: source?.artRoot || null, _artPrefix: source?.prefix || null };
+  // artFile built from DB cover_file — no NFS access needed
+  const artFile = coverFile ? albumPath + '/' + coverFile : null;
+
+  return { id, path: albumPath, displayName, artist, year, artFile, aaFile, seriesId: seriesId || null, discs, _artRoot: source?.artRoot || null, _artPrefix: source?.prefix || null };
 }
 
 function buildTreeFromDB(dbRows, source) {

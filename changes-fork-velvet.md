@@ -1,5 +1,19 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.7.1-velvet — April 2026 — Multi-disc queue overhaul + cover art DB index
+
+### fix: multi-disc albums load only one disc into the queue at a time
+- Clicking a track when the album is not in the queue: replaces queue with that disc only, starting from the clicked track
+- Clicking a track when the album is already in the queue: appends that disc to the end instead
+- "Play" and "+ Add to Queue" header buttons now operate on the visible disc tab only
+- Each disc tab is now a grouped pill: `[CD 1][+]` — the `+` appends that disc without switching tabs
+- Disc separator in the queue panel is now draggable: drag the label to move all songs of that disc as a block
+
+### feat: cover image filename indexed in the database (`cover_file`)
+- Scanner records the discovered cover image filename in a new `cover_file` column on `files`
+- Album Library browse reads `cover_file` from DB and returns `artFile` without a filesystem stat
+- Column added automatically on first server start; existing rows populated on next full rescan
+
 ## v6.7.0-velvet — April 2026 — Album Library enhancements
 
 ### feat: album art picker in album detail view (admin only)

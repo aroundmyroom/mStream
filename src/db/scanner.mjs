@@ -79,6 +79,7 @@ async function insertEntries(song) {
     "hash": song.hash,
     "aaFile": song.aaFile ? song.aaFile : null,
     "art_source": song._artSource || null,
+    "cover_file": song._coverFile || null,
     "vpath": loadJson.vpath,
     "ts": song._preserveTs || Math.floor(Date.now() / 1000),
     "sID": loadJson.scanId,
@@ -257,7 +258,7 @@ async function processFileResult(absPath, relPath, modTime, data) {
             url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-art`,
             headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
             responseType: 'json',
-            data: { filepath: data.filepath, vpath: loadJson.vpath, aaFile: songInfo.aaFile, scanId: loadJson.scanId, artSource: songInfo._artSource || null }
+            data: { filepath: data.filepath, vpath: loadJson.vpath, aaFile: songInfo.aaFile, scanId: loadJson.scanId, artSource: songInfo._artSource || null, coverFile: songInfo._coverFile || null }
           });
         }
       } catch (_artErr) {
@@ -739,6 +740,7 @@ function checkDirectoryForAlbumArt(songInfo) {
 
   let imageBuffer;
   let picFormat;
+  let selectedImageFile = null;
   let newFileFlag = false;
 
   // Search for a named file
@@ -748,6 +750,7 @@ function checkDirectoryForAlbumArt(songInfo) {
       try {
         imageBuffer = fs.readFileSync(path.join(directory, imageArray[i]));
         picFormat = getFileType(imageArray[i]);
+        selectedImageFile = imageArray[i];
       } catch (err) {
         console.error(`Warning: failed to read album art file ${imageArray[i]}: ${err.message}`);
       }
@@ -760,6 +763,7 @@ function checkDirectoryForAlbumArt(songInfo) {
     try {
       imageBuffer = fs.readFileSync(path.join(directory, imageArray[0]));
       picFormat = getFileType(imageArray[0]);
+      selectedImageFile = imageArray[0];
     } catch (err) {
       console.error(`Warning: failed to read album art file ${imageArray[0]}: ${err.message}`);
     }
@@ -772,6 +776,7 @@ function checkDirectoryForAlbumArt(songInfo) {
 
   const picHashString = crypto.createHash('md5').update(imageBuffer).digest('hex');
   songInfo.aaFile = picHashString + '.' + picFormat;
+  if (selectedImageFile) songInfo._coverFile = selectedImageFile;
   // Check image-cache folder for filename and save if doesn't exist
   if (!fs.existsSync(path.join(loadJson.albumArtDirectory, songInfo.aaFile))) {
     // Save file sync

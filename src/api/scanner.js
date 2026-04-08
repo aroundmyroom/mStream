@@ -145,7 +145,7 @@ export function setup(mstream) {
   });
 
   mstream.post('/api/v1/scanner/update-art', (req, res) => {
-    db.updateFileArt(req.body.filepath, req.body.vpath, req.body.aaFile, req.body.scanId, req.body.artSource || null);
+    db.updateFileArt(req.body.filepath, req.body.vpath, req.body.aaFile, req.body.scanId, req.body.artSource || null, req.body.coverFile || null);
     res.json({});
   });
 

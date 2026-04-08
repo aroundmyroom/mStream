@@ -265,6 +265,8 @@ export function init(dbDirectory) {
   try { db.exec('ALTER TABLE podcast_feeds ADD COLUMN sort_order INTEGER DEFAULT 0'); } catch (_e) {}
   // Migration: add trackOf (track total) for complete-album detection
   try { db.exec('ALTER TABLE files ADD COLUMN trackOf INTEGER'); } catch (_e) {}
+  // Migration: add cover_file to store the original cover image filename (e.g. "cover.jpg") discovered during scan
+  try { db.exec('ALTER TABLE files ADD COLUMN cover_file TEXT'); } catch (_e) {}
   // Migration: add pause_count to play_events to track user-initiated pauses
   try { db.exec('ALTER TABLE play_events ADD COLUMN pause_count INTEGER DEFAULT 0'); } catch (_e) {}
   // Ensure indexes exist (IF NOT EXISTS is idempotent — safe on every startup)
@@ -350,7 +352,7 @@ export function init(dbDirectory) {
   Object.assign(_s, {
     findFile:       db.prepare('SELECT rowid AS id, * FROM files WHERE filepath = ? AND vpath = ?'),
     updateScanId:   db.prepare('UPDATE files SET sID = ? WHERE filepath = ? AND vpath = ?'),
-    updateArt:      db.prepare('UPDATE files SET aaFile = ?, sID = ?, art_source = ? WHERE filepath = ? AND vpath = ?'),
+    updateArt:      db.prepare('UPDATE files SET aaFile = ?, sID = ?, art_source = ?, cover_file = ? WHERE filepath = ? AND vpath = ?'),
     countArtUsage:  db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE aaFile = ?'),
     updateCue:      db.prepare('UPDATE files SET cuepoints = ? WHERE filepath = ? AND vpath = ?'),
     updateDuration: db.prepare('UPDATE files SET duration = ? WHERE filepath = ? AND vpath = ?'),
@@ -361,8 +363,8 @@ export function init(dbDirectory) {
     removeByPath:   db.prepare('DELETE FROM files WHERE filepath = ? AND vpath = ?'),
     insertFileTs:   db.prepare('SELECT ts FROM files WHERE hash = ? AND ts IS NOT NULL LIMIT 1'),
     insertFileRow:  db.prepare(
-      'INSERT INTO files (title, artist, year, album, filepath, format, track, trackOf, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration, artist_id, album_id) ' +
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+      'INSERT INTO files (title, artist, year, album, filepath, format, track, trackOf, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration, artist_id, album_id, cover_file) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     // FTS5 write statements — used in insert / remove / tag-update paths
     ftsInsert:  db.prepare('INSERT INTO fts_files(rowid, title, artist, album, filepath) VALUES (?, ?, ?, ?, ?)'),
     ftsDel:     db.prepare("INSERT INTO fts_files(fts_files, rowid, title, artist, album, filepath) VALUES ('delete', ?, ?, ?, ?, ?)"),
@@ -588,8 +590,8 @@ export function batchUpdateScanIds(filepaths, vpath, scanId) {
   }
 }
 
-export function updateFileArt(filepath, vpath, aaFile, scanId, artSource = null) {
-  _s.updateArt.run(aaFile, scanId, artSource, filepath, vpath);
+export function updateFileArt(filepath, vpath, aaFile, scanId, artSource = null, coverFile = null) {
+  _s.updateArt.run(aaFile, scanId, artSource, coverFile, filepath, vpath);
 }
 
 export function countArtUsage(aaFile) {
@@ -659,7 +661,8 @@ export function insertFile(fileData) {
     fileData.modified ?? null, fileData.hash ?? null, fileData.aaFile ?? null, fileData.vpath,
     ts, fileData.sID ?? null, fileData.replaygainTrackDb ?? null, fileData.genre ?? null, fileData.cuepoints ?? null,
     fileData.art_source ?? null, fileData.duration ?? null,
-    fileData.artist_id ?? _makeArtistId(fileData.artist), fileData.album_id ?? _makeAlbumId(fileData.artist, fileData.album)
+    fileData.artist_id ?? _makeArtistId(fileData.artist), fileData.album_id ?? _makeAlbumId(fileData.artist, fileData.album),
+    fileData.cover_file ?? null
   );
   const rowId = Number(result.lastInsertRowid);
   _s.ftsInsert.run(rowId, fileData.title ?? null, fileData.artist ?? null, fileData.album ?? null, fileData.filepath);
@@ -940,7 +943,7 @@ export function getFilesForAlbumsBrowse(sources) {
     if (s.prefix) params.push(s.prefix.replace(/\/$/, '') + '/%');
   }
   return db.prepare(
-    `SELECT filepath, title, artist, track, disk, year, duration, aaFile, vpath, cuepoints
+    `SELECT filepath, title, artist, track, disk, year, duration, aaFile, vpath, cuepoints, cover_file
      FROM files WHERE ${clauses.join(' OR ')}`
   ).all(...params);
 }
