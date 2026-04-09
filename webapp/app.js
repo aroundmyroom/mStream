@@ -5574,6 +5574,9 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
     // Track which disc tab is currently visible (mutable)
     let curDiscIdx = discIdx;
 
+    // Is this a CUE-sheet album? (at least one disc is a single FLAC with cuepoints)
+    const isCueAlbum = discs.some(d => d.tracks.length === 1 && d.tracks[0].cuepoints?.length >= 2);
+
     const artEditOverlay = S.isAdmin
       ? `<div class="alb-art-edit-overlay" id="albd-art-edit-btn" title="Change album art">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
@@ -5599,6 +5602,7 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
             <button id="albd-play-all" class="primary-btn">▶ Play</button>
             <button id="albd-add-all" class="secondary-btn">+ Add to Queue</button>
           </div>
+          ${isCueAlbum ? '<div class="alb-cue-badge">Cue Album</div>' : ''}
         </div>
       </div>
       ${S.isAdmin ? `<div class="albd-art-picker-section hidden" id="albd-art-picker-section">

@@ -2101,6 +2101,7 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .alb-detail-title{font-size:22px;font-weight:700;color:var(--t1);margin-bottom:4px;}
 .alb-detail-sub{font-size:13px;color:var(--t2);margin-bottom:16px;}
 .alb-detail-actions{display:flex;gap:10px;flex-wrap:wrap;}
+.alb-cue-badge{margin-top:8px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#4caf7d;}
 
 /* Disc tab buttons */
 .disc-tab-group{display:inline-flex;align-items:stretch;border-radius:var(--r);overflow:hidden;border:1px solid var(--border2);}

@@ -1,5 +1,10 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.7.2-velvet — April 2026 — CUE Album badge
+
+### feat: "Cue Album" label in album detail header
+- Albums backed by a CUE sheet show a green "Cue Album" label below the Play / Add to Queue buttons, making the format immediately visible
+
 ## v6.7.1-velvet — April 2026 — Multi-disc queue overhaul + cover art DB index
 
 ### fix: multi-disc albums load only one disc into the queue at a time
