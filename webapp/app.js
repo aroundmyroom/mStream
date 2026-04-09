@@ -614,6 +614,29 @@ function normalizeArtist(name) {
     .toLowerCase().trim();
 }
 // Same stripping logic but preserves original case — used for display, A-Z bucket, avatar letter.
+// Extract an artist hint from a path string when the artist metadata tag is absent.
+// Album path:   "Albums/Isaac Hayes/Branded"  → "Isaac Hayes"  (parent folder)
+// Song filepath: "Albums/Isaac Hayes/Branded/01 Walk On By.flac" → "Isaac Hayes"
+// Skips single-char index folders (e.g. "A") and the vpath root (requires ≥3 segments).
+function _folderArtistFromPath(p) {
+  if (!p) return null;
+  const parts = p.split('/').filter(Boolean);
+  // For a filepath ending in a filename, the artist folder is parts[-3];
+  // for a path ending in a folder name, it's parts[-2].
+  // We try both: first assume it's a filepath (≥4 parts), then a folder path (≥3).
+  const candidates = parts.length >= 4 ? [parts[parts.length - 3], parts[parts.length - 2]]
+                   : parts.length >= 3 ? [parts[parts.length - 2]]
+                   : [];
+  for (const c of candidates) {
+    if (!c || c.length <= 1) continue;          // skip single-char index folders
+    // If the candidate looks like "Artist - Album", take only the artist part
+    const dashIdx = c.indexOf(' - ');
+    const name = dashIdx > 0 ? c.slice(0, dashIdx).trim() : c;
+    if (name.length > 1) return name;
+  }
+  return null;
+}
+
 function cleanArtistDisplay(name) {
   const noise = /^[\s#'"`()|[\]{}_.,\-\u2013\u2014*!/\\]+/;
   return String(name)
@@ -2018,9 +2041,10 @@ async function _npItunesSearch(song) {
   npLeft?.classList.add('np-left--picking');
   try {
     const params = new URLSearchParams();
-    if (song.artist) params.set('artist', song.artist);
-    if (song.album)  params.set('album',  song.album);
-    if (!song.artist && !song.album && song.title) params.set('album', song.title);
+    const _itunesArtist = song.artist || _folderArtistFromPath(song.filepath);
+    if (_itunesArtist)  params.set('artist', _itunesArtist);
+    if (song.album)     params.set('album',  song.album);
+    if (!_itunesArtist && !song.album && song.title) params.set('album', song.title);
     if (!params.toString()) {
       dsEl.innerHTML =
         `<span class="np-discogs-status">No artist or album info available for search</span>` +
@@ -2065,7 +2089,8 @@ async function _npDeezerSearch(song) {
   dsEl.innerHTML = `<span class="np-discogs-status">Searching Deezer…</span>`;
   npLeft?.classList.add('np-left--picking');
   try {
-    const q = [song.artist, song.album].filter(Boolean).join(' ');
+    const artist = song.artist || _folderArtistFromPath(song.filepath);
+    const q = [artist, song.album].filter(Boolean).join(' ');
     const data = await api('GET', `api/v1/deezer/search?q=${encodeURIComponent(q)}`);
     const hits = (data.data || []).filter(h => h.cover_medium);
     if (!hits.length) {
@@ -5376,7 +5401,8 @@ async function _albDiscogsSearch() {
   el.innerHTML = `<span class="np-discogs-status">Searching Discogs\u2026</span>`;
   try {
     const params = new URLSearchParams();
-    if (album.artist)      params.set('artist', album.artist);
+    const artist = album.artist || _folderArtistFromPath(album.path);
+    if (artist)            params.set('artist', artist);
     if (album.displayName) params.set('album',  album.displayName);
     if (album.year)        params.set('year',   String(album.year));
     const d = await api('GET', `api/v1/discogs/coverart?${params}`);
@@ -5412,7 +5438,8 @@ async function _albDeezerSearch() {
   if (!el || !album) return;
   el.innerHTML = `<span class="np-discogs-status">Searching Deezer\u2026</span>`;
   try {
-    const q = [album.artist, album.displayName].filter(Boolean).join(' ');
+    const artist = album.artist || _folderArtistFromPath(album.path);
+    const q = [artist, album.displayName].filter(Boolean).join(' ');
     const d = await api('GET', `api/v1/deezer/search?q=${encodeURIComponent(q)}`);
     const hits = (d.data || []).filter(h => h.cover_medium);
     if (!hits.length) {
@@ -5448,7 +5475,8 @@ async function _albItunesSearch() {
   el.innerHTML = `<span class="np-discogs-status">Searching iTunes\u2026</span>`;
   try {
     const params = new URLSearchParams();
-    if (album.artist)      params.set('artist', album.artist);
+    const artist = album.artist || _folderArtistFromPath(album.path);
+    if (artist)            params.set('artist', artist);
     if (album.displayName) params.set('album',  album.displayName);
     const d = await api('GET', `api/v1/itunes/search?${params}`);
     if (!d.results || !d.results.length) {

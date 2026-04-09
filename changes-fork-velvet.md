@@ -1,5 +1,14 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.7.3-velvet — April 2026 — Smarter album art search
+
+### fix: art search derives artist from parent folder when tag is absent
+- Albums under `Artist/Album` folder structure (e.g. `Albums/Isaac Hayes/Branded`) now search Discogs, Deezer, and iTunes with "Isaac Hayes" as the artist instead of just "Branded"
+- `albums-browse.js`: `album.artist` now populated from parent folder name when the album folder has no ` - ` separator
+- Album detail art picker (Discogs, Deezer, iTunes): all use `_folderArtistFromPath(album.path)` as fallback
+- NP modal Deezer and iTunes: use `_folderArtistFromPath(song.filepath)` fallback (Discogs already had filepath parsing server-side)
+- Single-char index folders and shallow paths are ignored
+
 ## v6.7.2-velvet — April 2026 — CUE Album badge
 
 ### feat: "Cue Album" label in album detail header

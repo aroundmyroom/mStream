@@ -210,9 +210,15 @@ function buildTrackListFromEntries(entries, source) {
 
 function buildAlbumFromEntries(albumPath, entries, partsBase, vpathName, seriesId, source) {
   const id          = md5(albumPath);
-  const displayName = albumPath.split('/').pop();
+  const pathParts   = albumPath.split('/');
+  const displayName = pathParts.pop();
   const year        = extractYear(displayName) || null;
-  const artist      = extractArtist(displayName) || null;
+  // Primary: "Artist - Album" convention in the folder name itself.
+  // Fallback: the parent folder is the artist (e.g. Albums/Isaac Hayes/Branded →
+  // parent "Isaac Hayes" is the artist when displayName contains no " - ").
+  // Guard: skip when the parent is the vpath root (only 1 part left after pop).
+  const parentFolder = pathParts.length >= 2 ? pathParts[pathParts.length - 1] : null;
+  const artist      = extractArtist(displayName) || parentFolder || null;
 
   // Split entries into direct tracks vs sub-folder entries
   let directEntries = [];
