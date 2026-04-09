@@ -11736,6 +11736,17 @@ function _startCrossfade(nextIdx) {
     _nextElGain.gain.setValueAtTime(0, audioCtx.currentTime);
     _curElGain.gain.setValueCurveAtTime(curCurve, audioCtx.currentTime, xf);
     _nextElGain.gain.setValueCurveAtTime(nxtCurve, audioCtx.currentTime, xf);
+    // Also ramp _rgGainNode from the current (outgoing) track's RG value to the
+    // incoming track's RG value — same duration as the sin curves. _rgGainNode is
+    // shared by both elements, so an instant hard-set at handoff time would cause
+    // a sudden volume spike if the two tracks have different ReplayGain levels.
+    if (_rgGainNode) {
+      const toRG = (S.rgEnabled && next?.replaygain != null)
+        ? Math.pow(10, Number(next.replaygain) / 20) : 1.0;
+      _rgGainNode.gain.cancelScheduledValues(audioCtx.currentTime);
+      _rgGainNode.gain.setValueAtTime(_rgGainNode.gain.value, audioCtx.currentTime);
+      _rgGainNode.gain.linearRampToValueAtTime(toRG, audioCtx.currentTime + xf);
+    }
     // No interval needed — AudioContext handles everything on the audio thread.
   } else {
     // ── Fallback: setInterval ramp (no Web Audio, e.g. CleverTouch) ──────────
@@ -11773,12 +11784,28 @@ function _doXfadeHandoff(nextIdx) {
   _gaplessTimer  = null;
 
   // Swap per-element gain nodes: incoming element now owns _curElGain.
-  // Cancel any scheduled values and lock both gains into their final state.
+  // IMPORTANT: do NOT cancel or modify _curElGain (the incoming element's gain).
+  // The setValueCurveAtTime scheduled in _startCrossfade is still running on the
+  // audio thread and will reach 1.0 naturally at its scheduled endpoint — even
+  // though we just swapped the JS reference.  Cancelling it (or reading .value
+  // after cancelling) causes the "BOEM" jump because:
+  //   a) cancelScheduledValues returns the *intrinsic* value (the last .value= / setValueAtTime),
+  //      not the current automation position — which may be far from 1.0.
+  //   b) This is especially wrong when Song A has a recorded silence at its end:
+  //      the combined volume was already low; hard-jumping the incoming gain to 1
+  //      causes a sudden spike.
+  // Solution: let the curve finish itself.  The "ended" event fires slightly before
+  // or after the curve end (timeupdate polling jitter); either way the gain reaches
+  // 1.0 gracefully within milliseconds.
   const oldCurGain = _curElGain;
   _curElGain  = _nextElGain;
   _nextElGain = null;
-  if (_curElGain)  { _curElGain.gain.cancelScheduledValues(0);  _curElGain.gain.value  = 1; }
-  if (oldCurGain)  { oldCurGain.gain.cancelScheduledValues(0);  oldCurGain.gain.value  = 0; }
+  // Silence the retiring outgoing gain node.
+  if (oldCurGain) {
+    const t = audioCtx ? audioCtx.currentTime : 0;
+    oldCurGain.gain.cancelScheduledValues(t);
+    oldCurGain.gain.value = 0;
+  }
 
   S.idx = nextIdx;
   const s = S.queue[nextIdx];
@@ -11814,8 +11841,12 @@ function _doXfadeHandoff(nextIdx) {
 
   if (!s) return;
 
-  // Apply ReplayGain and load waveform for the incoming track
-  _applyRGGain(s);
+  // Apply ReplayGain and load waveform for the incoming track.
+  // When Web Audio is active, _startCrossfade already scheduled a linear ramp
+  // on _rgGainNode for the full crossfade duration — calling _applyRGGain here
+  // would cancel that ramp mid-way and hard-jump the gain.  Only apply it
+  // directly when the fallback (no Web Audio) path was used.
+  if (!audioCtx || !_curElGain) _applyRGGain(s);
   _fetchWaveform(s.filepath);
 
   // Update UI / persistence (mirrors Player.playAt without touching audio)

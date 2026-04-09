@@ -1,5 +1,13 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.7.5-velvet — April 2026 — Crossfade volume-spike fix
+
+### fix: crossfade volume spikes when outgoing track has a recorded fade-out
+- `_doXfadeHandoff` no longer cancels the incoming element's Web Audio sin curve — letting it complete naturally eliminates the end-of-crossfade volume snap
+- `_startCrossfade` now schedules a `linearRampToValueAtTime` on `_rgGainNode` over the full crossfade duration, transitioning ReplayGain smoothly rather than hard-jumping at handoff
+- `_doXfadeHandoff` skips `_applyRGGain` when Web Audio is active; only applies it on the fallback (no-Web-Audio) path
+- Root cause: `_rgGainNode` is shared by both `_curElGain` and `_nextElGain`; an instant RG snap at handoff multiplied the mid-ramp gain value, producing the audible spike
+
 ## v6.7.4-velvet — April 2026 — Mute fix, album source filter, art thumbnails
 
 ### fix: mute state not cleared when dragging volume slider up
