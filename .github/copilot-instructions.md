@@ -2,11 +2,22 @@
 
 - **Dev server = production server**: all development and testing happens directly on `/home/mStream`. This machine always runs the latest code. There is no separate staging environment. Commits are made from this machine.
 - Do not suggest or create a commit unless the user explicitly asks for it
-- **Commit/push blackout window: Monday–Friday 08:30–17:00 CET (Amsterdam, UTC+1 winter / UTC+2 summer). Do NOT commit or push during these hours unless the user explicitly overrides. Outside these hours (evenings, weekends) commits are allowed as normal.**
+- **Commit/push blackout window: Monday–Friday 09:00–17:00 CET (Amsterdam, UTC+1 winter / UTC+2 summer). Do NOT commit or push during these hours unless the user explicitly overrides. Outside these hours (evenings, weekends) commits are allowed as normal.**
 - Before starting any commit, always write change notes first — update `changes-fork-velvet.md` with a summary of what changed and why
 - **After a commit, do NOT push automatically. Only push to GitHub (`git push`) when the user explicitly says to push or to release. The active tracking remote is `origin master`.**
 - The server uses HTTPS — always use `https://` in URLs and code
 - **Live server URL**: `https://music.aroundtheworld.net:3000` — use this for all curl tests and API verification when `localhost` or `127.0.0.1` is unreachable (curl exits with code 7 = connection refused). Example: `curl -sk https://music.aroundtheworld.net:3000/api/v1/ping/public`
+- **Authenticated API calls from scripts**: do NOT attempt to log in via `/api/v1/auth/login` (passwords are salted hashes — the plain value in config is the hash, not the raw password). Instead, mint a JWT directly from the server secret and use the `x-access-token` header. Node.js pattern (always write a `.cjs` file):
+  ```js
+  const jwt = require('jsonwebtoken');
+  const https = require('https');
+  const fs = require('fs');
+  const cfg = JSON.parse(fs.readFileSync('/home/mStream/save/conf/default.json', 'utf8'));
+  const token = jwt.sign({ username: Object.keys(cfg.users)[0] }, cfg.secret);
+  const opts = { hostname: 'music.aroundtheworld.net', port: 3000, path: '/api/v1/YOUR/ENDPOINT', headers: { 'x-access-token': token }, rejectUnauthorized: false };
+  https.get(opts, r => { let b=''; r.on('data',c=>b+=c); r.on('end',()=>console.log(JSON.parse(b))); });
+  ```
+  Use `https.get` (not `execSync curl`) for large responses — curl via execSync hits ENOBUFS on responses >1 MB.
 - Restart the server with: `systemctl restart music.service`
 - **After every change to any `src/` file, always restart the server automatically — do not wait for the user to ask. Client-side-only changes (`webapp/` files that are served statically) do not need a restart.**
 - Active branch is `master`

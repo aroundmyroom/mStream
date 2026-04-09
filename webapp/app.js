@@ -5244,6 +5244,14 @@ async function viewAlbumLibrary() {
     const seriesSorted     = [...series].sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }));
     const standaloneSorted = [...standaloneAlb].sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }));
 
+    // Collect distinct albumsOnly source vpaths present in the data (only show pills for 2+)
+    const sourcesInData = [...new Set([
+      ...albums.map(a => a.sourceVpath),
+      ...series.map(s => s.sourceVpath),
+    ].filter(Boolean))].sort();
+    const showSourcePills = sourcesInData.length >= 2;
+    const activeSources = new Set(sourcesInData);
+
     const body = document.getElementById('content-body');
     body.innerHTML = `
       <div class="fe-filter-row">
@@ -5252,6 +5260,7 @@ async function viewAlbumLibrary() {
         <span id="allib-count" class="fe-match-count"></span>
         <button id="allib-clear" class="fe-filter-clear hidden" title="Clear filter">✕</button>
       </div>
+      ${showSourcePills ? `<div class="search-vpath-pills" id="allib-source-pills">${sourcesInData.map(v => `<button class="dj-vpath-pill on" data-alb-source="${esc(v)}">${esc(v)}</button>`).join('')}</div>` : ''}
       <div id="allib-grid" class="album-grid"></div>`;
 
     const filterInput = body.querySelector('#allib-filter');
@@ -5300,11 +5309,13 @@ async function viewAlbumLibrary() {
       let count = 0;
 
       for (const s of seriesSorted) {
+        if (showSourcePills && !activeSources.has(s.sourceVpath)) continue;
         if (lc && !s.displayName.toLowerCase().includes(lc)) continue;
         html += seriesCard(s);
         count++;
       }
       for (const a of standaloneSorted) {
+        if (showSourcePills && !activeSources.has(a.sourceVpath)) continue;
         if (lc && !a.displayName.toLowerCase().includes(lc) && !(a.artist||'').toLowerCase().includes(lc)) continue;
         html += albumCard(a);
         count++;
@@ -5325,6 +5336,21 @@ async function viewAlbumLibrary() {
       filterClear.classList.add('hidden');
       render('');
     });
+
+    // Source filter pills (only present when 2+ albumsOnly vpaths exist)
+    if (showSourcePills) {
+      document.getElementById('allib-source-pills').addEventListener('click', e => {
+        const pill = e.target.closest('[data-alb-source]');
+        if (!pill) return;
+        const v = pill.dataset.albSource;
+        if (activeSources.has(v)) activeSources.delete(v);
+        else activeSources.add(v);
+        document.getElementById('allib-source-pills').querySelectorAll('[data-alb-source]').forEach(p => {
+          p.classList.toggle('on', activeSources.has(p.dataset.albSource));
+        });
+        render(filterInput.value);
+      });
+    }
 
     // Click: series → drill-down; album → detail
     grid.addEventListener('click', e => {
@@ -12074,15 +12100,25 @@ function _applyServerSettings(data) {
     document.getElementById('shuffle-btn')?.classList.toggle('active', S.shuffle);
   }
   if (prefs.mute != null) {
-    ls('ms2_mute_' + u, prefs.mute);
-    if (prefs.mute === '1') {
-      _preMuteVol = audioEl.volume;
-      audioEl.volume = 0;
-      const volEl = document.getElementById('volume');
-      if (volEl) { volEl.value = 0; _setVolPct(0); }
-      document.getElementById('mute-btn')?.classList.add('muted');
-      document.getElementById('vol-icon-on')?.classList.add('hidden');
-      document.getElementById('vol-icon-off')?.classList.remove('hidden');
+    // Guard: only apply server mute='1' if the local mute key agrees.
+    // If the user unmuted locally (slider drag or button click), the local key
+    // was already removed and _syncPrefs() will clear it on the server too —
+    // but a concurrent visibilitychange fetch could race and re-apply it here
+    // before the push completes, causing music to stop unexpectedly.
+    const localMute = localStorage.getItem(_uKey('mute'));
+    if (prefs.mute === '1' && localMute !== '1') {
+      // Server says muted but local state says unmuted — trust local, skip
+    } else {
+      ls('ms2_mute_' + u, prefs.mute);
+      if (prefs.mute === '1') {
+        _preMuteVol = audioEl.volume || _preMuteVol;
+        audioEl.volume = 0;
+        const volEl = document.getElementById('volume');
+        if (volEl) { volEl.value = 0; _setVolPct(0); }
+        document.getElementById('mute-btn')?.classList.add('muted');
+        document.getElementById('vol-icon-on')?.classList.add('hidden');
+        document.getElementById('vol-icon-off')?.classList.remove('hidden');
+      }
     }
   }
   _applyNavVisibility();
@@ -13623,6 +13659,13 @@ let _volSaveTimer = null;
 document.getElementById('volume').addEventListener('input', e => {
   audioEl.volume = e.target.value / 100;
   _setVolPct(e.target.value);
+  // If dragging up from a muted state, clear mute so the server is updated
+  if (parseFloat(e.target.value) > 0 && document.getElementById('mute-btn').classList.contains('muted')) {
+    document.getElementById('mute-btn').classList.remove('muted');
+    document.getElementById('vol-icon-on').classList.remove('hidden');
+    document.getElementById('vol-icon-off').classList.add('hidden');
+    localStorage.removeItem(_uKey('mute'));
+  }
   clearTimeout(_volSaveTimer);
   _volSaveTimer = setTimeout(() => { localStorage.setItem(_uKey('vol'), e.target.value); _syncPrefs(); }, 300);
 });
@@ -13693,15 +13736,7 @@ document.getElementById('mute-btn').addEventListener('click', () => {
     _syncPrefs();
   }
 });
-// Restore mute icon if user drags slider back up from 0
-document.getElementById('volume').addEventListener('input', e => {
-  if (parseFloat(e.target.value) > 0 && audioEl.volume === 0) {
-    document.getElementById('mute-btn').classList.remove('muted');
-    document.getElementById('vol-icon-on').classList.remove('hidden');
-    document.getElementById('vol-icon-off').classList.add('hidden');
-    localStorage.removeItem(_uKey('mute'));
-  }
-});
+
 
 // NP Modal
 document.getElementById('np-open-btn').addEventListener('click', e => {

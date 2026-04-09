@@ -1,5 +1,21 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.7.4-velvet — April 2026 — Mute fix, album source filter, art thumbnails
+
+### fix: mute state not cleared when dragging volume slider up
+- Second `input` listener was dead code (condition always false after first handler ran); merged into first with correct check
+- `_applyServerSettings`: server `mute='1'` now ignored when local state says unmuted — prevents tab-switch re-mutes
+
+### feat: Album Library source filter pills
+- When 2+ albumsOnly folders configured, pills appear in albums header (Albums, Disco, etc.) — default all on
+- Clicking a pill shows/hides that folder's albums; search only matches within enabled sources
+- `sourceVpath` field added to albums and series objects from `/api/v1/albums/browse`
+
+### fix: on-demand art and Now Playing modal now served at correct sizes
+- `GET /api/v1/files/art` now generates `zl-`/`zs-`/`zm-` thumbnails immediately after caching the original
+- Scanner `compressAlbumArt()` now also generates `zm-` (512 px) for the Now Playing modal
+- Force-recompress script also generates `zm-` for all existing originals
+
 ## v6.7.3-velvet — April 2026 — Smarter album art search
 
 ### fix: art search derives artist from parent folder when tag is absent

@@ -665,7 +665,8 @@ async function compressAlbumArt(buff, imgName) {
   if (buff.length < 100) { return; } // guard against malformed micro-buffers (file-type CVE workaround)
 
   await sharp(buff).resize(256, 256, { fit: 'inside', withoutEnlargement: true }).toFile(path.join(loadJson.albumArtDirectory, 'zl-' + imgName));
-  await sharp(buff).resize(92, 92, { fit: 'inside', withoutEnlargement: true }).toFile(path.join(loadJson.albumArtDirectory, 'zs-' + imgName));
+  await sharp(buff).resize(92,  92,  { fit: 'inside', withoutEnlargement: true }).toFile(path.join(loadJson.albumArtDirectory, 'zs-' + imgName));
+  await sharp(buff).resize(512, 512, { fit: 'inside', withoutEnlargement: true }).toFile(path.join(loadJson.albumArtDirectory, 'zm-' + imgName));
 }
 
 const mapOfDirectoryAlbumArt = {};

@@ -265,7 +265,7 @@ function buildAlbumFromEntries(albumPath, entries, partsBase, vpathName, seriesI
   // artFile built from DB cover_file — no NFS access needed
   const artFile = coverFile ? albumPath + '/' + coverFile : null;
 
-  return { id, path: albumPath, displayName, artist, year, artFile, aaFile, seriesId: seriesId || null, discs, _artRoot: source?.artRoot || null, _artPrefix: source?.prefix || null };
+  return { id, path: albumPath, displayName, artist, year, artFile, aaFile, seriesId: seriesId || null, discs, sourceVpath: vpathName || null, _artRoot: source?.artRoot || null, _artPrefix: source?.prefix || null };
 }
 
 function buildTreeFromDB(dbRows, source) {
@@ -334,6 +334,7 @@ function buildTreeFromDB(dbRows, source) {
           id: seriesId, path: l1Path, displayName: l1,
           artFile: null, aaFile: null,
           albumIds: seriesAlbumIds,
+          sourceVpath: vpathName,
         });
       }
     }

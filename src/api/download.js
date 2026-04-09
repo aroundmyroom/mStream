@@ -4,6 +4,7 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import crypto from 'crypto';
 import { parseFile } from 'music-metadata';
+import sharp from 'sharp';
 import Joi from 'joi';
 import winston from 'winston';
 import * as config from '../state/config.js';
@@ -203,6 +204,17 @@ export function setup(mstream) {
       if (!fsSync.existsSync(artPath)) {
         await fs.mkdir(artDir, { recursive: true });
         await fs.writeFile(artPath, buf);
+      }
+      // Generate size thumbnails if not already present
+      if (config.program.scanOptions?.compressImage !== false && buf.length >= 100) {
+        const zlPath = path.join(artDir, 'zl-' + aaFile);
+        const zsPath = path.join(artDir, 'zs-' + aaFile);
+        const zmPath = path.join(artDir, 'zm-' + aaFile);
+        try {
+          if (!fsSync.existsSync(zlPath)) await sharp(buf).resize(256, 256, { fit: 'inside', withoutEnlargement: true }).toFile(zlPath);
+          if (!fsSync.existsSync(zsPath)) await sharp(buf).resize(92,  92,  { fit: 'inside', withoutEnlargement: true }).toFile(zsPath);
+          if (!fsSync.existsSync(zmPath)) await sharp(buf).resize(512, 512, { fit: 'inside', withoutEnlargement: true }).toFile(zmPath);
+        } catch (_) { /* thumbnails are best-effort */ }
       }
       return aaFile;
     }

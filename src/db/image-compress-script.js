@@ -46,7 +46,8 @@ async function run() {
       if (file.startsWith('zs-') || file.startsWith('zl-') || file.startsWith('zm-')) { continue; }
 
       await sharp(filepath).resize(256, 256, { fit: 'inside', withoutEnlargement: true }).toFile(path.join(loadJson.albumArtDirectory, 'zl-' + file));
-      await sharp(filepath).resize(92, 92, { fit: 'inside', withoutEnlargement: true }).toFile(path.join(loadJson.albumArtDirectory, 'zs-' + file));
+      await sharp(filepath).resize(92,  92,  { fit: 'inside', withoutEnlargement: true }).toFile(path.join(loadJson.albumArtDirectory, 'zs-' + file));
+      await sharp(filepath).resize(512, 512, { fit: 'inside', withoutEnlargement: true }).toFile(path.join(loadJson.albumArtDirectory, 'zm-' + file));
     } catch (error) {
       console.log('error on file: ' + filepath);
       console.error(error);
