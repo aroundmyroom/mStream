@@ -46,7 +46,9 @@ export function setup(mstream) {
       req.user = {
         vpaths: Object.keys(config.program.folders),
         username: 'mstream-user',
-        admin: true
+        // lockAdmin=true means the owner wants the admin API locked down — honour
+        // that even in public/no-user mode where we'd otherwise grant admin:true.
+        admin: config.program.lockAdmin !== true
       };
 
       return next();

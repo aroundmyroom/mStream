@@ -7,6 +7,7 @@ import * as config from '../state/config.js';
 import { joiValidate } from '../util/validation.js';
 import WebError from '../util/web-error.js';
 import { mergeGenreRows } from '../util/genre-merge.js';
+import { indexFileOnDemand } from '../util/on-demand-index.js';
 
 function renderMetadataObj(row) {
   return {
@@ -351,12 +352,15 @@ export function setup(mstream) {
   });
 
   // ── log a play (always runs — independent of scrobbling) ────
-  mstream.post('/api/v1/db/stats/log-play', (req, res) => {
+  mstream.post('/api/v1/db/stats/log-play', async (req, res) => {
     const schema = Joi.object({ filePath: Joi.string().required() });
     joiValidate(schema, req.body);
     if (/^https?:\/\//i.test(req.body.filePath)) { return res.json({ ok: false }); }
     const pathInfo = vpath.getVPathInfo(req.body.filePath, req.user);
-    const fileRow  = resolveFile(pathInfo, req.user);
+    let fileRow  = resolveFile(pathInfo, req.user);
+    if (!fileRow) {
+      fileRow = await indexFileOnDemand(pathInfo);
+    }
     if (!fileRow) { return res.json({ ok: false }); }
     const existing = db.findUserMetadata(fileRow.hash, req.user.username);
     if (!existing) {

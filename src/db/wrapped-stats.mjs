@@ -105,6 +105,24 @@ export async function getWrappedStats(userId, fromMs, toMs, vpaths = []) {
     return { ...emptyStats(), radio, podcast };
   }
 
+  // ── Filepath-based fallback labels ─────────────────────────────────────────
+  // When a file has no embedded title/artist tags, derive readable labels from
+  // the file path rather than showing a raw hash or '(Unknown)'.
+  // filepath format: Artist/Album/Track.mp3  (relative to vpath root)
+  function _titleFromPath(fp) {
+    if (!fp) return null;
+    const name = fp.split('/').pop();                         // last segment
+    return name.replace(/\.[^.]+$/, '');                     // strip extension
+  }
+  function _artistFromPath(fp) {
+    if (!fp) return null;
+    const parts = fp.split('/');
+    // With 3+ parts: root-folder is typically Artist
+    // With 2 parts: root-folder is Album — use it as artist fallback
+    // With 1 part: flat file — use filename without extension
+    return parts.length >= 2 ? parts[0] : _titleFromPath(fp);
+  }
+
   // ── Basic counts ────────────────────────────────────────────────────────────
   const total_plays        = events.length;
   const completed_plays    = events.filter(e => e.completed).length;
@@ -121,8 +139,19 @@ export async function getWrappedStats(userId, fromMs, toMs, vpaths = []) {
   // ── Top songs ────────────────────────────────────────────────────────────────
   const songCounts = {};
   for (const e of events) {
+    const derivedTitle  = e.title  || _titleFromPath(e.filepath);
+    const derivedArtist = e.artist || _artistFromPath(e.filepath);
+    if (!derivedTitle && !derivedArtist) continue;  // orphaned file — skip
     if (!songCounts[e.file_hash]) {
-      songCounts[e.file_hash] = { hash: e.file_hash, title: e.title, artist: e.artist, album: e.album, aaFile: e.aaFile, play_count: 0, total_played_ms: 0 };
+      songCounts[e.file_hash] = {
+        hash:           e.file_hash,
+        title:          derivedTitle,
+        artist:         derivedArtist,
+        album:          e.album,
+        aaFile:         e.aaFile,
+        play_count:     0,
+        total_played_ms: 0,
+      };
     }
     songCounts[e.file_hash].play_count++;
     songCounts[e.file_hash].total_played_ms += e.played_ms ?? 0;
@@ -134,7 +163,8 @@ export async function getWrappedStats(userId, fromMs, toMs, vpaths = []) {
   // ── Top artists ─────────────────────────────────────────────────────────────
   const artistCounts = {};
   for (const e of events) {
-    const key = e.artist || '(Unknown)';
+    const key = e.artist || _artistFromPath(e.filepath);
+    if (!key) continue;  // file deleted from library — no recoverable identity, skip
     if (!artistCounts[key]) {
       artistCounts[key] = { artist: key, artist_id: e.artist_id, play_count: 0, total_played_ms: 0 };
     }
@@ -215,7 +245,8 @@ export async function getWrappedStats(userId, fromMs, toMs, vpaths = []) {
   // Most skipped artist (min 5 plays, highest skip rate)
   const artistSkipData = {};
   for (const e of events) {
-    const key = e.artist || '(Unknown)';
+    const key = e.artist || _artistFromPath(e.filepath);
+    if (!key) continue;  // orphaned file — skip
     if (!artistSkipData[key]) artistSkipData[key] = { total: 0, skipped: 0 };
     artistSkipData[key].total++;
     if (e.skipped) artistSkipData[key].skipped++;
@@ -245,7 +276,13 @@ export async function getWrappedStats(userId, fromMs, toMs, vpaths = []) {
     if (s.play_count < 5) continue;
     const sEvents = events.filter(e => e.file_hash === s.hash);
     const compRate = sEvents.filter(e => e.completed).length / sEvents.length;
-    if (compRate >= 1.0) { most_loyal_song = { title: s.title, artist: s.artist }; break; }
+    if (compRate >= 1.0) {
+      most_loyal_song = {
+        title:  s.title  || _titleFromPath(sEvents[0]?.filepath),
+        artist: s.artist || _artistFromPath(sEvents[0]?.filepath),
+      };
+      break;
+    }
   }
 
   // Night owl score

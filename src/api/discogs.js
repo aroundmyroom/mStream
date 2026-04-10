@@ -46,6 +46,46 @@ async function fetchImageBuf(url, useDiscogsAuth = true) {
 }
 
 /**
+ * Extract a catalog number from a folder/file name segment.
+ * Looks for trailing parenthetical or bracket groups whose content matches
+ * a catalog-number pattern: letter prefix + optional digits + digits.
+ * Examples: "(SMR 624)", "[SP5-1306]", "(DGCD-24425)", "(12CL 001)"
+ * Skips: "(FLAC)", "(2004)", "(2xLP)", "(320kbps)"
+ */
+function extractCatno(s) {
+  if (!s) return null;
+  const YEAR_ONLY  = /^\d{4}$/;
+  const FORMAT_KW  = /^(FLAC|MP3|WAV|OGG|AAC|ALAC|WMA|APE|WV|OPUS|DSD|320|256|192|128|CBR|VBR|lossless|lossy|CD|LP|EP|vinyl|dvd)$/i;
+  const DISC_LABEL = /^\d+(x|CD|LP|EP)/i;   // "2xLP", "3CD", "2LP"
+  // catno must start with letters, contain digits; may have space/dash between prefix and number
+  // OK: "SMR 624", "SP5-1306", "DGCD-24425", "12CL 001", "ATL 50-123", "SMR624"
+  const CATNO_RE = /^[A-Za-z]{1,6}\d{0,4}[\s\-]?\d{2,7}[A-Za-z]{0,3}$/;
+  const re = /[\(\[]\s*([^\]\)]{2,25})\s*[\)\]]/g;
+  const blocks = [];
+  let m;
+  while ((m = re.exec(s)) !== null) blocks.push(m[1].trim());
+  // Check from last (trailing) to first  — trailing parens hold catnos more often
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (YEAR_ONLY.test(b) || FORMAT_KW.test(b) || DISC_LABEL.test(b)) continue;
+    if (CATNO_RE.test(b)) return b;
+  }
+  return null;
+}
+
+/**
+ * Detect "X Presents [Y]"-style artist names (label/DJ compilations).
+ * Returns the label part (before "Presents") or null when not a Presents artist.
+ * Examples: "Salsoul Presents" → "Salsoul"
+ *           "Larry Levan Presents" → "Larry Levan"
+ */
+function presentsLabel(artist) {
+  if (!artist) return null;
+  const m = artist.match(/^(.+?)\s+presents?\b/i);
+  return m ? m[1].trim() : null;
+}
+
+/**
  * Cleans a raw filename/title string by stripping audio extension and
  * dot-separated hash/ID segments (e.g. ".G12U", ".3FAB8").
  * Works on both spaced and CamelCase filenames.
@@ -129,6 +169,16 @@ function artistMatchScore(requestedArtist, discogsTitle) {
   if (!artistPart) return 0.5; // no artist portion extractable → neutral
   const req = normalize(requestedArtist);
   const art = normalize(artistPart);
+
+  // "X Presents [Y]" artists: the actual Discogs artist will be "Various" or
+  // something similar. Treat Various/label results as a good match.
+  const presLbl = presentsLabel(requestedArtist);
+  if (presLbl) {
+    if (art === 'various' || art.startsWith('various ')) return 0.85;
+    if (art.includes(normalize(presLbl))) return 0.9;  // label name in artist
+    return 0.7;  // any result from a Presents search is plausible
+  }
+
   if (art === req) return 1.0;
   if (art.includes(req) || req.includes(art)) return 0.9;
   // word-level overlap for partial matches (e.g. "Francine McGee" in "A / Francine McGee")
@@ -180,6 +230,23 @@ export function setup(mstream) {
         if (artist && album) break;
       }
     }
+
+    // Extract catalog number from path segments (e.g. folder "Hit Mix '86 (2xLP 1986) (SMR 624)"
+    // → catno="SMR 624"). Walk segments innermost-first so we find the album-folder catno first.
+    let catno = null;
+    if (rawFilepath) {
+      const segs = rawFilepath.replace(/\\/g, '/').split('/').filter(Boolean);
+      for (let i = segs.length - 2; i >= 1; i--) {
+        catno = extractCatno(segs[i]);
+        if (catno) break;
+      }
+    }
+    // Also try extracting catno from the album tag itself (some users include it)
+    if (!catno && album) catno = extractCatno(album);
+
+    // Detect "X Presents [Y]" artist — label/DJ compilations credited as Various on Discogs.
+    // presLabel = "Salsoul" when artist = "Salsoul Presents"
+    const presLabel = presentsLabel(artist);
 
     if (!artist && !title && !album) return res.status(400).json({ error: 'artist, title, or album required' });
 
@@ -245,10 +312,33 @@ export function setup(mstream) {
       addSearch(p, albumPhase);
     }
 
+    // A1m. Master search — mirrors A1 but searches masters directly.
+    // CRITICAL for artists whose Discogs name includes extra words not in the ID3 tag
+    // (e.g. tagged "Alfie Khan" but Discogs has "Alfie Khan Sound Orchestra" as artist):
+    // the field-level artist filter on releases misses the entry entirely, but the master
+    // search is fuzzier and reliably surfaces the right result. This is the primary fix
+    // for the "finds the artist, but wrong album" failure mode.
+    if (album) {
+      const p = new URLSearchParams({ type: 'master', per_page: '8' });
+      if (artist) p.set('artist', artist);
+      p.set('release_title', album);
+      if (year) p.set('year', year);
+      addSearch(p, albumPhase);
+    }
+
     // A4. Free-text album + artist (handles varied Discogs punctuation)
     if (artist && cleanAlbum) {
       const p = new URLSearchParams({ type: 'release', per_page: '8' });
       p.set('q', `${artist} ${cleanAlbum}`);
+      addSearch(p, albumPhase);
+    }
+
+    // A4m. Free-text master search — master result set is far smaller than releases so the
+    // correct album appears near the top more reliably. Including year when available
+    // narrows it further without hurting recall (original year is reliable on masters).
+    if (artist && cleanAlbum) {
+      const p = new URLSearchParams({ type: 'master', per_page: '8' });
+      p.set('q', year ? `${artist} ${cleanAlbum} ${year}` : `${artist} ${cleanAlbum}`);
       addSearch(p, albumPhase);
     }
 
@@ -258,6 +348,52 @@ export function setup(mstream) {
       const p = new URLSearchParams({ type: 'release', per_page: '5' });
       p.set('q', cleanAlbum);
       addSearch(p, albumPhase);
+    }
+
+    // A6. Catalog-number search — extremely precise; identifies the exact pressing.
+    // Discogs `catno=` is a dedicated index field, so "SMR 624" finds only releases
+    // where that catalog number is registered — essentially no false positives.
+    if (catno) {
+      // A6a. catno + release_title (most precise)
+      if (cleanAlbum) {
+        const p = new URLSearchParams({ type: 'release', per_page: '5' });
+        p.set('catno', catno);
+        p.set('release_title', cleanAlbum);
+        addSearch(p, albumPhase);
+      }
+      // A6b. catno alone — handles title mismatches between ID3 tag and Discogs title
+      {
+        const p = new URLSearchParams({ type: 'release', per_page: '5' });
+        p.set('catno', catno);
+        addSearch(p, albumPhase);
+      }
+    }
+
+    // A7. "Presents" compilation — when artist = "Salsoul Presents" etc.
+    // The real Discogs artist is "Various"; regular artist-field searches return 0 hits.
+    // Strategy: search by album title only (no artist filter) and by label name.
+    if (presLabel && cleanAlbum) {
+      // A7a. Album title alone (no artist) — hits e.g. "Various – The Definitive 12″ Masters Vol. 2"
+      {
+        const p = new URLSearchParams({ type: 'release', per_page: '5' });
+        p.set('release_title', cleanAlbum);
+        if (year) p.set('year', year);
+        addSearch(p, albumPhase);
+      }
+      // A7b. Label name + album title — narrows to the right label's release
+      {
+        const p = new URLSearchParams({ type: 'release', per_page: '5' });
+        p.set('label', presLabel);
+        p.set('release_title', cleanAlbum);
+        addSearch(p, albumPhase);
+      }
+      // A7c. Master search by album title — master pool is small so correct entry ranks higher
+      {
+        const p = new URLSearchParams({ type: 'master', per_page: '5' });
+        p.set('release_title', cleanAlbum);
+        if (year) p.set('year', year);
+        addSearch(p, albumPhase);
+      }
     }
 
     // ── PHASE B: Track title / 12" single logic ───────────────────────────────
@@ -393,6 +529,8 @@ export function setup(mstream) {
 
       res.json({ choices });
     } catch (e) {
+      const status = e?.response?.status;
+      if (status === 429) return res.status(429).json({ error: 'Discogs rate limit reached — please wait a minute before searching again' });
       res.status(500).json({ error: e.message });
     }
   });
@@ -401,14 +539,27 @@ export function setup(mstream) {
   // Server-side proxy for the Deezer album search API.
   // Required because the Deezer API does not set CORS headers, so browsers
   // can't call it directly from an HTTPS origin.
+  // Accepts optional ?artist=&album= in addition to ?q= to allow server-side
+  // smart query building (Presents stripping, catalog number injection).
   mstream.get('/api/v1/deezer/search', async (req, res) => {
-    const q = (req.query.q || '').trim();
+    let q = (req.query.q || '').trim();
+    // Smart query: if artist+album are supplied separately, build a clean q.
+    // Strip "X Presents" from artist — Deezer doesn't know about it.
+    if (!q && (req.query.artist || req.query.album)) {
+      let a = (req.query.artist || '').trim();
+      const b = (req.query.album  || '').trim();
+      const pres = presentsLabel(a);
+      if (pres) a = '';  // drop "Salsoul Presents" — search album name only
+      q = [a, b].filter(Boolean).join(' ');
+    }
     if (!q) return res.status(400).json({ error: 'q is required' });
     try {
       const url = `https://api.deezer.com/search/album?q=${encodeURIComponent(q)}&limit=10`;
       const resp = await axios.get(url, { headers: { 'User-Agent': UA_BASE } });
       res.json(resp.data);
     } catch (e) {
+      const status = e?.response?.status;
+      if (status === 429) return res.status(429).json({ error: 'Deezer rate limit reached — please wait a minute before searching again' });
       res.status(502).json({ error: 'Deezer request failed: ' + e.message });
     }
   });
@@ -418,8 +569,12 @@ export function setup(mstream) {
   // Returns up to 10 album results with 600×600 artwork URLs.
   mstream.get('/api/v1/itunes/search', async (req, res) => {
     if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
-    const artist = (req.query.artist || '').trim();
+    let artist = (req.query.artist || '').trim();
     const album  = (req.query.album  || '').trim();
+    // Strip "X Presents" from artist — iTunes treats it as part of the artist name
+    // and fails to find "Various Artists" compilations.
+    const pres = presentsLabel(artist);
+    if (pres) artist = '';  // search album-only; iTunes finds it without the presents prefix
     const q = [artist, album].filter(Boolean).join(' ');
     if (!q) return res.json({ results: [] });
     try {
@@ -434,6 +589,8 @@ export function setup(mstream) {
         }));
       res.json({ results });
     } catch (e) {
+      const status = e?.response?.status;
+      if (status === 429) return res.status(429).json({ error: 'iTunes rate limit reached — please wait a minute before searching again' });
       res.status(502).json({ error: 'iTunes request failed: ' + e.message });
     }
   });

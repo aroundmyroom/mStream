@@ -1,6 +1,43 @@
 # mStream Velvet Fork — Combined Change Log
 
-## v6.7.6-velvet — April 2026 — Dice fix + crossfade animation cleanup
+## v6.7.7-velvet — in progress
+
+### feat: waveform pre-fetch + crossfade dissolve
+- **Pre-fetch**: waveforms were previously only generated the moment a song started playing — in Auto-DJ mode this caused a "Generating waveform…" delay even though the song had been in the queue for 30 seconds
+- Added a silent background pre-fetch queue (`_wfPrefetchPending` / `_wfPrefetchDrain`) that processes one request at a time (300 ms apart) whenever songs are added to `S.queue`; hooked into all queue-add paths: `Player.addSong`, `Player.addAll`, `Player.playNext`, `Player.setQueue`, and both Auto-DJ code paths (`autoDJPrefetch`, `autoDJFetch`)
+- Each prefetch hits the real `/api/v1/db/waveform` endpoint — the server writes `wf-{hash}.json` to `waveformDirectory` **and** the client caches in localStorage; both caches are warmed for instant display at play time
+- **Crossfade dissolve**: waveform now transitions in sync with album art and title/artist during crossfade — a true dissolve, not a late swap
+  - Old waveform snapshot fades out as `.xf-wf-out` canvas overlay over the full crossfade duration
+  - New waveform (if already cached) painted onto `.xf-wf-in` overlay at `pct=0` and fades in simultaneously — same duration, same moment as art and text
+  - Both transitions share a single `offsetHeight` flush so they start in perfect sync
+  - If not yet cached, incoming waveform appears via `_wfFadeIn()` once generation completes
+- New waveform always fades in (0.45 s `ease-in`) rather than appearing instantly; canvas snaps to opacity:0 when clearing so no stale data bleeds through
+- Extracted `_drawWaveformBars(ctx, W, H, data, pct)` pure drawing helper shared by live canvas and overlay canvases
+
+## v6.7.6-velvet — April 2026 — Dice fix + crossfade animation cleanup + unindexed file tracking
+
+### fix: album art search smarter for catalog numbers, "Presents" artists, and compilation titles
+- **Catalog number search (Discogs)**: `extractCatno()` parses `(SMR 624)`, `[SP5-1306]` etc. from folder names and the album tag. Discogs `catno=` is a dedicated index field — essentially no false positives. Two new Phase A searches: A6a (`catno + release_title`) and A6b (`catno` alone for title mismatches). Example: `Various - Hit Mix '86 (2xLP 1986) (SMR 624)` now finds the exact release immediately.
+- **"Presents" artist handling (Discogs, Deezer, iTunes)**: new `presentsLabel()` helper detects `"Salsoul Presents"` → label = `"Salsoul"`. Three new Phase A searches: A7a (album title only, no artist), A7b (label + album title), A7c (master by album title). `artistMatchScore` now gives Discogs "Various" results 0.85 when input artist contains "Presents". iTunes and Deezer server proxies strip the "Presents" prefix from the artist term before querying. Example: `Salsoul Presents - The Definitive 12'' Masters Vol. 2` now finds `Various – The Definitive 12" Masters Vol. 2`.
+- **Deezer proxy**: accepts `?artist=&album=` params in addition to `?q=` so the server can apply Presents stripping and build smarter queries. Client-side calls updated to send separated params.
+
+### fix: album grid thumbnails were blurry (92 px upscaled to 170+ px)
+- All album grid cards — Albums menu, genre browse, decade browse — were requesting the `zs-` thumbnail (92×92 px) via `compress=s`, but cards render at 170–250 px; the ~2.5× upscale was the cause of the fuzzy appearance
+- Switched to `compress=l` (`zl-` 256×256 px) in four places: `_albArtUrl()`, `buildCard()` (main albums VScroll), genre-detail album grid, decade-detail album grid
+- Detail view album art (180×180 px) benefits from the same fix via `_albArtUrl`
+- Search result rows (38×38 px album thumbnails) retain `compress=s` — no benefit to upgrading there
+
+### fix: Discogs cover art misses albums where artist name has extra words on Discogs
+- Artists tagged as e.g. "Alfie Khan" but credited on Discogs as "Alfie Khan Sound Orchestra" caused Phase A searches to find the artist but the wrong album — because all existing Phase A searches use `type=release` with a strict `artist` field filter that misses "Sound Orchestra"
+- Added **A1m**: `type=master, artist, release_title, year` — master search mirrors A1 and is fuzzier about artist name; reliably surfaces the parent master (e.g. master/349628)
+- Added **A4m**: `type=master, q="artist album [year]"` — free-text master search; master result sets are far smaller than releases so the correct album ranks higher; year included when available for precision
+- Both new searches run in Phase A (parallel) so they don't slow down normal cases
+
+### fix: plays on unindexed files (file explorer) are now tracked
+- Files played before a full library scan was run used to silently fail `play-start` and `log-play` — the DB lookup returned null and the event was dropped
+- New `src/util/on-demand-index.js`: when a played file has no DB row, it is indexed immediately — hash computed (md5 of first 512 KB), metadata parsed via `music-metadata`, and a minimal `files` row inserted — then play tracking proceeds normally
+- Applies to both `/api/v1/wrapped/play-start` (Wrapped stats) and `/api/v1/db/stats/log-play` (recently-played / play-count)
+- Both endpoints changed from sync to `async` handlers; on-demand indexing is transparent — the file appears in the library and resumes syncing as normal in the next full scan
 
 ### fix: dice faces show through each other after browser update
 - Added `backface-visibility:hidden` to `.dj-dice-face` — browser now correctly renders back-facing faces as invisible per spec

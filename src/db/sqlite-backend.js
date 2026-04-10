@@ -2265,9 +2265,9 @@ export function getWrappedDataInRange(userId, fromMs, toMs) {
       pe.duration_ms, pe.played_ms, pe.completed, pe.skipped,
       pe.source, pe.session_id, pe.pause_count,
       f.title, f.artist, f.album, f.year, f.genre,
-      f.aaFile, f.artist_id, f.album_id
+      f.aaFile, f.artist_id, f.album_id, f.filepath
     FROM play_events pe
-    LEFT JOIN (SELECT hash, title, artist, album, year, genre, aaFile, artist_id, album_id FROM files GROUP BY hash) f ON f.hash = pe.file_hash
+    LEFT JOIN (SELECT hash, title, artist, album, year, genre, aaFile, artist_id, album_id, filepath FROM files GROUP BY hash) f ON f.hash = pe.file_hash
     WHERE pe.user_id = ? AND pe.started_at >= ? AND pe.started_at < ?
     ORDER BY pe.started_at ASC
   `).all(userId, fromMs, toMs);

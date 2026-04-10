@@ -19,6 +19,7 @@ import * as db from '../db/manager.js';
 import * as config from '../state/config.js';
 import { joiValidate } from '../util/validation.js';
 import { getWrappedStats, getPeriodBounds } from '../db/wrapped-stats.mjs';
+import { indexFileOnDemand } from '../util/on-demand-index.js';
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -50,7 +51,7 @@ function resolveFileRow(filePath, user) {
 export function setup(mstream) {
 
   // ── play-start ─────────────────────────────────────────────────────────────
-  mstream.post('/api/v1/wrapped/play-start', (req, res) => {
+  mstream.post('/api/v1/wrapped/play-start', async (req, res) => {
     const schema = Joi.object({
       filePath:  Joi.string().required(),
       sessionId: Joi.string().max(64).required(),
@@ -58,7 +59,13 @@ export function setup(mstream) {
     });
     joiValidate(schema, req.body);
 
-    const fileRow = resolveFileRow(req.body.filePath, req.user);
+    let fileRow = resolveFileRow(req.body.filePath, req.user);
+    if (!fileRow) {
+      try {
+        const pathInfo = vpath.getVPathInfo(req.body.filePath, req.user);
+        fileRow = await indexFileOnDemand(pathInfo);
+      } catch (_e) { /* invalid path or access denied */ }
+    }
     if (!fileRow) { return res.json({ ok: false }); }
 
     const userId     = req.user.username;

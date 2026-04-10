@@ -180,6 +180,8 @@ let _msPosThrottle = 0;    // timestamp of last setPositionState call — thrott
 let _rgGainNode  = null;   // ReplayGain gain node — inserted before _audioGain
 let _waveformData = null;  // decoded waveform array [0..255] for current track
 let _waveformFp  = null;   // filepath matching _waveformData (avoids double-fetch)
+const _wfPrefetchPending = []; // filepaths queued for background pre-generation
+let   _wfPrefetching     = false; // true while one async prefetch is in flight
 let _cuePoints         = [];    // cue sheet track markers for the current file
 let _cueMarkersRendered = false; // true once tick marks have been drawn for current file
 let analyserL    = null;   // left-channel analyser
@@ -225,6 +227,14 @@ function _toggleTimeFlipped(e) {
   localStorage.setItem('ms2_time_flipped_' + S.username, S.timeFlipped ? '1' : '');
   _syncPrefs();
   _renderTimes();
+}
+// Returns a human-readable error message for art search failures.
+// Specifically translates HTTP 429 from the server into a rate-limit hint.
+function _artSearchErrMsg(e) {
+  if (e?.httpStatus === 429 || e?.status === 429) {
+    return 'Rate limited — too many requests in a short time. Please wait a minute and try again.';
+  }
+  return e?.message || 'Search failed';
 }
 function artUrl(f, size) {
   if (!f) return null;
@@ -654,7 +664,10 @@ const Player = {
     S.djArtistHistory = [];
     localStorage.removeItem(_djKey('artist_history'));
     _syncPrefs();
-    this.playAt(start ?? 0);
+    const idx = start ?? 0;
+    this.playAt(idx);
+    // Pre-fetch waveforms for upcoming songs (skip the one about to play — playAt handles it)
+    songs.forEach((s, i) => { if (i !== idx) _wfPrefetchEnqueue(s.filepath); });
   },
   playSingle(song) {
     S.queue = [song];
@@ -675,6 +688,7 @@ const Player = {
   },
   addSong(song) {
     S.queue.push(song);
+    _wfPrefetchEnqueue(song.filepath);
     toast('Added: ' + (song.title || song.filepath.split('/').pop()));
     refreshQueueUI();
     persistQueue();
@@ -682,6 +696,7 @@ const Player = {
   },
   addAll(songs) {
     S.queue.push(...songs);
+    songs.forEach(s => _wfPrefetchEnqueue(s.filepath));
     toast(`Added ${songs.length} songs to queue`);
     refreshQueueUI();
     persistQueue();
@@ -690,6 +705,7 @@ const Player = {
   playNext(song) {
     const insertAt = S.idx + 1;
     S.queue.splice(insertAt, 0, song);
+    _wfPrefetchEnqueue(song.filepath);
     toast('Playing next: ' + (song.title || song.filepath.split('/').pop()));
     refreshQueueUI();
     persistQueue();
@@ -1262,6 +1278,7 @@ async function autoDJPrefetch() {
     if (S.queue.length <= S.idx + 1) {
       _pruneQueue();
       S.queue.push(song);
+      _wfPrefetchEnqueue(song.filepath);
       refreshQueueUI();      // update queue panel FIRST so it's visible before strip appears
       _showDJStrip(song);
     }
@@ -1299,6 +1316,7 @@ async function autoDJFetch() {
     _djPushArtistHistory(song.artist);
     _pruneQueue();
     S.queue.push(song);
+    _wfPrefetchEnqueue(song.filepath);
     refreshQueueUI();      // update queue panel FIRST so it's visible before strip appears
     _showDJStrip(song);
     Player.playAt(S.queue.length - 1);
@@ -2076,7 +2094,7 @@ async function _npItunesSearch(song) {
     dsEl.dataset.songFp = song.filepath || '';
   } catch(e) {
     dsEl.innerHTML =
-      `<span class="np-discogs-status">iTunes search failed</span>` +
+      `<span class="np-discogs-status">${esc(_artSearchErrMsg(e))}</span>` +
       `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
   }
 }
@@ -2090,8 +2108,12 @@ async function _npDeezerSearch(song) {
   npLeft?.classList.add('np-left--picking');
   try {
     const artist = song.artist || _folderArtistFromPath(song.filepath);
-    const q = [artist, song.album].filter(Boolean).join(' ');
-    const data = await api('GET', `api/v1/deezer/search?q=${encodeURIComponent(q)}`);
+    const album  = song.album || '';
+    const params = new URLSearchParams();
+    if (artist) params.set('artist', artist);
+    if (album)  params.set('album', album);
+    if (!artist && !album) params.set('q', song.title || '');
+    const data = await api('GET', `api/v1/deezer/search?${params}`);
     const hits = (data.data || []).filter(h => h.cover_medium);
     if (!hits.length) {
       dsEl.innerHTML =
@@ -2117,7 +2139,7 @@ async function _npDeezerSearch(song) {
     dsEl.dataset.songFp = song.filepath || '';
   } catch(e) {
     dsEl.innerHTML =
-      `<span class="np-discogs-status">Deezer search failed</span>` +
+      `<span class="np-discogs-status">${esc(_artSearchErrMsg(e))}</span>` +
       `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
   }
 }
@@ -2197,7 +2219,7 @@ async function _npDiscogsSearch(song) {
   } catch(e) {
     const msg = e?.status === 404
       ? 'Discogs not enabled — configure in admin'
-      : esc(e?.message || 'Search failed');
+      : esc(_artSearchErrMsg(e));
     dsEl.innerHTML =
       `<span class="np-discogs-status">${msg}</span>` +
       `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
@@ -5181,7 +5203,7 @@ let _albArtBust  = '';     // bumped after art save to force browser cache refre
 let _pendingCueSeek = null; // seconds to seek to at start of next playAt (for CUE track rows)
 
 function _albArtUrl(artFile, aaFile) {
-  if (aaFile) return artUrl(aaFile, 's');
+  if (aaFile) return artUrl(aaFile, 'l');
   if (artFile) {
     const bust = _albArtBust ? `&_v=${_albArtBust}` : '';
     return `/api/v1/albums/art-file?p=${encodeURIComponent(artFile)}&token=${S.token}${bust}`;
@@ -5453,7 +5475,7 @@ async function _albDiscogsSearch() {
       `</div>` +
       `<span class="np-discogs-note">via Discogs — click a cover to save as cover.jpg</span>`;
   } catch(e) {
-    el.innerHTML = `<span class="np-discogs-status">${esc(e?.message || 'Search failed')}</span>
+    el.innerHTML = `<span class="np-discogs-status">${esc(_artSearchErrMsg(e))}</span>
       <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
   }
 }
@@ -5465,8 +5487,11 @@ async function _albDeezerSearch() {
   el.innerHTML = `<span class="np-discogs-status">Searching Deezer\u2026</span>`;
   try {
     const artist = album.artist || _folderArtistFromPath(album.path);
-    const q = [artist, album.displayName].filter(Boolean).join(' ');
-    const d = await api('GET', `api/v1/deezer/search?q=${encodeURIComponent(q)}`);
+    const params = new URLSearchParams();
+    if (artist)            params.set('artist', artist);
+    if (album.displayName) params.set('album',  album.displayName);
+    if (!artist && !album.displayName) params.set('q', album.displayName || '');
+    const d = await api('GET', `api/v1/deezer/search?${params}`);
     const hits = (d.data || []).filter(h => h.cover_medium);
     if (!hits.length) {
       el.innerHTML = `<span class="np-discogs-status">No results found on Deezer</span>
@@ -5489,7 +5514,7 @@ async function _albDeezerSearch() {
       `</div>` +
       `<span class="np-discogs-note">via Deezer — click a cover to save as cover.jpg</span>`;
   } catch(e) {
-    el.innerHTML = `<span class="np-discogs-status">${esc(e?.message || 'Search failed')}</span>
+    el.innerHTML = `<span class="np-discogs-status">${esc(_artSearchErrMsg(e))}</span>
       <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
   }
 }
@@ -5526,7 +5551,7 @@ async function _albItunesSearch() {
       `</div>` +
       `<span class="np-discogs-note">via iTunes — click a cover to save as cover.jpg</span>`;
   } catch(e) {
-    el.innerHTML = `<span class="np-discogs-status">${esc(e?.message || 'Search failed')}</span>
+    el.innerHTML = `<span class="np-discogs-status">${esc(_artSearchErrMsg(e))}</span>
       <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
   }
 }
@@ -5907,7 +5932,7 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
   function buildCard(i) {
     const a   = albumsClean[i];
     const name = a.cleanName;
-    const art  = artUrl(a.album_art_file, 's');
+    const art  = artUrl(a.album_art_file, 'l');
     return `<div class="album-card" data-i="${i}">
       <div class="album-art">
         ${art
@@ -7521,7 +7546,7 @@ async function viewGenreDetail(genre, defaultTab) {
         if (!fa.length) { bc.innerHTML = `<div class="info-panel"><p class="info-hint">${q ? `No albums match "${esc(q)}".` : 'No albums found — try Tracks.'}</p></div>`; return; }
         _mountAlbumVScroll(fa,
           (a, i) => {
-            const u   = artUrl(a.album_art_file, 's');
+            const u   = artUrl(a.album_art_file, 'l');
             const art = u ? `<img src="${u}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">` : noArtHtml();
             return `<div class="album-card" data-i="${i}">
               <div class="album-art">${art}<div class="play-ov"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg></div></div>
@@ -7603,7 +7628,7 @@ async function viewDecadeDetail(decade, label, defaultTab) {
         if (!fa.length) { bc.innerHTML = `<div class="info-panel"><p class="info-hint">${q ? `No albums match "${esc(q)}".` : 'No albums found — try Tracks.'}</p></div>`; return; }
         _mountAlbumVScroll(fa,
           (a, i) => {
-            const u   = artUrl(a.album_art_file, 's');
+            const u   = artUrl(a.album_art_file, 'l');
             const art = u ? `<img src="${u}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">` : noArtHtml();
             return `<div class="album-card" data-i="${i}">
               <div class="album-art">${art}<div class="play-ov"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg></div></div>
@@ -8561,7 +8586,7 @@ async function _renderWrapped() {
           <span class="wrapped-rank">${i + 1}</span>
           ${s.aaFile ? `<img class="wrapped-thumb" src="${esc(artUrl(s.aaFile,'s'))}" alt="" loading="lazy">` : `<div class="wrapped-thumb wrapped-thumb-empty"></div>`}
           <div class="wrapped-top-info">
-            <div class="wrapped-top-title">${esc(s.title || s.hash)}</div>
+            <div class="wrapped-top-title">${esc(s.title || '—')}</div>
             <div class="wrapped-top-sub">${esc(s.artist || '—')}</div>
           </div>
           <span class="wrapped-top-count">${s.play_count}×</span>
@@ -11042,6 +11067,49 @@ function _wfLsSet(filepath, data) {
   try { localStorage.setItem(_WF_LS_PREFIX + filepath, JSON.stringify(data)); } catch (_e) {}
 }
 
+// ── WAVEFORM BACKGROUND PRE-FETCH ─────────────────────────────
+// Enqueue a filepath so its waveform is generated and stored in localStorage
+// before the song reaches the front of the queue.  One request at a time,
+// 300 ms apart — low priority, silent on error.
+function _wfPrefetchEnqueue(filepath) {
+  if (!filepath || /^https?:\/\//i.test(filepath)) return; // skip radio / external URLs
+  if (_wfLsGet(filepath)) return;                          // already cached
+  if (_wfPrefetchPending.includes(filepath)) return;       // already queued
+  _wfPrefetchPending.push(filepath);
+  _wfPrefetchDrain();
+}
+
+async function _wfPrefetchDrain() {
+  if (_wfPrefetching || _wfPrefetchPending.length === 0) return;
+  _wfPrefetching = true;
+  const fp = _wfPrefetchPending.shift();
+  try {
+    if (!_wfLsGet(fp)) { // double-check: may have been fetched since enqueue
+      const d = await api('GET', `api/v1/db/waveform?filepath=${encodeURIComponent(fp)}`);
+      if (d.waveform && d.waveform.length > 0) _wfLsSet(fp, d.waveform);
+    }
+  } catch (_e) { /* silent — waveform unavailable or ffmpeg busy */ }
+  finally {
+    _wfPrefetching = false;
+    if (_wfPrefetchPending.length > 0) setTimeout(_wfPrefetchDrain, 300);
+  }
+}
+
+// Fade-in the waveform canvas after new data has just been loaded.
+// Sets opacity to 0 (sync), draws, then transitions to 1.
+// The RAF animation loop only redraws pixel content and never touches opacity,
+// so the fade runs exactly once per song and doesn't interfere with playback.
+function _wfFadeIn() {
+  const canvas = document.getElementById('waveform-canvas');
+  if (!canvas) { _drawWaveform(); return; }
+  canvas.style.transition = 'none';
+  canvas.style.opacity    = '0';
+  _drawWaveform();
+  void canvas.offsetWidth;                          // flush style before starting transition
+  canvas.style.transition = 'opacity 0.45s ease-in';
+  canvas.style.opacity    = '1';
+}
+
 async function _fetchWaveform(filepath) {
   if (!filepath || /^https?:\/\//i.test(filepath)) { _waveformData = null; _waveformFp = null; _drawWaveform(); return; }
   if (_waveformFp === filepath) { _drawWaveform(); return; }   // in-memory cache
@@ -11051,7 +11119,7 @@ async function _fetchWaveform(filepath) {
   if (cached) {
     _waveformData = cached;
     _waveformFp   = filepath;
-    _drawWaveform();
+    _wfFadeIn();
     if (!audioEl.paused) _startWaveformRaf();
     return;
   }
@@ -11069,12 +11137,54 @@ async function _fetchWaveform(filepath) {
       _waveformData = d.waveform;
       _waveformFp   = filepath;
       _wfLsSet(filepath, d.waveform);   // persist for future page loads
-      _drawWaveform();
+      _wfFadeIn();
       if (!audioEl.paused) _startWaveformRaf();
     }
   } catch(_e) { /* waveform unavailable — silent fail */ } finally {
     if (wfStatus) { wfStatus.textContent = ''; wfStatus.classList.remove('visible'); }
   }
+}
+
+// Draw waveform bars for `data` onto ctx (W×H) with playhead at fraction `pct`.
+// Pure drawing — no DOM queries, no globals read except CSS variables.
+function _drawWaveformBars(ctx, W, H, data, pct) {
+  ctx.clearRect(0, 0, W, H);
+  const splitX = pct * W;
+  const midY   = H / 2;
+  const barW   = W / data.length;
+  const drawW  = Math.max(1, barW > 2 ? barW - 1 : barW);
+  const cs      = getComputedStyle(document.documentElement);
+  const colPri  = cs.getPropertyValue('--primary').trim();
+  const colAcc  = cs.getPropertyValue('--accent').trim();
+  const grad = ctx.createLinearGradient(0, 0, W, 0);
+  grad.addColorStop(0, colPri);
+  grad.addColorStop(1, colAcc);
+  const html = document.documentElement;
+  const unplayedAlpha = html.classList.contains('light')
+    ? 'rgba(0,0,0,0.22)'
+    : html.classList.contains('dark')
+      ? 'rgba(255,255,255,0.28)'
+      : 'rgba(255,255,255,0.35)';
+  if (splitX > 0) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, splitX, H); ctx.clip();
+    ctx.fillStyle = grad;
+    for (let i = 0; i < data.length; i++) {
+      const x = (i / data.length) * W;
+      const barH = Math.max(2, (data[i] / 255) * midY * 1.8);
+      ctx.fillRect(x, midY - barH / 2, drawW, barH);
+    }
+    ctx.restore();
+  }
+  ctx.save();
+  ctx.beginPath(); ctx.rect(splitX, 0, W - splitX, H); ctx.clip();
+  ctx.fillStyle = unplayedAlpha;
+  for (let i = 0; i < data.length; i++) {
+    const x = (i / data.length) * W;
+    const barH = Math.max(2, (data[i] / 255) * midY * 1.8);
+    ctx.fillRect(x, midY - barH / 2, drawW, barH);
+  }
+  ctx.restore();
 }
 
 function _drawWaveform() {
@@ -11133,55 +11243,15 @@ function _drawWaveform() {
   }
 
   if (track) track.classList.toggle('wf-active', !!(_waveformData && _waveformData.length));
-  if (!_waveformData || _waveformData.length === 0) return;
+  if (!_waveformData || _waveformData.length === 0) {
+    canvas.style.transition = 'none';
+    canvas.style.opacity    = '0';
+    return;
+  }
 
   const data   = _waveformData;
   const pct    = audioEl.duration > 0 ? audioEl.currentTime / audioEl.duration : 0;
-  const splitX = pct * W;
-  const midY   = H / 2;
-  const barW   = W / data.length;
-  const drawW  = Math.max(1, barW > 2 ? barW - 1 : barW);
-
-  // Read theme colours from CSS variables so the waveform respects light/dark mode
-  const cs      = getComputedStyle(document.documentElement);
-  const colPri  = cs.getPropertyValue('--primary').trim();   // e.g. #8b5cf6
-  const colAcc  = cs.getPropertyValue('--accent').trim();    // e.g. #60a5fa
-  // Gradient matches the progress-fill bar: --primary left → --accent right
-  const grad = ctx.createLinearGradient(0, 0, W, 0);
-  grad.addColorStop(0, colPri);
-  grad.addColorStop(1, colAcc);
-
-  // Pass 1 — played region: clip left of splitX, fill with gradient
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(0, 0, splitX, H);
-  ctx.clip();
-  ctx.fillStyle = grad;
-  for (let i = 0; i < data.length; i++) {
-    const x    = (i / data.length) * W;
-    const barH = Math.max(2, (data[i] / 255) * midY * 1.8);
-    ctx.fillRect(x, midY - barH / 2, drawW, barH);
-  }
-  ctx.restore();
-
-  // Pass 2 — unplayed region: clip right of splitX, fill dim
-  const html = document.documentElement;
-  const unplayedAlpha = html.classList.contains('light')
-    ? 'rgba(0,0,0,0.22)'
-    : html.classList.contains('dark')
-      ? 'rgba(255,255,255,0.28)'
-      : 'rgba(255,255,255,0.35)';  // Velvet — navy bg needs stronger contrast
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(splitX, 0, W - splitX, H);
-  ctx.clip();
-  ctx.fillStyle = unplayedAlpha;
-  for (let i = 0; i < data.length; i++) {
-    const x    = (i / data.length) * W;
-    const barH = Math.max(2, (data[i] / 255) * midY * 1.8);
-    ctx.fillRect(x, midY - barH / 2, drawW, barH);
-  }
-  ctx.restore();
+  _drawWaveformBars(ctx, W, H, data, pct);
 }
 
 function _updateWaveformProgress() {
@@ -11500,6 +11570,57 @@ function _startArtXfade(nextIdx, durationMs) {
     ]
   );
 
+  // ── Waveform canvas dissolve ─────────────────────────────────────────────
+  // Outgoing: snapshot current canvas → .xf-wf-out, fade OUT over `durationMs`.
+  // Incoming: if next song's waveform is already cached, paint it onto a
+  //           .xf-wf-in overlay starting at opacity:0 and fade IN — exactly
+  //           in sync with the art/text dissolve. True dissolve like the text.
+  // Live canvas stays hidden (opacity:0); _wfFadeIn() in _doXfadeHandoff
+  // reveals it when it takes over with live waveform data.
+  const wfCanvas  = document.getElementById('waveform-canvas');
+  const progTrack = document.getElementById('prog-track');
+  if (wfCanvas && progTrack) {
+    progTrack.querySelectorAll('.xf-wf-out, .xf-wf-in').forEach(e => e.remove());
+    const cW = wfCanvas.width  || wfCanvas.offsetWidth;
+    const cH = wfCanvas.height || wfCanvas.offsetHeight;
+
+    // Outgoing snapshot — only if we have waveform data to snapshot
+    if (_waveformData && _waveformData.length && cW > 0 && cH > 0) {
+      const snap = document.createElement('canvas');
+      snap.className = 'xf-wf-out';
+      snap.width = cW; snap.height = cH;
+      snap.getContext('2d').drawImage(wfCanvas, 0, 0);
+      snap.style.transition = `opacity ${dur} ease-in-out`;
+      progTrack.appendChild(snap);
+      setTimeout(() => snap.remove(), durationMs + 150);
+    }
+
+    // Hide live canvas immediately
+    wfCanvas.style.transition = 'none';
+    wfCanvas.style.opacity    = '0';
+
+    // Incoming overlay — only if already in cache (pre-fetch warmed it)
+    const nextData = _wfLsGet(s.filepath);
+    if (nextData && nextData.length && cW > 0 && cH > 0) {
+      const inC = document.createElement('canvas');
+      inC.className = 'xf-wf-in';
+      inC.width = cW; inC.height = cH;
+      _drawWaveformBars(inC.getContext('2d'), cW, cH, nextData, 0);
+      inC.style.transition = 'none';
+      inC.style.opacity    = '0';
+      progTrack.appendChild(inC);
+      void progTrack.offsetHeight; // single flush — commits opacity:0 on both overlays
+      // Start outgoing fade-out and incoming fade-in simultaneously
+      progTrack.querySelectorAll('.xf-wf-out').forEach(e => { e.style.opacity = '0'; });
+      inC.style.transition = `opacity ${dur} ease-in-out`;
+      inC.style.opacity    = '1';
+      setTimeout(() => inC.remove(), durationMs + 300);
+    } else {
+      void progTrack.offsetHeight; // flush needed so outgoing starts correctly
+      progTrack.querySelectorAll('.xf-wf-out').forEach(e => { e.style.opacity = '0'; });
+    }
+  }
+
   // ── NP modal (if open) ────────────────────────────────────────────────────
   if (!document.getElementById('np-modal').classList.contains('hidden')) {
     const npArtEl = document.getElementById('np-art');
@@ -11527,13 +11648,16 @@ function _startArtXfade(nextIdx, durationMs) {
 }
 
 function _cancelArtXfade() {
-  document.querySelectorAll('.xf-art, .xf-text-out').forEach(e => e.remove());
+  document.querySelectorAll('.xf-art, .xf-text-out, .xf-wf-out, .xf-wf-in').forEach(e => e.remove());
   ['player-title','player-artist','player-album','np-title','np-artist','np-album'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     el.style.transition = '';
     el.style.opacity = '';
   });
+  // Restore canvas visibility in case a crossfade was cancelled mid-way
+  const wfCanvas = document.getElementById('waveform-canvas');
+  if (wfCanvas) { wfCanvas.style.transition = ''; wfCanvas.style.opacity = ''; }
 }
 
 function _finishArtXfade() {
