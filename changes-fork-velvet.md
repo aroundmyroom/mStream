@@ -1,5 +1,12 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.7.6-velvet — April 2026 — Dice fix + crossfade animation cleanup
+
+### fix: dice faces show through each other after browser update
+- Added `backface-visibility:hidden` to `.dj-dice-face` — browser now correctly renders back-facing faces as invisible per spec
+- Reduced `border-radius` from 10px to 4px to close the corner gap exposed by hiding back faces
+- `_throwDjDice`: cancel all animations via `getAnimations()` instead of only the stored `_djw`/`_djc` refs — orphaned fade-out animations were accumulating and compositing against new throws
+
 ## v6.7.5-velvet — April 2026 — Crossfade volume-spike fix
 
 ### fix: crossfade volume spikes when outgoing track has a recorded fade-out

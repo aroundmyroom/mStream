@@ -11560,9 +11560,11 @@ function _throwDjDice(xfSec) {
   const cube = wrap.querySelector('.dj-dice-cube');
   if (!cube) return;
 
-  // Cancel any in-flight animation
-  try { if (wrap._djw) wrap._djw.cancel(); } catch(_){}
-  try { if (cube._djc) cube._djc.cancel(); } catch(_){}
+  // Cancel ALL in-flight Web Animations (including the fade-out which is not
+  // stored in _djw — it accumulates as fill:'forwards' and causes transparent
+  // faces and jank on the next throw).
+  wrap.getAnimations().forEach(a => { try { a.cancel(); } catch(_){} });
+  cube.getAnimations().forEach(a => { try { a.cancel(); } catch(_){} });
   (wrap._djTimers || []).forEach(t => clearTimeout(t));
   wrap._djTimers = [];
 
@@ -11680,13 +11682,10 @@ function _throwDjDice(xfSec) {
   // ─ Rest then fade out at end of crossfade ──────
   wrap._djTimers.push(setTimeout(() => {
     const fadeMs = Math.max(500, restMs);
-    const out = wrap.animate([
+    wrap.animate([
       { opacity: 1, transform: `translate(${tx},0px) scale(1.0)` },
       { opacity: 0, transform: `translate(${tx},-18px) scale(.55)` },
     ], { duration: fadeMs, delay: Math.max(0, restMs - fadeMs), easing: 'ease-in', fill: 'forwards' });
-    out.onfinish = () => {
-      try { wrap._djw.cancel(); cube._djc.cancel(); } catch(_){}
-    };
   }, flightMs + b1Ms + b2Ms + b3Ms + b4Ms));
 }
 

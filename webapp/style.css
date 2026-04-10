@@ -1076,7 +1076,7 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 /* ── Auto-DJ dice throw ──────────────────────────── */
 #dj-dice{position:fixed;bottom:calc(var(--player) + 10px);right:76px;z-index:310;pointer-events:none;width:64px;height:64px;perspective:200px;opacity:0;}
 .dj-dice-cube{width:64px;height:64px;position:relative;transform-style:preserve-3d;}
-.dj-dice-face{position:absolute;inset:0;border-radius:10px;background:linear-gradient(145deg,var(--primary) 0%,#4c1d95 100%);display:grid;grid-template:repeat(3,1fr)/repeat(3,1fr);padding:9px;box-sizing:border-box;border:2px solid rgba(196,181,253,.3);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 6px 24px rgba(0,0,0,.55);}
+.dj-dice-face{position:absolute;inset:0;border-radius:4px;background:linear-gradient(145deg,var(--primary) 0%,#4c1d95 100%);display:grid;grid-template:repeat(3,1fr)/repeat(3,1fr);padding:9px;box-sizing:border-box;border:2px solid rgba(196,181,253,.3);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 6px 24px rgba(0,0,0,.55);backface-visibility:hidden;-webkit-backface-visibility:hidden;}
 .dj-dice-face span{border-radius:50%;background:#e9d5ff;box-shadow:0 1px 4px rgba(0,0,0,.6);}
 .dj-face-label{position:absolute;bottom:4px;left:0;right:0;text-align:center;font-size:6.5px;font-style:normal;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.92);pointer-events:none;line-height:1;}
 :root.light .dj-face-label{color:rgba(12,12,26,.82);}
