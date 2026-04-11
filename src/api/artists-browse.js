@@ -497,6 +497,18 @@ function hydrationStatusSnapshot() {
   };
 }
 
+function seedHydrationFromMissing(limit = 500) {
+  const rows = db.getArtistImageAudit('missing', Math.max(1, Math.min(2000, Number(limit) || 500)));
+  let enqueued = 0;
+  for (const a of rows) {
+    const before = _imgHydrateQueue.length;
+    _enqueueHydration(a.artistKey, a.canonicalName);
+    if (_imgHydrateQueue.length > before) enqueued += 1;
+  }
+  _drainHydrationQueue().catch(() => {});
+  return enqueued;
+}
+
 // ── Allowed vpaths helper (reuse pattern from rest of API) ────────────────────
 
 function getAllowedVpaths(req) {
@@ -756,6 +768,21 @@ export function setup(mstream) {
     try {
       const counts = db.getArtistImageAuditCounts();
       res.json({ ...hydrationStatusSnapshot(), counts });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── POST /api/v1/admin/artists/hydration-seed ─────────────────────────────
+  mstream.post('/api/v1/admin/artists/hydration-seed', (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const schema = Joi.object({ limit: Joi.number().integer().min(1).max(2000).default(500) });
+    try { joiValidate(schema, req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
+
+    try {
+      const enqueued = seedHydrationFromMissing(req.body?.limit || 500);
+      const counts = db.getArtistImageAuditCounts();
+      res.json({ ok: true, enqueued, ...hydrationStatusSnapshot(), counts });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

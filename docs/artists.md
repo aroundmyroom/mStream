@@ -91,6 +91,7 @@ A naive approach would JOIN `files` with a normalisation function on every reque
 | POST | `/api/v1/admin/artists/rebuild-index` | admin | Trigger an immediate index rebuild without a full scan |
 | GET | `/api/v1/admin/artists/image-audit?kind=missing|wrong` | admin | List artists needing image fixes |
 | GET | `/api/v1/admin/artists/hydration-status` | admin | Live hydration queue status, counters, delay profile, and Discogs readiness |
+| POST | `/api/v1/admin/artists/hydration-seed` | admin | Enqueue missing artists on demand (used by the Queue next 500 action) |
 | GET | `/api/v1/admin/artists/discogs-candidates?artistKey=...` | admin | Fetch Discogs artist image candidates |
 | POST | `/api/v1/admin/artists/apply-image` | admin | Apply selected Discogs/custom image URL to artist |
 
@@ -157,6 +158,7 @@ For admin users, artist cards/rows include a flag action to mark an artist image
 - Hydration runs as a throttled background queue with adaptive delays (`~1.4s` success, `~2.2s` no-image/skip, `~4s` on errors) and a queue cap (800) to protect upstream services.
 - When an upstream lookup yields no usable image, the system records the fetch attempt (`last_fetched`) so missing artists are not repeatedly retried and hammered.
 - Admin can monitor live queue/rate/error counters via `GET /api/v1/admin/artists/hydration-status` (used by Admin → Artists status panel).
+- Admin can force-start hydration on demand with `POST /api/v1/admin/artists/hydration-seed` (wired to **Queue next 500** in Admin → Artists).
 
 ### Admin image repair workflow
 

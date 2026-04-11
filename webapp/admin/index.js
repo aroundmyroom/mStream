@@ -4432,6 +4432,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         delayMs: { ok: 0, noImage: 0, error: 0 },
         discogs: { enabled: false, hasApiCredentials: false },
       },
+      seedPending: false,
       pollTimer: null,
     };
   },
@@ -4501,6 +4502,24 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         this.loading = false;
       }
     },
+    async seedHydration(limit = 500) {
+      if (this.seedPending) return;
+      this.seedPending = true;
+      try {
+        const res = await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/admin/artists/hydration-seed`,
+          data: { limit }
+        });
+        this.hydration = res.data || this.hydration;
+        this.counts = res.data?.counts || this.counts;
+        iziToast.success({ title: `Queued ${res.data?.enqueued || 0} artists`, position: 'topCenter', timeout: 1800 });
+      } catch (e) {
+        iziToast.error({ title: 'Failed to queue hydration', message: e.message || '', position: 'topCenter', timeout: 2500 });
+      } finally {
+        this.seedPending = false;
+      }
+    },
     async selectArtist(row) {
       this.selected = row;
       this.candidates = [];
@@ -4565,9 +4584,10 @@ const artistsAdminView = Vue.component('artists-admin-view', {
           <span class="card-title">Artist Images</span>
           <div style="font-size:.9rem;color:var(--t2);margin-top:2px;">Review missing or wrong artist portraits and fix them with Discogs suggestions or a direct link. Background fetch is rate-limited to protect upstream services.</div>
         </div>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn-flat" @click="load('missing')" :style="kind==='missing' ? 'border-color:var(--primary);color:var(--primary);' : ''">Missing ({{ counts.missing || 0 }})</button>
           <button class="btn-flat" @click="load('wrong')" :style="kind==='wrong' ? 'border-color:var(--warn,#b45309);color:var(--warn,#b45309);' : ''">Wrong ({{ counts.wrong || 0 }})</button>
+          <button class="btn-flat" @click="seedHydration(500)" :disabled="seedPending">{{ seedPending ? 'Queueing...' : 'Queue next 500' }}</button>
           <button class="btn" @click="load(kind)" :disabled="loading">{{ loading ? 'Refreshing...' : 'Refresh' }}</button>
         </div>
       </div>
@@ -4579,6 +4599,9 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         <div style="font-size:.82rem;color:var(--t2);">Success / no-image / fail: <b>{{ hydration.stats.succeeded || 0 }}</b> / {{ hydration.stats.noImage || 0 }} / {{ hydration.stats.failed || 0 }}</div>
         <div style="font-size:.82rem;color:var(--t2);">Dropped (queue cap): <b>{{ hydration.stats.dropped || 0 }}</b></div>
         <div style="font-size:.82rem;color:var(--t2);">Discogs: <b :style="discogsReady ? 'color:var(--ok,#16a34a);' : 'color:var(--warn,#b45309);'">{{ discogsReady ? 'ready' : 'disabled or missing API keys' }}</b></div>
+      </div>
+      <div v-if="!hydration.running && (hydration.queueLength || 0) === 0 && (counts.missing || 0) > 0" style="margin-top:8px;font-size:.82rem;color:var(--t2);">
+        Background hydration is idle because no artists are queued. Click <b>Queue next 500</b> to start processing missing artist images.
       </div>
     </div>
 

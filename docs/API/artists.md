@@ -183,3 +183,26 @@ Response:
   "counts": { "missing": 18060, "wrong": 1 }
 }
 ```
+
+### POST /api/v1/admin/artists/hydration-seed
+
+Queues missing artists for background hydration on demand.
+
+Request:
+
+```json
+{ "limit": 500 }
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "enqueued": 200,
+  "running": true,
+  "queueLength": 200,
+  "queueLimit": 800,
+  "counts": { "missing": 18060, "wrong": 1 }
+}
+```

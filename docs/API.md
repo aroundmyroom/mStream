@@ -122,7 +122,7 @@ See [docs/your-stats.md](your-stats.md) for full schema and field reference.
 
 [/api/v1/artists/mark-image-wrong](API/artists.md#post-apiv1artistsmark-image-wrong) *(admin)*
 
-[/api/v1/admin/artists/rebuild-index, /admin/artists/image-audit, /admin/artists/discogs-candidates, /admin/artists/apply-image, /admin/artists/hydration-status](API/artists.md#admin-artist-image-and-index-management) *(admin)*
+[/api/v1/admin/artists/rebuild-index, /admin/artists/image-audit, /admin/artists/discogs-candidates, /admin/artists/apply-image, /admin/artists/hydration-status, /admin/artists/hydration-seed](API/artists.md#admin-artist-image-and-index-management) *(admin)*
 
 ## Last.fm
 

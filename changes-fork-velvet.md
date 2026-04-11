@@ -1,5 +1,17 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.8.1-velvet — April 2026
+
+### fix: Artist image hydration can be idle with no visible progress after restart
+- Added explicit admin trigger endpoint `POST /api/v1/admin/artists/hydration-seed` to enqueue missing artists on demand.
+- Added **Queue next 500** action in **Admin → Artists** to start background hydration immediately.
+- Added idle-state guidance in Admin UI when queue is empty but missing artists still exist.
+- This prevents the confusing state where status shows Discogs as ready but hydration remains idle because nothing has been queued yet.
+
+### fix: improve observability of background artist hydration startup
+- Admin status panel now clearly distinguishes idle-with-empty-queue from active processing.
+- Seeding response returns updated queue/running state so the UI can reflect activity immediately.
+
 ## v6.8.0-velvet — April 2026
 
 ### feat: artist image moderation workflow (missing/wrong queues + Discogs fixes)
