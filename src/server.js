@@ -40,6 +40,7 @@ import * as podcastApi from './api/podcasts.js';
 import * as smartPlaylistApi from './api/smart-playlists.js';
 import * as ytdlApi from './api/ytdl.js';
 import * as albumsBrowseApi from './api/albums-browse.js';
+import * as artistsBrowseApi from './api/artists-browse.js';
 import * as wrappedApi from './api/wrapped.js';
 import * as serverPlaybackApi from './api/server-playback.js';
 import WebError from './util/web-error.js';
@@ -202,6 +203,7 @@ export async function serveIt(configFile) {
   smartPlaylistApi.setup(mstream);
   ytdlApi.setup(mstream);
   albumsBrowseApi.setup(mstream);
+  artistsBrowseApi.setup(mstream);
   wrappedApi.setup(mstream);
   serverPlaybackApi.setup(mstream);
   // Kick off ffmpeg auto-download early so it's ready for radio-recorder,

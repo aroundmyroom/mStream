@@ -116,6 +116,14 @@ See [docs/your-stats.md](your-stats.md) for full schema and field reference.
 
 [/db/waveform](API/db_waveform.md) — waveform amplitude array for the scrubber *(GitHub Copilot, 2026-03-05)*
 
+## Artist Library *(v6.8.0-velvet)*
+
+[/api/v1/artists/home, /artists/letter, /artists/search, /artists/profile, /artists/images/:filename](API/artists.md)
+
+[/api/v1/artists/mark-image-wrong](API/artists.md#post-apiv1artistsmark-image-wrong) *(admin)*
+
+[/api/v1/admin/artists/rebuild-index, /admin/artists/image-audit, /admin/artists/discogs-candidates, /admin/artists/apply-image, /admin/artists/hydration-status](API/artists.md#admin-artist-image-and-index-management) *(admin)*
+
 ## Last.fm
 
 [Last.fm integration — scrobbling, connect/disconnect, similar artists, admin key config](API/lastfm.md) *(GitHub Copilot, 2026-03-05)*

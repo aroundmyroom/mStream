@@ -23,6 +23,19 @@ import * as scrobblerApi from './scrobbler.js';
 import { mergeGenreRows } from '../util/genre-merge.js';
 import * as serverPlaybackApi from './server-playback.js';
 
+let _artistRebuildState = {
+  running: false,
+  startedAt: null,
+  finishedAt: null,
+  lastError: null,
+};
+
+function _errMsg(err) {
+  if (err && typeof err.message === 'string' && err.message) return err.message;
+  if (typeof err === 'string' && err) return err;
+  try { return JSON.stringify(err); } catch (_e) { return 'Unknown error'; }
+}
+
 export function setup(mstream) {
   mstream.all('/api/v1/admin/{*path}', (req, res, next) => {
     if (config.program.lockAdmin === true) { return res.status(405).json({ error: 'Admin API Disabled' }); }
@@ -1200,6 +1213,41 @@ export function setup(mstream) {
     if (value.toMs < value.fromMs) return res.status(400).json({ error: 'toMs must be >= fromMs' });
     const deleted = db.purgePlayEvents(value.userId, value.fromMs, value.toMs);
     res.json({ ok: true, deleted });
+  });
+
+  // GET /api/v1/admin/artists/rebuild-status
+  mstream.get('/api/v1/admin/artists/rebuild-status', (req, res) => {
+    res.json(_artistRebuildState);
+  });
+
+  // POST /api/v1/admin/artists/rebuild-index
+  // Starts a background rebuild and returns immediately so the UI can show
+  // a loader/poll status without reverse-proxy timeouts.
+  mstream.post('/api/v1/admin/artists/rebuild-index', (req, res) => {
+    if (_artistRebuildState.running) {
+      return res.status(409).json({ ok: false, running: true, error: 'Artist index rebuild already running' });
+    }
+
+    _artistRebuildState = {
+      running: true,
+      startedAt: Date.now(),
+      finishedAt: null,
+      lastError: null,
+    };
+    res.json({ ok: true, started: true });
+
+    setImmediate(() => {
+      try {
+        db.rebuildArtistIndex();
+      } catch (err) {
+        const msg = _errMsg(err);
+        _artistRebuildState.lastError = msg;
+        winston.error(`Artist index rebuild failed: ${msg}`);
+      } finally {
+        _artistRebuildState.running = false;
+        _artistRebuildState.finishedAt = Date.now();
+      }
+    });
   });
 
   // POST /api/v1/admin/wrapped/backfill-folder-metadata

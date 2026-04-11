@@ -557,8 +557,20 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .artist-row{display:flex;align-items:center;gap:14px;padding:9px 10px;border-radius:var(--r);cursor:pointer;transition:background .14s;}
 .artist-row:hover{background:var(--hover);}
 .artist-av{width:46px;height:46px;border-radius:50%;background:var(--raised);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:var(--t2);flex-shrink:0;overflow:hidden;}
+.artist-av{position:relative;}
+.artist-av-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;z-index:2;}
+.artist-av-fallback{position:relative;z-index:1;}
+.artist-wrong-btn{margin-left:auto;flex-shrink:0;width:24px;height:24px;border-radius:999px;border:1px solid var(--border2);background:var(--raised);color:var(--t2);display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;transition:background .12s,color .12s,border-color .12s,opacity .12s;}
+.artist-wrong-btn:hover{background:var(--warn,#b45309);border-color:var(--warn,#b45309);color:#fff;}
 .artist-name{font-size:14px;font-weight:600;}
 .artist-var{font-size:11px;font-weight:500;color:var(--t3);margin-left:3px;}
+.artist-col{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.artist-sub{font-size:11px;color:var(--t3);}
+/* Artist home page — no drag grip since shelves aren't reorderable here */
+.artist-home-view .home-shelf{margin-bottom:24px;}
+.artist-home-view.artist-filtering .home-shelf{display:none;}
+.art-az-block{margin-bottom:16px;padding-bottom:4px;}
+.art-az-strip .az-btn{min-width:28px;}
 
 /* A-Z index strip */
 .az-strip{display:flex;flex-wrap:nowrap;gap:3px;padding:4px 0 12px;}
@@ -2032,9 +2044,15 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 /* ── art card (radio, podcast, songs) ── */
 .hc{width:100%;cursor:pointer;border-radius:var(--r);overflow:hidden;background:var(--raised);border:1px solid var(--border);position:relative;display:flex;flex-direction:column;transition:background .12s,box-shadow .12s;}
 .hc:hover{background:var(--hover);box-shadow:0 0 0 1px var(--border2);}
-.hc-art{width:100%;aspect-ratio:1;flex-shrink:0;background:var(--surface);display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--t2);}
+.hc-art{width:100%;aspect-ratio:1;flex-shrink:0;background:var(--surface);display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--t2);position:relative;}
 .hc-art img{width:100%;height:100%;object-fit:cover;display:block;}
 .hc-art>svg{display:block;width:100%;height:auto;}
+.artist-home-ph{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0));}
+.artist-home-ph-head{width:28%;aspect-ratio:1;border-radius:50%;background:color-mix(in srgb, var(--t2) 55%, transparent);}
+.artist-home-ph-body{width:52%;height:24%;border-radius:999px 999px 12px 12px;background:color-mix(in srgb, var(--t2) 45%, transparent);}
+.artist-home-img{position:absolute;inset:0;z-index:2;}
+.artist-home-card .artist-wrong-btn{position:absolute;top:6px;right:6px;z-index:5;backdrop-filter:blur(2px);opacity:.45;width:20px;height:20px;font-size:10px;}
+.artist-home-card:hover .artist-wrong-btn{opacity:.95;}
 .hc-info{padding:5px 8px 8px;min-width:0;}
 .hc-title{font-size:.72rem;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;}
 .hc-sub{font-size:.65rem;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}

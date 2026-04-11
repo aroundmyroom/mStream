@@ -2178,6 +2178,7 @@ const dbView = Vue.component('db-view', {
       isPullingShared: false,
       scanProgress: [],
       spPollTimer: null,
+      rebuildingArtists: false,
     };
   },
   mounted: async function() {
@@ -2254,6 +2255,11 @@ const dbView = Vue.component('db-view', {
                 <a v-on:click="scanDB" class="btn">Start A Scan</a>
                 <a v-if="scanProgress.length > 0" v-on:click="stopScan" class="btn red" style="margin-left:.5rem">Stop Scanning</a>
                 <a v-on:click="pullStats" class="btn">Pull Stats</a>
+                <a class="btn" :disabled="rebuildingArtists" v-on:click="doRebuildArtists" style="margin-left:.5rem">{{ rebuildingArtists ? 'Rebuilding…' : 'Rebuild Artist Index' }}</a>
+                <span v-if="rebuildingArtists" style="display:inline-flex;align-items:center;gap:.4rem;margin-left:.7rem;color:#666;font-size:.92rem;vertical-align:middle;">
+                  <svg class="spinner" width="18px" height="18px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
+                  Rebuilding artist index…
+                </span>
                 <div v-if="scanProgress.length > 0" class="sp-container">
                   <div v-for="sp in scanProgress" :key="sp.scanId" class="sp-card">
                     <div class="sp-header">
@@ -2459,6 +2465,59 @@ const dbView = Vue.component('db-view', {
       </div>
     </div>`,
   methods: {
+    async doRebuildArtists() {
+      this.rebuildingArtists = true;
+      try {
+        // Start rebuild (or get 409 if one is already running) then poll status.
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/artists/rebuild-index` });
+
+        let done = false;
+        for (let i = 0; i < 600; i++) { // up to 10 minutes
+          await new Promise(r => setTimeout(r, 1000));
+          const st = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/artists/rebuild-status` });
+          if (st.data && st.data.running === false) {
+            done = true;
+            if (st.data.lastError) {
+              iziToast.error({ title: 'Rebuild failed', message: st.data.lastError, position: 'topCenter', timeout: 7000 });
+            } else {
+              iziToast.success({ title: 'Artist index rebuilt', message: 'Reload the Artist Library to see updated groups.', position: 'topCenter', timeout: 4000 });
+            }
+            break;
+          }
+        }
+        if (!done) {
+          iziToast.error({ title: 'Rebuild timed out', message: 'The rebuild is still running in the background.', position: 'topCenter', timeout: 7000 });
+        }
+      } catch (e) {
+        const msg = (e && e.response && e.response.data && e.response.data.error)
+          ? e.response.data.error
+          : (e && e.message ? e.message : 'Unknown error');
+        // If rebuild is already running, keep loader visible and poll anyway.
+        if (e && e.response && e.response.status === 409) {
+          try {
+            let done = false;
+            for (let i = 0; i < 600; i++) {
+              await new Promise(r => setTimeout(r, 1000));
+              const st = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/artists/rebuild-status` });
+              if (st.data && st.data.running === false) {
+                done = true;
+                if (st.data.lastError) iziToast.error({ title: 'Rebuild failed', message: st.data.lastError, position: 'topCenter', timeout: 7000 });
+                else iziToast.success({ title: 'Artist index rebuilt', message: 'Reload the Artist Library to see updated groups.', position: 'topCenter', timeout: 4000 });
+                break;
+              }
+            }
+            if (!done) iziToast.error({ title: 'Rebuild timed out', message: 'The rebuild is still running in the background.', position: 'topCenter', timeout: 7000 });
+          } catch (pollErr) {
+            const pmsg = (pollErr && pollErr.message) ? pollErr.message : msg;
+            iziToast.error({ title: 'Rebuild status check failed', message: pmsg, position: 'topCenter', timeout: 7000 });
+          }
+        } else {
+          iziToast.error({ title: 'Rebuild failed', message: msg, position: 'topCenter', timeout: 7000 });
+        }
+      } finally {
+        this.rebuildingArtists = false;
+      }
+    },
     pollProgress: async function() {
       try {
         const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/db/scan/progress` });
@@ -4352,6 +4411,236 @@ const genreGroupsView = Vue.component('genre-groups-view', {
   }
 });
 
+const artistsAdminView = Vue.component('artists-admin-view', {
+  data() {
+    return {
+      loading: false,
+      kind: 'missing',
+      counts: { missing: 0, wrong: 0 },
+      sessionStartMissing: null,
+      artists: [],
+      selected: null,
+      candidateLoading: false,
+      candidates: [],
+      customImageUrl: '',
+      applying: false,
+      hydration: {
+        running: false,
+        queueLength: 0,
+        queueLimit: 0,
+        stats: { startedAt: 0, enqueued: 0, dropped: 0, processed: 0, succeeded: 0, noImage: 0, failed: 0 },
+        delayMs: { ok: 0, noImage: 0, error: 0 },
+        discogs: { enabled: false, hasApiCredentials: false },
+      },
+      pollTimer: null,
+    };
+  },
+  mounted() {
+    this.load('missing');
+    this.startPolling();
+  },
+  beforeDestroy() {
+    this.stopPolling();
+  },
+  computed: {
+    discogsReady() {
+      return !!(this.hydration.discogs && this.hydration.discogs.enabled && this.hydration.discogs.hasApiCredentials);
+    },
+    hydratedThisSession() {
+      if (!Number.isFinite(this.sessionStartMissing)) return null;
+      return Math.max(0, this.sessionStartMissing - (this.counts.missing || 0));
+    },
+  },
+  methods: {
+    startPolling() {
+      this.stopPolling();
+      this.pollTimer = setInterval(() => {
+        this.loadHydrationStatus();
+      }, 5000);
+      this.loadHydrationStatus();
+    },
+    stopPolling() {
+      if (this.pollTimer) {
+        clearInterval(this.pollTimer);
+        this.pollTimer = null;
+      }
+    },
+    async loadHydrationStatus() {
+      try {
+        const res = await API.axios({
+          method: 'GET',
+          url: `${API.url()}/api/v1/admin/artists/hydration-status`
+        });
+        this.hydration = res.data || this.hydration;
+        const c = res.data?.counts || null;
+        if (c) {
+          this.counts = c;
+          if (!Number.isFinite(this.sessionStartMissing)) this.sessionStartMissing = c.missing || 0;
+        }
+      } catch (_e) {
+        // Non-fatal polling failure; keep existing status UI.
+      }
+    },
+    async load(kind = this.kind) {
+      this.loading = true;
+      this.kind = kind;
+      this.selected = null;
+      this.candidates = [];
+      try {
+        const res = await API.axios({
+          method: 'GET',
+          url: `${API.url()}/api/v1/admin/artists/image-audit`,
+          params: { kind, limit: 300 }
+        });
+        this.counts = res.data.counts || { missing: 0, wrong: 0 };
+        if (!Number.isFinite(this.sessionStartMissing)) this.sessionStartMissing = this.counts.missing || 0;
+        this.artists = res.data.artists || [];
+      } catch (e) {
+        iziToast.error({ title: 'Failed to load artists image audit', message: e.message || '', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.loading = false;
+      }
+    },
+    async selectArtist(row) {
+      this.selected = row;
+      this.candidates = [];
+      this.customImageUrl = '';
+      if (!this.discogsReady) {
+        this.candidateLoading = false;
+        return;
+      }
+      this.candidateLoading = true;
+      try {
+        const res = await API.axios({
+          method: 'GET',
+          url: `${API.url()}/api/v1/admin/artists/discogs-candidates`,
+          params: { artistKey: row.artistKey }
+        });
+        this.candidates = res.data.candidates || [];
+      } catch (e) {
+        iziToast.error({ title: 'Failed to load Discogs candidates', message: e.message || '', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.candidateLoading = false;
+      }
+    },
+    async applyImage(url, source = 'discogs') {
+      if (!this.selected || !url || this.applying) return;
+      this.applying = true;
+      try {
+        await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/admin/artists/apply-image`,
+          data: { artistKey: this.selected.artistKey, imageUrl: url, source }
+        });
+        iziToast.success({ title: 'Artist image updated', position: 'topCenter', timeout: 1800 });
+        await this.load(this.kind);
+      } catch (e) {
+        iziToast.error({ title: 'Failed to set artist image', message: e.message || '', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.applying = false;
+      }
+    },
+    async clearWrong(row) {
+      try {
+        await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/artists/mark-image-wrong`,
+          data: { artistKey: row.artistKey, wrong: false }
+        });
+        iziToast.success({ title: 'Removed wrong-image flag', position: 'topCenter', timeout: 1500 });
+        await this.load(this.kind);
+      } catch (e) {
+        iziToast.error({ title: 'Failed to clear flag', message: e.message || '', position: 'topCenter', timeout: 2500 });
+      }
+    },
+    imgSrc(imageFile) {
+      return `${API.url()}/api/v1/artists/images/${encodeURIComponent(imageFile)}`;
+    }
+  },
+  template: `
+  <div>
+    <div class="card z-depth-1" style="padding:18px 20px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <div>
+          <span class="card-title">Artist Images</span>
+          <div style="font-size:.9rem;color:var(--t2);margin-top:2px;">Review missing or wrong artist portraits and fix them with Discogs suggestions or a direct link. Background fetch is rate-limited to protect upstream services.</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn-flat" @click="load('missing')" :style="kind==='missing' ? 'border-color:var(--primary);color:var(--primary);' : ''">Missing ({{ counts.missing || 0 }})</button>
+          <button class="btn-flat" @click="load('wrong')" :style="kind==='wrong' ? 'border-color:var(--warn,#b45309);color:var(--warn,#b45309);' : ''">Wrong ({{ counts.wrong || 0 }})</button>
+          <button class="btn" @click="load(kind)" :disabled="loading">{{ loading ? 'Refreshing...' : 'Refresh' }}</button>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;">
+        <div style="font-size:.82rem;color:var(--t2);">Hydration: <b :style="hydration.running ? 'color:var(--ok,#16a34a);' : 'color:var(--t2);'">{{ hydration.running ? 'running' : 'idle' }}</b></div>
+        <div style="font-size:.82rem;color:var(--t2);">Queue: <b>{{ hydration.queueLength || 0 }}</b> / {{ hydration.queueLimit || 0 }}</div>
+        <div style="font-size:.82rem;color:var(--t2);">Session fixed: <b>{{ hydratedThisSession == null ? 0 : hydratedThisSession }}</b></div>
+        <div style="font-size:.82rem;color:var(--t2);">Success / no-image / fail: <b>{{ hydration.stats.succeeded || 0 }}</b> / {{ hydration.stats.noImage || 0 }} / {{ hydration.stats.failed || 0 }}</div>
+        <div style="font-size:.82rem;color:var(--t2);">Dropped (queue cap): <b>{{ hydration.stats.dropped || 0 }}</b></div>
+        <div style="font-size:.82rem;color:var(--t2);">Discogs: <b :style="discogsReady ? 'color:var(--ok,#16a34a);' : 'color:var(--warn,#b45309);'">{{ discogsReady ? 'ready' : 'disabled or missing API keys' }}</b></div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:minmax(340px,1fr) minmax(360px,1fr);gap:12px;margin-top:12px;align-items:start;">
+      <div class="card z-depth-1" style="padding:10px 0;">
+        <div style="padding:0 14px 8px;font-size:.86rem;color:var(--t2);">{{ artists.length }} artist{{ artists.length === 1 ? '' : 's' }} listed</div>
+        <div style="max-height:64vh;overflow:auto;">
+          <div v-if="!artists.length && !loading" style="padding:12px 14px;color:var(--t2);">No artists in this list.</div>
+          <button v-for="a in artists" :key="a.artistKey" @click="selectArtist(a)" class="btn-flat" style="width:100%;text-align:left;display:flex;align-items:center;gap:10px;border-radius:0;border-left:none;border-right:none;border-top:none;padding:9px 14px;">
+            <img v-if="a.imageFile" :src="imgSrc(a.imageFile)" alt="" style="width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border);" />
+            <div v-else style="width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--raised);color:var(--t2);font-weight:700;flex-shrink:0;">{{ (a.canonicalName||'?').replace(/^The\s+/i,'').charAt(0).toUpperCase() }}</div>
+            <div style="min-width:0;flex:1;">
+              <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ a.canonicalName }}</div>
+              <div style="font-size:.78rem;color:var(--t2);">{{ a.songCount || 0 }} songs<span v-if="a.imageSource"> • {{ a.imageSource }}</span></div>
+            </div>
+            <span v-if="a.wrongFlag" style="font-size:.72rem;padding:3px 7px;border-radius:999px;background:rgba(180,83,9,.18);color:var(--warn,#b45309);">wrong</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="card z-depth-1" style="padding:14px;min-height:220px;">
+        <div v-if="!selected" style="color:var(--t2);">Select an artist from the left to repair image mapping.</div>
+        <div v-else>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+            <div>
+              <div style="font-size:1rem;font-weight:700;">{{ selected.canonicalName }}</div>
+              <div style="font-size:.82rem;color:var(--t2);">{{ selected.songCount || 0 }} songs</div>
+            </div>
+            <button v-if="selected.wrongFlag" class="btn-flat" @click="clearWrong(selected)">Clear wrong flag</button>
+          </div>
+
+          <div style="margin-bottom:12px;">
+            <div style="font-size:.82rem;color:var(--t2);margin-bottom:6px;">Apply from URL</div>
+            <div style="display:flex;gap:8px;">
+              <input v-model="customImageUrl" type="url" placeholder="https://..." style="flex:1;" />
+              <button class="btn" @click="applyImage(customImageUrl, 'custom')" :disabled="!customImageUrl || applying">Apply</button>
+            </div>
+          </div>
+
+          <div style="font-size:.82rem;color:var(--t2);margin-bottom:8px;">Discogs suggestions</div>
+          <div v-if="!discogsReady" style="padding:8px 0;color:var(--warn,#b45309);">Discogs suggestions are disabled. Enable Discogs and set API key/secret in Admin → Discogs.</div>
+          <div v-else-if="candidateLoading" style="padding:8px 0;color:var(--t2);">Loading Discogs candidates...</div>
+          <div v-else-if="!candidates.length" style="padding:8px 0;color:var(--t2);">No Discogs candidates found for this artist.</div>
+          <div v-else style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;">
+            <div v-for="c in candidates" :key="c.imageUrl" style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--surface);">
+              <img :src="c.thumbUrl || c.imageUrl" alt="" style="width:100%;aspect-ratio:1;object-fit:cover;display:block;" />
+              <div style="padding:8px;">
+                <div style="font-size:.76rem;font-weight:600;line-height:1.3;max-height:2.2em;overflow:hidden;">{{ c.title }}</div>
+                <div style="display:flex;gap:6px;margin-top:7px;">
+                  <button class="btn btn-small" style="flex:1;" @click="applyImage(c.imageUrl, 'discogs')" :disabled="applying || !discogsReady">Use</button>
+                  <a v-if="c.sourceUrl" class="btn-flat btn-small" :href="c.sourceUrl" target="_blank" rel="noopener" style="padding:0 8px;">View</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  `
+});
+
 const vm = new Vue({
   el: '#content',
   components: {
@@ -4375,6 +4664,7 @@ const vm = new Vue({
     'lyrics-view': lyricsView,
     'radio-view': radioView,
     'genre-groups-view': genreGroupsView,
+    'artists-admin-view': artistsAdminView,
   },
   data: {
     currentViewMain: 'folders-view',

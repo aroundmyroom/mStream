@@ -2,6 +2,7 @@ import path from 'path';
 import { mkdirSync } from 'fs';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'crypto';
+import { buildArtistGroups } from '../util/artist-normalize.js';
 
 // ── Subsonic ID helpers ───────────────────────────────────────────────────────
 // Artist ID = MD5(normalised artist name).slice(0,16)
@@ -343,8 +344,15 @@ export function init(dbDirectory) {
     content='artists_normalized', content_rowid='id',
     tokenize='trigram'
   )`);
-  // Migration: add vpaths_json column if missing (introduced after initial release)
-  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN vpaths_json TEXT DEFAULT '[]'"); } catch (_e) { /* already exists */ }
+  // Migrations: add columns introduced after initial release
+  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN vpaths_json    TEXT DEFAULT '[]'"); } catch (_e) { /* already exists */ }
+  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN bio           TEXT"); }             catch (_e) { /* already exists */ }
+  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN image_file    TEXT"); }             catch (_e) { /* already exists */ }
+  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN image_source  TEXT"); }             catch (_e) { /* already exists */ }
+  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN last_fetched  INTEGER"); }          catch (_e) { /* already exists */ }
+  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN image_flag_wrong INTEGER DEFAULT 0"); } catch (_e) { /* already exists */ }
+  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN name_override INTEGER DEFAULT 0"); } catch (_e) { /* already exists */ }
+  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN song_count    INTEGER DEFAULT 0"); } catch (_e) { /* already exists */ }
 
   // ── Cache hot-path prepared statements ───────────────────────────────────
   // These functions are called once per file during scans (up to 123K times).
@@ -452,36 +460,74 @@ export function rebuildFolderIndex() {
 // ── Rebuild normalized artist index ──────────────────────────────────────
 // Called after every scan completes. Groups all raw artist tag values by their
 // normalized form and stores the grouping in artists_normalized.
+// Uses the smart buildArtistGroups() algorithm that:
+//   • merges zero-padded duplicates ("01 DJ Deep" → "DJ Deep") when a clean
+//     version exists with ≥50% as many songs
+//   • preserves real digit-named artists ("2 Unlimited", "808 State", "50 Cent")
+//   • preserves admin-set name_override, bio, image_file across rebuilds
 export function rebuildArtistIndex() {
-  // Fetch all distinct (artist, vpath) pairs in one pass
-  const rows = db.prepare(
-    "SELECT DISTINCT artist, vpath FROM files WHERE artist IS NOT NULL AND artist != ''"
+  // Fetch all distinct (artist, vpath, count) in one pass
+  const rawRows = db.prepare(
+    "SELECT artist, vpath, COUNT(*) AS count FROM files WHERE artist IS NOT NULL AND artist != '' GROUP BY artist, vpath"
   ).all();
 
-  // Group by normalized key, collecting raw variants and vpaths
-  const groupMap = new Map(); // normalizedKey → { clean, variantSet, vpathSet }
-  for (const row of rows) {
-    const key   = _normalizeArtist(row.artist);
-    const clean = _cleanArtist(row.artist);
-    if (!groupMap.has(key)) {
-      groupMap.set(key, { clean, variantSet: new Set([row.artist]), vpathSet: new Set([row.vpath]) });
-    } else {
-      const g = groupMap.get(key);
-      g.variantSet.add(row.artist);
-      g.vpathSet.add(row.vpath);
-      // Prefer a clean version that starts with a real letter for display
-      if (!/^[a-zA-Z]/i.test(g.clean) && /^[a-zA-Z]/i.test(clean)) {
-        g.clean = clean;
-      }
-    }
+  // Build per-artist count totals (sum across vpaths) + vpath sets
+  const countMap = new Map(); // artist → total count
+  const vpathMap = new Map(); // artist → Set of vpaths
+  for (const row of rawRows) {
+    countMap.set(row.artist, (countMap.get(row.artist) || 0) + row.count);
+    if (!vpathMap.has(row.artist)) vpathMap.set(row.artist, new Set());
+    vpathMap.get(row.artist).add(row.vpath);
   }
+
+  // Run smart normalization — this is the core deduplication algorithm
+  const countRows = [...countMap.entries()].map(([artist, count]) => ({ artist, count }));
+  const groups = buildArtistGroups(countRows); // Map<artistKey, { canonicalName, rawVariants[] }>
+
+  // Precompute song_count per group from countMap (no extra DB query needed)
+  function groupSongCount(group) {
+    return group.rawVariants.reduce((sum, v) => sum + (countMap.get(v.name) || 0), 0);
+  }
+
+  // Load existing rows to preserve bio / image / name_override across rebuild
+  const existing = db.prepare('SELECT artist_clean, bio, image_file, image_source, last_fetched, image_flag_wrong, name_override FROM artists_normalized').all();
+  const existingMap = new Map(existing.map(r => [r.artist_clean.toLowerCase(), r]));
 
   db.exec('BEGIN');
   db.exec('DELETE FROM artists_normalized');
-  const ins = db.prepare('INSERT INTO artists_normalized (artist_clean, artist_raw_variants, vpaths_json) VALUES (?, ?, ?)');
-  for (const g of groupMap.values()) {
-    ins.run(g.clean, JSON.stringify([...g.variantSet]), JSON.stringify([...g.vpathSet]));
+  const ins = db.prepare(`
+    INSERT INTO artists_normalized
+      (artist_clean, artist_raw_variants, vpaths_json, bio, image_file, image_source, last_fetched, image_flag_wrong, name_override, song_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  for (const [, group] of groups) {
+    // Collect all vpaths for this group's raw variants
+    const vpathSet = new Set();
+    for (const v of group.rawVariants) {
+      const vps = vpathMap.get(v.name);
+      if (vps) for (const vp of vps) vpathSet.add(vp);
+    }
+
+    // Determine display name — respect name_override if admin set it
+    const prevKey = group.canonicalName.toLowerCase();
+    const prev = existingMap.get(prevKey);
+    const displayName = (prev && prev.name_override) ? prev.artist_clean : group.canonicalName;
+
+    ins.run(
+      displayName,
+      JSON.stringify(group.rawVariants.map(v => v.name)),
+      JSON.stringify([...vpathSet]),
+      prev ? (prev.bio || null) : null,
+      prev ? (prev.image_file || null) : null,
+      prev ? (prev.image_source || null) : null,
+      prev ? (prev.last_fetched || null) : null,
+      prev ? (prev.image_flag_wrong || 0) : 0,
+      prev ? (prev.name_override || 0) : 0,
+      groupSongCount(group)
+    );
   }
+
   db.exec('COMMIT');
 
   // Rebuild FTS from freshly populated artists_normalized table
@@ -858,11 +904,11 @@ export function getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilep
   for (const row of rows) {
     if (row.name === null) {
       const key = 'null\x00' + _normaliseAlbumDir(row.dir);
-      if (!store[key]) { albums.push({ name: null, year: null, album_art_file: row.album_art_file || null }); store[key] = true; }
+      if (!store[key]) { albums.push({ name: null, year: null, album_art_file: row.album_art_file || null, dir: row.dir || '', normDir: _normaliseAlbumDir(row.dir) }); store[key] = true; }
     } else {
       const key = row.name + '\x00' + _normaliseAlbumDir(row.dir);
       if (!store[key]) {
-        albums.push({ name: row.name, year: row.year, album_art_file: row.album_art_file || null });
+        albums.push({ name: row.name, year: row.year, album_art_file: row.album_art_file || null, dir: row.dir || '', normDir: _normaliseAlbumDir(row.dir) });
         store[key] = true;
       }
     }
@@ -970,7 +1016,11 @@ export function getAlbumSongs(album, vpaths, username, opts) {
     params.push(album);
   }
 
-  if (opts.artist) {
+  if (opts.artists && Array.isArray(opts.artists) && opts.artists.length) {
+    const aIn = inClause('f.artist', opts.artists.map(String));
+    sql += ` AND ${aIn.sql}`;
+    params.push(...aIn.params);
+  } else if (opts.artist) {
     sql += ' AND f.artist = ?';
     params.push(opts.artist);
   }
@@ -978,6 +1028,17 @@ export function getAlbumSongs(album, vpaths, username, opts) {
   if (opts.year) {
     sql += ' AND f.year = ?';
     params.push(Number(opts.year));
+  }
+
+  // Directory-based filter: when albumDir is provided, restrict to that folder.
+  // This is critical for albums whose album tag is generic (e.g. "Catalogue") —
+  // the dir uniquely identifies the physical release folder in the library.
+  // normDir is the normalised dir (disc sub-folders collapsed) so multi-disc
+  // albums like "Album/CD 1" and "Album/CD 2" both fall under "Album".
+  if (opts.albumDir) {
+    const dirPrefix = opts.albumDir.replace(/\/$/, '') + '/';
+    sql += ' AND f.filepath LIKE ?';
+    params.push(dirPrefix + '%');
   }
 
   sql += ' ORDER BY f.disk, f.track, f.filepath';
@@ -1064,12 +1125,279 @@ export function searchArtistsNormalized(query, vpaths, ignoreVPaths) {
     }));
 }
 
+// ── Artist browse / profile ───────────────────────────────────────────────
+
+// Returns artists starting with a given letter (or '0' for all digit-starting names).
+// Uses precomputed song_count — no join with files needed.
+export function getArtistsByLetter(letter) {
+  let rows;
+  if (letter === '0') {
+    // Digits: artist_clean starts with 0-9
+    rows = db.prepare(
+      "SELECT * FROM artists_normalized WHERE artist_clean != '' AND artist_clean GLOB '[0-9]*' ORDER BY artist_clean COLLATE NOCASE"
+    ).all();
+  } else {
+    const l = letter.toUpperCase();
+    rows = db.prepare(
+      "SELECT * FROM artists_normalized WHERE artist_clean != '' AND upper(substr(artist_clean,1,1)) = ? ORDER BY artist_clean COLLATE NOCASE"
+    ).all(l);
+  }
+  return rows.map(r => ({
+    artistKey:    r.artist_clean.toLowerCase(),
+    canonicalName: r.artist_clean,
+    imageFile:    r.image_file || null,
+    hasBio:       !!r.bio,
+    songCount:    r.song_count || 0,
+    rawVariants:  (() => { try { return JSON.parse(r.artist_raw_variants); } catch { return [r.artist_clean]; } })(),
+  }));
+}
+
+// Returns home-page artist stats:
+//   topArtists  — top 20 by song_count
+//   recentArtists — up to 10 most recently played (from play_events + files join)
+//   totalCount  — total number of distinct artists
+export function getArtistHomeStats() {
+  const totalRow = db.prepare("SELECT COUNT(*) AS c FROM artists_normalized WHERE artist_clean != ''").get();
+  const totalCount = totalRow ? totalRow.c : 0;
+
+  const topRows = db.prepare(
+    "SELECT * FROM artists_normalized WHERE artist_clean != '' ORDER BY song_count DESC LIMIT 20"
+  ).all();
+
+  const topArtists = topRows.map(r => ({
+    artistKey:    r.artist_clean.toLowerCase(),
+    canonicalName: r.artist_clean,
+    imageFile:    r.image_file || null,
+    hasBio:       !!r.bio,
+    songCount:    r.song_count || 0,
+    rawVariants:  (() => { try { return JSON.parse(r.artist_raw_variants); } catch { return [r.artist_clean]; } })(),
+  }));
+
+  // Most played: aggregate play_events by raw file artist first, then map to canonical groups.
+  const playedRawRows = db.prepare(`
+    SELECT f.artist AS raw_artist, COUNT(*) AS plays
+    FROM play_events pe
+    JOIN files f ON f.hash = pe.file_hash
+    WHERE f.artist IS NOT NULL AND f.artist != ''
+    GROUP BY f.artist
+    ORDER BY plays DESC
+    LIMIT 500
+  `).all();
+
+  const playByCanonical = new Map();
+  for (const row of playedRawRows) {
+    const anRow = db.prepare(
+      "SELECT * FROM artists_normalized WHERE EXISTS (SELECT 1 FROM json_each(artist_raw_variants) WHERE value = ?)"
+    ).get(row.raw_artist);
+    if (!anRow) continue;
+    const key = anRow.artist_clean.toLowerCase();
+    const prev = playByCanonical.get(key);
+    if (prev) {
+      prev.playCount += Number(row.plays || 0);
+      continue;
+    }
+    playByCanonical.set(key, {
+      artistKey: key,
+      canonicalName: anRow.artist_clean,
+      imageFile: anRow.image_file || null,
+      hasBio: !!anRow.bio,
+      songCount: anRow.song_count || 0,
+      playCount: Number(row.plays || 0),
+      rawVariants: (() => { try { return JSON.parse(anRow.artist_raw_variants); } catch { return [anRow.artist_clean]; } })(),
+    });
+  }
+
+  const mostPlayedArtists = Array.from(playByCanonical.values())
+    .sort((a, b) => (b.playCount - a.playCount) || a.canonicalName.localeCompare(b.canonicalName))
+    .slice(0, 20);
+
+  // Recent: join last N play_events with files to get the artist, deduplicated
+  const recentRows = db.prepare(`
+    SELECT DISTINCT f.artist
+    FROM play_events pe
+    JOIN files f ON f.hash = pe.file_hash
+    WHERE f.artist IS NOT NULL AND f.artist != ''
+    ORDER BY pe.started_at DESC
+    LIMIT 50
+  `).all();
+
+  // Map each raw artist to its canonical group
+  const recentArtists = [];
+  const seen = new Set();
+  for (const row of recentRows) {
+    const anRow = db.prepare(
+      "SELECT * FROM artists_normalized WHERE EXISTS (SELECT 1 FROM json_each(artist_raw_variants) WHERE value = ?)"
+    ).get(row.artist);
+    if (!anRow) continue;
+    const key = anRow.artist_clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    recentArtists.push({
+      artistKey:    key,
+      canonicalName: anRow.artist_clean,
+      imageFile:    anRow.image_file || null,
+      hasBio:       !!anRow.bio,
+      songCount:    anRow.song_count || 0,
+      rawVariants:  (() => { try { return JSON.parse(anRow.artist_raw_variants); } catch { return [anRow.artist_clean]; } })(),
+    });
+    if (recentArtists.length >= 10) break;
+  }
+
+  return { totalCount, topArtists, recentArtists, mostPlayedArtists };
+}
+
+// Returns all artists for the Artist Library grid, sorted by display name.
+// Uses precomputed song_count (no expensive join with files).
+export function getArtistsForBrowse(vpaths, ignoreVPaths) {
+  // Legacy function — kept for any future bulk use.
+  // For the home page, use getArtistHomeStats(). For letter browse, use getArtistsByLetter().
+  const rows = db.prepare(
+    'SELECT * FROM artists_normalized ORDER BY artist_clean COLLATE NOCASE'
+  ).all();
+  return rows.map(r => ({
+    artistKey:    r.artist_clean.toLowerCase(),
+    canonicalName: r.artist_clean,
+    imageFile:    r.image_file || null,
+    hasBio:       !!r.bio,
+    songCount:    r.song_count || 0,
+  }));
+}
+
+// Returns the full profile row for one artist by its artist_clean (case-insensitive).
+// Returns null if not found.
+export function getArtistRow(artistClean) {
+  const row = db.prepare(
+    "SELECT * FROM artists_normalized WHERE lower(artist_clean) = lower(?)"
+  ).get(artistClean);
+  if (!row) return null;
+  return {
+    artistKey:    row.artist_clean.toLowerCase(),
+    canonicalName: row.artist_clean,
+    bio:          row.bio || null,
+    imageFile:    row.image_file || null,
+    imageSource:  row.image_source || null,
+    lastFetched:  row.last_fetched || null,
+    nameOverride: row.name_override || 0,
+    songCount:    row.song_count || 0,
+    rawVariants:  (() => { try { return JSON.parse(row.artist_raw_variants); } catch { return [row.artist_clean]; } })(),
+  };
+}
+
+// Returns all file rows for an artist (by raw variant list) with their filepaths.
+// Includes all columns needed to build release groups.
+export function getArtistFiles(rawVariants, vpaths, ignoreVPaths) {
+  const filtered = vpathFilter(vpaths, ignoreVPaths);
+  if (filtered.length === 0 || rawVariants.length === 0) return [];
+
+  const vIn = inClause('vpath', filtered);
+  const aIn = inClause('artist', rawVariants);
+  return db.prepare(`
+    SELECT filepath, vpath, title, artist, album, track, trackOf, disk, year,
+           duration, aaFile, cover_file, genre, cuepoints
+    FROM files
+    WHERE ${vIn.sql} AND ${aIn.sql}
+    ORDER BY filepath
+  `).all(...vIn.params, ...aIn.params);
+}
+
+// Saves bio + image info fetched from an external service.
+// Never overwrites name_override.
+export function saveArtistInfo(artistClean, { bio, imageFile, imageSource }) {
+  db.prepare(`
+    UPDATE artists_normalized
+    SET bio = ?, image_file = ?, image_source = ?, last_fetched = ?, image_flag_wrong = CASE WHEN ? IS NOT NULL THEN 0 ELSE image_flag_wrong END
+    WHERE lower(artist_clean) = lower(?)
+  `).run(bio || null, imageFile || null, imageSource || null, Date.now(), imageFile || null, artistClean);
+}
+
+// Admin: override the canonical display name for an artist.
+export function setArtistNameOverride(artistClean, newName) {
+  db.prepare(`
+    UPDATE artists_normalized
+    SET artist_clean = ?, name_override = 1
+    WHERE lower(artist_clean) = lower(?)
+  `).run(newName, artistClean);
+}
+
+// Admin: set a custom artist image (downloaded externally and stored in image-cache/artists/).
+export function setArtistImage(artistClean, imageFile, imageSource) {
+  db.prepare(`
+    UPDATE artists_normalized
+    SET image_file = ?, image_source = ?, last_fetched = ?, image_flag_wrong = 0
+    WHERE lower(artist_clean) = lower(?)
+  `).run(imageFile, imageSource || 'custom', Date.now(), artistClean);
+}
+
+export function setArtistImageWrongFlag(artistClean, isWrong) {
+  db.prepare(`
+    UPDATE artists_normalized
+    SET image_flag_wrong = ?, last_fetched = CASE WHEN ? = 1 THEN NULL ELSE last_fetched END
+    WHERE lower(artist_clean) = lower(?)
+  `).run(isWrong ? 1 : 0, isWrong ? 1 : 0, artistClean);
+}
+
+export function markArtistFetchAttempt(artistClean) {
+  db.prepare(`
+    UPDATE artists_normalized
+    SET last_fetched = ?
+    WHERE lower(artist_clean) = lower(?)
+  `).run(Date.now(), artistClean);
+}
+
+export function getArtistImageAudit(kind, limit = 200) {
+  const n = Math.max(1, Math.min(1000, Number(limit) || 200));
+  let where = "artist_clean != ''";
+  if (kind === 'missing') {
+    where += " AND (image_file IS NULL OR image_file = '')";
+  } else if (kind === 'wrong') {
+    where += ' AND image_flag_wrong = 1';
+  }
+  const rows = db.prepare(`
+    SELECT artist_clean, image_file, image_source, song_count, image_flag_wrong, last_fetched
+    FROM artists_normalized
+    WHERE ${where}
+    ORDER BY song_count DESC, artist_clean COLLATE NOCASE
+    LIMIT ?
+  `).all(n);
+  return rows.map(r => ({
+    artistKey: String(r.artist_clean || '').toLowerCase(),
+    canonicalName: r.artist_clean,
+    imageFile: r.image_file || null,
+    imageSource: r.image_source || null,
+    songCount: r.song_count || 0,
+    wrongFlag: !!r.image_flag_wrong,
+    lastFetched: r.last_fetched || null,
+  }));
+}
+
+export function getArtistImageAuditCounts() {
+  const row = db.prepare(`
+    SELECT
+      SUM(CASE WHEN image_file IS NULL OR image_file = '' THEN 1 ELSE 0 END) AS missing,
+      SUM(CASE WHEN image_flag_wrong = 1 THEN 1 ELSE 0 END) AS wrong
+    FROM artists_normalized
+    WHERE artist_clean != ''
+  `).get() || { missing: 0, wrong: 0 };
+  return {
+    missing: Number(row.missing || 0),
+    wrong: Number(row.wrong || 0),
+  };
+}
+
+// Returns artist_clean values where last_fetched IS NULL (never fetched) — used
+// by the auto-fetch queue after a scan completes.
+export function getArtistsNeedingFetch() {
+  return db.prepare(
+    "SELECT artist_clean FROM artists_normalized WHERE last_fetched IS NULL ORDER BY artist_clean COLLATE NOCASE"
+  ).all().map(r => r.artist_clean);
+}
+
 export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms = []) {
+  const validCols = ['title', 'artist', 'album', 'filepath'];
+  if (!validCols.includes(searchCol)) { return []; }
+
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
-
-  const validCols = ['artist', 'album', 'filepath', 'title'];
-  if (!validCols.includes(searchCol)) { return []; }
 
   const vIn = inClause('vpath', filtered);
   const ep = excludePrefixClauses(excludeFilepathPrefixes);

@@ -5046,127 +5046,295 @@ async function viewArtists() {
   const sig = _navCancel();
   setBody('<div class="loading-state"></div>');
   try {
-    const abEx = _audioBookExclusions();
-    const d = await api('POST', 'api/v1/db/artists', {
-      ...(abEx.ignoreVPaths.length ? { ignoreVPaths: abEx.ignoreVPaths } : {}),
-      ...(abEx.excludeFilepathPrefixes.length ? { excludeFilepathPrefixes: abEx.excludeFilepathPrefixes } : {}),
-    }, sig);
-    const rawArtists = d.artists || [];
-    if (!rawArtists.length) { setBody('<div class="empty-state">No artists found</div>'); return; }
-    S.curSongs = [];
-    document.getElementById('play-all-btn').onclick = null;
-    document.getElementById('add-all-btn').onclick  = null;
+    const data = await api('GET', 'api/v1/artists/home', undefined, sig);
+    if (S.view !== 'artists') return;
 
-    // Group raw artist name variants by normalized key
-    const groupMap = new Map();
-    for (const a of rawArtists) {
-      const key = normalizeArtist(a);
-      const clean = cleanArtistDisplay(a);
-      if (!groupMap.has(key)) {
-        groupMap.set(key, { display: a, cleanDisplay: clean, variants: [a] });
-      } else {
-        const g = groupMap.get(key);
-        g.variants.push(a);
-        // Prefer a clean display that starts with a real letter
-        if (!/^[a-zA-Z]/i.test(g.cleanDisplay) && /^[a-zA-Z]/i.test(clean)) {
-          g.display = a;
-          g.cleanDisplay = clean;
-        }
+    const { totalCount = 0, topArtists = [], recentArtists = [], mostPlayedArtists = [] } = data;
+
+    // JS Map: artistKey → rawVariants[] — avoids storing large arrays in DOM attrs
+    const _varMap = new Map();
+    function _storeVariants(list) {
+      for (const a of list) {
+        if (a.artistKey && a.rawVariants && a.rawVariants.length) _varMap.set(a.artistKey, a.rawVariants);
       }
     }
-    const groups = [...groupMap.values()];
+    _storeVariants(topArtists);
+    _storeVariants(recentArtists);
+    _storeVariants(mostPlayedArtists);
 
-    // Determine which A-Z / # buckets are populated using the CLEAN name
-    const letterOf = g => {
-      const ch = g.cleanDisplay.charAt(0).toUpperCase();
-      return /[A-Z]/.test(ch) ? ch : '#';
-    };
-    const AZ_KEYS = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')];
-    const hasLetter = new Set(groups.map(letterOf));
+    function _openArtist(akey, aname) {
+      const variants = _varMap.get(akey) || [aname];
+      viewArtistAlbums(aname, variants.filter(Boolean), () => viewArtists());
+    }
+
+    function _setArtistFiltering(active) {
+      const view = body.querySelector('.artist-home-view');
+      if (!view) return;
+      view.classList.toggle('artist-filtering', !!active);
+    }
+
+    async function _markArtistImageWrong(artistKey, canonicalName, ev) {
+      if (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+      if (!S.isAdmin) return;
+      try {
+        await api('POST', 'api/v1/artists/mark-image-wrong', { artistKey, wrong: true });
+        toast(`Marked ${canonicalName} image as wrong`);
+      } catch (e) {
+        toast(`Failed to mark wrong artist image${e && e.message ? `: ${e.message}` : ''}`);
+      }
+    }
+
+    function _wrongBtn(a) {
+      if (!S.isAdmin) return '';
+      return `<button type="button" class="artist-wrong-btn" title="Mark artist image as wrong" aria-label="Mark artist image as wrong" data-mark-wrong="1" data-akey="${esc(a.artistKey)}" data-aname="${esc(a.canonicalName)}">⚑</button>`;
+    }
+
+    // ── artist card helper (HOME-shelf style) ──────────────────────────────
+    function artistCard(a) {
+      if (!a.canonicalName) return '';
+      const placeholder = `<div class="artist-home-ph" aria-hidden="true"><div class="artist-home-ph-head"></div><div class="artist-home-ph-body"></div></div>`;
+      const artInner = a.imageFile
+        ? `${placeholder}<img class="artist-home-img" src="api/v1/artists/images/${encodeURIComponent(a.imageFile)}" alt="" loading="lazy" onerror="this.onerror=null;this.remove()">`
+        : placeholder;
+      const sub = Number.isFinite(a.playCount) && a.playCount > 0
+        ? `${a.playCount} play${a.playCount !== 1 ? 's' : ''}`
+        : (a.songCount ? `${a.songCount} song${a.songCount !== 1 ? 's' : ''}` : '');
+      return `<div class="hc artist-home-card" data-akey="${esc(a.artistKey)}" data-aname="${esc(a.canonicalName)}">
+        <div class="hc-art">${artInner}</div>
+        <div class="hc-info">
+          <div class="hc-title">${esc(a.canonicalName)}</div>
+          ${sub ? `<div class="hc-sub">${sub}</div>` : ''}
+        </div>
+        ${_wrongBtn(a)}
+      </div>`;
+    }
+
+    // ── shelf helper ───────────────────────────────────────────────────────
+    const _ART_GRIP = `<svg width="10" height="14" viewBox="0 0 10 16" fill="currentColor" aria-hidden="true"><circle cx="2.5" cy="2" r="1.5"/><circle cx="7.5" cy="2" r="1.5"/><circle cx="2.5" cy="6" r="1.5"/><circle cx="7.5" cy="6" r="1.5"/><circle cx="2.5" cy="10" r="1.5"/><circle cx="7.5" cy="10" r="1.5"/><circle cx="2.5" cy="14" r="1.5"/><circle cx="7.5" cy="14" r="1.5"/></svg>`;
+    function artistShelf(id, title, cards) {
+      if (!cards) return '';
+      return `<div class="home-shelf" data-shelf="${id}" draggable="true">
+        <div class="home-shelf-header">
+          <span class="home-grip" title="Drag to reorder">${_ART_GRIP}</span>
+          <span class="home-shelf-title">${title}</span>
+        </div>
+        <div class="home-row">${cards}</div>
+      </div>`;
+    }
+
+    // filter blank artists from shelves
+    const validTop    = topArtists.filter(a => a.canonicalName);
+    const validRecent = recentArtists.filter(a => a.canonicalName);
+    const validMostPlayed = mostPlayedArtists.filter(a => a.canonicalName);
+
+    // ── shelf order persistence ────────────────────────────────────────────
+    const _ART_ORDER_KEY = `ms2_art_order_${S.username || ''}`;
+    function _artSavedOrder() { try { return JSON.parse(localStorage.getItem(_ART_ORDER_KEY) || 'null'); } catch(_) { return null; } }
+    function _artSaveOrder(view) {
+      const order = JSON.stringify([...view.querySelectorAll(':scope > .home-shelf')].map(s => s.dataset.shelf));
+      localStorage.setItem(_ART_ORDER_KEY, order);
+    }
+
+    const _artShelfDefs = [
+      { id: 'art-most-songs', html: artistShelf('art-most-songs', 'Most Songs in Library', validTop.slice(0, 8).map(artistCard).join('') || null) },
+      { id: 'art-most-played',html: artistShelf('art-most-played','Most Played Artists',  validMostPlayed.slice(0, 8).map(artistCard).join('') || null) },
+      { id: 'art-recent',     html: artistShelf('art-recent',     'Recently Listened',     validRecent.map(artistCard).join('')          || null) },
+    ];
+    const _artShelfMap  = Object.fromEntries(_artShelfDefs.map(s => [s.id, s.html]));
+    const _artDefOrder  = _artShelfDefs.map(s => s.id);
+    const _artOrder     = (_artSavedOrder() || _artDefOrder).filter(id => _artShelfMap[id]);
+    _artDefOrder.forEach(id => { if (!_artOrder.includes(id)) _artOrder.push(id); });
+    const shelves = _artOrder.map(id => _artShelfMap[id] || '').join('');
+
+    // ── A-Z pill strip ─────────────────────────────────────────────────────
+    const AZ_KEYS = ['0', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')];
+    const azPills = AZ_KEYS.map(l =>
+      `<button class="az-btn art-az-btn" data-letter="${l}">${l === '0' ? '0–9' : l}</button>`
+    ).join('');
+
+    const html = `<div class="home-view artist-home-view">
+      <div class="art-az-block">
+        <div class="az-strip art-az-strip">${azPills}</div>
+        <div class="fe-filter-row" style="margin:4px 0 10px">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input id="art-search" class="fe-filter-input" type="text" placeholder="Search all ${totalCount.toLocaleString()} artists…" autocomplete="off">
+          <span id="art-match-count" class="fe-match-count"></span>
+          <button id="art-search-clear" class="fe-filter-clear hidden" title="Clear">✕</button>
+        </div>
+        <div id="art-letter-results" class="artist-list"></div>
+      </div>
+      ${shelves}
+    </div>`;
 
     const body = document.getElementById('content-body');
-    body.innerHTML = `
-      <div class="fe-filter-row">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input id="lib-filter" class="fe-filter-input" type="text" placeholder="Search artists…" autocomplete="off">
-        <span id="lib-match-count" class="fe-match-count"></span>
-        <button id="lib-filter-clear" class="fe-filter-clear hidden" title="Clear filter">✕</button>
-      </div>
-      <div class="az-strip" id="az-strip">${
-        AZ_KEYS.map(l => `<button class="az-btn" data-letter="${l}"${hasLetter.has(l) ? '' : ' disabled'}>${l}</button>`).join('')
-      }</div>
-      <div class="artist-list">${
-        groups.map((g, i) => {
-          const letter = letterOf(g);
-          const av = g.cleanDisplay.charAt(0).toUpperCase() || '?';
-          return `<div class="artist-row" data-gi="${i}" data-letter="${letter}">
-            <div class="artist-av">${esc(av)}</div>
-            <div class="artist-name">${esc(g.cleanDisplay)}${g.variants.length > 1 ? `<span class="artist-var"> +${g.variants.length - 1}</span>` : ''}</div>
-          </div>`;
-        }).join('')
-      }</div>`;
+    body.innerHTML = html;
 
-    const filterInput = body.querySelector('#lib-filter');
-    const filterClear = body.querySelector('#lib-filter-clear');
-    const matchCount  = body.querySelector('#lib-match-count');
-    const azStrip     = body.querySelector('#az-strip');
-    const allRows     = Array.from(body.querySelectorAll('.artist-row'));
-    const rowNames    = groups.map(g => g.cleanDisplay.toLowerCase());
-
-    function setActiveAZ(letter) {
-      body.querySelectorAll('.az-btn').forEach(b => b.classList.toggle('active', b.dataset.letter === letter));
-    }
-    function applyFilter() {
-      const q = filterInput.value.trim().toLowerCase();
-      filterClear.classList.toggle('hidden', !q);
-      azStrip.classList.toggle('az-hidden', !!q); // hide A-Z when typing
-      if (q) { _activeLetter = null; setActiveAZ(null); }
-      let visible = 0;
-      allRows.forEach((row, i) => {
-        const matches = !q || rowNames[i].includes(q);
-        row.classList.toggle('fe-hidden', !matches);
-        if (matches) visible++;
+    // ── artist shelf drag-to-reorder ───────────────────────────────────────
+    {
+      const view = body.querySelector('.artist-home-view');
+      let _dragSrc = null, _canDrag = false;
+      body.querySelectorAll('.artist-home-view > .home-shelf .home-grip').forEach(grip => {
+        grip.addEventListener('mousedown', () => { _canDrag = true; });
       });
-      matchCount.textContent = q ? `${visible} result${visible !== 1 ? 's' : ''}` : '';
+      body.addEventListener('mouseup', () => { _canDrag = false; });
+      body.querySelectorAll('.artist-home-view > .home-shelf').forEach(shelf => {
+        shelf.addEventListener('dragstart', e => {
+          if (!_canDrag) { e.preventDefault(); return; }
+          _dragSrc = shelf;
+          shelf.classList.add('hs-dragging');
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        shelf.addEventListener('dragend', () => {
+          _canDrag = false; _dragSrc = null;
+          body.querySelectorAll('.artist-home-view > .home-shelf').forEach(s => s.classList.remove('hs-dragging', 'hs-over'));
+          _artSaveOrder(view);
+        });
+        shelf.addEventListener('dragover', e => {
+          if (!_dragSrc || _dragSrc === shelf) return;
+          e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+          body.querySelectorAll('.artist-home-view > .home-shelf').forEach(s => s.classList.remove('hs-over'));
+          shelf.classList.add('hs-over');
+        });
+        shelf.addEventListener('dragleave', e => {
+          if (!shelf.contains(e.relatedTarget)) shelf.classList.remove('hs-over');
+        });
+        shelf.addEventListener('drop', e => {
+          e.preventDefault();
+          if (!_dragSrc || _dragSrc === shelf) return;
+          const all = [...view.querySelectorAll(':scope > .home-shelf')];
+          const si  = all.indexOf(_dragSrc);
+          const di  = all.indexOf(shelf);
+          if (si < di) view.insertBefore(_dragSrc, shelf.nextSibling);
+          else         view.insertBefore(_dragSrc, shelf);
+        });
+      });
     }
 
-    // A-Z strip click: filter list to only artists starting with that letter
-    // Clicking the active letter again clears the filter and shows all
+    // click on home shelf artist cards
+    body.querySelectorAll('.artist-home-card').forEach(card => {
+      card.addEventListener('click', () => _openArtist(card.dataset.akey, card.dataset.aname));
+    });
+    body.querySelectorAll('.artist-wrong-btn').forEach(btn => {
+      btn.addEventListener('mousedown', (ev) => { ev.preventDefault(); ev.stopPropagation(); });
+      btn.addEventListener('touchstart', (ev) => { ev.preventDefault(); ev.stopPropagation(); }, { passive: false });
+      btn.addEventListener('click', (ev) => _markArtistImageWrong(btn.dataset.akey, btn.dataset.aname, ev));
+    });
+
+    // ── render artist list rows (letter/search results) ────────────────────
+    function renderArtistRows(artists) {
+      _storeVariants(artists); // cache variants for click handling
+      return artists.filter(a => a.canonicalName).map(a => {
+        const av = a.canonicalName.replace(/^The\s+/i, '').charAt(0).toUpperCase() || '?';
+        const sub = a.songCount ? `${a.songCount} song${a.songCount !== 1 ? 's' : ''}` : '';
+        const imgUrl = a.imageFile ? `/api/v1/artists/images/${encodeURIComponent(a.imageFile)}` : '';
+        return `<div class="artist-row" data-akey="${esc(a.artistKey)}" data-aname="${esc(a.canonicalName)}">
+          <div class="artist-av">${imgUrl
+            ? `<img class="artist-av-img" src="${esc(imgUrl)}" alt="${esc(a.canonicalName)}" loading="lazy" onerror="this.remove()">`
+            : ''
+          }<span class="artist-av-fallback">${esc(av)}</span></div>
+          <div class="artist-col">
+            <div class="artist-name">${esc(a.canonicalName)}</div>
+            ${sub ? `<div class="artist-sub">${sub}</div>` : ''}
+          </div>
+          ${_wrongBtn(a)}
+        </div>`;
+      }).join('');
+    }
+
+    function bindRows(container) {
+      container.querySelectorAll('.artist-row').forEach(row => {
+        row.addEventListener('click', () => _openArtist(row.dataset.akey, row.dataset.aname));
+      });
+      container.querySelectorAll('.artist-wrong-btn').forEach(btn => {
+        btn.addEventListener('mousedown', (ev) => { ev.preventDefault(); ev.stopPropagation(); });
+        btn.addEventListener('touchstart', (ev) => { ev.preventDefault(); ev.stopPropagation(); }, { passive: false });
+        btn.addEventListener('click', (ev) => _markArtistImageWrong(btn.dataset.akey, btn.dataset.aname, ev));
+      });
+    }
+
+    // ── letter pills ───────────────────────────────────────────────────────
+    const resultsEl   = body.querySelector('#art-letter-results');
+    const searchInput = body.querySelector('#art-search');
+    const searchClear = body.querySelector('#art-search-clear');
+    const matchCount  = body.querySelector('#art-match-count');
     let _activeLetter = null;
-    body.querySelectorAll('.az-btn').forEach(btn => {
+    let _searchTimer  = null;
+
+    async function loadLetter(letter) {
+      _activeLetter = letter;
+      body.querySelectorAll('.art-az-btn').forEach(b => b.classList.toggle('active', b.dataset.letter === letter));
+      _setArtistFiltering(true);
+      resultsEl.innerHTML = '<div class="loading-state" style="height:60px;padding:16px 0"></div>';
+      try {
+        const d = await api('GET', `api/v1/artists/letter?l=${encodeURIComponent(letter)}`);
+        const rows = renderArtistRows(d.artists || []);
+        if (!rows) { resultsEl.innerHTML = '<div class="fe-match-count" style="padding:8px 2px">No artists found</div>'; return; }
+        resultsEl.innerHTML = rows;
+        bindRows(resultsEl);
+        body.scrollTop = 0;
+      } catch(e) {
+        if (e.name !== 'AbortError') resultsEl.innerHTML = `<div class="fe-match-count" style="padding:8px 2px">Error: ${esc(e.message)}</div>`;
+      }
+    }
+
+    body.querySelectorAll('.art-az-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        filterInput.value = '';
-        const letter = btn.dataset.letter;
-        if (_activeLetter === letter) {
-          // toggle off → show all
+        searchInput.value = '';
+        searchClear.classList.add('hidden');
+        matchCount.textContent = '';
+        if (_activeLetter === btn.dataset.letter) {
           _activeLetter = null;
-          setActiveAZ(null);
-          allRows.forEach(r => r.classList.remove('fe-hidden'));
-          matchCount.textContent = '';
-          azStrip.classList.remove('az-hidden');
+          btn.classList.remove('active');
+          resultsEl.innerHTML = '';
+          _setArtistFiltering(false);
           return;
         }
-        _activeLetter = letter;
-        setActiveAZ(letter);
-        let visible = 0;
-        allRows.forEach(row => {
-          const matches = row.dataset.letter === letter;
-          row.classList.toggle('fe-hidden', !matches);
-          if (matches) visible++;
-        });
-        matchCount.textContent = `${visible} artist${visible !== 1 ? 's' : ''}`;
-        // Scroll content-body back to top so results are visible
-        body.scrollTop = 0;
+        loadLetter(btn.dataset.letter);
       });
     });
 
-    let _artTimer;
-    filterInput.addEventListener('input', () => { clearTimeout(_artTimer); _artTimer = setTimeout(applyFilter, 150); });
-    filterClear.addEventListener('click', () => { clearTimeout(_artTimer); _activeLetter = null; filterInput.value = ''; filterInput.focus(); applyFilter(); });
-    allRows.forEach(row => {
-      const g = groups[parseInt(row.dataset.gi)];
-      if (g) row.addEventListener('click', () => viewArtistAlbums(g.display, g.variants));
+    // ── search ─────────────────────────────────────────────────────────────
+    async function doSearch(q) {
+      if (!q || q.length < 2) {
+        resultsEl.innerHTML = '';
+        matchCount.textContent = '';
+        if (!_activeLetter) _setArtistFiltering(false);
+        return;
+      }
+      _activeLetter = null;
+      body.querySelectorAll('.art-az-btn').forEach(b => b.classList.remove('active'));
+      _setArtistFiltering(true);
+      resultsEl.innerHTML = '<div class="loading-state" style="height:60px;padding:16px 0"></div>';
+      try {
+        const d = await api('GET', `api/v1/artists/search?q=${encodeURIComponent(q)}`);
+        const artists = (d.artists || []).filter(a => a.canonicalName);
+        matchCount.textContent = artists.length ? `${artists.length} result${artists.length !== 1 ? 's' : ''}` : 'No results';
+        if (!artists.length) { resultsEl.innerHTML = ''; return; }
+        resultsEl.innerHTML = renderArtistRows(artists);
+        bindRows(resultsEl);
+      } catch(e) { if (e.name !== 'AbortError') resultsEl.innerHTML = ''; }
+    }
+
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.trim();
+      searchClear.classList.toggle('hidden', !q);
+      clearTimeout(_searchTimer);
+      _searchTimer = setTimeout(() => doSearch(q), 250);
     });
+    searchClear.addEventListener('click', () => {
+      searchInput.value = '';
+      searchClear.classList.add('hidden');
+      searchInput.focus();
+      resultsEl.innerHTML = '';
+      matchCount.textContent = '';
+      body.querySelectorAll('.art-az-btn').forEach(b => b.classList.remove('active'));
+      _activeLetter = null;
+      _setArtistFiltering(false);
+    });
+
   } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
@@ -5191,7 +5359,13 @@ async function viewArtistAlbums(displayName, variantsOrBackFn, backFn) {
       ...(abEx.ignoreVPaths?.length                ? { ignoreVPaths: abEx.ignoreVPaths } : {}),
       ...(abEx.excludeFilepathPrefixes?.length ? { excludeFilepathPrefixes: abEx.excludeFilepathPrefixes } : {}),
     }, sig);
-    renderAlbumGrid(d.albums || [], displayName, variants);
+    const allAlbums = d.albums || [];
+    const restoreFullArtistView = () => {
+      setTitle(displayName);
+      setBack(back || (() => viewArtists()));
+      renderAlbumGrid(allAlbums, displayName, variants, restoreFullArtistView, displayName);
+    };
+    renderAlbumGrid(allAlbums, displayName, variants, restoreFullArtistView, displayName);
   } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
@@ -5884,7 +6058,7 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
 
 // ── END ALBUM LIBRARY ─────────────────────────────────────────────────────────
 
-function renderAlbumGrid(albums, defaultArtist, artistVariants) {
+function renderAlbumGrid(albums, defaultArtist, artistVariants, _parentRestoreFn, _titlePrefix) {
   if (!albums.length) { setBody('<div class="empty-state">No albums found</div>'); return; }
   S.curSongs = [];
   document.getElementById('play-all-btn').onclick = null;
@@ -5897,12 +6071,62 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
     cleanName: a.name ? cleanArtistDisplay(a.name) : 'Singles',
   }));
 
+  // When multiple albums in this set share the same tag name (e.g. 26 CDs all
+  // tagged "Catalogue"), fall back to the last path segment of normDir as the
+  // display label so the user sees "CD01-On the Radio Part 1" etc. instead.
+  const _nameCnt = new Map();
+  albumsClean.forEach(a => _nameCnt.set(a.name, (_nameCnt.get(a.name) || 0) + 1));
+  albumsClean.forEach(a => {
+    if ((_nameCnt.get(a.name) || 0) > 1 && a.normDir) {
+      const segs = a.normDir.replace(/\/$/, '').split('/');
+      const last = segs[segs.length - 1];
+      if (last) a.cleanName = last;
+    }
+  });
+
   const letterOfAlbum = a => {
     const ch = a.cleanName.charAt(0).toUpperCase();
     return /[A-Z]/.test(ch) ? ch : '#';
   };
   const AZ_KEYS = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')];
-  const hasLetter = new Set(albumsClean.map(letterOfAlbum));
+  // ── Series grouping ─────────────────────────────────────────────────────────
+  // Albums nested under a parent folder are grouped into a series card, mirroring
+  // the Albums Library series concept.
+  // Example: filepath "Madonna - Catalogue/Like a Prayer (1989)/01.mp3"
+  //   has dir "Madonna - Catalogue/Like a Prayer (1989)/"
+  //   → L1 parent = "Madonna - Catalogue" → series card containing all sub-albums
+  const _seriesParent = dir => {
+    if (!dir) return null;
+    const segs = dir.replace(/\/$/, '').split('/');
+    return segs.length >= 2 ? segs[0] : null;
+  };
+  const seriesMap = new Map(); // seriesName → album indices[]
+  albumsClean.forEach((a, si) => {
+    const s = _seriesParent(a.dir);
+    if (!s) return;
+    if (!seriesMap.has(s)) seriesMap.set(s, []);
+    seriesMap.get(s).push(si);
+  });
+
+  // Build merged cardData: series items replace individual album items in groups of 2+
+  const cardData = [];
+  const _seenSeries = new Set();
+  for (let ci = 0; ci < albumsClean.length; ci++) {
+    const a = albumsClean[ci];
+    const sname = _seriesParent(a.dir);
+    const sIdxs = sname ? seriesMap.get(sname) : null;
+    if (sIdxs && sIdxs.length >= 2) {
+      if (!_seenSeries.has(sname)) {
+        _seenSeries.add(sname);
+        const sch = sname.replace(/^(the|a|an)\s+/i, '').charAt(0).toUpperCase();
+        cardData.push({ type: 'ser', lc: sname.toLowerCase(), letter: /[A-Z]/.test(sch) ? sch : '#', seriesName: sname, seriesIdxs: sIdxs });
+      }
+    } else {
+      cardData.push({ type: 'alb', lc: (a.cleanName || '').toLowerCase(), letter: letterOfAlbum(a), idx: ci });
+    }
+  }
+
+  const hasLetter = new Set(cardData.map(c => c.letter));
 
   body.innerHTML = `
     <div class="fe-filter-row">
@@ -5921,19 +6145,31 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
   const azStrip     = body.querySelector('#az-strip');
   const grid        = body.querySelector('.album-grid');
 
-  // Lightweight data — no HTML pre-built; keeps memory lean for large libraries
-  const cardData = albumsClean.map((a, i) => ({
-    lc:     (a.cleanName || '').toLowerCase(),
-    letter: letterOfAlbum(a),
-    idx:    i,
-  }));
-
-  // Build HTML for a single card on demand
-  function buildCard(i) {
-    const a   = albumsClean[i];
+  // Build HTML for a single card on demand (item is {type:'alb', idx} or {type:'ser', ...})
+  function buildCard(item) {
+    if (item.type === 'ser') {
+      let art = null;
+      for (const si of item.seriesIdxs) {
+        const c = artUrl(albumsClean[si].album_art_file, 'l');
+        if (c) { art = c; break; }
+      }
+      return `<div class="album-card album-card--series" data-series-name="${esc(item.seriesName)}">
+        <div class="album-art">
+          ${art
+            ? `<img src="${art}" alt="${esc(item.seriesName)}" loading="lazy" onerror="this.style.display='none'">`
+            : `<div class="no-art no-art-album"><div class="no-art-wave"><span></span><span></span><span></span><span></span><span></span></div><span class="no-art-label">no artwork</span></div>`}
+          <div class="play-ov"><svg width="30" height="30" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div>
+        </div>
+        <div class="album-meta">
+          <div class="album-name">${esc(item.seriesName)}</div>
+          <div class="album-year" style="color:var(--t2)">${item.seriesIdxs.length} albums</div>
+        </div>
+      </div>`;
+    }
+    const a    = albumsClean[item.idx];
     const name = a.cleanName;
     const art  = artUrl(a.album_art_file, 'l');
-    return `<div class="album-card" data-i="${i}">
+    return `<div class="album-card" data-i="${item.idx}">
       <div class="album-art">
         ${art
           ? `<img src="${art}" alt="${esc(name)}" loading="lazy" onerror="this.style.display='none'">`
@@ -5996,7 +6232,7 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
     const fIdx = fRow * cols;
     const lIdx = Math.min(vData.length - 1, (lRow + 1) * cols - 1);
     const html = [];
-    for (let i = fIdx; i <= lIdx; i++) html.push(buildCard(vData[i].idx));
+    for (let i = fIdx; i <= lIdx; i++) html.push(buildCard(vData[i]));
     grid.innerHTML = html.join('');
   }
 
@@ -6025,12 +6261,39 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
   grid.addEventListener('click', e => {
     const card = e.target.closest('.album-card');
     if (!card) return;
+    // Series card: drill into sub-albums
+    if (card.dataset.seriesName !== undefined) {
+      const sname = card.dataset.seriesName;
+      const item = cardData.find(c => c.type === 'ser' && c.seriesName === sname);
+      if (!item) return;
+      // Clear dir so sub-albums render as standalone (no infinite nesting)
+      const subAlbums = item.seriesIdxs.map(i => ({ ...albumsClean[i], dir: '' }));
+      const newPrefix = _titlePrefix ? `${_titlePrefix} – ${sname}` : sname;
+      setTitle(newPrefix);
+      const restoreBack = _parentRestoreFn || (() => {});
+      setBack(restoreBack);
+      renderAlbumGrid(subAlbums, defaultArtist, artistVariants, restoreBack, newPrefix);
+      return;
+    }
     const album = albums[parseInt(card.dataset.i)];
     if (!album) return;
-    const backFn = defaultArtist
-      ? () => viewArtistAlbums(defaultArtist, artistVariants || [defaultArtist])
-      : () => viewAlbumLibrary();
-    viewAlbumSongs(album.name, album._rawArtist || defaultArtist, backFn, { skipAOFilter: true });
+    // Restore exactly this level of the grid (correct breadcrumb + correct back)
+    const restoreThisLevel = () => {
+      if (_titlePrefix) {
+        setTitle(_titlePrefix);
+        setBack(_parentRestoreFn || null);
+      } else if (defaultArtist) {
+        setTitle(defaultArtist);
+        setBack(() => viewArtists());
+      } else {
+        setTitle('Albums');
+        setBack(null);
+      }
+      renderAlbumGrid(albums, defaultArtist, artistVariants, _parentRestoreFn, _titlePrefix);
+    };
+    const albumDisplayName = album.cleanName || album.name;
+    const albumTitle = _titlePrefix ? `${_titlePrefix} – ${albumDisplayName}` : albumDisplayName;
+    viewAlbumSongs(album.name, album._rawArtist || null, restoreThisLevel, { skipAOFilter: true, albumDir: album.normDir || null, artistVariants: artistVariants || (defaultArtist ? [defaultArtist] : null), titleOverride: albumTitle });
   });
 
   // Switch the active data set + reset scroll + redraw
@@ -6103,13 +6366,15 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants) {
 }
 
 async function viewAlbumSongs(albumName, artist, backFn, opts = {}) {
-  setTitle(albumName || 'Singles');
+  setTitle(opts.titleOverride || albumName || 'Singles');
   setBack(backFn || null);
   const sig = _navCancel();
   setBody('<div class="loading-state"></div>');
   try {
     const body = { album: albumName };
-    if (artist) body.artist = artist;
+    if (opts.albumDir) body.albumDir = opts.albumDir;
+    if (opts.artistVariants && opts.artistVariants.filter(Boolean).length) body.artists = opts.artistVariants.filter(Boolean);
+    else if (artist) body.artist = artist;
     // skipAOFilter: when called from search, don't restrict to albumsOnly paths —
     // the search found the album across all vpaths, so the song view should match.
     if (!opts.skipAOFilter) {

@@ -1,6 +1,36 @@
 # mStream Velvet Fork — Combined Change Log
 
-## v6.7.7-velvet — in progress
+## v6.8.0-velvet — April 2026
+
+### feat: artist image moderation workflow (missing/wrong queues + Discogs fixes)
+- Added a new **Admin → Artists** screen to repair artist portraits:
+  - **Missing** queue: artists with no image
+  - **Wrong** queue: artists flagged from the player as incorrect image
+  - Per-artist Discogs candidate picker (multiple options) + direct image-link apply
+- Added player-side admin action in Artist Library cards/lists: **mark artist image as wrong** (flag icon) without opening admin first.
+- Added backend admin APIs for artist image audit and correction:
+  - `GET /api/v1/admin/artists/image-audit?kind=missing|wrong`
+  - `GET /api/v1/admin/artists/discogs-candidates?artistKey=`
+  - `POST /api/v1/admin/artists/apply-image`
+  - `POST /api/v1/artists/mark-image-wrong`
+- Added persistent `image_flag_wrong` tracking in `artists_normalized`; the flag survives artist-index rebuilds and is automatically cleared when a new image is applied.
+- Extended hydration behavior so **all** Artist Library letter pills (`0-9`, `A-Z`) and search results enqueue background image fetching, not only home shelves.
+- Artist Home now includes a third shelf: **Most Played Artists** (play-history based).
+- Added anti-hammer safeguards + visibility for large libraries:
+  - hydration queue cap (`800`) with dropped-item counter
+  - slower adaptive pacing (`1.4s` success, `2.2s` no-image/skip, `4s` on errors)
+  - failed/no-image attempts now set `last_fetched` so the same missing artist does not get hammered repeatedly
+  - new admin telemetry endpoint `GET /api/v1/admin/artists/hydration-status` (running state, queue depth, counters, Discogs readiness)
+  - Admin → Artists now shows live background status and Discogs readiness (`enabled` + API credentials) so users know why candidate search is or is not available
+
+### fix: artist normalization — underscore-format, pure-digit, and remix-credit tags now merged correctly
+- **Underscore-format tags** (`01_Communards`, `07_Level_42`, `11_Mel_&_Kim`) — artist tags written by some rippers as `NN_ArtistName` (filesystem-style). Strip the numeric prefix, replace underscores with spaces, merge the variant into the canonical artist group (e.g. `07_Level_42` → absorbed into `Level 42`).
+- **Pure-digit ghost artists** (`01`, `05`, `06`, `1`, `42`) — bare track numbers that leaked into the artist field. Excluded from the artist index entirely; songs remain searchable by album/title but don't pollute the artist browser.
+- **Parenthetical-only remix credit** — entire artist field is a remixer attribution: `" (Nalin & Kane Remix)"` → extract `Nalin & Kane`, merge the variant song under their group.
+- **Remix/mix suffix** — `"Earth Wind & Fire (Phats & Small Remix)"` → extract base artist `"Earth Wind & Fire"`, add variant to their group.
+- **Similarity/containment merge pass** — after the explicit pattern passes, any small group (≤ 5 songs) whose lowercase key word-boundary contains a larger group's key (≥ 10 songs and ≥ 5× more songs) is merged into the larger group. Catches malformed tags like `"Nalin & Kane Remix)"` (no opening paren) → `"Nalin & Kane"`.
+- New admin endpoint `POST /api/v1/admin/artists/rebuild-index` — triggers an immediate `rebuildArtistIndex()` without waiting for a full file scan; useful after normalization algorithm changes.
+- All variants remain queryable; songs are found under the correct canonical artist rather than appearing in a separate junk group.
 
 ### feat: waveform pre-fetch + crossfade dissolve
 - **Pre-fetch**: waveforms were previously only generated the moment a song started playing — in Auto-DJ mode this caused a "Generating waveform…" delay even though the song had been in the queue for 30 seconds

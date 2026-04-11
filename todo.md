@@ -4,6 +4,14 @@
 
 ## NOW — In Progress / Remaining
 
+### Artist Image Moderation — Follow-ups
+
+- [ ] Admin Artists: add bulk actions (apply first Discogs candidate to selected rows)
+- [ ] Admin Artists: add pagination/filter by minimum song count for very large libraries
+- [ ] Player Artist Library: optional badge for already-flagged wrong artists (admin-only)
+- [ ] Add global media-enrichment budget (shared limiter between artist-image hydration and album-art background tasks)
+- [ ] Add admin performance panel for enrichment throughput (items/min, queue depth, fail rate)
+
 ### Localisation (i18n) — Phase 1: Infrastructure + Admin Panel
 
 Upstream commit `67e11723` added a full i18n system. We have zero i18n infrastructure currently.
