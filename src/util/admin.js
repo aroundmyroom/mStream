@@ -21,7 +21,7 @@ export function saveFile(saveData, file) {
   return fs.writeFile(file, JSON.stringify(saveData, null, 2), 'utf8');
 }
 
-export async function addDirectory(directory, vpath, autoAccess, isAudioBooks, mstream, isRecording = false, allowRecordDelete = false, isYoutube = false, isExcluded = false) {
+export async function addDirectory(directory, vpath, autoAccess, isAudioBooks, mstream, isRecording = false, allowRecordDelete = false, isYoutube = false, isExcluded = false, artistsOn = true) {
   // confirm directory is real
   const stat = await fs.stat(directory);
   if (!stat.isDirectory()) { throw new Error(`${directory} is not a directory`); }
@@ -45,6 +45,9 @@ export async function addDirectory(directory, vpath, autoAccess, isAudioBooks, m
   if ((isRecording || isYoutube) && allowRecordDelete) {
     memClone[vpath].allowRecordDelete = true;
   }
+  // Artist Library inclusion flag (default ON): when false, this folder's data
+  // is excluded from artists_normalized rebuild and artist-facing features.
+  memClone[vpath].artistsOn = artistsOn !== false;
 
   // add directory to config file
   const loadConfig = await loadFile(config.configFile);

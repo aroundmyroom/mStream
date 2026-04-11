@@ -19,6 +19,7 @@ import { getVPathInfo } from '../util/vpath.js';
 import { getTransAlgos, getTransCodecs, getTransBitrates } from '../api/transcode.js';
 import * as scanProgress from '../state/scan-progress.js';
 import { invalidateCache as invalidateAlbumsCache } from './albums-browse.js';
+import { invalidateArtistCache } from './artists-browse.js';
 import * as scrobblerApi from './scrobbler.js';
 import { mergeGenreRows } from '../util/genre-merge.js';
 import * as serverPlaybackApi from './server-playback.js';
@@ -248,7 +249,8 @@ export function setup(mstream) {
       isRecording: Joi.boolean().default(false),
       isYoutube: Joi.boolean().default(false),
       allowRecordDelete: Joi.boolean().default(false),
-      isExcluded: Joi.boolean().default(false)
+      isExcluded: Joi.boolean().default(false),
+      artistsOn: Joi.boolean().default(true),
     });
     const input = joiValidate(schema, req.body);
 
@@ -261,7 +263,8 @@ export function setup(mstream) {
       input.value.isRecording,
       input.value.allowRecordDelete,
       input.value.isYoutube,
-      input.value.isExcluded);
+      input.value.isExcluded,
+      input.value.artistsOn);
     res.json({});
 
     try {
@@ -281,15 +284,16 @@ export function setup(mstream) {
   });
 
   // PATCH /api/v1/admin/directory/flags — update per-folder flags on an existing folder
-  // Supports: allowRecordDelete (recordings/youtube folders), albumsOnly (music/audio-books only)
+  // Supports: allowRecordDelete (recordings/youtube folders), albumsOnly (music/audio-books only), artistsOn (all non-excluded folders)
   mstream.patch("/api/v1/admin/directory/flags", async (req, res) => {
     const schema = Joi.object({
       vpath: Joi.string().pattern(/[a-zA-Z0-9-]+/).required(),
       allowRecordDelete: Joi.boolean().optional(),
       albumsOnly: Joi.boolean().optional(),
-    }).or('allowRecordDelete', 'albumsOnly');
+      artistsOn: Joi.boolean().optional(),
+    }).or('allowRecordDelete', 'albumsOnly', 'artistsOn');
     const input = joiValidate(schema, req.body);
-    const { vpath, allowRecordDelete, albumsOnly } = input.value;
+    const { vpath, allowRecordDelete, albumsOnly, artistsOn } = input.value;
     const folder = config.program.folders[vpath];
     if (!folder) return res.status(404).json({ error: 'vpath not found' });
 
@@ -307,6 +311,12 @@ export function setup(mstream) {
       else delete config.program.folders[vpath].albumsOnly;
     }
 
+    if (artistsOn !== undefined) {
+      if (folder.type === 'excluded') return res.status(400).json({ error: 'excluded folders are never included in artist features' });
+      if (artistsOn) config.program.folders[vpath].artistsOn = true;
+      else config.program.folders[vpath].artistsOn = false;
+    }
+
     // Persist to config file
     const loadConfig = await admin.loadFile(config.configFile);
     if (!loadConfig.folders) loadConfig.folders = {};
@@ -320,9 +330,16 @@ export function setup(mstream) {
       if (albumsOnly) loadConfig.folders[vpath].albumsOnly = true;
       else delete loadConfig.folders[vpath].albumsOnly;
     }
+    if (artistsOn !== undefined) {
+      loadConfig.folders[vpath].artistsOn = artistsOn ? true : false;
+    }
 
     await admin.saveFile(loadConfig, config.configFile);
     if (albumsOnly !== undefined) invalidateAlbumsCache();
+    if (artistsOn !== undefined) {
+      db.rebuildArtistIndex();
+      invalidateArtistCache();
+    }
     res.json({});
   });
 

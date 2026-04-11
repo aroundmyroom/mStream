@@ -3,6 +3,7 @@ import { mkdirSync } from 'fs';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'crypto';
 import { buildArtistGroups } from '../util/artist-normalize.js';
+import * as config from '../state/config.js';
 
 // ── Subsonic ID helpers ───────────────────────────────────────────────────────
 // Artist ID = MD5(normalised artist name).slice(0,16)
@@ -466,10 +467,28 @@ export function rebuildFolderIndex() {
 //   • preserves real digit-named artists ("2 Unlimited", "808 State", "50 Cent")
 //   • preserves admin-set name_override, bio, image_file across rebuilds
 export function rebuildArtistIndex() {
+  const artistFilter = getArtistFolderFilter();
+  const artistEnabledVpaths = artistFilter.vpaths;
+
+  if (artistEnabledVpaths.length === 0) {
+    db.exec('BEGIN');
+    db.exec('DELETE FROM artists_normalized');
+    db.exec('COMMIT');
+    db.exec("INSERT INTO fts_artists(fts_artists) VALUES ('rebuild')");
+    return;
+  }
+
+  const vpIn = inClause('vpath', artistEnabledVpaths);
+    const include = includePrefixClauses(artistFilter.includeFilepathPrefixes);
+    const exclude = excludePrefixClauses(artistFilter.excludeFilepathPrefixes);
+
   // Fetch all distinct (artist, vpath, count) in one pass
   const rawRows = db.prepare(
-    "SELECT artist, vpath, COUNT(*) AS count FROM files WHERE artist IS NOT NULL AND artist != '' GROUP BY artist, vpath"
-  ).all();
+    `SELECT artist, vpath, COUNT(*) AS count
+     FROM files
+      WHERE artist IS NOT NULL AND artist != '' AND ${vpIn.sql}${include.sql}${exclude.sql}
+     GROUP BY artist, vpath`
+    ).all(...vpIn.params, ...include.params, ...exclude.params);
 
   // Build per-artist count totals (sum across vpaths) + vpath sets
   const countMap = new Map(); // artist → total count
@@ -597,6 +616,89 @@ function includePrefixClauses(includeFilepathPrefixes, vpathCol = 'vpath', pathC
     params.push(vpath, ...prefixes.map(p => p.replace(/[%_\\]/g, '\\$&') + '%'));
   }
   return { sql: ' AND ' + parts.join(' AND '), params };
+}
+
+function getArtistFolderFilter() {
+  const folders = config.program?.folders || {};
+  const entries = Object.entries(folders);
+
+  function withSlash(p) {
+    return String(p || '').replace(/\/?$/, '/');
+  }
+
+  function findParent(name) {
+    const myRoot = withSlash(folders[name]?.root);
+    let best = null;
+    let bestLen = -1;
+    for (const [other, folder] of entries) {
+      if (other === name) continue;
+      const otherRoot = withSlash(folder.root);
+      if (myRoot === otherRoot) continue;
+      if (!myRoot.startsWith(otherRoot)) continue;
+      if (otherRoot.length > bestLen) {
+        best = other;
+        bestLen = otherRoot.length;
+      }
+    }
+    return best;
+  }
+
+  function findRoot(name) {
+    let cur = name;
+    let parent = findParent(cur);
+    while (parent) {
+      cur = parent;
+      parent = findParent(cur);
+    }
+    return cur;
+  }
+
+  const rootNames = entries.map(([name]) => name).filter(name => !findParent(name));
+  const allowedRoots = new Set();
+  const includeFilepathPrefixes = [];
+  const excludeFilepathPrefixes = [];
+
+  for (const rootName of rootNames) {
+    const rootFolder = folders[rootName] || {};
+    if (rootFolder.type === 'excluded') continue;
+
+    const rootEnabled = rootFolder.artistsOn !== false;
+    const rootPath = withSlash(rootFolder.root);
+    const descendants = entries.filter(([name, folder]) => {
+      if (name === rootName) return false;
+      if ((folder.type || 'music') === 'excluded') return false;
+      return findRoot(name) === rootName;
+    });
+
+    const enabledPrefixes = [];
+    for (const [, folder] of descendants) {
+      const prefix = withSlash(folder.root).slice(rootPath.length);
+      if (!prefix) continue;
+      if (folder.artistsOn === false) {
+        excludeFilepathPrefixes.push({ vpath: rootName, prefix });
+      } else if (!rootEnabled) {
+        enabledPrefixes.push(prefix);
+      }
+    }
+
+    if (rootEnabled) {
+      allowedRoots.add(rootName);
+      continue;
+    }
+
+    if (enabledPrefixes.length > 0) {
+      allowedRoots.add(rootName);
+      for (const prefix of enabledPrefixes) {
+        includeFilepathPrefixes.push({ vpath: rootName, prefix });
+      }
+    }
+  }
+
+  return {
+    vpaths: [...allowedRoots],
+    includeFilepathPrefixes,
+    excludeFilepathPrefixes,
+  };
 }
 
 // File Operations
@@ -1351,6 +1453,8 @@ export function getArtistImageAudit(kind, limit = 200) {
     where += " AND (image_file IS NULL OR image_file = '')";
   } else if (kind === 'wrong') {
     where += ' AND image_flag_wrong = 1';
+  } else if (kind === 'with-image') {
+    where += " AND image_file IS NOT NULL AND image_file != ''";
   }
   const rows = db.prepare(`
     SELECT artist_clean, image_file, image_source, song_count, image_flag_wrong, last_fetched
@@ -1374,13 +1478,15 @@ export function getArtistImageAuditCounts() {
   const row = db.prepare(`
     SELECT
       SUM(CASE WHEN image_file IS NULL OR image_file = '' THEN 1 ELSE 0 END) AS missing,
-      SUM(CASE WHEN image_flag_wrong = 1 THEN 1 ELSE 0 END) AS wrong
+      SUM(CASE WHEN image_flag_wrong = 1 THEN 1 ELSE 0 END) AS wrong,
+      SUM(CASE WHEN image_file IS NOT NULL AND image_file != '' THEN 1 ELSE 0 END) AS withImage
     FROM artists_normalized
     WHERE artist_clean != ''
-  `).get() || { missing: 0, wrong: 0 };
+  `).get() || { missing: 0, wrong: 0, withImage: 0 };
   return {
     missing: Number(row.missing || 0),
     wrong: Number(row.wrong || 0),
+    withImage: Number(row.withImage || 0),
   };
 }
 

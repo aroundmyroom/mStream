@@ -1,5 +1,27 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.8.2-velvet — April 2026
+
+### feat: per-folder Artist Library include toggle (`artistsOn`) + review improvements
+- Added a new folder flag `artistsOn` (default: `true`) in Admin Directory settings.
+- New **Artists: On/Off** toggle in **Admin → Directories** for all non-excluded folders.
+- Added an inline Admin hint explaining how root folders affect the whole artist tree and how child folders override only their own subtree.
+- Admin → Artists manual image URL field now shows a live preview and warns when the pasted link cannot be previewed as an image.
+- Admin → Artists now includes a **With image** list so existing artist portraits can be reviewed and marked **Yes (OK)** or **No (wrong)** directly.
+- When a folder is set to **Artists Off**, its files are excluded from artist index rebuilds, so it no longer contributes to:
+  - Artist Home shelves (Most Songs, Recently Listened, Most Played)
+  - A-Z artist browse and artist search
+  - artist image hydration/missing-image queues
+- Toggling the flag triggers an immediate artist-index rebuild and cache invalidation so changes apply right away.
+
+### fix: artist index regression with child-vpath toggles
+- Fixed root/child filtering in artist index rebuild so child folder toggles are applied via parent-vpath filepath-prefix include/exclude rules.
+- Prevents empty Artist Home when a root folder is off but selected child folders are still on.
+
+### fix: artist normalization for vinyl-style tracklist prefixes
+- Added cleanup for `A1`, `A2`, `B1`-style artist tag corruption, including dotted/comma/glued forms (e.g. `A1. Artist`, `A1, Artist`, `A1.Artist`).
+- Added nested-prefix cleanup for malformed stacked tags such as `02 B1.Tom Hooker`.
+
 ## v6.8.1-velvet — April 2026
 
 ### fix: Artist image hydration can be idle with no visible progress after restart

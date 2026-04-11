@@ -36,6 +36,12 @@ const DOTTED_PREFIX_RX   = /^(\d{1,3})\.\s*(.+)$/;
 // Side/slot prefix often seen in ripped VA mixes: "03a) Lime"
 const SIDE_PREFIX_RX     = /^(\d{1,2})[a-z]\)\s+(.+)$/i;
 
+// Vinyl side/position prefixes from pasted tracklists: "A1 Artist", "A2. Artist", "B10) Artist"
+const VINYL_SIDE_PREFIX_RX = /^([A-D])(\d{1,2})(?:[.)])?\s+(.+)$/i;
+
+// Glued punctuation variants: "A1.Artist", "A1, Artist", "B2)Artist"
+const VINYL_SIDE_PUNCT_PREFIX_RX = /^([A-D])(\d{1,2})[.,)]\s*(.+)$/i;
+
 // Underscore format: "01_Communards", "07_Level_42"  (any digits, then _, then name)
 const UNDERSCORE_PREFIX_RX = /^(\d+)_(.+)$/;
 
@@ -85,6 +91,20 @@ function parseDigitPrefix(raw) {
     return { stripped, padded: true, num: Number(sided[1]), drop: PURE_YEAR_RX.test(stripped) };
   }
 
+  const vinylPunct = raw.match(VINYL_SIDE_PUNCT_PREFIX_RX);
+  if (vinylPunct) {
+    const stripped = vinylPunct[3].trim();
+    return { stripped, padded: true, num: Number(vinylPunct[2]), drop: PURE_YEAR_RX.test(stripped) };
+  }
+
+  // "A1 Madonna", "A2. Big Pig", "B3) D Mob" style prefixes are track
+  // positions copied from vinyl/tracklist metadata, not artist names.
+  const vinylSide = raw.match(VINYL_SIDE_PREFIX_RX);
+  if (vinylSide) {
+    const stripped = vinylSide[3].trim();
+    return { stripped, padded: true, num: Number(vinylSide[2]), drop: PURE_YEAR_RX.test(stripped) };
+  }
+
   const unpadded = raw.match(UNPADDED_PREFIX_RX);
   if (unpadded) {
     const stripped = unpadded[2].trim();
@@ -112,6 +132,21 @@ function stripDigitPrefix(raw) {
 
 function toKey(raw) {
   return raw.toLowerCase().trim();
+}
+
+// Some malformed tags contain stacked prefixes, e.g. "02 B1.Tom Hooker".
+// Remove repeated padded-style track prefixes, but never strip unpadded
+// prefixes to avoid breaking real artists like "50 Cent".
+function stripNestedPaddedPrefixes(name) {
+  let cur = String(name || '').trim();
+  for (let i = 0; i < 4; i++) {
+    const p = parseDigitPrefix(cur);
+    if (!p || !p.padded) break;
+    const next = String(p.stripped || '').trim();
+    if (!next || next === cur) break;
+    cur = next;
+  }
+  return cur;
 }
 
 /**
@@ -226,7 +261,8 @@ function buildArtistGroups(rows) {
     // ── Case: space-separated digit prefix "NN ArtistName" ───────────────
     const prefix = parseDigitPrefix(raw);
     if (prefix) {
-      const { stripped, padded, num, drop } = prefix;
+      const { padded, num, drop } = prefix;
+      const stripped = padded ? stripNestedPaddedPrefixes(prefix.stripped) : prefix.stripped;
       if (drop || !stripped) continue;
       const strippedKey = toKey(stripped);
       const cleanEntry  = byLower.get(strippedKey);

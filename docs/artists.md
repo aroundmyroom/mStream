@@ -72,6 +72,26 @@ The rebuild:
 3. DELETEs the entire `artists_normalized` table and re-inserts in a single transaction.
 4. Calls `invalidateArtistCache()` so the home-page cache is refreshed.
 
+### Folder-level artist inclusion (`artistsOn`)
+
+Each configured folder now has an Artist Library include flag:
+
+- `artistsOn: true` (default) — folder contributes to artist index + artist features.
+- `artistsOn: false` — folder is excluded from artist index rebuilds.
+
+This setting is controlled in **Admin → Directories** via **Artists: On/Off** and applies to:
+
+- Artist Home shelves (Most Songs, Recently Listened, Most Played)
+- A-Z letter browse + artist search
+- artist image hydration and missing/wrong audit queues
+
+The Admin UI also shows an inline hint beside each folder path:
+
+- root folders affect the whole artist subtree by default
+- child folders act as scoped overrides for only their own subfolder prefix inside the parent root
+
+When changed, the server immediately rebuilds `artists_normalized`, so results update without waiting for a full library scan.
+
 ### Why a precomputed table?
 
 A naive approach would JOIN `files` with a normalisation function on every request. With 130,000+ songs that join would be several seconds on every page load. The precomputed table makes all artist queries O(1) for lookups and O(n_artists) for listing — typically under 5 ms.
@@ -89,7 +109,7 @@ A naive approach would JOIN `files` with a normalisation function on every reque
 | POST | `/api/v1/artists/mark-image-wrong` | admin | Flag/unflag an artist image as wrong from the player view |
 | POST | `/api/v1/db/artists-albums-multi` | user | Albums for one artist (accepts an array of variant names to handle all tag forms) |
 | POST | `/api/v1/admin/artists/rebuild-index` | admin | Trigger an immediate index rebuild without a full scan |
-| GET | `/api/v1/admin/artists/image-audit?kind=missing|wrong` | admin | List artists needing image fixes |
+| GET | `/api/v1/admin/artists/image-audit?kind=missing|wrong|with-image` | admin | List artists for missing/wrong review and with-image validation |
 | GET | `/api/v1/admin/artists/hydration-status` | admin | Live hydration queue status, counters, delay profile, and Discogs readiness |
 | POST | `/api/v1/admin/artists/hydration-seed` | admin | Enqueue missing artists on demand (used by the Queue next 500 action) |
 | GET | `/api/v1/admin/artists/discogs-candidates?artistKey=...` | admin | Fetch Discogs artist image candidates |
@@ -165,9 +185,11 @@ For admin users, artist cards/rows include a flag action to mark an artist image
 `Admin → Artists` provides:
 
 - **Missing** queue: artists with no stored image.
+- **With image** queue: artists that already have an image, for manual quality review.
 - **Wrong** queue: artists flagged from the player as incorrect image.
 - Discogs candidate grid (multiple options) with direct apply.
-- Direct image URL apply for manual fixes.
+- Direct image URL apply for manual fixes, with a live preview before applying.
+- In **With image**, admins can quickly validate each portrait with **Yes: image is OK** or **No: mark wrong**.
 - Live telemetry panel showing whether background hydration is running, queue depth, dropped items (queue cap), and session progress.
 - Clear Discogs readiness state (enabled + API credentials) so users understand when Discogs suggestions are unavailable.
 

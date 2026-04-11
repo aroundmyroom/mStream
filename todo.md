@@ -8,6 +8,10 @@
 
 - [ ] Admin Artists: add bulk actions (apply first Discogs candidate to selected rows)
 - [ ] Admin Artists: add pagination/filter by minimum song count for very large libraries
+- [ ] Admin Artists: add image-dimension / file-size details to manual URL preview before apply
+- [ ] Admin Artists: add bulk Yes/No validation actions in the With image review list
+- [ ] Admin Directories: add bulk Artists On/Off actions by folder type (music/audio-books/recordings)
+- [ ] Admin Directories: add visual parent/child relationship badges for Albums Only and Artists On/Off inheritance
 - [ ] Player Artist Library: optional badge for already-flagged wrong artists (admin-only)
 - [ ] Add global media-enrichment budget (shared limiter between artist-image hydration and album-art background tasks)
 - [ ] Add admin performance panel for enrichment throughput (items/min, queue depth, fail rate)

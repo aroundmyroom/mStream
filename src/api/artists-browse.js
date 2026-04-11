@@ -745,12 +745,12 @@ export function setup(mstream) {
     res.json({ ok: true, artistKey: artistRow.artistKey, wrong: !!wrong });
   });
 
-  // ── GET /api/v1/admin/artists/image-audit?kind=missing|wrong&limit=200 ───
+  // ── GET /api/v1/admin/artists/image-audit?kind=missing|wrong|with-image&limit=200 ───
   mstream.get('/api/v1/admin/artists/image-audit', (req, res) => {
     if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
     const kind = String(req.query.kind || 'missing').toLowerCase();
     const limit = Number(req.query.limit || 200);
-    if (kind !== 'missing' && kind !== 'wrong') {
+    if (kind !== 'missing' && kind !== 'wrong' && kind !== 'with-image') {
       return res.status(400).json({ error: 'Invalid kind' });
     }
     try {

@@ -92,7 +92,7 @@ Response:
 
 Triggers immediate rebuild of `artists_normalized` without waiting for full scan.
 
-### GET /api/v1/admin/artists/image-audit?kind=missing|wrong&limit=300
+### GET /api/v1/admin/artists/image-audit?kind=missing|wrong|with-image&limit=300
 
 Lists artists for moderation queues.
 
@@ -101,7 +101,7 @@ Response:
 ```json
 {
   "kind": "missing",
-  "counts": { "missing": 18060, "wrong": 1 },
+  "counts": { "missing": 18060, "wrong": 1, "withImage": 392 },
   "artists": [
     {
       "artistKey": "chicane",
@@ -180,7 +180,7 @@ Response:
     "lastErrorAt": 0,
     "lastError": null
   },
-  "counts": { "missing": 18060, "wrong": 1 }
+  "counts": { "missing": 18060, "wrong": 1, "withImage": 392 }
 }
 ```
 
@@ -203,6 +203,6 @@ Response:
   "running": true,
   "queueLength": 200,
   "queueLimit": 800,
-  "counts": { "missing": 18060, "wrong": 1 }
+  "counts": { "missing": 18060, "wrong": 1, "withImage": 392 }
 }
 ```

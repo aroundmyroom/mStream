@@ -1313,6 +1313,12 @@ const foldersView = Vue.component('folders-view', {
                     @click="toggleAlbumsOnly(k)">
                     {{v.albumsOnly ? 'Albums Only: On' : 'Albums Only: Off'}}
                   </button>
+                  <button v-if="v.type !== 'excluded'" class="btn-small" type="button"
+                    :style="v.artistsOn !== false ? 'background:var(--primary);color:#fff;' : ''"
+                    :title="v.artistsOn !== false ? 'Artist Library ON — click to disable' : 'Artist Library OFF — click to enable'"
+                    @click="toggleArtistsOn(k)">
+                    {{v.artistsOn !== false ? 'Artists: On' : 'Artists: Off'}}
+                  </button>
                   <button class="btn-small red" type="button" @click="removeFolder(k, v.root)">Remove</button>
                 </div>
               </div>
@@ -1320,7 +1326,12 @@ const foldersView = Vue.component('folders-view', {
               <!-- Row 2: directory path -->
               <div style="display:flex;align-items:baseline;gap:8px;">
                 <span style="font-size:11px;color:var(--t3);flex-shrink:0;min-width:60px;">Path</span>
-                <span style="font-size:12px;color:var(--t2);word-break:break-all;font-family:monospace;">{{v.root}}</span>
+                <div style="display:flex;flex-direction:column;gap:3px;min-width:0;">
+                  <span style="font-size:12px;color:var(--t2);word-break:break-all;font-family:monospace;">{{v.root}}</span>
+                  <small v-if="v.type !== 'excluded'" style="color:var(--t3);font-size:.76rem;line-height:1.35;">
+                    Artists hint: root folders apply to the whole library tree unless a child folder overrides it. Child folders act as include/exclude sub-sections inside their parent for Artist Home, browse, search, and artist image scanning.
+                  </small>
+                </div>
               </div>
 
               <!-- Row 3: user access -->
@@ -1484,7 +1495,7 @@ const foldersView = Vue.component('folders-view', {
           else if (isRec && isYT) addedType = 'recordings';
           else if (isYT) addedType = 'youtube';
           else if (isRec) addedType = 'recordings';
-          const addedFolder = { root: this.folder.value, type: addedType };
+          const addedFolder = { root: this.folder.value, type: addedType, artistsOn: true };
           if ((isRec || isYT) && isARD) addedFolder.allowRecordDelete = true;
           Vue.set(ADMINDATA.folders, this.dirName, addedFolder);
           this.dirName = '';
@@ -1536,6 +1547,25 @@ const foldersView = Vue.component('folders-view', {
           iziToast.success({
             title: newVal ? 'Albums Only enabled — Albums view restricted to this folder' : 'Albums Only disabled',
             position: 'topCenter', timeout: 3000
+          });
+        } catch (_e) {
+          iziToast.error({ title: 'Failed to update setting', position: 'topCenter', timeout: 3000 });
+        }
+      },
+      toggleArtistsOn: async function(vpath) {
+        const folder = ADMINDATA.folders[vpath];
+        const newVal = folder.artistsOn === false;
+        try {
+          await API.axios({
+            method: 'PATCH',
+            url: `${API.url()}/api/v1/admin/directory/flags`,
+            data: { vpath, artistsOn: newVal }
+          });
+          Vue.set(ADMINDATA.folders[vpath], 'artistsOn', newVal);
+          iziToast.success({
+            title: newVal ? 'Artist Library enabled for this folder' : 'Artist Library disabled for this folder',
+            message: 'Artist index was rebuilt to apply this change.',
+            position: 'topCenter', timeout: 3500
           });
         } catch (_e) {
           iziToast.error({ title: 'Failed to update setting', position: 'topCenter', timeout: 3000 });
@@ -4416,13 +4446,14 @@ const artistsAdminView = Vue.component('artists-admin-view', {
     return {
       loading: false,
       kind: 'missing',
-      counts: { missing: 0, wrong: 0 },
+      counts: { missing: 0, wrong: 0, withImage: 0 },
       sessionStartMissing: null,
       artists: [],
       selected: null,
       candidateLoading: false,
       candidates: [],
       customImageUrl: '',
+      customImagePreviewError: false,
       applying: false,
       hydration: {
         running: false,
@@ -4450,6 +4481,11 @@ const artistsAdminView = Vue.component('artists-admin-view', {
     hydratedThisSession() {
       if (!Number.isFinite(this.sessionStartMissing)) return null;
       return Math.max(0, this.sessionStartMissing - (this.counts.missing || 0));
+    },
+    customImagePreviewUrl() {
+      const url = String(this.customImageUrl || '').trim();
+      if (!/^https?:\/\//i.test(url)) return '';
+      return url;
     },
   },
   methods: {
@@ -4493,7 +4529,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
           url: `${API.url()}/api/v1/admin/artists/image-audit`,
           params: { kind, limit: 300 }
         });
-        this.counts = res.data.counts || { missing: 0, wrong: 0 };
+        this.counts = res.data.counts || { missing: 0, wrong: 0, withImage: 0 };
         if (!Number.isFinite(this.sessionStartMissing)) this.sessionStartMissing = this.counts.missing || 0;
         this.artists = res.data.artists || [];
       } catch (e) {
@@ -4524,6 +4560,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
       this.selected = row;
       this.candidates = [];
       this.customImageUrl = '';
+      this.customImagePreviewError = false;
       if (!this.discogsReady) {
         this.candidateLoading = false;
         return;
@@ -4559,17 +4596,27 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         this.applying = false;
       }
     },
-    async clearWrong(row) {
+    onCustomPreviewLoad() {
+      this.customImagePreviewError = false;
+    },
+    onCustomPreviewError() {
+      this.customImagePreviewError = true;
+    },
+    async setWrong(row, wrong) {
       try {
         await API.axios({
           method: 'POST',
           url: `${API.url()}/api/v1/artists/mark-image-wrong`,
-          data: { artistKey: row.artistKey, wrong: false }
+          data: { artistKey: row.artistKey, wrong: !!wrong }
         });
-        iziToast.success({ title: 'Removed wrong-image flag', position: 'topCenter', timeout: 1500 });
+        iziToast.success({
+          title: wrong ? 'Marked as wrong image' : 'Marked as image OK',
+          position: 'topCenter',
+          timeout: 1500
+        });
         await this.load(this.kind);
       } catch (e) {
-        iziToast.error({ title: 'Failed to clear flag', message: e.message || '', position: 'topCenter', timeout: 2500 });
+        iziToast.error({ title: 'Failed to update image status', message: e.message || '', position: 'topCenter', timeout: 2500 });
       }
     },
     imgSrc(imageFile) {
@@ -4586,6 +4633,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn-flat" @click="load('missing')" :style="kind==='missing' ? 'border-color:var(--primary);color:var(--primary);' : ''">Missing ({{ counts.missing || 0 }})</button>
+          <button class="btn-flat" @click="load('with-image')" :style="kind==='with-image' ? 'border-color:var(--ok,#16a34a);color:var(--ok,#16a34a);' : ''">With image ({{ counts.withImage || 0 }})</button>
           <button class="btn-flat" @click="load('wrong')" :style="kind==='wrong' ? 'border-color:var(--warn,#b45309);color:var(--warn,#b45309);' : ''">Wrong ({{ counts.wrong || 0 }})</button>
           <button class="btn-flat" @click="seedHydration(500)" :disabled="seedPending">{{ seedPending ? 'Queueing...' : 'Queue next 500' }}</button>
           <button class="btn" @click="load(kind)" :disabled="loading">{{ loading ? 'Refreshing...' : 'Refresh' }}</button>
@@ -4630,14 +4678,26 @@ const artistsAdminView = Vue.component('artists-admin-view', {
               <div style="font-size:1rem;font-weight:700;">{{ selected.canonicalName }}</div>
               <div style="font-size:.82rem;color:var(--t2);">{{ selected.songCount || 0 }} songs</div>
             </div>
-            <button v-if="selected.wrongFlag" class="btn-flat" @click="clearWrong(selected)">Clear wrong flag</button>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button v-if="kind === 'with-image' || selected.wrongFlag" class="btn-flat" @click="setWrong(selected, false)">Yes: image is OK</button>
+              <button v-if="kind === 'with-image' || !selected.wrongFlag" class="btn-flat" style="border-color:var(--warn,#b45309);color:var(--warn,#b45309);" @click="setWrong(selected, true)">No: mark wrong</button>
+            </div>
           </div>
 
           <div style="margin-bottom:12px;">
             <div style="font-size:.82rem;color:var(--t2);margin-bottom:6px;">Apply from URL</div>
             <div style="display:flex;gap:8px;">
-              <input v-model="customImageUrl" type="url" placeholder="https://..." style="flex:1;" />
+              <input v-model="customImageUrl" @input="customImagePreviewError = false" type="url" placeholder="https://..." style="flex:1;" />
               <button class="btn" @click="applyImage(customImageUrl, 'custom')" :disabled="!customImageUrl || applying">Apply</button>
+            </div>
+            <div v-if="customImagePreviewUrl" style="margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);display:flex;gap:12px;align-items:flex-start;">
+              <img v-show="!customImagePreviewError" :src="customImagePreviewUrl" @load="onCustomPreviewLoad" @error="onCustomPreviewError" alt="Custom preview" style="width:112px;height:112px;border-radius:10px;object-fit:cover;display:block;background:var(--raised);border:1px solid var(--border);flex-shrink:0;" />
+              <div style="min-width:0;display:flex;flex-direction:column;gap:6px;">
+                <div style="font-size:.82rem;font-weight:600;">Preview</div>
+                <div v-if="customImagePreviewError" style="font-size:.8rem;color:var(--warn,#b45309);line-height:1.4;">This URL could not be previewed as an image. Check the link before applying it.</div>
+                <div v-else style="font-size:.8rem;color:var(--t2);line-height:1.4;">The pasted image will be downloaded, resized, and stored for <b>{{ selected.canonicalName }}</b>.</div>
+                <div style="font-size:.74rem;color:var(--t3);word-break:break-all;">{{ customImagePreviewUrl }}</div>
+              </div>
             </div>
           </div>
 
