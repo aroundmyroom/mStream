@@ -1,5 +1,23 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.8.3-velvet — April 2026
+
+### fix: prevent playback stalls while artist index rebuild runs
+- Moved `rebuildArtistIndex()` heavy normalization work to a `worker_thread` so the main Node.js event loop stays responsive during rebuilds.
+- Fixes intermittent browser-side `Stream stalled` loops and unexpected stop/resume cycles during playback on local networks when artist rebuilds were triggered.
+- Rebuild calls are now deduplicated while one worker is in flight, avoiding overlapping CPU spikes.
+
+### fix: instant Admin Directories Artists On/Off response
+- **Admin → Directories** now applies the Artists On/Off toggle optimistically in the UI and returns API success immediately.
+- Artist index rebuild is executed in the background and artist cache is invalidated only after rebuild completion.
+- This prevents repeated clicks caused by delayed visual feedback on large libraries.
+
+### perf: targeted SQL indexes for artist hot paths
+- Added `idx_an_song_count` on `artists_normalized(song_count DESC)` for Artist Home top-list queries.
+- Added `idx_an_image_flag` on `artists_normalized(image_flag_wrong, song_count DESC)` for admin image-audit queues.
+- Added `idx_files_vpath_artist` on `files(vpath, artist)` for artist-song browse queries.
+- Verified with `EXPLAIN QUERY PLAN`: these paths now use indexes instead of temp sort/full-scan behavior.
+
 ## v6.8.2-velvet — April 2026
 
 ### feat: per-folder Artist Library include toggle (`artistsOn`) + review improvements

@@ -1,9 +1,12 @@
 import path from 'path';
 import { mkdirSync } from 'fs';
+import { fileURLToPath } from 'node:url';
+import { Worker } from 'node:worker_threads';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'crypto';
-import { buildArtistGroups } from '../util/artist-normalize.js';
 import * as config from '../state/config.js';
+
+const _workerPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../util/artist-rebuild-worker.mjs');
 
 // ── Subsonic ID helpers ───────────────────────────────────────────────────────
 // Artist ID = MD5(normalised artist name).slice(0,16)
@@ -19,11 +22,14 @@ function _makeAlbumId(artist, album) {
 }
 
 let db;
+let _dbPath = null;
+let _rebuildInFlight = false;
 const _s = {}; // cached prepared statements — populated in init(), reused on every call
 
 export function init(dbDirectory) {
   mkdirSync(dbDirectory, { recursive: true });
   const dbPath = path.join(dbDirectory, 'mstream.sqlite');
+  _dbPath = dbPath;
   db = new DatabaseSync(dbPath);
   db.exec('PRAGMA journal_mode=WAL');
   // NORMAL skips per-write fsync (safe with WAL); prevents 50-200ms event-loop
@@ -355,6 +361,16 @@ export function init(dbDirectory) {
   try { db.exec("ALTER TABLE artists_normalized ADD COLUMN name_override INTEGER DEFAULT 0"); } catch (_e) { /* already exists */ }
   try { db.exec("ALTER TABLE artists_normalized ADD COLUMN song_count    INTEGER DEFAULT 0"); } catch (_e) { /* already exists */ }
 
+  // ── Missing indexes (added post-initial-release) ──────────────────────────
+  // Artist Home page: ORDER BY song_count DESC LIMIT 20 — was a full 18k-row
+  // scan + temp B-TREE sort on every page load.
+  db.exec('CREATE INDEX IF NOT EXISTS idx_an_song_count ON artists_normalized(song_count DESC)');
+  // Audit queries: WHERE image_flag_wrong=1 — full scan without this index.
+  db.exec('CREATE INDEX IF NOT EXISTS idx_an_image_flag ON artists_normalized(image_flag_wrong, song_count DESC)');
+  // Artist browse: WHERE vpath=? AND artist=? — was hitting idx_files_vpath_sID
+  // then scanning the entire vpath partition to match artist.
+  db.exec('CREATE INDEX IF NOT EXISTS idx_files_vpath_artist ON files(vpath, artist)');
+
   // ── Cache hot-path prepared statements ───────────────────────────────────
   // These functions are called once per file during scans (up to 123K times).
   // Caching avoids re-running sqlite3_prepare_v2 on every call.
@@ -466,91 +482,53 @@ export function rebuildFolderIndex() {
 //     version exists with ≥50% as many songs
 //   • preserves real digit-named artists ("2 Unlimited", "808 State", "50 Cent")
 //   • preserves admin-set name_override, bio, image_file across rebuilds
-export function rebuildArtistIndex() {
-  const artistFilter = getArtistFolderFilter();
-  const artistEnabledVpaths = artistFilter.vpaths;
+// Queued callbacks to fire after the current in-flight rebuild completes.
+const _rebuildDoneCallbacks = [];
 
-  if (artistEnabledVpaths.length === 0) {
-    db.exec('BEGIN');
-    db.exec('DELETE FROM artists_normalized');
-    db.exec('COMMIT');
-    db.exec("INSERT INTO fts_artists(fts_artists) VALUES ('rebuild')");
-    return;
-  }
+/**
+ * Rebuild the artists_normalized table in a worker_thread so the
+ * CPU-intensive buildArtistGroups pass (~20 s on large libraries) never
+ * blocks the main event loop or interrupts audio streaming.
+ *
+ * Fire-and-forget: returns immediately.  If a rebuild is already running,
+ * the request is deduplicated — the optional onComplete callback is still
+ * invoked once the current worker finishes.
+ *
+ * @param {Function} [onComplete]  Called (with no args) when the rebuild finishes.
+ */
+export function rebuildArtistIndex(onComplete) {
+  if (typeof onComplete === 'function') _rebuildDoneCallbacks.push(onComplete);
+  if (_rebuildInFlight) return; // already running — callback queued, will fire on completion
+  _rebuildInFlight = true;
 
-  const vpIn = inClause('vpath', artistEnabledVpaths);
-    const include = includePrefixClauses(artistFilter.includeFilepathPrefixes);
-    const exclude = excludePrefixClauses(artistFilter.excludeFilepathPrefixes);
+  // Compute the folder filter synchronously in the main thread (cheap — just reads config)
+  const filter = getArtistFolderFilter();
 
-  // Fetch all distinct (artist, vpath, count) in one pass
-  const rawRows = db.prepare(
-    `SELECT artist, vpath, COUNT(*) AS count
-     FROM files
-      WHERE artist IS NOT NULL AND artist != '' AND ${vpIn.sql}${include.sql}${exclude.sql}
-     GROUP BY artist, vpath`
-    ).all(...vpIn.params, ...include.params, ...exclude.params);
+  const worker = new Worker(_workerPath, {
+    workerData: {
+      dbPath: _dbPath,
+      vpaths: filter.vpaths,
+      includeFilepathPrefixes: filter.includeFilepathPrefixes,
+      excludeFilepathPrefixes: filter.excludeFilepathPrefixes,
+    },
+  });
 
-  // Build per-artist count totals (sum across vpaths) + vpath sets
-  const countMap = new Map(); // artist → total count
-  const vpathMap = new Map(); // artist → Set of vpaths
-  for (const row of rawRows) {
-    countMap.set(row.artist, (countMap.get(row.artist) || 0) + row.count);
-    if (!vpathMap.has(row.artist)) vpathMap.set(row.artist, new Set());
-    vpathMap.get(row.artist).add(row.vpath);
-  }
-
-  // Run smart normalization — this is the core deduplication algorithm
-  const countRows = [...countMap.entries()].map(([artist, count]) => ({ artist, count }));
-  const groups = buildArtistGroups(countRows); // Map<artistKey, { canonicalName, rawVariants[] }>
-
-  // Precompute song_count per group from countMap (no extra DB query needed)
-  function groupSongCount(group) {
-    return group.rawVariants.reduce((sum, v) => sum + (countMap.get(v.name) || 0), 0);
-  }
-
-  // Load existing rows to preserve bio / image / name_override across rebuild
-  const existing = db.prepare('SELECT artist_clean, bio, image_file, image_source, last_fetched, image_flag_wrong, name_override FROM artists_normalized').all();
-  const existingMap = new Map(existing.map(r => [r.artist_clean.toLowerCase(), r]));
-
-  db.exec('BEGIN');
-  db.exec('DELETE FROM artists_normalized');
-  const ins = db.prepare(`
-    INSERT INTO artists_normalized
-      (artist_clean, artist_raw_variants, vpaths_json, bio, image_file, image_source, last_fetched, image_flag_wrong, name_override, song_count)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (const [, group] of groups) {
-    // Collect all vpaths for this group's raw variants
-    const vpathSet = new Set();
-    for (const v of group.rawVariants) {
-      const vps = vpathMap.get(v.name);
-      if (vps) for (const vp of vps) vpathSet.add(vp);
+  worker.on('message', msg => {
+    if (msg.error) {
+      // Log but don't crash — the old data remains intact
+      import('winston').then(w => w.default.error(`Artist index rebuild failed: ${msg.error}`)).catch(() => {});
     }
+  });
 
-    // Determine display name — respect name_override if admin set it
-    const prevKey = group.canonicalName.toLowerCase();
-    const prev = existingMap.get(prevKey);
-    const displayName = (prev && prev.name_override) ? prev.artist_clean : group.canonicalName;
+  worker.on('exit', () => {
+    _rebuildInFlight = false;
+    const cbs = _rebuildDoneCallbacks.splice(0);
+    for (const cb of cbs) { try { cb(); } catch (_) {} }
+  });
 
-    ins.run(
-      displayName,
-      JSON.stringify(group.rawVariants.map(v => v.name)),
-      JSON.stringify([...vpathSet]),
-      prev ? (prev.bio || null) : null,
-      prev ? (prev.image_file || null) : null,
-      prev ? (prev.image_source || null) : null,
-      prev ? (prev.last_fetched || null) : null,
-      prev ? (prev.image_flag_wrong || 0) : 0,
-      prev ? (prev.name_override || 0) : 0,
-      groupSongCount(group)
-    );
-  }
-
-  db.exec('COMMIT');
-
-  // Rebuild FTS from freshly populated artists_normalized table
-  db.exec("INSERT INTO fts_artists(fts_artists) VALUES ('rebuild')");
+  worker.on('error', err => {
+    import('winston').then(w => w.default.error(`Artist rebuild worker error: ${err.message}`)).catch(() => {});
+  });
 }
 
 // Helper: build IN clause for variable-length arrays

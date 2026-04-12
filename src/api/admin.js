@@ -336,11 +336,12 @@ export function setup(mstream) {
 
     await admin.saveFile(loadConfig, config.configFile);
     if (albumsOnly !== undefined) invalidateAlbumsCache();
-    if (artistsOn !== undefined) {
-      db.rebuildArtistIndex();
-      invalidateArtistCache();
-    }
     res.json({});
+    if (artistsOn !== undefined) {
+      // Pass invalidateArtistCache as onComplete so the cache is cleared
+      // only after the worker finishes writing the new index.
+      db.rebuildArtistIndex(invalidateArtistCache);
+    }
   });
 
   // PATCH /api/v1/admin/directory/type — change the type of an existing folder
@@ -1253,17 +1254,10 @@ export function setup(mstream) {
     };
     res.json({ ok: true, started: true });
 
-    setImmediate(() => {
-      try {
-        db.rebuildArtistIndex();
-      } catch (err) {
-        const msg = _errMsg(err);
-        _artistRebuildState.lastError = msg;
-        winston.error(`Artist index rebuild failed: ${msg}`);
-      } finally {
-        _artistRebuildState.running = false;
-        _artistRebuildState.finishedAt = Date.now();
-      }
+    db.rebuildArtistIndex(() => {
+      _artistRebuildState.running = false;
+      _artistRebuildState.finishedAt = Date.now();
+      invalidateArtistCache();
     });
   });
 
@@ -1272,8 +1266,8 @@ export function setup(mstream) {
   mstream.post('/api/v1/admin/wrapped/backfill-folder-metadata', async (req, res) => {
     try {
       const updated = db.backfillFolderMetadata();
-      db.rebuildArtistIndex();
       res.json({ ok: true, updated });
+      db.rebuildArtistIndex(invalidateArtistCache);
     } catch (err) {
       winston.error(err);
       res.status(500).json({ error: err.message });

@@ -226,7 +226,7 @@ export function setup(mstream) {
     // Rebuild the folder and artist search indexes after every scan.
     // These are non-critical background operations — errors must not fail the scan.
     try { db.rebuildFolderIndex(); } catch (_e) { /* non-critical */ }
-    try { db.rebuildArtistIndex(); } catch (_e) { /* non-critical */ }
+    db.rebuildArtistIndex(); // runs in worker_thread — non-blocking, fire-and-forget
     res.json({});
   });
 

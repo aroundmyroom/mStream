@@ -51,7 +51,7 @@ export function countFilesByVpath(vpath) { return backend.countFilesByVpath(vpat
 export function getStats() { return backend.getStats(); }
 export function getLastScannedMs() { return backend.getLastScannedMs(); }
 export function rebuildFolderIndex() { backend.rebuildFolderIndex(); }
-export function rebuildArtistIndex() { backend.rebuildArtistIndex(); }
+export function rebuildArtistIndex(onComplete) { backend.rebuildArtistIndex(onComplete); }
 
 // Metadata Queries
 export function updateFileArt(filepath, vpath, aaFile, scanId, artSource) { return backend.updateFileArt(filepath, vpath, aaFile, scanId, artSource); }

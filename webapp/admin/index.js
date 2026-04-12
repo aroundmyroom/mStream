@@ -1555,19 +1555,20 @@ const foldersView = Vue.component('folders-view', {
       toggleArtistsOn: async function(vpath) {
         const folder = ADMINDATA.folders[vpath];
         const newVal = folder.artistsOn === false;
+        Vue.set(ADMINDATA.folders[vpath], 'artistsOn', newVal);
         try {
           await API.axios({
             method: 'PATCH',
             url: `${API.url()}/api/v1/admin/directory/flags`,
             data: { vpath, artistsOn: newVal }
           });
-          Vue.set(ADMINDATA.folders[vpath], 'artistsOn', newVal);
           iziToast.success({
             title: newVal ? 'Artist Library enabled for this folder' : 'Artist Library disabled for this folder',
-            message: 'Artist index was rebuilt to apply this change.',
+            message: 'Artist index is being rebuilt in the background.',
             position: 'topCenter', timeout: 3500
           });
         } catch (_e) {
+          Vue.set(ADMINDATA.folders[vpath], 'artistsOn', !newVal);
           iziToast.error({ title: 'Failed to update setting', position: 'topCenter', timeout: 3000 });
         }
       },

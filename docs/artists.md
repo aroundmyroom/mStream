@@ -66,6 +66,8 @@ After the explicit passes, any *small* group (≤ 5 songs, `SIM_MAX_CANDIDATE`) 
 
 `rebuildArtistIndex()` runs automatically at the end of every file scan (`src/api/scanner.js`). It also runs on startup and can be triggered manually from **Admin → Database → Rebuild Artist Index** without waiting for a full scan — useful after algorithm improvements.
 
+As of `v6.8.3`, rebuild execution is offloaded to a `worker_thread` so heavy normalization does not block the main server event loop. This keeps audio streaming responsive while the artist index is being rebuilt.
+
 The rebuild:
 1. Queries all distinct `(artist, COUNT(*))` rows from `files`.
 2. Passes them through `buildArtistGroups()`.
@@ -90,7 +92,7 @@ The Admin UI also shows an inline hint beside each folder path:
 - root folders affect the whole artist subtree by default
 - child folders act as scoped overrides for only their own subfolder prefix inside the parent root
 
-When changed, the server immediately rebuilds `artists_normalized`, so results update without waiting for a full library scan.
+When changed, the server starts a background rebuild of `artists_normalized`, so the toggle response is immediate while updated results appear as soon as rebuild completes.
 
 ### Why a precomputed table?
 
