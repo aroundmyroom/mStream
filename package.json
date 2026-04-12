@@ -97,7 +97,7 @@
     "electron-updater": "^6.7.3",
     "escape-string-regexp": "^5.0.0",
     "express": "^5.0.1",
-    "fast-xml-parser": "^5.5.10",
+    "fast-xml-parser": "^5.5.11",
     "http-proxy": "^1.18.1",
     "joi": "^18.1.2",
     "jsonwebtoken": "^9.0.3",
