@@ -21,6 +21,7 @@
   <link rel="stylesheet" href="../assets/css/spinner.css">
   <link rel="stylesheet" href="index.css">
 
+  <script src="../assets/js/i18n.js"></script>
   <script src="../assets/js/api.js"></script>
 
   <script>
@@ -58,7 +59,7 @@
       </svg>
       <div>
         <div style="font-size:15px;letter-spacing:-.2px;"><span style="font-weight:300;color:var(--t2);">m</span><span style="font-weight:700;color:var(--t1);">Stream</span> <span style="font-size:9px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--primary);opacity:.8;">Velvet</span></div>
-        <div class="side-nav-brand-label">Admin Panel</div>
+        <div class="side-nav-brand-label" data-i18n="admin.nav.brandLabel">Admin Panel</div>
       </div>
     </div>
 
@@ -77,67 +78,67 @@
       </button>
     </div>
 
-    <div class="side-nav-section-label">Config</div>
+    <div class="side-nav-section-label" data-i18n="admin.nav.sectionConfig">Config</div>
 
     <div class="side-nav-item select" onclick="changeView('folders-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" height="20"><path fill="#FFA000" d="M38 12H22l-4-4H8c-2.2 0-4 1.8-4 4v24c0 2.2 1.8 4 4 4h31c1.7 0 3-1.3 3-3V16c0-2.2-1.8-4-4-4z"/><path fill="#FFCA28" d="M42.2 18H15.3c-1.9 0-3.6 1.4-3.9 3.3L8 40h31.7c1.9 0 3.6-1.4 3.9-3.3l2.5-14c.5-2.4-1.4-4.7-3.9-4.7z"/></svg>
-      <span>Directories</span>
+      <span data-i18n="admin.nav.directories">Directories</span>
     </div>
     <div class="side-nav-item" onclick="changeView('users-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="200 200 800 800"><path fill="currentColor" d="M671.027 410.286c31.749 19.852 54.013 53.574 58.044 92.642 12.928 6.092 27.325 9.578 42.596 9.578 55.593 0 100.645-45.073 100.645-100.73 0-55.591-45.052-100.706-100.645-100.706-55.152.087-99.807 44.283-100.64 99.216m-65.998 206.146c55.611 0 100.749-45.093 100.749-100.705 0-55.568-45.138-100.665-100.749-100.665-55.569 0-100.662 45.097-100.662 100.665 0 55.612 45.092 100.705 100.662 100.705m42.706 6.883H562.3c-71.084 0-128.886 57.823-128.886 128.886v104.541l.218 1.623 7.232 2.255c67.816 21.213 126.781 28.225 175.295 28.225 94.746 0 149.683-26.955 153.076-28.728l6.707-3.375h.723V752.201c0-71.063-57.827-128.886-128.93-128.886M814.33 519.32h-84.754c-.965 33.965-15.406 64.487-38.305 86.465 63.217 18.8 109.431 77.392 109.431 146.613v32.211c83.705-3.089 131.951-26.823 135.152-28.442l6.707-3.42h.744V648.273c0-71.106-57.826-128.953-128.975-128.953m-385.958-6.814c19.655 0 37.997-5.742 53.556-15.537 4.907-32.188 22.172-60.344 46.827-79.498.108-1.882.283-3.726.283-5.611 0-55.631-45.094-100.704-100.666-100.704-55.633 0-100.751 45.073-100.751 100.704.001 55.573 45.118 100.646 100.751 100.646m90.433 93.279c-22.766-21.846-37.249-52.261-38.279-85.942-3.159-.216-6.248-.523-9.468-.523h-85.455c-71.083 0-128.929 57.847-128.929 128.953v104.474l.26 1.644 7.188 2.301c54.474 17.026 103.075 24.829 145.234 27.238v-31.532c-.001-69.221 46.233-127.77 109.449-146.613"/></svg>
-      <span>Users</span>
+      <span data-i18n="admin.nav.users">Users</span>
     </div>
     <div class="side-nav-item" onclick="changeView('genre-groups-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-      <span>Groups &amp; Genres</span>
+      <span data-i18n="admin.nav.genreGroups">Groups &amp; Genres</span>
     </div>
     <div class="side-nav-item" onclick="changeView('advanced-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      <span>Settings</span>
+      <span data-i18n="admin.nav.settings">Settings</span>
     </div>
     <div class="side-nav-item" onclick="changeView('db-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-      <span>Database</span>
+      <span data-i18n="admin.nav.database">Database</span>
     </div>
     <div class="side-nav-item" onclick="changeView('artists-admin-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      <span>Artists</span>
+      <span data-i18n="admin.nav.artists">Artists</span>
     </div>
     <div class="side-nav-item" onclick="changeView('backup-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-      <span>Backup</span>
+      <span data-i18n="admin.nav.backup">Backup</span>
     </div>
     <div class="side-nav-item" onclick="changeView('transcode-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 48 48" fill="none" stroke="#34d399" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" stroke-miterlimit="10"><path d="M8.5 8.5h9l-9 9v11l20-20h11l-31 31h11l20-20v11l-9 9h9"/></svg>
-      <span>Transcoding</span>
+      <span data-i18n="admin.nav.transcoding">Transcoding</span>
     </div>
     <div class="side-nav-item" onclick="changeView('server-audio-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-      <span>Server Audio</span>
+      <span data-i18n="admin.nav.serverAudio">Server Audio</span>
     </div>
     <div class="side-nav-item" onclick="changeView('federation-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 48 48"><path d="M44.4 17.3C44.3 15.9 43.3 14.8 41.9 14.6 38.4 14 30.3 13 24.2 13 18.1 13 9.6 13.9 6 14.5 4.7 14.7 3.7 15.8 3.5 17.2L3 25c-.1 1.6 1.1 2.8 2.7 3.2 2.9.8 10 .8 18.5.8 8.5 0 15.3-.1 18.1-.7 1.6-.3 2.8-1.6 2.7-3.2z" fill="#ffc107"/><path d="M23.7 3c-.2 0-.2 0-.3.2C19 8.4 15.7 14.8 13.4 22.9c-1.6 6-.9 13.2-1.4 21.8 0 .2.2.3.3.3l.2-.001c.2 0 .2 0 .3-.2C17.2 38.2 20.5 33.1 26 29.8c1-.5 1.5-.8 2-.8.2 0 .5.2 1 .8 2.6 3.6 5.4 7.1 8.2 12 .001 0 .3 0 .5 0 .2 0 .3-.2.3-.3-.7-7.2-1.8-13.8-4.1-20.3C31.6 14.7 28.3 8.5 24.1 3.2c0-.2-.2-.2-.4-.2z" fill="#455a64"/></svg>
-      <span>Federation</span>
+      <span data-i18n="admin.nav.federation">Federation</span>
     </div>
     <div class="side-nav-item" onclick="changeView('logs-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-      <span>Logs</span>
+      <span data-i18n="admin.nav.logs">Logs</span>
     </div>
     <div class="side-nav-item" id="scan-errors-nav" onclick="changeView('scan-errors-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      <span>Scan Errors</span>
+      <span data-i18n="admin.nav.scanErrors">Scan Errors</span>
       <span id="scan-errors-badge" class="se-nav-badge" style="display:none"></span>
     </div>
     <div class="side-nav-item" onclick="changeView('wrapped-admin-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-      <span>Play Stats</span>
+      <span data-i18n="admin.nav.playStats">Play Stats</span>
     </div>
     <div class="side-nav-item" onclick="changeView('lock-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-      <span>Lock Admin API</span>
+      <span data-i18n="admin.nav.lockAdmin">Lock Admin API</span>
     </div>
 
-    <div class="side-nav-section-label">External Services</div>
+    <div class="side-nav-section-label" data-i18n="admin.nav.sectionExternal">External Services</div>
 
     <div class="side-nav-item" onclick="changeView('lastfm-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm-1 13V8l6 4-6 4z"/></svg>
@@ -157,25 +158,35 @@
     </div>
     <div class="side-nav-item" onclick="changeView('radio-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M7.76 7.76a6 6 0 0 0 0 8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/></svg>
-      <span>Radio Streams</span>
+      <span data-i18n="admin.nav.radioStreams">Radio Streams</span>
+    </div>
+    <div class="side-nav-item" onclick="changeView('languages-view', this)">
+      <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      <span data-i18n="admin.nav.languages">Languages</span>
     </div>
 
-    <div class="side-nav-section-label">Server</div>
+    <div class="side-nav-section-label" data-i18n="admin.nav.sectionServer">Server</div>
 
     <div class="side-nav-item" onclick="changeView('info-view', this)">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M4 2c-1.093 0-2 .907-2 2v18.406l1.719-1.687L6.438 18H20c1.093 0 2-.907 2-2V4c0-1.093-.907-2-2-2H4zm0 2h16v12H5.594l-.313.281L4 17.563V4zm7 2v2h2V6h-2zm0 3v5h2V9h-2z"/></svg>
-      <span>About</span>
+      <span data-i18n="admin.nav.about">About</span>
     </div>
 
-    <div class="side-nav-section-label">Navigation</div>
+    <div id="admin-lang-picker-label" class="side-nav-section-label" data-i18n="settings.language">Language</div>
+
+    <div class="admin-lang-picker-wrap">
+      <div id="admin-lang-picker" class="lang-flag-row admin-lang-flag-row" role="group" aria-labelledby="admin-lang-picker-label"></div>
+    </div>
+
+    <div class="side-nav-section-label" data-i18n="admin.nav.sectionNavigation">Navigation</div>
 
     <div class="side-nav-item" onclick="gotoPlayer()">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-      <span>Go to Player</span>
+      <span data-i18n="admin.nav.gotoPlayer">Go to Player</span>
     </div>
     <div class="side-nav-item" onclick="adminConfirm('Logout?', 'Music playing in the player tab will stop.', 'Logout', () => API.logout())">
       <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-      <span>Logout</span>
+      <span data-i18n="admin.nav.logout">Logout</span>
     </div>
   </div>
 
@@ -269,6 +280,59 @@
       }
       w.focus();
     }
+
+    // Build admin language buttons from enabled config languages only.
+    I18N.ready.then(() => {
+      var picker = document.getElementById('admin-lang-picker');
+      if (!picker) return;
+      var allLangs = I18N.listLanguages();
+      function buildPicker(enabledCodes) {
+        picker.innerHTML = '';
+        allLangs.forEach(function(lang) {
+          if (!enabledCodes.includes(lang.code)) return;
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'lang-flag-btn';
+          btn.dataset.lang = lang.code;
+          btn.title = lang.label;
+          btn.setAttribute('aria-label', lang.label);
+          btn.setAttribute('aria-pressed', lang.code === I18N.getLanguage() ? 'true' : 'false');
+          if (lang.code === I18N.getLanguage()) btn.classList.add('active');
+          var img = document.createElement('img');
+          img.className = 'lang-flag-icon';
+          img.loading = 'lazy';
+          img.decoding = 'async';
+          img.alt = '';
+          if (lang.country) {
+            img.src = 'https://flagcdn.com/24x18/' + lang.country + '.png';
+          }
+          var fallback = document.createElement('span');
+          fallback.className = 'lang-flag-fallback';
+          fallback.textContent = lang.flag;
+          fallback.setAttribute('aria-hidden', 'true');
+          if (lang.country) {
+            fallback.style.display = 'none';
+            img.onerror = function() {
+              img.style.display = 'none';
+              fallback.style.display = 'inline';
+            };
+          }
+          btn.appendChild(img);
+          btn.appendChild(fallback);
+          btn.addEventListener('click', function() { I18N.loadLanguage(lang.code); });
+          picker.appendChild(btn);
+        });
+        if (!enabledCodes.includes(I18N.getLanguage())) I18N.loadLanguage('en');
+      }
+      fetch('/api/v1/languages/enabled')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          buildPicker(d.enabled && d.enabled.length ? d.enabled : allLangs.map(function(lang) { return lang.code; }));
+        })
+        .catch(function() {
+          buildPicker(allLangs.map(function(lang) { return lang.code; }));
+        });
+    });
   </script>
 
   <script defer src="index.js"></script>

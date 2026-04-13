@@ -1060,6 +1060,32 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 /* Light mode: use dark purple stem so it's visible on white background */
 :root.light .cue-tick::before{background:rgba(109,60,230,.8);}
 :root.light .cue-tick:hover::before{background:var(--primary);}
+/* Language flags */
+.lang-picker-wrap{display:flex;flex-direction:column;gap:4px;}
+.lang-flag-row{display:flex;gap:4px;flex-wrap:nowrap;overflow-x:auto;padding:2px 0 1px;scrollbar-width:none;}
+.lang-flag-row::-webkit-scrollbar{display:none;}
+.lang-flag-btn{
+  border:1px solid var(--border,#444);
+  background:var(--bg2,#2a2a3e);
+  color:var(--t1,#e0e0ff);
+  border-radius:6px;
+  min-width:32px;
+  height:28px;
+  padding:0;
+  font-size:17px;
+  line-height:1;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex:0 0 auto;
+  transition:border-color .15s,transform .1s,background .15s,box-shadow .15s;
+}
+.lang-flag-btn:hover{border-color:var(--primary);transform:translateY(-1px);}
+.lang-flag-btn.active{background:var(--primary-d,rgba(139,92,246,.18));border-color:var(--primary);box-shadow:0 0 0 1px var(--primary-d,rgba(139,92,246,.18)) inset;}
+.lang-flag-btn:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
+.lang-flag-icon{width:22px;height:16px;display:block;border-radius:2px;object-fit:cover;box-shadow:0 0 0 1px rgba(255,255,255,.16) inset;}
+.lang-flag-fallback{font-size:17px;line-height:1;display:inline-block;}
 /* Tooltip above the bar */
 .cue-tick::after{
   content:attr(data-label);

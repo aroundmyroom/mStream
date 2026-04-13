@@ -1,3 +1,15 @@
+// ── i18n Vue-reactivity bridge ───────────────────────────────────────────────
+// I18NSTATE.tick increments each time a language loads.  Vue templates that
+// call this.t('key') read the tick value, making them automatically re-render.
+const I18NSTATE = Vue.observable({ tick: 0 });
+Vue.prototype.t = function(key, params) {
+  void I18NSTATE.tick; // reactive dependency — forces re-render on lang change
+  return I18N.t(key, params);
+};
+I18N.onChange(() => { I18NSTATE.tick++; });
+I18N.loadLanguage(); // detect from localStorage / browser navigator
+// ─────────────────────────────────────────────────────────────────────────────
+
 const ADMINDATA = (() => {
   const module = {};
 
@@ -327,7 +339,7 @@ const wrappedAdminView = Vue.component('wrapped-admin-view', {
         this.loaded = true;
         if (this.stats.per_user.length) this.purgeUser = this.stats.per_user[0].user_id;
       } catch (e) {
-        iziToast.error({ title: 'Failed to load play stats', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.playStats.toastFailedLoad'), position: 'topCenter', timeout: 3000 });
       } finally {
         this.loading = false;
       }
@@ -337,18 +349,18 @@ const wrappedAdminView = Vue.component('wrapped-admin-view', {
       const fromMs = new Date(this.fromDt).getTime();
       const toMs   = new Date(this.toDt).getTime();
       if (isNaN(fromMs) || isNaN(toMs)) {
-        iziToast.error({ title: 'Invalid date', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.playStats.toastInvalidDate'), position: 'topCenter', timeout: 3000 });
         return;
       }
       if (toMs < fromMs) {
-        iziToast.error({ title: '"To" must be after "From"', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.playStats.toastToBeforeFrom'), position: 'topCenter', timeout: 3000 });
         return;
       }
       const fmt = dt => new Date(dt).toLocaleString();
       adminConfirm(
-        `Delete events for <b>${this.purgeUser}</b>?`,
-        `Song, radio, and podcast events between<br><b>${fmt(fromMs)}</b> and <b>${fmt(toMs)}</b> will be permanently deleted.`,
-        'Delete',
+        this.t('admin.playStats.confirmDeleteTitle', { user: this.purgeUser }),
+        this.t('admin.playStats.confirmDeleteMsg', { from: fmt(fromMs), to: fmt(toMs) }),
+        this.t('admin.playStats.confirmDeleteLabel'),
         async () => {
           this.purging = true;
           try {
@@ -357,10 +369,10 @@ const wrappedAdminView = Vue.component('wrapped-admin-view', {
               url: `${API.url()}/api/v1/admin/wrapped/purge`,
               data: { userId: this.purgeUser, fromMs, toMs },
             });
-            iziToast.success({ title: `Deleted ${r.data.deleted} song events`, position: 'topCenter', timeout: 3000 });
+            iziToast.success({ title: this.t('admin.playStats.toastDeletedEvents', { count: r.data.deleted }), position: 'topCenter', timeout: 3000 });
             this.load();
           } catch (e) {
-            iziToast.error({ title: 'Delete failed', message: e.message, position: 'topCenter', timeout: 4000 });
+            iziToast.error({ title: this.t('admin.playStats.toastDeleteFailed'), message: e.message, position: 'topCenter', timeout: 4000 });
           } finally {
             this.purging = false;
           }
@@ -375,16 +387,16 @@ const wrappedAdminView = Vue.component('wrapped-admin-view', {
     },
     doBackfill() {
       adminConfirm(
-        'Derive missing artist/album/title from folder names?',
-        'Files with no embedded tags will be updated using the pattern <b>"Artist - Release info"</b> in the parent folder name. This cannot be undone without a full rescan.',
-        'Apply',
+        this.t('admin.playStats.confirmBackfillTitle'),
+        this.t('admin.playStats.confirmBackfillMsg'),
+        this.t('admin.playStats.confirmBackfillLabel'),
         async () => {
           this.backfilling = true;
           try {
             const r = await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/wrapped/backfill-folder-metadata` });
-            iziToast.success({ title: `Updated ${r.data.updated} files`, position: 'topCenter', timeout: 4000 });
+            iziToast.success({ title: this.t('admin.playStats.toastUpdatedFiles', { count: r.data.updated }), position: 'topCenter', timeout: 4000 });
           } catch (e) {
-            iziToast.error({ title: 'Backfill failed', message: e.message, position: 'topCenter', timeout: 4000 });
+            iziToast.error({ title: this.t('admin.playStats.toastBackfillFailed'), message: e.message, position: 'topCenter', timeout: 4000 });
           } finally {
             this.backfilling = false;
           }
@@ -396,30 +408,30 @@ const wrappedAdminView = Vue.component('wrapped-admin-view', {
     <div>
       <div class="card">
         <div class="card-content">
-          <span class="card-title">Play Statistics</span>
-          <p class="grey-text">All listening events recorded on this server.</p>
-          <div v-if="loading" class="center-align" style="padding:2rem;">Loading…</div>
+          <span class="card-title">{{ t('admin.playStats.title') }}</span>
+          <p class="grey-text">{{ t('admin.playStats.subtitle') }}</p>
+          <div v-if="loading" class="center-align" style="padding:2rem;">{{ t('admin.playStats.loading') }}</div>
           <div v-else-if="loaded && stats">
             <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:1.5rem;">
               <div class="admin-stat-box">
                 <div class="admin-stat-value">{{ stats.total_events.toLocaleString() }}</div>
-                <div class="admin-stat-label">Song play events</div>
+                <div class="admin-stat-label">{{ t('admin.playStats.statSongEvents') }}</div>
               </div>
               <div class="admin-stat-box">
                 <div class="admin-stat-value">{{ stats.total_radio.toLocaleString() }}</div>
-                <div class="admin-stat-label">Radio sessions</div>
+                <div class="admin-stat-label">{{ t('admin.playStats.statRadioSessions') }}</div>
               </div>
               <div class="admin-stat-box">
                 <div class="admin-stat-value">{{ stats.total_podcast.toLocaleString() }}</div>
-                <div class="admin-stat-label">Podcast episodes</div>
+                <div class="admin-stat-label">{{ t('admin.playStats.statPodcastEpisodes') }}</div>
               </div>
               <div class="admin-stat-box">
                 <div class="admin-stat-value">{{ storageKB }} KB</div>
-                <div class="admin-stat-label">DB storage used</div>
+                <div class="admin-stat-label">{{ t('admin.playStats.statDbStorage') }}</div>
               </div>
             </div>
             <table class="striped" v-if="stats.per_user.length">
-              <thead><tr><th>User</th><th>Songs</th><th>Song time</th><th>Radio sessions</th><th>Radio time</th><th>Podcast eps</th><th>Podcast time</th></tr></thead>
+              <thead><tr><th>{{ t('admin.playStats.tableUser') }}</th><th>{{ t('admin.playStats.tableSongs') }}</th><th>{{ t('admin.playStats.tableSongTime') }}</th><th>{{ t('admin.playStats.tableRadioSessions') }}</th><th>{{ t('admin.playStats.tableRadioTime') }}</th><th>{{ t('admin.playStats.tablePodcastEps') }}</th><th>{{ t('admin.playStats.tablePodcastTime') }}</th></tr></thead>
               <tbody>
                 <tr v-for="u in stats.per_user" :key="u.user_id">
                   <td>{{ u.user_id }}</td>
@@ -432,18 +444,18 @@ const wrappedAdminView = Vue.component('wrapped-admin-view', {
                 </tr>
               </tbody>
             </table>
-            <p v-else class="grey-text">No play events recorded yet.</p>
+            <p v-else class="grey-text">{{ t('admin.playStats.noEventsYet') }}</p>
           </div>
         </div>
       </div>
 
       <div class="card" v-if="loaded && stats && stats.per_user.length">
         <div class="card-content">
-          <span class="card-title">Delete Events in Range</span>
-          <p class="grey-text">Deletes all song, radio, and podcast events for the selected user that fall within the chosen time window.</p>
+          <span class="card-title">{{ t('admin.playStats.deleteRangeTitle') }}</span>
+          <p class="grey-text">{{ t('admin.playStats.deleteRangeDesc') }}</p>
 
           <div style="margin-bottom:1rem;">
-            <div style="font-size:.8rem;color:var(--fg-muted);margin-bottom:.4rem;">User</div>
+            <div style="font-size:.8rem;color:var(--fg-muted);margin-bottom:.4rem;">{{ t('admin.playStats.labelUser') }}</div>
             <select v-model="purgeUser" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg);">
               <option v-for="u in stats.per_user" :key="u.user_id" :value="u.user_id">{{ u.user_id }}</option>
             </select>
@@ -451,46 +463,37 @@ const wrappedAdminView = Vue.component('wrapped-admin-view', {
 
           <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem;">
             <div>
-              <div style="font-size:.8rem;color:var(--fg-muted);margin-bottom:.3rem;">From</div>
+              <div style="font-size:.8rem;color:var(--fg-muted);margin-bottom:.3rem;">{{ t('admin.playStats.labelFrom') }}</div>
               <input type="datetime-local" v-model="fromDt" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg);" />
             </div>
             <div>
-              <div style="font-size:.8rem;color:var(--fg-muted);margin-bottom:.3rem;">To</div>
+              <div style="font-size:.8rem;color:var(--fg-muted);margin-bottom:.3rem;">{{ t('admin.playStats.labelTo') }}</div>
               <input type="datetime-local" v-model="toDt" style="padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg);" />
             </div>
           </div>
 
           <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:1.2rem;">
-            <span style="font-size:.8rem;color:var(--fg-muted);">Quick select:</span>
-            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPreset(1)">Last 1h</button>
-            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPreset(6)">Last 6h</button>
-            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPreset(12)">Last 12h</button>
-            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPresetDay(0)">Today</button>
-            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPresetDay(1)">Yesterday</button>
+            <span style="font-size:.8rem;color:var(--fg-muted);">{{ t('admin.playStats.quickSelect') }}</span>
+            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPreset(1)">{{ t('admin.playStats.presetLast1h') }}</button>
+            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPreset(6)">{{ t('admin.playStats.presetLast6h') }}</button>
+            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPreset(12)">{{ t('admin.playStats.presetLast12h') }}</button>
+            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPresetDay(0)">{{ t('admin.playStats.presetToday') }}</button>
+            <button class="btn btn-small" style="height:2rem;line-height:2rem;padding:0 .75rem;font-size:.8rem;" @click="setPresetDay(1)">{{ t('admin.playStats.presetYesterday') }}</button>
           </div>
 
           <button class="btn red darken-1" :disabled="purging" @click="doPurge">
-            {{ purging ? 'Deleting…' : 'Delete events in range' }}
+            {{ purging ? t('admin.playStats.btnDeleting') : t('admin.playStats.btnDelete') }}
           </button>
         </div>
       </div>
 
       <div class="card">
         <div class="card-content">
-          <span class="card-title">Fix Missing Metadata (DB only)</span>
-          <p class="grey-text">
-            For files that have <b>no embedded tags at all</b>, this derives artist, album, and title values from
-            the parent folder name using the pattern <b>"Artist - Release info"</b> and writes them to the
-            <b>mStream database only</b> — the audio files on disk are not modified and their ID3/Vorbis tags
-            are left untouched.
-          </p>
-          <p class="grey-text" style="margin-top:.5rem;">
-            These derived values are <b>safe through rescans</b>: if a file is unchanged on disk, the scanner
-            skips full re-parsing and will not overwrite them. Only files whose content changes trigger a
-            re-parse, which will re-apply the same folder-name fallback if no embedded tags are found.
-          </p>
+          <span class="card-title">{{ t('admin.playStats.fixMetadataTitle') }}</span>
+          <p class="grey-text">{{ t('admin.playStats.fixMetadataDesc') }}</p>
+          <p class="grey-text" style="margin-top:.5rem;">{{ t('admin.playStats.fixMetadataNote') }}</p>
           <button class="btn" :disabled="backfilling" @click="doBackfill" style="margin-top:.5rem;">
-            {{ backfilling ? 'Applying…' : 'Derive metadata from folder names' }}
+            {{ backfilling ? t('admin.playStats.btnApplying') : t('admin.playStats.btnDerive') }}
           </button>
         </div>
       </div>
@@ -552,16 +555,16 @@ const scanErrorsView = Vue.component('scan-errors-view', {
           badge.style.display = cnt === 0 ? 'none' : 'inline-flex';
         }
       } catch (err) {
-        iziToast.error({ title: 'Failed to load scan errors', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.scanErrors.toastFailedLoad'), position: 'topCenter', timeout: 3000 });
       } finally {
         this.loading = false;
       }
     },
     confirmClear() {
       adminConfirm(
-        'Clear all scan errors?',
-        'This deletes the entire error history. Errors will re-appear on the next scan if the underlying problems persist.',
-        'Clear All',
+        this.t('admin.scanErrors.confirmClearTitle'),
+        this.t('admin.scanErrors.confirmClearMsg'),
+        this.t('admin.scanErrors.confirmClearLabel'),
         () => this.doClear()
       );
     },
@@ -573,9 +576,9 @@ const scanErrorsView = Vue.component('scan-errors-view', {
         this.typeFilter = null;
         const badge = document.getElementById('scan-errors-badge');
         if (badge) badge.style.display = 'none';
-        iziToast.success({ title: 'Scan errors cleared', position: 'topCenter', timeout: 2500 });
+        iziToast.success({ title: this.t('admin.scanErrors.toastCleared'), position: 'topCenter', timeout: 2500 });
       } catch (err) {
-        iziToast.error({ title: 'Failed to clear errors', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.scanErrors.toastFailedClear'), position: 'topCenter', timeout: 3000 });
       }
     },
     async saveRetention() {
@@ -587,9 +590,9 @@ const scanErrorsView = Vue.component('scan-errors-view', {
           data: { hours: Number(this.retentionHours) }
         });
         ADMINDATA.dbParams.scanErrorRetentionHours = Number(this.retentionHours);
-        iziToast.success({ title: 'Retention period saved', position: 'topCenter', timeout: 2000 });
+        iziToast.success({ title: this.t('admin.scanErrors.toastRetentionSaved'), position: 'topCenter', timeout: 2000 });
       } catch (err) {
-        iziToast.error({ title: 'Failed to save retention', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.scanErrors.toastRetentionFailed'), position: 'topCenter', timeout: 3000 });
       } finally {
         this.savingRetention = false;
       }
@@ -598,7 +601,13 @@ const scanErrorsView = Vue.component('scan-errors-view', {
       this.expandedRow = this.expandedRow === guid ? null : guid;
     },
     typeLabel(t) {
-      return { parse: 'Parse Error', art: 'Album Art', cue: 'CUE Sheet', insert: 'DB Insert', other: 'Other' }[t] || t;
+      return {
+        parse: this.t('admin.scanErrors.typeParseError'),
+        art: this.t('admin.scanErrors.typeAlbumArt'),
+        cue: this.t('admin.scanErrors.typeCueSheet'),
+        insert: this.t('admin.scanErrors.typeDbInsert'),
+        other: this.t('admin.scanErrors.typeOther')
+      }[t] || t;
     },
     typeIcon(t) {
       const icons = {
@@ -617,7 +626,15 @@ const scanErrorsView = Vue.component('scan-errors-view', {
       return { parse: 'rgba(248,113,113,.14)', art: 'rgba(251,191,36,.14)', cue: 'rgba(139,92,246,.14)', insert: 'rgba(96,165,250,.12)', other: 'rgba(136,136,176,.10)' }[t] || 'rgba(136,136,176,.10)';
     },
     retentionLabel(h) {
-      const map = { 12:'12 hours', 24:'1 day', 48:'2 days', 72:'3 days', 168:'1 week', 336:'2 weeks', 720:'30 days' };
+      const map = {
+        12: this.t('admin.scanErrors.retention12h'),
+        24: this.t('admin.scanErrors.retention1d'),
+        48: this.t('admin.scanErrors.retention2d'),
+        72: this.t('admin.scanErrors.retention3d'),
+        168: this.t('admin.scanErrors.retention1w'),
+        336: this.t('admin.scanErrors.retention2w'),
+        720: this.t('admin.scanErrors.retention30d')
+      };
       return map[h] || h + 'h';
     },
     relTime(ts) {
@@ -641,7 +658,7 @@ const scanErrorsView = Vue.component('scan-errors-view', {
     copyPath(fp) {
       if (!fp) return;
       navigator.clipboard.writeText(fp).then(() => {
-        iziToast.info({ title: 'Path copied to clipboard', position: 'topCenter', timeout: 1500 });
+        iziToast.info({ title: this.t('admin.scanErrors.toastPathCopied'), position: 'topCenter', timeout: 1500 });
       }).catch(() => {});
     },
     async fixError(err) {
@@ -660,24 +677,38 @@ const scanErrorsView = Vue.component('scan-errors-view', {
           badge.textContent = cnt > 99 ? '99+' : cnt;
           badge.style.display = cnt === 0 ? 'none' : 'inline-flex';
         }
-        const labels = { art_fixed: 'Embedded image stripped from file', remuxed: 'File rewritten — trigger a rescan to update the library', cue_dismissed: 'Cue error dismissed', dismissed: 'Dismissed', unrecoverable: 'File is corrupt and unrecoverable — delete it' };
+        const labels = {
+          art_fixed: this.t('admin.scanErrors.fixActionArtFixed'),
+          remuxed: this.t('admin.scanErrors.fixActionRemuxed'),
+          reencoded: this.t('admin.scanErrors.fixActionReencoded'),
+          cue_dismissed: this.t('admin.scanErrors.fixActionCueDismissed'),
+          dismissed: this.t('admin.scanErrors.fixActionDismissed'),
+          unrecoverable: this.t('admin.scanErrors.fixActionUnrecoverable')
+        };
         if (r.data.action === 'unrecoverable') {
-          iziToast.error({ title: '\u26A0 File Unrecoverable', message: 'No valid audio stream found. This file is completely corrupt and cannot be played or repaired. Delete it.', position: 'topCenter', timeout: 0, close: true });
+          iziToast.error({ title: this.t('admin.scanErrors.toastFileUnrecoverable'), message: this.t('admin.scanErrors.toastFileUnrecoverableMsg'), position: 'topCenter', timeout: 0, close: true });
         } else {
-          const msg = (labels[r.data.action] || 'Done') + (r.data.note ? ' — ' + r.data.note : '');
-          iziToast.success({ title: 'Fixed', message: msg, position: 'topCenter', timeout: 4000 });
+          const msg = (labels[r.data.action] || this.t('admin.scanErrors.toastFixed')) + (r.data.note ? ' — ' + r.data.note : '');
+          iziToast.success({ title: this.t('admin.scanErrors.toastFixed'), message: msg, position: 'topCenter', timeout: 4000 });
         }
         // Sync fix_action from server response into the local row so the badge
         // reflects the correct state immediately (before page reload).
         if (idx >= 0) this.errors[idx].fix_action = r.data.action;
       } catch (e) {
-        iziToast.error({ title: 'Fix failed', message: e?.response?.data?.error || 'Unknown error', position: 'topCenter', timeout: 0, close: true });
+        iziToast.error({ title: this.t('admin.scanErrors.toastFixFailed'), message: e?.response?.data?.error || this.t('admin.scanErrors.typeOther'), position: 'topCenter', timeout: 0, close: true });
       } finally {
         Vue.delete(this.fixing, err.guid);
       }
     },
     fixActionLabel(action) {
-      return { art_fixed: 'Embedded image stripped', remuxed: 'File rewritten, rescan needed', reencoded: 'File re-encoded, rescan needed', cue_dismissed: 'Cue error dismissed', dismissed: 'Dismissed', unrecoverable: '\u26A0 Unrecoverable — delete this file' }[action] || 'Fixed';
+      return {
+        art_fixed: this.t('admin.scanErrors.fixActionArtFixed'),
+        remuxed: this.t('admin.scanErrors.fixActionRemuxed'),
+        reencoded: this.t('admin.scanErrors.fixActionReencoded'),
+        cue_dismissed: this.t('admin.scanErrors.fixActionCueDismissed'),
+        dismissed: this.t('admin.scanErrors.fixActionDismissed'),
+        unrecoverable: this.t('admin.scanErrors.fixActionUnrecoverable')
+      }[action] || this.t('admin.scanErrors.toastFixed');
     }
   },
   template: `
@@ -695,42 +726,42 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                       <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
                     </svg>
                     <div>
-                      <div class="se-main-title">Scan Error Audit</div>
-                      <div class="se-sub">Persistent log of every file that failed during a library scan — deduplicated by file &amp; error type so recurring problems show a count, not duplicate rows.</div>
+                      <div class="se-main-title">{{ t('admin.scanErrors.title') }}</div>
+                      <div class="se-sub">{{ t('admin.scanErrors.subtitle') }}</div>
                     </div>
                     <span class="se-total-pill" v-if="loaded && unfixedCount > 0">
-                      {{unfixedCount}} issue{{unfixedCount === 1 ? '' : 's'}}{{total > errors.length ? ' (showing '+errors.length.toLocaleString()+' of '+total.toLocaleString()+')' : ''}}
+                      {{ t('admin.scanErrors.pillIssues', { count: unfixedCount }) }}{{total > errors.length ? ' ' + t('admin.scanErrors.pillShowing', { shown: errors.length.toLocaleString(), total: total.toLocaleString() }) : ''}}
                     </span>
                     <span class="se-total-pill se-total-ok" v-else-if="loaded && errors.length === 0">
-                      ✓ Clean
+                      {{ t('admin.scanErrors.pillClean') }}
                     </span>
                     <span class="se-total-pill se-total-ok" v-else-if="loaded && unfixedCount === 0">
-                      ✓ No actionable issues
+                      {{ t('admin.scanErrors.pillNoActionable') }}
                     </span>
                   </div>
                   <div class="se-controls-row">
                     <div class="se-retention-group">
-                      <label class="se-retention-label">Keep errors for</label>
+                      <label class="se-retention-label">{{ t('admin.scanErrors.retentionLabel') }}</label>
                       <select v-model.number="retentionHours" @change="saveRetention" class="se-retention-sel" :disabled="savingRetention">
-                        <option :value="12">12 hours</option>
-                        <option :value="24">1 day</option>
-                        <option :value="48">2 days</option>
-                        <option :value="72">3 days</option>
-                        <option :value="168">1 week</option>
-                        <option :value="336">2 weeks</option>
-                        <option :value="720">30 days</option>
+                        <option :value="12">{{ t('admin.scanErrors.retention12h') }}</option>
+                        <option :value="24">{{ t('admin.scanErrors.retention1d') }}</option>
+                        <option :value="48">{{ t('admin.scanErrors.retention2d') }}</option>
+                        <option :value="72">{{ t('admin.scanErrors.retention3d') }}</option>
+                        <option :value="168">{{ t('admin.scanErrors.retention1w') }}</option>
+                        <option :value="336">{{ t('admin.scanErrors.retention2w') }}</option>
+                        <option :value="720">{{ t('admin.scanErrors.retention30d') }}</option>
                       </select>
-                      <span class="se-retention-hint">Older entries are pruned at scan start</span>
+                      <span class="se-retention-hint">{{ t('admin.scanErrors.retentionHint') }}</span>
                     </div>
                     <div class="se-action-group">
                       <button class="btn-flat btn-small" @click="load" :disabled="loading">
                         <svg v-if="!loading" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                         <svg v-else class="se-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-                        {{loading ? 'Loading…' : 'Refresh'}}
+                        {{loading ? t('admin.scanErrors.btnLoading') : t('admin.scanErrors.btnRefresh')}}
                       </button>
                       <button class="btn btn-small red" @click="confirmClear" v-if="errors.length > 0">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
-                        Clear All
+                        {{ t('admin.scanErrors.btnClearAll') }}
                       </button>
                     </div>
                   </div>
@@ -758,8 +789,8 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                     <polyline points="22 4 12 14.01 9 11.01"/>
                   </svg>
                 </div>
-                <div class="se-empty-title">No scan errors</div>
-                <div class="se-empty-msg">Your library scanned cleanly — no file parsing, art extraction, cue sheet or database errors were recorded.</div>
+                <div class="se-empty-title">{{ t('admin.scanErrors.emptyTitle') }}</div>
+                <div class="se-empty-msg">{{ t('admin.scanErrors.emptyMsg') }}</div>
               </div>
             </div>
           </div>
@@ -772,7 +803,7 @@ const scanErrorsView = Vue.component('scan-errors-view', {
             <div class="col s12">
               <div style="background:rgba(251,191,36,.13);border:1px solid rgba(251,191,36,.35);border-radius:8px;padding:.7rem 1rem;display:flex;align-items:center;gap:.6rem;font-size:.85rem;color:var(--yellow)">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                Showing first {{errors.length.toLocaleString()}} of {{total.toLocaleString()}} errors. Use <strong>Clear All</strong> to remove old entries, then re-scan to re-detect current problems.
+                {{ t('admin.scanErrors.truncationWarning', { shown: errors.length.toLocaleString(), total: total.toLocaleString() }) }}
               </div>
             </div>
           </div>
@@ -782,7 +813,7 @@ const scanErrorsView = Vue.component('scan-errors-view', {
             <div class="col s12">
               <div class="se-filter-strip">
                 <button class="se-fchip" :class="{active: typeFilter === null}" @click="typeFilter = null">
-                  All
+                  {{ t('admin.scanErrors.filterAll') }}
                   <span class="se-fchip-cnt">{{errors.length}}</span>
                 </button>
                 <button
@@ -808,12 +839,12 @@ const scanErrorsView = Vue.component('scan-errors-view', {
 
                   <!-- Column headers -->
                   <div class="se-thead">
-                    <div class="se-th se-col-type">Type</div>
-                    <div class="se-th se-col-file">File</div>
-                    <div class="se-th se-col-msg">Issue</div>
-                    <div class="se-th se-col-count">Detections</div>
-                    <div class="se-th se-col-first">First Seen</div>
-                    <div class="se-th se-col-last">Last Seen</div>
+                    <div class="se-th se-col-type">{{ t('admin.scanErrors.colType') }}</div>
+                    <div class="se-th se-col-file">{{ t('admin.scanErrors.colFile') }}</div>
+                    <div class="se-th se-col-msg">{{ t('admin.scanErrors.colIssue') }}</div>
+                    <div class="se-th se-col-count">{{ t('admin.scanErrors.colDetections') }}</div>
+                    <div class="se-th se-col-first">{{ t('admin.scanErrors.colFirstSeen') }}</div>
+                    <div class="se-th se-col-last">{{ t('admin.scanErrors.colLastSeen') }}</div>
                     <div class="se-th se-col-exp"></div>
                   </div>
 
@@ -833,10 +864,10 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                           <span v-html="typeIcon(err.error_type)"></span>
                           {{typeLabel(err.error_type)}}
                         </span>
-                        <span class="se-fixed-badge" v-if="err.fixed_at && err.fix_action !== 'unrecoverable'">&#x2713; Fixed</span>
-                        <span class="se-unrecoverable-badge" v-if="err.fix_action === 'unrecoverable'">&#x26A0; Unrecoverable</span>
-                        <span class="se-deleted-badge" v-if="!err.file_in_db && !(err.error_msg && (err.error_msg.includes('EPIPE') || err.error_msg.includes('ECONNRESET') || err.error_msg.includes('ECONNREFUSED')))">&#x1F5D1; Gone from library</span>
-                        <span class="se-deleted-badge" v-if="!err.file_in_db && err.error_msg && (err.error_msg.includes('EPIPE') || err.error_msg.includes('ECONNRESET') || err.error_msg.includes('ECONNREFUSED'))">&#x26A1; Scan interrupted</span>
+                        <span class="se-fixed-badge" v-if="err.fixed_at && err.fix_action !== 'unrecoverable'">{{ t('admin.scanErrors.badgeFixed') }}</span>
+                        <span class="se-unrecoverable-badge" v-if="err.fix_action === 'unrecoverable'">{{ t('admin.scanErrors.badgeUnrecoverable') }}</span>
+                        <span class="se-deleted-badge" v-if="!err.file_in_db && !(err.error_msg && (err.error_msg.includes('EPIPE') || err.error_msg.includes('ECONNRESET') || err.error_msg.includes('ECONNREFUSED')))">{{ t('admin.scanErrors.badgeGoneFromLibrary') }}</span>
+                        <span class="se-deleted-badge" v-if="!err.file_in_db && err.error_msg && (err.error_msg.includes('EPIPE') || err.error_msg.includes('ECONNRESET') || err.error_msg.includes('ECONNREFUSED'))">{{ t('admin.scanErrors.badgeScanInterrupted') }}</span>
                       </div>
 
                       <!-- File path -->
@@ -849,15 +880,15 @@ const scanErrorsView = Vue.component('scan-errors-view', {
 
                       <!-- Error message (truncated) -->
                       <div class="se-col-msg">
-                        <span class="se-errmsg">{{err.error_msg || '(no message)'}}</span>
+                        <span class="se-errmsg">{{err.error_msg || '(' + t('admin.scanErrors.noMessage') + ')'}}</span>
                       </div>
 
                       <!-- Detection count -->
                       <div class="se-col-count">
-                        <span class="se-count-badge" v-if="err.count > 1" :title="err.count + ' times detected'">
-                          {{err.count}}&times; detected
+                        <span class="se-count-badge" v-if="err.count > 1" :title="t('admin.scanErrors.countDetected', { count: err.count })">
+                          {{ t('admin.scanErrors.countDetected', { count: err.count }) }}
                         </span>
-                        <span class="se-count-once" v-else>Once</span>
+                        <span class="se-count-once" v-else>{{ t('admin.scanErrors.countOnce') }}</span>
                       </div>
 
                       <!-- First seen -->
@@ -883,37 +914,37 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                     <div class="se-detail" v-if="expandedRow === err.guid">
                       <div class="se-detail-grid">
                         <div class="se-detail-section">
-                          <div class="se-detail-label">Full Path</div>
+                          <div class="se-detail-label">{{ t('admin.scanErrors.detailFullPath') }}</div>
                           <div class="se-detail-value se-detail-path" @click="copyPath(err.filepath)" title="Click to copy">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                             {{err.filepath || '—'}}
                           </div>
                         </div>
                         <div class="se-detail-section">
-                          <div class="se-detail-label">Error Message</div>
-                          <div class="se-detail-value">{{err.error_msg || '(none)'}}</div>
+                          <div class="se-detail-label">{{ t('admin.scanErrors.detailErrorMsg') }}</div>
+                          <div class="se-detail-value">{{err.error_msg || '(' + t('admin.scanErrors.none') + ')'}}</div>
                         </div>
                         <div class="se-detail-section" v-if="err.stack">
-                          <div class="se-detail-label">Stack Trace</div>
+                          <div class="se-detail-label">{{ t('admin.scanErrors.detailStackTrace') }}</div>
                           <pre class="se-stack">{{err.stack}}</pre>
                         </div>
                         <div class="se-detail-meta-row">
                           <div class="se-detail-meta-chip">
-                            <span class="se-detail-meta-k">Library path</span>
+                            <span class="se-detail-meta-k">{{ t('admin.scanErrors.detailLibraryPath') }}</span>
                             <span class="se-detail-meta-v">{{err.vpath}}</span>
                           </div>
                           <div class="se-detail-meta-chip">
-                            <span class="se-detail-meta-k">First detected</span>
+                            <span class="se-detail-meta-k">{{ t('admin.scanErrors.detailFirstDetected') }}</span>
                             <span class="se-detail-meta-v">{{absTime(err.first_seen)}}</span>
                           </div>
                           <div class="se-detail-meta-chip">
-                            <span class="se-detail-meta-k">Last detected</span>
+                            <span class="se-detail-meta-k">{{ t('admin.scanErrors.detailLastDetected') }}</span>
                             <span class="se-detail-meta-v">{{absTime(err.last_seen)}}</span>
                           </div>
                           <div class="se-detail-meta-chip">
-                            <span class="se-detail-meta-k">Total detections</span>
+                            <span class="se-detail-meta-k">{{ t('admin.scanErrors.detailTotalDetections') }}</span>
                             <span class="se-detail-meta-v" :style="{color: err.count > 1 ? typeColor(err.error_type) : 'inherit'}">
-                              {{err.count}} time{{err.count === 1 ? '' : 's'}}
+                              {{ t('admin.scanErrors.detailTimePlural', { count: err.count }) }}
                             </span>
                           </div>
                         </div>
@@ -922,11 +953,11 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                         <div class="se-deleted-banner" v-if="!err.file_in_db">
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
                           <div>
-                            <div class="se-deleted-title">File no longer in library</div>
+                            <div class="se-deleted-title">{{ t('admin.scanErrors.deletedBannerTitle') }}</div>
                             <div class="se-deleted-body" v-if="err.error_msg && (err.error_msg.includes('EPIPE') || err.error_msg.includes('ECONNRESET') || err.error_msg.includes('ECONNREFUSED'))">
-                              The scan was interrupted by a connection error (server restart or crash mid-scan) &mdash; the file itself may be perfectly fine. Run another scan and it should be picked up normally. This error record will expire automatically after 48 h.
+                              {{ t('admin.scanErrors.deletedBodyInterrupted') }}
                             </div>
-                            <div class="se-deleted-body" v-else>This file was removed from the library database (most likely deleted from disk). No action needed &mdash; this error record will expire automatically after 48 h.</div>
+                            <div class="se-deleted-body" v-else>{{ t('admin.scanErrors.deletedBodyRemoved') }}</div>
                           </div>
                         </div>
 
@@ -934,8 +965,8 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                         <div class="se-unrecoverable-banner" v-if="err.fix_action === 'unrecoverable'">
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                           <div>
-                            <div class="se-unrecoverable-title">File is corrupt and unrecoverable</div>
-                            <div class="se-unrecoverable-body">No valid audio stream was found. This file cannot be played or repaired &mdash; it contains no audio data. <strong>Delete it from disk.</strong></div>
+                            <div class="se-unrecoverable-title">{{ t('admin.scanErrors.unrecoverableTitle') }}</div>
+                            <div class="se-unrecoverable-body">{{ t('admin.scanErrors.unrecoverableBody') }}</div>
                           </div>
                         </div>
                         <div class="se-detail-fix-row" v-else-if="err.fixed_at && err.fix_action !== 'unrecoverable'">
@@ -944,22 +975,22 @@ const scanErrorsView = Vue.component('scan-errors-view', {
                             Fixed {{relTime(err.fixed_at)}}
                             <span v-if="err.fix_action" style="opacity:.65;margin-left:.35rem">({{fixActionLabel(err.fix_action)}})</span>
                             <span v-if="err.confirmed_at" class="se-confirmed-chip">&#10003; Rescan confirmed OK {{relTime(err.confirmed_at)}}</span>
-                            <span v-else style="opacity:.5;margin-left:.5rem;font-size:.8em">— rescan to confirm, auto-removed after 48 h</span>
+                            <span v-else style="opacity:.5;margin-left:.5rem;font-size:.8em">{{ t('admin.scanErrors.fixRescanWaiting') }}</span>
                           </span>
                         </div>
                         <div class="se-detail-fix-row" v-else-if="!err.file_in_db">
-                          <span style="opacity:.5;font-size:.85em">No fix needed — file has been removed from the library.</span>
+                          <span style="opacity:.5;font-size:.85em">{{ t('admin.scanErrors.fixNoActionNeeded') }}</span>
                         </div>
                         <div class="se-detail-fix-row" v-else>
                           <button class="se-fix-btn" @click.stop="fixError(err)" :disabled="fixing[err.guid]">
                             <svg v-if="!fixing[err.guid]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                             <svg v-else class="se-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-                            {{fixing[err.guid] ? 'Fixing\u2026' : 'Fix this error'}}
+                            {{fixing[err.guid] ? t('admin.scanErrors.btnFixing') : t('admin.scanErrors.btnFixError')}}
                           </button>
-                          <span class="se-fix-hint" v-if="err.error_type === 'art'">Strips embedded images with ffmpeg &mdash; then rescan to update the library</span>
-                          <span class="se-fix-hint" v-else-if="err.error_type === 'cue'">Marks cue error as dismissed &mdash; auto-expires in 48 h</span>
-                          <span class="se-fix-hint" v-else-if="err.error_type === 'parse' || err.error_type === 'duration'">Rewrites file with ffmpeg (lossless, no re-encode) &mdash; then rescan to update the library</span>
-                          <span class="se-fix-hint" v-else>Dismisses this error &mdash; auto-expires in 48 h</span>
+                          <span class="se-fix-hint" v-if="err.error_type === 'art'">{{ t('admin.scanErrors.fixHintArt') }}</span>
+                          <span class="se-fix-hint" v-else-if="err.error_type === 'cue'">{{ t('admin.scanErrors.fixHintCue') }}</span>
+                          <span class="se-fix-hint" v-else-if="err.error_type === 'parse' || err.error_type === 'duration'">{{ t('admin.scanErrors.fixHintParse') }}</span>
+                          <span class="se-fix-hint" v-else>{{ t('admin.scanErrors.fixHintOther') }}</span>
                         </div>
 
                       </div>
@@ -969,9 +1000,9 @@ const scanErrorsView = Vue.component('scan-errors-view', {
 
                   <!-- Row count footer -->
                   <div class="se-table-footer">
-                    Showing {{filteredErrors.length}} of {{errors.length}} error{{errors.length === 1 ? '' : 's'}}
-                    <span v-if="typeFilter"> &mdash; filtered by <b>{{typeLabel(typeFilter)}}</b></span>
-                    <a v-if="typeFilter" @click="typeFilter = null" style="margin-left:.5rem">&times; clear filter</a>
+                    {{ t('admin.scanErrors.tableFooter', { shown: filteredErrors.length, total: errors.length }) }}
+                    <span v-if="typeFilter"> {{ t('admin.scanErrors.filteredBy', { type: typeLabel(typeFilter) }) }}</span>
+                    <a v-if="typeFilter" @click="typeFilter = null" style="margin-left:.5rem">{{ t('admin.scanErrors.clearFilter') }}</a>
                   </div>
 
                 </div>
@@ -1155,34 +1186,34 @@ const foldersView = Vue.component('folders-view', {
 
       <div class="card">
         <div class="card-content">
-          <span class="card-title">Add Directory</span>
+          <span class="card-title">{{ t('admin.folders.addTitle') }}</span>
           <form id="choose-directory-form" @submit.prevent="submitForm">
 
             <div class="input-field">
-              <label for="folder-name">Directory Path</label>
+              <label for="folder-name">{{ t('admin.folders.labelPath') }}</label>
               <div style="display:flex;gap:.5rem;align-items:stretch;">
                 <input
                   v-on:click="addFolderDialog()"
                   v-model="folder.value"
                   id="folder-name" required type="text"
-                  placeholder="Click Browse to choose a folder…"
+                  :placeholder="t('admin.folders.pathPlaceholder')"
                   style="cursor:pointer;flex:1;margin-bottom:0;"
                   readonly />
                 <button type="button" class="btn" @click="addFolderDialog()" style="flex-shrink:0;height:38px;align-self:center;" title="Open folder browser">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 48 48" style="vertical-align:middle;margin-right:4px;"><path fill="#FFA000" d="M38 12H22l-4-4H8c-2.2 0-4 1.8-4 4v24c0 2.2 1.8 4 4 4h31c1.7 0 3-1.3 3-3V16c0-2.2-1.8-4-4-4z"/><path fill="#FFCA28" d="M42.2 18H15.3c-1.9 0-3.6 1.4-3.9 3.3L8 40h31.7c1.9 0 3.6-1.4 3.9-3.3l2.5-14c.5-2.4-1.4-4.7-3.9-4.7z"/></svg>Browse
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 48 48" style="vertical-align:middle;margin-right:4px;"><path fill="#FFA000" d="M38 12H22l-4-4H8c-2.2 0-4 1.8-4 4v24c0 2.2 1.8 4 4 4h31c1.7 0 3-1.3 3-3V16c0-2.2-1.8-4-4-4z"/><path fill="#FFCA28" d="M42.2 18H15.3c-1.9 0-3.6 1.4-3.9 3.3L8 40h31.7c1.9 0 3.6-1.4 3.9-3.3l2.5-14c.5-2.4-1.4-4.7-3.9-4.7z"/></svg>{{ t('admin.folders.btnBrowse') }}
                 </button>
               </div>
             </div>
 
             <div class="input-field">
-              <label for="add-directory-name">Path Alias <span style="color:var(--t3);font-weight:400;">(vPath)</span></label>
+              <label for="add-directory-name">{{ t('admin.folders.labelAlias') }} <span style="color:var(--t3);font-weight:400;">{{ t('admin.folders.aliasSuffix') }}</span></label>
               <input
                 pattern="[a-zA-Z0-9-]+"
                 v-model="dirName"
                 id="add-directory-name" required type="text"
-                placeholder="e.g. music" />
+                :placeholder="t('admin.folders.aliasPlaceholder')" />
               <small style="display:block;color:var(--t2);font-size:.82rem;margin-top:.25rem;">
-                A short URL-friendly name used to identify this directory in the API and player. Letters, numbers, hyphens only — no spaces.
+                {{ t('admin.folders.aliasHint') }}
               </small>
             </div>
 
@@ -1191,8 +1222,8 @@ const foldersView = Vue.component('folders-view', {
               <label style="display:flex;align-items:flex-start;gap:.6rem;cursor:pointer;">
                 <input id="folder-auto-access" type="checkbox" checked style="width:auto;margin-top:3px;flex-shrink:0;" />
                 <span>
-                  <span style="color:var(--t1);font-weight:600;">Give access to all users</span><br>
-                  <small style="color:var(--t2);font-size:.82rem;">Every existing and new user will automatically have this directory in their allowed paths. Uncheck to manage access per-user manually.</small>
+                  <span style="color:var(--t1);font-weight:600;">{{ t('admin.folders.optionAutoAccess') }}</span><br>
+                  <small style="color:var(--t2);font-size:.82rem;">{{ t('admin.folders.optionAutoAccessDesc') }}</small>
                 </span>
               </label>
 
@@ -1200,8 +1231,8 @@ const foldersView = Vue.component('folders-view', {
                 <input id="folder-is-audiobooks" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;"
                   @change="if ($event.target.checked) { document.getElementById('folder-is-excluded').checked = false; document.getElementById('folder-is-excluded').dispatchEvent(new Event('change')); }" />
                 <span>
-                  <span style="color:var(--t1);font-weight:600;">Audiobooks &amp; Podcasts</span><br>
-                  <small style="color:var(--t2);font-size:.82rem;">Mark this directory as an Audiobooks / Podcasts library. Files will be scanned and displayed separately from your main music collection, allowing you to browse and stream spoken-word content independently.</small>
+                  <span style="color:var(--t1);font-weight:600;">{{ t('admin.folders.optionAudiobooks') }}</span><br>
+                  <small style="color:var(--t2);font-size:.82rem;">{{ t('admin.folders.optionAudiobooksDesc') }}</small>
                 </span>
               </label>
 
@@ -1219,8 +1250,8 @@ const foldersView = Vue.component('folders-view', {
                     }
                     ['folder-is-audiobooks','folder-is-recordings','folder-is-youtube'].forEach(id => document.getElementById(id).disabled = excl);" />
                 <span>
-                  <span style="color:var(--t1);font-weight:600;">Excluded from index</span><br>
-                  <small style="color:var(--t2);font-size:.82rem;">Files in this folder will not be scanned into the music library. Any existing indexed entries will be removed on the next scan of the parent folder.</small>
+                  <span style="color:var(--t1);font-weight:600;">{{ t('admin.folders.optionExcluded') }}</span><br>
+                  <small style="color:var(--t2);font-size:.82rem;">{{ t('admin.folders.optionExcludedDesc') }}</small>
                 </span>
               </label>
 
@@ -1232,8 +1263,8 @@ const foldersView = Vue.component('folders-view', {
                     document.getElementById('folder-allow-record-delete-row').style.display = any ? 'flex' : 'none';
                     if (!any) document.getElementById('folder-allow-record-delete').checked = false;" />
                 <span>
-                  <span style="color:var(--t1);font-weight:600;">Radio Recordings folder</span><br>
-                  <small style="color:var(--t2);font-size:.82rem;">Target folder for radio stream recordings. Not scanned into the music library. Can be combined with YouTube Downloads below.</small>
+                  <span style="color:var(--t1);font-weight:600;">{{ t('admin.folders.optionRecordings') }}</span><br>
+                  <small style="color:var(--t2);font-size:.82rem;">{{ t('admin.folders.optionRecordingsDesc') }}</small>
                 </span>
               </label>
 
@@ -1245,16 +1276,16 @@ const foldersView = Vue.component('folders-view', {
                     document.getElementById('folder-allow-record-delete-row').style.display = any ? 'flex' : 'none';
                     if (!any) document.getElementById('folder-allow-record-delete').checked = false;" />
                 <span>
-                  <span style="color:var(--t1);font-weight:600;">YouTube Downloads folder</span><br>
-                  <small style="color:var(--t2);font-size:.82rem;">Target folder for YouTube audio downloads. Not scanned into the music library. Can be combined with Radio Recordings above.</small>
+                  <span style="color:var(--t1);font-weight:600;">{{ t('admin.folders.optionYoutube') }}</span><br>
+                  <small style="color:var(--t2);font-size:.82rem;">{{ t('admin.folders.optionYoutubeDesc') }}</small>
                 </span>
               </label>
 
               <label id="folder-allow-record-delete-row" style="display:none;align-items:flex-start;gap:.6rem;cursor:pointer;">
                 <input id="folder-allow-record-delete" type="checkbox" style="width:auto;margin-top:3px;flex-shrink:0;" />
                 <span>
-                  <span style="color:var(--t1);font-weight:600;">Allow users to delete files</span><br>
-                  <small style="color:var(--t2);font-size:.82rem;">When enabled, a <strong>Delete</strong> option appears in the context menu for files in this folder. A confirmation prompt is always shown before deletion.</small>
+                  <span style="color:var(--t1);font-weight:600;">{{ t('admin.folders.optionAllowDelete') }}</span><br>
+                  <small style="color:var(--t2);font-size:.82rem;">{{ t('admin.folders.optionAllowDeleteDesc') }}</small>
                 </span>
               </label>
 
@@ -1263,7 +1294,7 @@ const foldersView = Vue.component('folders-view', {
         </div>
         <div class="card-action">
           <button class="btn" type="submit" form="choose-directory-form" :disabled="submitPending === true">
-            {{ submitPending ? 'Adding…' : 'Add Directory' }}
+            {{ submitPending ? t('admin.folders.btnAdding') : t('admin.folders.btnAdd') }}
           </button>
         </div>
       </div>
@@ -1275,10 +1306,10 @@ const foldersView = Vue.component('folders-view', {
       <div v-show="foldersTS.ts > 0" class="card">
         <div class="card-content">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;">
-            <span class="card-title" style="margin-bottom:0;">Directories</span>
-            <button class="btn-small" type="button" @click="testAccess" title="Check read / write access for all configured directories">Test Access</button>
+            <span class="card-title" style="margin-bottom:0;">{{ t('admin.folders.listTitle') }}</span>
+            <button class="btn-small" type="button" @click="testAccess" :title="t('admin.folders.btnTestAccess')">{{ t('admin.folders.btnTestAccess') }}</button>
           </div>
-          <div v-if="Object.keys(folders).length === 0" style="color:var(--t2);padding:.5rem 0;">No directories added yet.</div>
+          <div v-if="Object.keys(folders).length === 0" style="color:var(--t2);padding:.5rem 0;">{{ t('admin.folders.noDirectories') }}</div>
           <div v-else style="display:flex;flex-direction:column;gap:10px;">
             <div v-for="(v, k) in folders" :key="k"
                  style="border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;background:var(--raised);display:flex;flex-direction:column;gap:8px;">
@@ -1292,51 +1323,51 @@ const foldersView = Vue.component('folders-view', {
                    v.type === 'audio-books'? 'background:rgba(245,158,11,.12);color:#f59e0b;' :
                    v.type === 'excluded'   ? 'background:rgba(156,163,175,.12);color:#9ca3af;' :
                                             'background:rgba(16,185,129,.12);color:#10b981;')">
-                  {{ v.type === 'recordings' ? '⏺ Radio Recordings' :
-                     v.type === 'youtube'    ? '▶ YouTube Downloads' :
-                     v.type === 'audio-books'? '📖 Audiobooks' :
-                     v.type === 'excluded'   ? '🚫 Excluded from index' : '🎵 Music' }}
+                  {{ v.type === 'recordings' ? t('admin.folders.typeRadioRecordings') :
+                     v.type === 'youtube'    ? t('admin.folders.typeYoutubeDownloads') :
+                     v.type === 'audio-books'? t('admin.folders.typeAudiobooks') :
+                     v.type === 'excluded'   ? t('admin.folders.typeExcluded') : t('admin.folders.typeMusic') }}
                 </span>
                 <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;">
                   <button class="btn-small" type="button" @click="toggleEditFolder(k)">
-                    {{ editingFolder === k ? 'Cancel' : 'Edit' }}
+                    {{ editingFolder === k ? t('admin.folders.btnCancelEdit') : t('admin.folders.btnEdit') }}
                   </button>
                   <button v-if="v.type === 'recordings' || v.type === 'youtube'" class="btn-small" type="button"
                     :style="v.allowRecordDelete ? 'background:var(--primary);color:#fff;' : ''"
-                    :title="v.allowRecordDelete ? 'Users can delete files — click to disable' : 'Users cannot delete files — click to enable'"
+                    :title="v.allowRecordDelete ? t('admin.folders.btnDeleteOn') : t('admin.folders.btnDeleteOff')"
                     @click="toggleRecordDelete(k)">
-                    {{v.allowRecordDelete ? 'Delete: On' : 'Delete: Off'}}
+                    {{v.allowRecordDelete ? t('admin.folders.btnDeleteOn') : t('admin.folders.btnDeleteOff')}}
                   </button>
                   <button v-if="v.type !== 'recordings' && v.type !== 'youtube' && v.type !== 'excluded'" class="btn-small" type="button"
                     :style="v.albumsOnly ? 'background:var(--primary);color:#fff;' : ''"
-                    :title="v.albumsOnly ? 'Albums Only ON — click to disable' : 'Albums Only OFF — click to enable'"
+                    :title="v.albumsOnly ? t('admin.folders.btnAlbumsOnlyOn') : t('admin.folders.btnAlbumsOnlyOff')"
                     @click="toggleAlbumsOnly(k)">
-                    {{v.albumsOnly ? 'Albums Only: On' : 'Albums Only: Off'}}
+                    {{v.albumsOnly ? t('admin.folders.btnAlbumsOnlyOn') : t('admin.folders.btnAlbumsOnlyOff')}}
                   </button>
                   <button v-if="v.type !== 'excluded'" class="btn-small" type="button"
                     :style="v.artistsOn !== false ? 'background:var(--primary);color:#fff;' : ''"
-                    :title="v.artistsOn !== false ? 'Artist Library ON — click to disable' : 'Artist Library OFF — click to enable'"
+                    :title="v.artistsOn !== false ? t('admin.folders.btnArtistsOn') : t('admin.folders.btnArtistsOff')"
                     @click="toggleArtistsOn(k)">
-                    {{v.artistsOn !== false ? 'Artists: On' : 'Artists: Off'}}
+                    {{v.artistsOn !== false ? t('admin.folders.btnArtistsOn') : t('admin.folders.btnArtistsOff')}}
                   </button>
-                  <button class="btn-small red" type="button" @click="removeFolder(k, v.root)">Remove</button>
+                  <button class="btn-small red" type="button" @click="removeFolder(k, v.root)">{{ t('admin.folders.btnRemove') }}</button>
                 </div>
               </div>
 
               <!-- Row 2: directory path -->
               <div style="display:flex;align-items:baseline;gap:8px;">
-                <span style="font-size:11px;color:var(--t3);flex-shrink:0;min-width:60px;">Path</span>
+                <span style="font-size:11px;color:var(--t3);flex-shrink:0;min-width:60px;">{{ t('admin.folders.labelPathRow') }}</span>
                 <div style="display:flex;flex-direction:column;gap:3px;min-width:0;">
                   <span style="font-size:12px;color:var(--t2);word-break:break-all;font-family:monospace;">{{v.root}}</span>
                   <small v-if="v.type !== 'excluded'" style="color:var(--t3);font-size:.76rem;line-height:1.35;">
-                    Artists hint: root folders apply to the whole library tree unless a child folder overrides it. Child folders act as include/exclude sub-sections inside their parent for Artist Home, browse, search, and artist image scanning.
+                    {{ t('admin.folders.artistsHint') }}
                   </small>
                 </div>
               </div>
 
               <!-- Row 3: user access -->
               <div style="display:flex;align-items:flex-start;gap:8px;">
-                <span style="font-size:11px;color:var(--t3);flex-shrink:0;min-width:60px;padding-top:2px;">Access</span>
+                <span style="font-size:11px;color:var(--t3);flex-shrink:0;min-width:60px;padding-top:2px;">{{ t('admin.folders.labelAccessRow') }}</span>
                 <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
                   <span v-for="uname in admin_users" :key="'admin-'+uname"
                         title="Admin — always has full access to all folders"
@@ -1344,7 +1375,7 @@ const foldersView = Vue.component('folders-view', {
                     ★ {{uname}}
                   </span>
                   <span v-if="(directories_users[k] || []).length >= non_admin_count && non_admin_count > 0"
-                        style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:11px;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.3);color:#10b981;font-weight:600;">All users</span>
+                        style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:11px;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.3);color:#10b981;font-weight:600;">{{ t('admin.folders.allUsers') }}</span>
                   <template v-else-if="(directories_users[k] || []).length > 0">
                     <span v-for="uname in (directories_users[k] || [])" :key="uname"
                           style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:11px;background:var(--card);border:1px solid var(--border);color:var(--t2);">
@@ -1352,7 +1383,7 @@ const foldersView = Vue.component('folders-view', {
                     </span>
                   </template>
                   <span v-else-if="non_admin_count > 0"
-                        style="font-size:12px;color:var(--t3);">No regular users assigned</span>
+                        style="font-size:12px;color:var(--t3);">{{ t('admin.folders.noUsersAssigned') }}</span>
                 </div>
               </div>
 
@@ -1362,37 +1393,37 @@ const foldersView = Vue.component('folders-view', {
 
                 <!-- Path -->
                 <div>
-                  <label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px;">Directory Path</label>
+                  <label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px;">{{ t('admin.folders.editLabelPath') }}</label>
                   <div style="display:flex;gap:6px;">
                     <input v-model="editForm.root" type="text" class="settings-select" style="flex:1;font-family:monospace;font-size:.82rem;" />
                     <button class="btn-small" type="button" @click="pickEditFolder(k)" title="Browse">…</button>
                   </div>
-                  <small style="color:var(--t3);font-size:.78rem;">Changing the path requires a server restart to take effect for media serving.</small>
+                  <small style="color:var(--t3);font-size:.78rem;">{{ t('admin.folders.editPathHint') }}</small>
                 </div>
 
                 <!-- Type (checkboxes for radio/youtube, like add form) -->
                 <div>
-                  <label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:6px;">Folder Type</label>
+                  <label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:6px;">{{ t('admin.folders.editLabelType') }}</label>
                   <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;">
                     <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--t1);">
                       <input type="checkbox" v-model="editForm.isRecording" style="width:auto;" :disabled="editForm.isExcluded"
                         @change="if (editForm.isRecording) editForm.isExcluded = false;" />
-                      ⏺ Radio Recordings
+                      {{ t('admin.folders.typeRadioRecordings') }}
                     </label>
                     <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--t1);">
                       <input type="checkbox" v-model="editForm.isYoutube" style="width:auto;" :disabled="editForm.isExcluded"
                         @change="if (editForm.isYoutube) editForm.isExcluded = false;" />
-                      ▶ YouTube Downloads
+                      {{ t('admin.folders.typeYoutubeDownloads') }}
                     </label>
                     <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--t1);">
                       <input type="checkbox" v-model="editForm.isAudioBooks" style="width:auto;" :disabled="editForm.isExcluded"
                         @change="if (editForm.isAudioBooks) editForm.isExcluded = false;" />
-                      📖 Audiobooks
+                      {{ t('admin.folders.typeAudiobooks') }}
                     </label>
                     <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--t1);">
                       <input type="checkbox" v-model="editForm.isExcluded" style="width:auto;"
                         @change="if (editForm.isExcluded) { editForm.isRecording=false; editForm.isYoutube=false; editForm.isAudioBooks=false; }" />
-                      🚫 Excluded from index
+                      {{ t('admin.folders.typeExcluded') }}
                     </label>
                   </div>
                   <small style="color:var(--t3);font-size:.78rem;">Check one or both. Both checked = Radio+YouTube combined folder. Excluded = never scanned or indexed.</small>
@@ -1400,7 +1431,7 @@ const foldersView = Vue.component('folders-view', {
 
                 <!-- User access (non-admin users only) -->
                 <div v-if="non_admin_count > 0">
-                  <label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:6px;">User Access</label>
+                  <label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:6px;">{{ t('admin.folders.editLabelUsers') }}</label>
                   <div style="display:flex;flex-wrap:wrap;gap:8px;">
                     <label v-for="(u, uname) in users" :key="uname" v-if="!u.admin"
                            style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;color:var(--t1);">
@@ -1412,8 +1443,8 @@ const foldersView = Vue.component('folders-view', {
 
                 <!-- Save -->
                 <div style="display:flex;gap:8px;justify-content:flex-end;">
-                  <button class="btn-small" type="button" @click="editingFolder = null">Cancel</button>
-                  <button class="btn-small btn-primary" type="button" @click="saveEditFolder(k)">Save changes</button>
+                  <button class="btn-small" type="button" @click="editingFolder = null">{{ t('admin.folders.editBtnCancel') }}</button>
+                  <button class="btn-small btn-primary" type="button" @click="saveEditFolder(k)">{{ t('admin.folders.editBtnSave') }}</button>
                 </div>
               </div>
 
@@ -1453,7 +1484,7 @@ const foldersView = Vue.component('folders-view', {
       submitForm: async function () {
         if (ADMINDATA.folders[this.dirName]) {
           iziToast.warn({
-            title: 'Server Path already in use',
+            title: this.t('admin.folders.toastAlreadyInUse'),
             position: 'topCenter',
             timeout: 3500
           });
@@ -1504,7 +1535,7 @@ const foldersView = Vue.component('folders-view', {
           });
         }catch(err) {
           iziToast.error({
-            title: 'Failed to add directory',
+            title: this.t('admin.folders.toastFailedAdd'),
             position: 'topCenter',
             timeout: 3500
           });
@@ -1527,11 +1558,11 @@ const foldersView = Vue.component('folders-view', {
           });
           Vue.set(ADMINDATA.folders[vpath], 'allowRecordDelete', newVal);
           iziToast.success({
-            title: newVal ? 'Users can now delete their own recordings' : 'Recording deletion disabled',
+            title: newVal ? this.t('admin.folders.toastDeleteEnabled') : this.t('admin.folders.toastDeleteDisabled'),
             position: 'topCenter', timeout: 3000
           });
         } catch (_e) {
-          iziToast.error({ title: 'Failed to update setting', position: 'topCenter', timeout: 3000 });
+          iziToast.error({ title: this.t('admin.folders.toastFailedUpdate'), position: 'topCenter', timeout: 3000 });
         }
       },
       toggleAlbumsOnly: async function(vpath) {
@@ -1545,11 +1576,11 @@ const foldersView = Vue.component('folders-view', {
           });
           Vue.set(ADMINDATA.folders[vpath], 'albumsOnly', newVal);
           iziToast.success({
-            title: newVal ? 'Albums Only enabled — Albums view restricted to this folder' : 'Albums Only disabled',
+            title: newVal ? this.t('admin.folders.toastAlbumsOnlyEnabled') : this.t('admin.folders.toastAlbumsOnlyDisabled'),
             position: 'topCenter', timeout: 3000
           });
         } catch (_e) {
-          iziToast.error({ title: 'Failed to update setting', position: 'topCenter', timeout: 3000 });
+          iziToast.error({ title: this.t('admin.folders.toastFailedUpdate'), position: 'topCenter', timeout: 3000 });
         }
       },
       toggleArtistsOn: async function(vpath) {
@@ -1563,13 +1594,13 @@ const foldersView = Vue.component('folders-view', {
             data: { vpath, artistsOn: newVal }
           });
           iziToast.success({
-            title: newVal ? 'Artist Library enabled for this folder' : 'Artist Library disabled for this folder',
-            message: 'Artist index is being rebuilt in the background.',
+            title: newVal ? this.t('admin.folders.toastArtistsEnabled') : this.t('admin.folders.toastArtistsDisabled'),
+            message: this.t('admin.folders.toastArtistsRebuild'),
             position: 'topCenter', timeout: 3500
           });
         } catch (_e) {
           Vue.set(ADMINDATA.folders[vpath], 'artistsOn', !newVal);
-          iziToast.error({ title: 'Failed to update setting', position: 'topCenter', timeout: 3000 });
+          iziToast.error({ title: this.t('admin.folders.toastFailedUpdate'), position: 'topCenter', timeout: 3000 });
         }
       },
       toggleEditFolder: function(vpath) {
@@ -1639,13 +1670,13 @@ const foldersView = Vue.component('folders-view', {
             });
             Vue.set(ADMINDATA.folders[vpath], 'root', this.editForm.root.trim());
             iziToast.warning({
-              title: 'Path changed — server restart recommended for media serving to update',
+              title: this.t('admin.folders.toastPathChanged'),
               position: 'topCenter', timeout: 5000
             });
           } catch (err) {
             errors.push('path');
             iziToast.error({
-              title: 'Invalid path: ' + (err?.response?.data?.error || 'not a valid directory'),
+              title: this.t('admin.folders.toastInvalidPath', { error: err?.response?.data?.error || 'not a valid directory' }),
               position: 'topCenter', timeout: 4000
             });
           }
@@ -1676,21 +1707,21 @@ const foldersView = Vue.component('folders-view', {
         }
 
         if (errors.length === 0) {
-          iziToast.success({ title: 'Folder updated', position: 'topCenter', timeout: 2500 });
+          iziToast.success({ title: this.t('admin.folders.toastFolderUpdated'), position: 'topCenter', timeout: 2500 });
           this.editingFolder = null;
         } else if (errors.length < 3) {
-          iziToast.warning({ title: `Some changes failed: ${errors.join(', ')}`, position: 'topCenter', timeout: 4000 });
+          iziToast.warning({ title: this.t('admin.folders.toastSomeChangesFailed', { fields: errors.join(', ') }), position: 'topCenter', timeout: 4000 });
         }
       },
       removeFolder: async function(vpath, folder) {
-                adminConfirm(`Remove access to <b>${folder}</b>?`, `No files will be deleted. Your server will need to reboot.`, 'Remove', () => {
+                adminConfirm(this.t('admin.folders.confirmRemoveTitle', { folder: folder }), this.t('admin.folders.confirmRemoveMsg'), this.t('admin.folders.confirmRemoveLabel'), () => {
           API.axios({
                           method: 'DELETE',
                           url: `${API.url()}/api/v1/admin/directory`,
                           data: { vpath: vpath }
                         }).then(() => {
                           iziToast.warning({
-                            title: 'Server Rebooting. Please wait 30s for the server to come back online',
+                            title: this.t('admin.folders.toastServerRebooting'),
                             position: 'topCenter',
                             timeout: 3500
                           });
@@ -1702,7 +1733,7 @@ const foldersView = Vue.component('folders-view', {
                           });
                         }).catch(() => {
                           iziToast.error({
-                            title: 'Failed to remove folder',
+                            title: this.t('admin.folders.toastFailedRemove'),
                             position: 'topCenter',
                             timeout: 3500
                           });
@@ -1732,17 +1763,17 @@ const usersView = Vue.component('users-view', {
 
       <div class="card">
         <div class="card-content">
-          <span class="card-title">Add User</span>
-          <p style="color:var(--t2);font-size:.88rem;margin:.25rem 0 1rem;">Create a new account. The first user must have admin access.</p>
+          <span class="card-title">{{ t('admin.users.addTitle') }}</span>
+          <p style="color:var(--t2);font-size:.88rem;margin:.25rem 0 1rem;">{{ t('admin.users.addDesc') }}</p>
           <form id="add-user-form" @submit.prevent="addUser" autocomplete="off">
 
             <div style="display:flex;gap:.75rem;flex-wrap:wrap;">
               <div class="input-field" style="flex:1;min-width:160px;">
-                <label for="new-username">Username</label>
-                <input v-model="newUsername" id="new-username" required type="text" placeholder="e.g. alice" autocomplete="off">
+                <label for="new-username">{{ t('admin.users.labelUsername') }}</label>
+                <input v-model="newUsername" id="new-username" required type="text" :placeholder="t('admin.users.usernamePlaceholder')" autocomplete="off">
               </div>
               <div class="input-field" style="flex:1;min-width:160px;">
-                <label for="new-password">Password</label>
+                <label for="new-password">{{ t('admin.users.labelPassword') }}</label>
                 <div class="pwd-wrap">
                   <input v-model="newPassword" id="new-password" required :type="showNewPassword ? 'text' : 'password'" placeholder="•••••••" autocomplete="new-password">
                   <button type="button" class="pwd-toggle" @click="showNewPassword = !showNewPassword" tabindex="-1" :title="showNewPassword ? 'Hide password' : 'Show password'">
@@ -1754,25 +1785,25 @@ const usersView = Vue.component('users-view', {
             </div>
 
             <div class="input-field">
-              <label for="new-user-dirs">Folder Access <span style="color:var(--red);font-size:.8rem;">*</span></label>
+              <label for="new-user-dirs">{{ t('admin.users.labelFolderAccess') }} <span style="color:var(--red);font-size:.8rem;">*</span></label>
               <select id="new-user-dirs" :disabled="Object.keys(directories).length === 0" multiple :size="Math.max(2, Object.keys(directories).length)" v-model="newUserDirs">
-                <option disabled value="" v-if="Object.keys(directories).length === 0">No directories &mdash; add a music folder first</option>
+                <option disabled value="" v-if="Object.keys(directories).length === 0">{{ t('admin.users.noDirectoriesToSelect') }}</option>
                 <option v-for="(val, key) in directories" :key="key" :value="key">{{ key }}</option>
               </select>
-              <small style="display:block;color:var(--t2);font-size:.82rem;margin-top:.25rem;" v-if="Object.keys(directories).length > 0">Select at least one folder. Hold Ctrl / Cmd to select multiple.</small>
+              <small style="display:block;color:var(--t2);font-size:.82rem;margin-top:.25rem;" v-if="Object.keys(directories).length > 0">{{ t('admin.users.folderSelectHint') }}</small>
               <small style="display:block;color:var(--t2);font-size:.82rem;margin-top:.25rem;" v-else>Add a music directory before creating users.</small>
             </div>
 
             <label style="display:flex;align-items:center;gap:.6rem;cursor:pointer;margin:.25rem 0 .5rem;">
               <input id="make-admin-cb" type="checkbox" v-model="makeAdmin" style="width:auto;margin:0;flex-shrink:0;">
-              <span><span style="color:var(--t1);font-weight:600;">Grant admin access</span><br><small style="color:var(--t2);font-size:.82rem;">Admin users can access this settings panel and manage all users.</small></span>
+              <span><span style="color:var(--t1);font-weight:600;">{{ t('admin.users.grantAdmin') }}</span><br><small style="color:var(--t2);font-size:.82rem;">{{ t('admin.users.grantAdminDesc') }}</small></span>
             </label>
 
           </form>
         </div>
         <div class="card-action">
           <button class="btn" type="submit" form="add-user-form" :disabled="submitPending === true">
-            {{submitPending === false ? 'Add User' : 'Adding...'}}
+            {{submitPending === false ? t('admin.users.btnAdd') : t('admin.users.btnAdding')}}
           </button>
         </div>
       </div>
@@ -1783,7 +1814,7 @@ const usersView = Vue.component('users-view', {
 
       <div v-else class="card">
         <div class="card-content">
-          <span class="card-title">Users</span>
+          <span class="card-title">{{ t('admin.users.listTitle') }}</span>
           <p v-if="Object.keys(users).length === 0" style="color:var(--t2);margin:.5rem 0 0;">No users &mdash; authentication is currently <strong>disabled</strong>. The first user you create must have admin access.</p>
           <div v-if="Object.keys(users).length === 0" style="margin-top:.85rem;padding:.65rem .85rem;border-radius:6px;background:var(--raised);border:1px solid var(--border);font-size:.85rem;color:var(--t2);line-height:1.5;">
             <strong style="color:var(--t1);">Subsonic API (no-auth mode)</strong><br>
@@ -1793,11 +1824,11 @@ const usersView = Vue.component('users-view', {
           <table v-else>
             <thead>
               <tr>
-                <th style="width:140px;">Username</th>
-                <th>Folders</th>
-                <th style="width:70px;">Role</th>
-                <th style="width:130px;">Permissions</th>
-                <th style="text-align:right;white-space:nowrap;">Actions</th>
+                <th style="width:140px;">{{ t('admin.users.colUsername') }}</th>
+                <th>{{ t('admin.users.colFolders') }}</th>
+                <th style="width:70px;">{{ t('admin.users.colRole') }}</th>
+                <th style="width:130px;">{{ t('admin.users.colPermissions') }}</th>
+                <th style="text-align:right;white-space:nowrap;">{{ t('admin.users.colActions') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -1805,8 +1836,8 @@ const usersView = Vue.component('users-view', {
                 <td style="font-weight:600;color:var(--t1);">{{k}}</td>
                 <td><span style="color:var(--t2);font-size:.85rem;">{{v.vpaths.join(', ') || '&mdash;'}}</span></td>
                 <td>
-                  <span v-if="v.admin === true" style="background:rgba(139,92,246,.15);color:var(--primary);font-size:.75rem;font-weight:700;padding:.15rem .45rem;border-radius:4px;">Admin</span>
-                  <span v-else style="background:var(--raised);color:var(--t2);font-size:.75rem;padding:.15rem .45rem;border-radius:4px;">User</span>
+                  <span v-if="v.admin === true" style="background:rgba(139,92,246,.15);color:var(--primary);font-size:.75rem;font-weight:700;padding:.15rem .45rem;border-radius:4px;">{{ t('admin.users.roleAdmin') }}</span>
+                  <span v-else style="background:var(--raised);color:var(--t2);font-size:.75rem;padding:.15rem .45rem;border-radius:4px;">{{ t('admin.users.roleUser') }}</span>
                 </td>
                 <td>
                   <div style="display:flex;flex-direction:column;gap:.3rem;">
@@ -1835,10 +1866,10 @@ const usersView = Vue.component('users-view', {
                 </td>
                 <td>
                   <div style="display:flex;gap:.4rem;justify-content:flex-end;flex-wrap:wrap;">
-                    <button class="btn-small btn-flat" type="button" @click="changePassword(k)">Password</button>
-                    <button class="btn-small btn-flat" type="button" @click="changeVPaths(k)">Folders</button>
-                    <button class="btn-small btn-flat" type="button" @click="changeAccess(k)">Access</button>
-                    <button class="btn-small" type="button" style="background:var(--red);border-color:var(--red);" @click="deleteUser(k)">Delete</button>
+                    <button class="btn-small btn-flat" type="button" @click="changePassword(k)">{{ t('admin.users.btnPassword') }}</button>
+                    <button class="btn-small btn-flat" type="button" @click="changeVPaths(k)">{{ t('admin.users.btnFolders') }}</button>
+                    <button class="btn-small btn-flat" type="button" @click="changeAccess(k)">{{ t('admin.users.btnAccess') }}</button>
+                    <button class="btn-small" type="button" style="background:var(--red);border-color:var(--red);" @click="deleteUser(k)">{{ t('admin.users.btnDelete') }}</button>
                   </div>
                 </td>
               </tr>
@@ -1869,7 +1900,7 @@ const usersView = Vue.component('users-view', {
         modVM.openModal();
       },
       deleteUser: function (username) {
-                adminConfirm(`Delete <b>${username}</b>?`, '', 'Delete', async () => {
+                adminConfirm(this.t('admin.users.confirmDeleteTitle', { username }), '', this.t('admin.users.confirmDeleteLabel'), async () => {
           try {
                           await API.axios({
                             method: 'DELETE',
@@ -1879,7 +1910,7 @@ const usersView = Vue.component('users-view', {
                           Vue.delete(ADMINDATA.users, username);
                         } catch (err) {
                           iziToast.error({
-                            title: 'Failed to delete user',
+                            title: this.t('admin.users.toastFailedUpdate'),
                             position: 'topCenter',
                             timeout: 3500
                           });
@@ -1892,8 +1923,8 @@ const usersView = Vue.component('users-view', {
 
           if (this.newUserDirs.length === 0) {
             iziToast.warning({
-              title: 'No folder selected',
-              message: 'Please select at least one folder for this user.',
+              title: this.t('admin.users.toastNoFolder'),
+              message: this.t('admin.users.toastNoFolderMsg'),
               position: 'topCenter',
               timeout: 4000
             });
@@ -1924,7 +1955,7 @@ const usersView = Vue.component('users-view', {
           this.makeAdmin = false;
           this.newUserDirs = [];
 
-          iziToast.success({ title: 'User added', position: 'topCenter', timeout: 3000 });
+          iziToast.success({ title: this.t('admin.users.toastUserAdded'), position: 'topCenter', timeout: 3000 });
 
           if (isFirstUser) {
             adminConfirm('First user created', 'You will now be taken to the login page.', 'Go to Login', () => {
@@ -1933,7 +1964,7 @@ const usersView = Vue.component('users-view', {
           }
         }catch(err) {
           iziToast.error({
-            title: 'Failed to add user',
+            title: this.t('admin.users.toastFailedAdd'),
             position: 'topCenter',
             timeout: 3500
           });
@@ -2004,39 +2035,39 @@ const advancedView = Vue.component('advanced-view', {
           <div class="col s12">
             <div class="card">
               <div class="card-content">
-                <span class="card-title">User Interface</span>
+                <span class="card-title">{{ t('admin.settings.uiTitle') }}</span>
                 <table>
                   <tbody>
                     <tr>
-                      <td><b>Default Theme:</b></td>
+                      <td><b>{{ t('admin.settings.labelDefaultTheme') }}</b></td>
                       <td>
                         <select v-model="uiSelect" v-on:change="setUi(uiSelect)" style="width:auto;padding:4px 8px">
-                          <option value="velvet">Velvet (Default)</option>
-                          <option value="velvet-dark">Velvet Dark</option>
-                          <option value="velvet-light">Velvet Light</option>
+                          <option value="velvet">{{ t('admin.settings.themeVelvetDefault') }}</option>
+                          <option value="velvet-dark">{{ t('admin.settings.themeVelvetDark') }}</option>
+                          <option value="velvet-light">{{ t('admin.settings.themeVelvetLight') }}</option>
                         </select>
                       </td>
                     </tr>
                   </tbody>
                 </table>
-                <p style="color:#888;font-size:12px;margin-top:8px">Sets the theme shown to users who have not yet chosen a personal preference.</p>
+                <p style="color:#888;font-size:12px;margin-top:8px">{{ t('admin.settings.themeHint') }}</p>
               </div>
             </div>
           </div>
           <div class="col s12">
             <div class="card">
               <div class="card-content">
-                <span class="card-title">Security</span>
+                <span class="card-title">{{ t('admin.settings.securityTitle') }}</span>
                 <table>
                   <tbody>
                     <tr>
-                      <td><b>File Uploading:</b> {{params.noUpload === false ? 'Enabled' : 'Disabled'}}</td>
+                      <td><b>{{ t('admin.settings.labelFileUploading') }}</b> {{ params.noUpload === false ? t('admin.settings.fileUploadingEnabled') : t('admin.settings.fileUploadingDisabled') }}</td>
                       <td>
-                        <a v-on:click="toggleFileUpload()" class="btn-sm btn-sm-edit">edit</a>
+                        <a v-on:click="toggleFileUpload()" class="btn-sm btn-sm-edit">{{ t('admin.common.edit') }}</a>
                       </td>
                     </tr>
                     <tr>
-                      <td><b>Auth Key:</b> ****************{{params.secret}}</td>
+                      <td><b>{{ t('admin.settings.labelAuthKey') }}</b> ****************{{params.secret}}</td>
                       <td>
                         <a v-on:click="generateNewKey()" class="btn-sm btn-sm-edit">edit</a>
                       </td>
@@ -2049,25 +2080,25 @@ const advancedView = Vue.component('advanced-view', {
           <div class="col s12">
             <div class="card">
               <div class="card-content">
-                <span class="card-title">Network Settings</span>
+                <span class="card-title">{{ t('admin.settings.networkTitle') }}</span>
                 <table>
                   <tbody>
                     <tr>
-                      <td><b>Port:</b> {{params.port}}</td>
+                      <td><b>{{ t('admin.settings.labelPort') }}</b> {{params.port}}</td>
                       <td>
-                        <a v-on:click="openModal('edit-port-modal')" class="btn-sm btn-sm-edit">edit</a>
+                        <a v-on:click="openModal('edit-port-modal')" class="btn-sm btn-sm-edit">{{ t('admin.common.edit') }}</a>
                       </td>
                     </tr>
                     <tr>
-                      <td><b>Max Request Size:</b> {{params.maxRequestSize}}</td>
+                      <td><b>{{ t('admin.settings.labelMaxRequestSize') }}</b> {{params.maxRequestSize}}</td>
                       <td>
-                        <a v-on:click="openModal('edit-request-size-modal')" class="btn-sm btn-sm-edit">edit</a>
+                        <a v-on:click="openModal('edit-request-size-modal')" class="btn-sm btn-sm-edit">{{ t('admin.common.edit') }}</a>
                       </td>
                     </tr>
                     <tr>
-                      <td><b>Address:</b> {{params.address}}</td>
+                      <td><b>{{ t('admin.settings.labelAddress') }}</b> {{params.address}}</td>
                       <td>
-                        <a v-on:click="openModal('edit-address-modal')" class="btn-sm btn-sm-edit">edit</a>
+                        <a v-on:click="openModal('edit-address-modal')" class="btn-sm btn-sm-edit">{{ t('admin.common.edit') }}</a>
                       </td>
                     </tr>
                   </tbody>
@@ -2079,27 +2110,27 @@ const advancedView = Vue.component('advanced-view', {
             <div class="card">
               <div v-if="!params.ssl || !params.ssl.cert">
                 <div class="card-content">
-                  <span class="card-title">SSL Settings</span>
-                  <a v-on:click="openModal('edit-ssl-modal')" class="btn">Add SSL Certs</a>
+                  <span class="card-title">{{ t('admin.settings.sslTitle') }}</span>
+                  <a v-on:click="openModal('edit-ssl-modal')" class="btn">{{ t('admin.settings.btnAddSslCerts') }}</a>
                 </div>
               </div>
               <div v-else>
                 <div class="card-content">
-                  <span class="card-title">SSL Settings</span>
+                  <span class="card-title">{{ t('admin.settings.sslTitle') }}</span>
                   <table>
                     <tbody>
                       <tr>
-                        <td><b>Cert:</b> {{params.ssl.cert}}</td>
+                        <td><b>{{ t('admin.settings.labelCert') }}</b> {{params.ssl.cert}}</td>
                       </tr>
                       <tr>
-                        <td><b>Key:</b> {{params.ssl.key}}</td>
+                        <td><b>{{ t('admin.settings.labelKey') }}</b> {{params.ssl.key}}</td>
                       </tr>
                     </tbody>
                   </table>
                 </div>
                 <div class="card-action">
-                  <a v-on:click="openModal('edit-ssl-modal')" class="btn">Edit SSL</a>
-                  <a v-on:click="removeSSL()" class="btn">Remove SSL</a>
+                  <a v-on:click="openModal('edit-ssl-modal')" class="btn">{{ t('admin.settings.btnEditSsl') }}</a>
+                  <a v-on:click="removeSSL()" class="btn">{{ t('admin.settings.btnRemoveSsl') }}</a>
                 </div>
               </div>
             </div>
@@ -2126,13 +2157,13 @@ const advancedView = Vue.component('advanced-view', {
                       }, 4000);
 
                       iziToast.success({
-                        title: 'Certs Deleted. You will be redirected shortly',
+                        title: this.t('admin.settings.toastCertsDeleted'),
                         position: 'topCenter',
                         timeout: 8500
                       });
                     } catch (err) {
                       iziToast.error({
-                        title: 'Failed to Delete Cert',
+                        title: this.t('admin.settings.toastFailedDeleteCert'),
                         position: 'topCenter',
                         timeout: 3500
                       });
@@ -2164,10 +2195,10 @@ const advancedView = Vue.component('advanced-view', {
       }).then(() => {
         Vue.set(ADMINDATA.serverParams, 'ui', ui);
         this.uiSelect = ui;
-        iziToast.success({ title: 'Default theme updated', position: 'topCenter', timeout: 3000 });
+        iziToast.success({ title: this.t('admin.settings.toastThemeUpdated'), position: 'topCenter', timeout: 3000 });
       }).catch(() => {
         this.uiSelect = ADMINDATA.serverParams.ui || 'velvet';
-        iziToast.error({ title: 'Failed', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.common.failed'), position: 'topCenter', timeout: 3000 });
       });
     },
     toggleFileUpload: function() {
@@ -2226,50 +2257,50 @@ const dbView = Vue.component('db-view', {
           <div class="col s12">
             <div class="card">
               <div class="card-content">
-                <span class="card-title">DB Scan Settings</span>
+                <span class="card-title">{{ t('admin.db.scanSettingsTitle') }}</span>
                 <table>
                   <tbody>
                     <tr>
-                      <td><b>Scan Interval:</b> {{dbParams.scanInterval}} hours</td>
+                      <td><b>{{ t('admin.db.labelScanInterval') }}</b> {{dbParams.scanInterval}} {{ t('admin.db.scanIntervalUnit') }}</td>
                       <td>
-                        <a v-on:click="openModal('edit-scan-interval-modal')" class="btn-sm btn-sm-edit">edit</a>
+                        <a v-on:click="openModal('edit-scan-interval-modal')" class="btn-sm btn-sm-edit">{{ t('admin.common.edit') }}</a>
                       </td>
                     </tr>
                     <tr>
-                      <td><b>Boot Scan Delay:</b> {{dbParams.bootScanDelay}} seconds</td>
+                      <td><b>{{ t('admin.db.labelBootScanDelay') }}</b> {{dbParams.bootScanDelay}} {{ t('admin.db.bootScanDelayUnit') }}</td>
                       <td>
-                        <a v-on:click="openModal('edit-boot-scan-delay-modal')" class="btn-sm btn-sm-edit">edit</a>
+                        <a v-on:click="openModal('edit-boot-scan-delay-modal')" class="btn-sm btn-sm-edit">{{ t('admin.common.edit') }}</a>
                       </td>
                     </tr>
                     <tr>
-                      <td><b>Skip Image Metadata:</b> {{dbParams.skipImg}}</td>
+                      <td><b>{{ t('admin.db.labelSkipImageMetadata') }}</b> {{dbParams.skipImg}}</td>
                       <td>
-                        <a v-on:click="toggleSkipImg()" class="btn-sm btn-sm-edit">edit</a>
+                        <a v-on:click="toggleSkipImg()" class="btn-sm btn-sm-edit">{{ t('admin.common.edit') }}</a>
                       </td>
                     </tr>
                     <tr>
-                      <td><b>Compress Images:</b> {{dbParams.compressImage}}</td>
+                      <td><b>{{ t('admin.db.labelCompressImages') }}</b> {{dbParams.compressImage}}</td>
                       <td>
-                        <a v-on:click="recompressImages()" class="btn-sm">re-compress</a>
-                        <a v-on:click="toggleCompressImage()" class="btn-sm btn-sm-edit">edit</a>
+                        <a v-on:click="recompressImages()" class="btn-sm">{{ t('admin.db.btnRecompress') }}</a>
+                        <a v-on:click="toggleCompressImage()" class="btn-sm btn-sm-edit">{{ t('admin.common.edit') }}</a>
                       </td>
                     </tr>
                     <tr>
-                      <td><b>Max Concurrent Scans:</b> {{dbParams.maxConcurrentTasks}}</td>
+                      <td><b>{{ t('admin.db.labelMaxConcurrentScans') }}</b> {{dbParams.maxConcurrentTasks}}</td>
                       <td>
-                        <a v-on:click="openModal('edit-max-scan-modal')" class="btn-sm btn-sm-edit">edit</a>
+                        <a v-on:click="openModal('edit-max-scan-modal')" class="btn-sm btn-sm-edit">{{ t('admin.common.edit') }}</a>
                       </td>
                     </tr>
                     <tr>
-                      <td><b>Allow ID3 Tag Editing:</b> {{dbParams.allowId3Edit || false}}</td>
+                      <td><b>{{ t('admin.db.labelAllowId3Edit') }}</b> {{dbParams.allowId3Edit || false}}</td>
                       <td>
-                        <a v-on:click="toggleAllowId3Edit()" class="btn-sm btn-sm-edit">edit</a>
+                        <a v-on:click="toggleAllowId3Edit()" class="btn-sm btn-sm-edit">{{ t('admin.common.edit') }}</a>
                       </td>
                     </tr>
                     <tr>
-                      <td><b>Max ZIP Download Size:</b> {{dbParams.maxZipMb || 500}} MB</td>
+                      <td><b>{{ t('admin.db.labelMaxZipSize') }}</b> {{dbParams.maxZipMb || 500}} {{ t('admin.db.maxZipUnit') }}</td>
                       <td>
-                        <a v-on:click="openModal('edit-max-zip-mb-modal')" class="btn-sm btn-sm-edit">edit</a>
+                        <a v-on:click="openModal('edit-max-zip-mb-modal')" class="btn-sm btn-sm-edit">{{ t('admin.common.edit') }}</a>
                       </td>
                     </tr>
                   </tbody>
@@ -2282,14 +2313,14 @@ const dbView = Vue.component('db-view', {
           <div class="col s12">
             <div class="card">
               <div class="card-content">
-                <span class="card-title">Scan Queue & Stats</span>
-                <a v-on:click="scanDB" class="btn">Start A Scan</a>
-                <a v-if="scanProgress.length > 0" v-on:click="stopScan" class="btn red" style="margin-left:.5rem">Stop Scanning</a>
-                <a v-on:click="pullStats" class="btn">Pull Stats</a>
-                <a class="btn" :disabled="rebuildingArtists" v-on:click="doRebuildArtists" style="margin-left:.5rem">{{ rebuildingArtists ? 'Rebuilding…' : 'Rebuild Artist Index' }}</a>
+                <span class="card-title">{{ t('admin.db.queueStatsTitle') }}</span>
+                <a v-on:click="scanDB" class="btn">{{ t('admin.db.btnStartScan') }}</a>
+                <a v-if="scanProgress.length > 0" v-on:click="stopScan" class="btn red" style="margin-left:.5rem">{{ t('admin.db.btnStopScanning') }}</a>
+                <a v-on:click="pullStats" class="btn">{{ t('admin.db.btnPullStats') }}</a>
+                <a class="btn" :disabled="rebuildingArtists" v-on:click="doRebuildArtists" style="margin-left:.5rem">{{ rebuildingArtists ? t('admin.db.btnRebuildingArtists') : t('admin.db.btnRebuildArtistIndex') }}</a>
                 <span v-if="rebuildingArtists" style="display:inline-flex;align-items:center;gap:.4rem;margin-left:.7rem;color:#666;font-size:.92rem;vertical-align:middle;">
                   <svg class="spinner" width="18px" height="18px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
-                  Rebuilding artist index…
+                  {{ t('admin.db.rebuildingArtistMsg') }}
                 </span>
                 <div v-if="scanProgress.length > 0" class="sp-container">
                   <div v-for="sp in scanProgress" :key="sp.scanId" class="sp-card">
@@ -2330,77 +2361,77 @@ const dbView = Vue.component('db-view', {
                   <div class="stat-grid">
                     <div class="stat-chip">
                       <div class="sc-num">{{(dbStats.totalFiles||0).toLocaleString()}}</div>
-                      <div class="sc-label">Total Tracks</div>
+                      <div class="sc-label">{{ t('admin.db.statTotalTracks') }}</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num">{{(dbStats.totalArtists||0).toLocaleString()}}</div>
-                      <div class="sc-label">Artists</div>
+                      <div class="sc-label">{{ t('admin.db.statArtists') }}</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num">{{(dbStats.totalAlbums||0).toLocaleString()}}</div>
-                      <div class="sc-label">Albums</div>
+                      <div class="sc-label">{{ t('admin.db.statAlbums') }}</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num">{{(dbStats.totalGenres||0).toLocaleString()}}</div>
-                      <div class="sc-label">Genres</div>
+                      <div class="sc-label">{{ t('admin.db.statGenres') }}</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num">{{(dbStats.withArt||0).toLocaleString()}}</div>
-                      <div class="sc-label">With Cover Art</div>
+                      <div class="sc-label">{{ t('admin.db.statWithArt') }}</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num" style="color:var(--t2)">{{(dbStats.withoutArt||0).toLocaleString()}}</div>
-                      <div class="sc-label">No Cover Art</div>
+                      <div class="sc-label">{{ t('admin.db.statNoArt') }}</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num">{{(dbStats.artEmbedded||0).toLocaleString()}}</div>
-                      <div class="sc-label">Art Embedded in File</div>
+                      <div class="sc-label">{{ t('admin.db.statArtEmbedded') }}</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num">{{(dbStats.artFromDirectory||0).toLocaleString()}}</div>
-                      <div class="sc-label">Art from Folder Image</div>
+                      <div class="sc-label">{{ t('admin.db.statArtFromFolder') }}</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num" style="color:var(--accent)">{{(dbStats.artFromDiscogs||0).toLocaleString()}}</div>
-                      <div class="sc-label">Art Picked by User (Discogs)</div>
+                      <div class="sc-label">{{ t('admin.db.statArtFromDiscogs') }}</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num" style="color:var(--accent)">{{(dbStats.withReplaygain||0).toLocaleString()}}</div>
-                      <div class="sc-label">ReplayGain Tagged</div>
+                      <div class="sc-label">{{ t('admin.db.statReplayGain') }}</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num" style="color:var(--accent)">{{(dbStats.withCue||0).toLocaleString()}}</div>
-                      <div class="sc-label">CUE Sheet Files</div>
+                      <div class="sc-label">{{ t('admin.db.statCueFiles') }}</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num" style="color:var(--t2)">{{(dbStats.cueUnchecked||0).toLocaleString()}}</div>
-                      <div class="sc-label">CUE Not Yet Scanned</div>
+                      <div class="sc-label">{{ t('admin.db.statCueNotScanned') }}</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num">{{(dbStats.addedLast7Days||0).toLocaleString()}}</div>
-                      <div class="sc-label">Added Last 7 Days</div>
+                      <div class="sc-label">{{ t('admin.db.statAdded7Days') }}</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num">{{(dbStats.addedLast30Days||0).toLocaleString()}}</div>
-                      <div class="sc-label">Added Last 30 Days</div>
+                      <div class="sc-label">{{ t('admin.db.statAdded30Days') }}</div>
                     </div>
                     <div class="stat-chip" v-if="dbStats.oldestYear">
                       <div class="sc-num">{{dbStats.oldestYear}}&thinsp;&ndash;&thinsp;{{dbStats.newestYear}}</div>
-                      <div class="sc-label">Year Range</div>
+                      <div class="sc-label">{{ t('admin.db.statYearRange') }}</div>
                     </div>
                     <div class="stat-chip">
                       <div class="sc-num" style="color:var(--accent)">{{(dbStats.waveformCount||0).toLocaleString()}}</div>
-                      <div class="sc-label">Waveforms Cached</div>
+                      <div class="sc-label">{{ t('admin.db.statWaveforms') }}</div>
                     </div>
                     <div class="stat-chip" v-if="dbStats.totalDurationSec > 0">
                       <div class="sc-num" style="color:var(--primary)">{{formatDuration(dbStats.totalDurationSec)}}</div>
-                      <div class="sc-label">Total Library Duration</div>
+                      <div class="sc-label">{{ t('admin.db.statTotalDuration') }}</div>
                     </div>
                   </div>
 
                   <div class="stat-section-row">
                     <div class="stat-section" v-if="dbStats.formats.length > 1">
-                      <div class="stat-section-title">Formats</div>
+                      <div class="stat-section-title">{{ t('admin.db.statSectionFormats') }}</div>
                       <div v-for="f in dbStats.formats" class="stat-bar-row">
                         <span class="stat-bar-label">{{f.format ? f.format.toUpperCase() : '?'}}</span>
                         <div class="stat-bar-bg"><div class="stat-bar-fill" :style="{width: Math.round(f.cnt/dbStats.totalFiles*100)+'%'}"></div></div>
@@ -2408,7 +2439,7 @@ const dbView = Vue.component('db-view', {
                       </div>
                     </div>
                     <div class="stat-section" v-if="dbStats.topArtists.length > 0">
-                      <div class="stat-section-title">Top Artists by Track Count</div>
+                      <div class="stat-section-title">{{ t('admin.db.statSectionTopArtists') }}</div>
                       <div v-for="a in dbStats.topArtists" class="stat-bar-row">
                         <span class="stat-bar-label">{{a.artist}}</span>
                         <div class="stat-bar-bg"><div class="stat-bar-fill" :style="{width: Math.round(a.cnt/dbStats.topArtists[0].cnt*100)+'%', background:'var(--accent)'}"></div></div>
@@ -2416,7 +2447,7 @@ const dbView = Vue.component('db-view', {
                       </div>
                     </div>
                     <div class="stat-section" v-if="dbStats.topGenres.length > 0">
-                      <div class="stat-section-title">Top Genres</div>
+                      <div class="stat-section-title">{{ t('admin.db.statSectionTopGenres') }}</div>
                       <div v-for="g in dbStats.topGenres" class="stat-bar-row">
                         <span class="stat-bar-label">{{g.genre}}</span>
                         <div class="stat-bar-bg"><div class="stat-bar-fill" :style="{width: Math.round(g.cnt/dbStats.topGenres[0].cnt*100)+'%', background:'var(--red)'}"></div></div>
@@ -2424,7 +2455,7 @@ const dbView = Vue.component('db-view', {
                       </div>
                     </div>
                     <div class="stat-section" v-if="dbStats.decades && dbStats.decades.length > 1">
-                      <div class="stat-section-title">Music by Decade</div>
+                      <div class="stat-section-title">{{ t('admin.db.statSectionMusicByDecade') }}</div>
                       <div v-for="d in dbStats.decades" class="stat-bar-row">
                         <span class="stat-bar-label">{{d.decade}}s</span>
                         <div class="stat-bar-bg"><div class="stat-bar-fill" :style="{width: Math.round(d.cnt / Math.max(...dbStats.decades.map(x=>x.cnt)) * 100)+'%', background:'var(--t2)'}"></div></div>
@@ -2432,7 +2463,7 @@ const dbView = Vue.component('db-view', {
                       </div>
                     </div>
                     <div class="stat-section" v-if="dbStats.perVpath.length > 1">
-                      <div class="stat-section-title">Tracks per Folder</div>
+                      <div class="stat-section-title">{{ t('admin.db.statSectionTracksPerFolder') }}</div>
                       <div v-for="v in dbStats.perVpath" class="stat-bar-row">
                         <span class="stat-bar-label">{{v.vpath}}</span>
                         <div class="stat-bar-bg"><div class="stat-bar-fill" :style="{width: Math.round(v.cnt/dbStats.totalFiles*100)+'%', background:'var(--accent)'}"></div></div>
@@ -2456,24 +2487,24 @@ const dbView = Vue.component('db-view', {
           <div class="col s12">
             <div class="card">
               <div class="card-content">
-                <span class="card-title">Shared Playlists</span>
-                <a v-on:click="loadShared" class="btn">Load Playlists</a>
+                <span class="card-title">{{ t('admin.db.sharedPlaylistsTitle') }}</span>
+                <a v-on:click="loadShared" class="btn">{{ t('admin.db.btnLoadPlaylists') }}</a>
                 <br><br>
                 <div v-if="isPullingShared === true">
                   <svg class="spinner" width="65px" height="65px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
                 </div>
                 <div v-else-if="sharedPlaylistsTS.ts !== 0 && sharedPlaylists.length > 0">
-                  <a v-on:click="deleteUnxpShared" class="btn-sm">Delete Playlists with no Expiration</a>
+                  <a v-on:click="deleteUnxpShared" class="btn-sm">{{ t('admin.db.btnDeleteNoExpiry') }}</a>
                   <br>
-                  <a v-on:click="deleteExpiredShared" class="btn-sm">Delete Expired Playlists</a>
+                  <a v-on:click="deleteExpiredShared" class="btn-sm">{{ t('admin.db.btnDeleteExpired') }}</a>
                   <br>
                   <table>
                     <thead>
                       <tr>
-                        <th>Playlist ID</th>
-                        <th>User</th>
-                        <th>Expires</th>
-                        <th>Actions</th>
+                        <th>{{ t('admin.db.colPlaylistId') }}</th>
+                        <th>{{ t('admin.db.colUser') }}</th>
+                        <th>{{ t('admin.db.colExpires') }}</th>
+                        <th>{{ t('admin.db.colActions') }}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2481,13 +2512,13 @@ const dbView = Vue.component('db-view', {
                         <th><a target="_blank" v-bind:href="'/shared/'+ v.playlistId">{{v.playlistId}}</a></th>
                         <th>{{v.user}}</th>
                         <th>{{new Date(v.expires * 1000).toLocaleString()}}</th>
-                        <th><a v-on:click="deletePlaylist(v)" class="btn-sm btn-sm-delete">delete</a></th>
+                        <th><a v-on:click="deletePlaylist(v)" class="btn-sm btn-sm-delete">{{ t('admin.common.delete') }}</a></th>
                       </tr>
                     </tbody>
                   </table>
                 </div>
                 <div v-else-if="sharedPlaylistsTS.ts !== 0 && sharedPlaylists.length === 0">
-                  No Shared Playlists
+                  {{ t('admin.db.noSharedPlaylists') }}
                 </div>
               </div>
             </div>
@@ -2509,15 +2540,15 @@ const dbView = Vue.component('db-view', {
           if (st.data && st.data.running === false) {
             done = true;
             if (st.data.lastError) {
-              iziToast.error({ title: 'Rebuild failed', message: st.data.lastError, position: 'topCenter', timeout: 7000 });
+              iziToast.error({ title: this.t('admin.db.toastRebuildFailed'), message: st.data.lastError, position: 'topCenter', timeout: 7000 });
             } else {
-              iziToast.success({ title: 'Artist index rebuilt', message: 'Reload the Artist Library to see updated groups.', position: 'topCenter', timeout: 4000 });
+              iziToast.success({ title: this.t('admin.db.toastArtistIndexRebuilt'), message: this.t('admin.db.toastReloadArtistLibrary'), position: 'topCenter', timeout: 4000 });
             }
             break;
           }
         }
         if (!done) {
-          iziToast.error({ title: 'Rebuild timed out', message: 'The rebuild is still running in the background.', position: 'topCenter', timeout: 7000 });
+          iziToast.error({ title: this.t('admin.db.toastRebuildTimedOut'), message: this.t('admin.db.toastRebuildTimedOutMsg'), position: 'topCenter', timeout: 7000 });
         }
       } catch (e) {
         const msg = (e && e.response && e.response.data && e.response.data.error)
@@ -2532,18 +2563,18 @@ const dbView = Vue.component('db-view', {
               const st = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/artists/rebuild-status` });
               if (st.data && st.data.running === false) {
                 done = true;
-                if (st.data.lastError) iziToast.error({ title: 'Rebuild failed', message: st.data.lastError, position: 'topCenter', timeout: 7000 });
-                else iziToast.success({ title: 'Artist index rebuilt', message: 'Reload the Artist Library to see updated groups.', position: 'topCenter', timeout: 4000 });
+                if (st.data.lastError) iziToast.error({ title: this.t('admin.db.toastRebuildFailed'), message: st.data.lastError, position: 'topCenter', timeout: 7000 });
+                else iziToast.success({ title: this.t('admin.db.toastArtistIndexRebuilt'), message: this.t('admin.db.toastReloadArtistLibrary'), position: 'topCenter', timeout: 4000 });
                 break;
               }
             }
-            if (!done) iziToast.error({ title: 'Rebuild timed out', message: 'The rebuild is still running in the background.', position: 'topCenter', timeout: 7000 });
+            if (!done) iziToast.error({ title: this.t('admin.db.toastRebuildTimedOut'), message: this.t('admin.db.toastRebuildTimedOutMsg'), position: 'topCenter', timeout: 7000 });
           } catch (pollErr) {
             const pmsg = (pollErr && pollErr.message) ? pollErr.message : msg;
-            iziToast.error({ title: 'Rebuild status check failed', message: pmsg, position: 'topCenter', timeout: 7000 });
+            iziToast.error({ title: this.t('admin.db.toastRebuildStatusCheckFailed'), message: pmsg, position: 'topCenter', timeout: 7000 });
           }
         } else {
-          iziToast.error({ title: 'Rebuild failed', message: msg, position: 'topCenter', timeout: 7000 });
+          iziToast.error({ title: this.t('admin.db.toastRebuildFailed'), message: msg, position: 'topCenter', timeout: 7000 });
         }
       } finally {
         this.rebuildingArtists = false;
@@ -2592,7 +2623,7 @@ const dbView = Vue.component('db-view', {
         this.dbStats = res.data
       } catch (err) {
         iziToast.error({
-          title: 'Failed to Pull Data',
+          title: this.t('admin.db.toastFailedPullData'),
           position: 'topCenter',
           timeout: 3500
         });
@@ -2606,7 +2637,7 @@ const dbView = Vue.component('db-view', {
         await ADMINDATA.getSharedPlaylists();
       } catch (err) {
         iziToast.error({
-          title: 'Failed to Pull Data',
+          title: this.t('admin.db.toastFailedPullData'),
           position: 'topCenter',
           timeout: 3500
         });
@@ -2620,7 +2651,7 @@ const dbView = Vue.component('db-view', {
                       await ADMINDATA.deleteSharedPlaylist(playlistObj);
                     } catch (err) {
                       iziToast.error({
-                        title: 'Failed to Delete Playlist',
+                        title: this.t('admin.db.toastFailedDeletePlaylist'),
                         position: 'topCenter',
                         timeout: 3500
                       });
@@ -2635,7 +2666,7 @@ const dbView = Vue.component('db-view', {
                       await ADMINDATA.getSharedPlaylists();
                     } catch (err) {
                       iziToast.error({
-                        title: 'Failed to Delete Shared Playlists',
+                        title: this.t('admin.db.toastFailedDeleteSharedPlaylists'),
                         position: 'topCenter',
                         timeout: 3500
                       });
@@ -2651,7 +2682,7 @@ const dbView = Vue.component('db-view', {
         await ADMINDATA.getSharedPlaylists();
       } catch (err) {
         iziToast.error({
-          title: 'Failed to Pull Data',
+          title: this.t('admin.db.toastFailedPullData'),
           position: 'topCenter',
           timeout: 3500
         });
@@ -2667,13 +2698,13 @@ const dbView = Vue.component('db-view', {
         });
 
         iziToast.success({
-          title: 'Scan Started',
+          title: this.t('admin.db.toastScanStarted'),
           position: 'topCenter',
           timeout: 3500
         });
       } catch (err) {
         iziToast.error({
-          title: 'Failed to Start Scan',
+          title: this.t('admin.db.toastFailedStartScan'),
           position: 'topCenter',
           timeout: 3500
         });
@@ -2682,10 +2713,10 @@ const dbView = Vue.component('db-view', {
     stopScan: async function() {
       try {
         await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/db/scan/stop` });
-        iziToast.success({ title: 'Scan Stopped', position: 'topCenter', timeout: 3500 });
+        iziToast.success({ title: this.t('admin.db.toastScanStopped'), position: 'topCenter', timeout: 3500 });
         this.scanProgress = [];
       } catch (err) {
-        iziToast.error({ title: 'Failed to Stop Scan', position: 'topCenter', timeout: 3500 });
+        iziToast.error({ title: this.t('admin.db.toastFailedStopScan'), position: 'topCenter', timeout: 3500 });
       }
     },
     recompressImages: function() {
@@ -2813,23 +2844,19 @@ const backupView = Vue.component('backup-view', {
         <div class="col s12">
           <div class="card">
             <div class="card-content">
-              <span class="card-title">Backup</span>
-              <p style="color:var(--t2);margin-bottom:1rem;">
-                Create a backup of the database and configuration file. Backups are stored in
-                <code style="color:var(--accent);background:var(--raised);padding:.1rem .35rem;border-radius:4px;">save/backups/</code>.
-                A backup runs automatically every week and the 4 most recent are kept.
-              </p>
+              <span class="card-title">{{ t('admin.backup.title') }}</span>
+              <p style="color:var(--t2);margin-bottom:1rem;">{{ t('admin.backup.desc') }}</p>
               <div v-if="isLoading" style="text-align:center;padding:2rem 0;">
                 <svg class="spinner" width="40px" height="40px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
               </div>
               <div v-else>
-                <div v-if="backups.length === 0" style="color:var(--t2);margin:.5rem 0 1rem;">No backups yet.</div>
+                <div v-if="backups.length === 0" style="color:var(--t2);margin:.5rem 0 1rem;">{{ t('admin.backup.noBackups') }}</div>
                 <table v-else>
                   <thead>
                     <tr>
-                      <th>Filename</th>
-                      <th>Size</th>
-                      <th>Created</th>
+                      <th>{{ t('admin.backup.colFilename') }}</th>
+                      <th>{{ t('admin.backup.colSize') }}</th>
+                      <th>{{ t('admin.backup.colCreated') }}</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -2838,7 +2865,7 @@ const backupView = Vue.component('backup-view', {
                       <td style="font-family:monospace;font-size:.85rem;">{{b.filename}}</td>
                       <td>{{formatBytes(b.size)}}</td>
                       <td>{{formatDate(b.mtime)}}</td>
-                      <td><a class="btn-sm btn-sm-download" title="Download" style="cursor:pointer;" @click="downloadBackup(b.filename)">Download</a></td>
+                      <td><a class="btn-sm btn-sm-download" title="Download" style="cursor:pointer;" @click="downloadBackup(b.filename)">{{ t('admin.backup.btnDownload') }}</a></td>
                     </tr>
                   </tbody>
                 </table>
@@ -2846,8 +2873,8 @@ const backupView = Vue.component('backup-view', {
             </div>
             <div class="card-action">
               <button class="btn" type="button" :disabled="isCreating" @click="createBackup()">
-                <span v-if="isCreating">Creating…</span>
-                <span v-else>Create Backup Now</span>
+                <span v-if="isCreating">{{ t('admin.backup.btnCreating') }}</span>
+                <span v-else>{{ t('admin.backup.btnCreate') }}</span>
               </button>
             </div>
           </div>
@@ -2861,7 +2888,7 @@ const backupView = Vue.component('backup-view', {
         const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/backups` });
         this.backups = res.data;
       } catch (_) {
-        iziToast.error({ title: 'Failed to load backups', position: 'topCenter', timeout: 3500 });
+        iziToast.error({ title: this.t('admin.backup.toastFailedLoad'), position: 'topCenter', timeout: 3500 });
       }
       this.isLoading = false;
     },
@@ -2869,10 +2896,10 @@ const backupView = Vue.component('backup-view', {
       this.isCreating = true;
       try {
         await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/backup` });
-        iziToast.success({ title: 'Backup created successfully', position: 'topCenter', timeout: 3500 });
+        iziToast.success({ title: this.t('admin.backup.toastCreated'), position: 'topCenter', timeout: 3500 });
         await this.loadBackups();
       } catch (_) {
-        iziToast.error({ title: 'Backup failed', position: 'topCenter', timeout: 3500 });
+        iziToast.error({ title: this.t('admin.backup.toastFailed'), position: 'topCenter', timeout: 3500 });
         this.isCreating = false;
       }
       this.isCreating = false;
@@ -2892,7 +2919,7 @@ const backupView = Vue.component('backup-view', {
         link.click();
         link.remove();
       } catch (_) {
-        iziToast.error({ title: 'Download failed', position: 'topCenter', timeout: 3500 });
+        iziToast.error({ title: this.t('admin.backup.toastDownloadFailed'), position: 'topCenter', timeout: 3500 });
       }
     },
     formatBytes: function(bytes) {
@@ -3053,23 +3080,23 @@ const infoView = Vue.component('info-view', {
         </svg>
         <div>
           <div style="font-size:1.6rem;font-weight:700;line-height:1.1;"><span style="font-weight:300;color:var(--t2);">m</span><span style="color:var(--t1);">Stream</span> <span style="font-size:.7rem;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--primary);opacity:.85;">Velvet</span></div>
-          <div style="font-size:.8rem;color:var(--t3);margin-top:2px;">Admin Panel</div>
+          <div style="font-size:.8rem;color:var(--t3);margin-top:2px;">{{t('admin.info.adminPanel')}}</div>
         </div>
       </div>
       <div class="row">
         <div class="col s12">
           <div class="card">
             <div class="card-content">
-              <h4 style="margin:0 0 .25rem;font-size:1.3rem;font-weight:700;color:var(--t1);"><span style="font-weight:300;color:var(--t2);">m</span><span style="font-weight:700;color:var(--t1);">Stream</span> <span style="font-size:10px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--primary);opacity:.85;vertical-align:middle;position:relative;top:-1px;">Velvet</span> <span style="color:var(--primary);font-size:1rem;">v{{version.val}}</span> <span style="color:var(--t2);font-size:.8rem;font-weight:400;">— a fork of mStream</span></h4>
-              <p style="margin:0 0 1.25rem;color:var(--t2);font-size:.85rem;">mStream Developed by <strong style="color:var(--t1);">Paul Sori</strong><br>Features, Functionality and Maintenance by <strong style="color:var(--t1);">Dennis Slagers</strong> (AroundMyRoom)</p>
+              <h4 style="margin:0 0 .25rem;font-size:1.3rem;font-weight:700;color:var(--t1);"><span style="font-weight:300;color:var(--t2);">m</span><span style="font-weight:700;color:var(--t1);">Stream</span> <span style="font-size:10px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--primary);opacity:.85;vertical-align:middle;position:relative;top:-1px;">Velvet</span> <span style="color:var(--primary);font-size:1rem;">v{{version.val}}</span> <span style="color:var(--t2);font-size:.8rem;font-weight:400;">{{t('admin.info.forkLabel')}}</span></h4>
+              <p style="margin:0 0 1.25rem;color:var(--t2);font-size:.85rem;">{{t('admin.info.creditDeveloper')}}<br>{{t('admin.info.creditMaintainer')}}</p>
               <div style="margin-bottom:1.25rem;display:flex;gap:.75rem;flex-wrap:wrap;">
                 <a href="https://github.com/aroundmyroom/mStream" target="_blank" style="display:inline-flex;align-items:center;gap:8px;background:var(--raised);border:1px solid var(--border);color:var(--t1);text-decoration:none;padding:.5rem 1rem;border-radius:6px;font-size:.85rem;font-weight:600;">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.604-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836a9.59 9.59 0 0 1 2.504.337c1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.202 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
-                  GitHub — mStream Velvet
+                  {{t('admin.info.btnGithub')}}
                 </a>
                 <a href="https://discord.gg/KfsTCYrTkS" target="_blank" style="display:inline-flex;align-items:center;gap:8px;background:#5865F2;color:#fff;text-decoration:none;padding:.5rem 1rem;border-radius:6px;font-size:.85rem;font-weight:600;">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
-                  Discord — mStream Velvet
+                  {{t('admin.info.btnDiscord')}}
                 </a>
               </div>
             </div>
@@ -3080,11 +3107,11 @@ const infoView = Vue.component('info-view', {
         <div class="col s12">
           <div class="card">
             <div class="card-content">
-              <span class="card-title">Anonymous Telemetry</span>
-              <p style="color:var(--t2);margin-bottom:.75rem;">mStream Velvet sends a small anonymous ping once at startup and then every 24 hours. This helps us understand how many instances are running and which versions are in use.</p>
-              <p style="color:var(--t2);margin-bottom:.5rem;font-size:.85rem;"><strong style="color:var(--t1);">Exactly this data is sent — nothing more:</strong></p>
+              <span class="card-title">{{t('admin.info.telemetryTitle')}}</span>
+              <p style="color:var(--t2);margin-bottom:.75rem;">{{t('admin.info.telemetryDesc')}}</p>
+              <p style="color:var(--t2);margin-bottom:.5rem;font-size:.85rem;"><strong style="color:var(--t1);">{{t('admin.info.telemetryDataTitle')}}</strong></p>
               <pre style="background:var(--raised);border:1px solid var(--border);border-radius:6px;padding:.65rem .9rem;font-size:.78rem;color:var(--t2);margin:0 0 1rem;overflow-x:auto;">{"id":"&lt;random UUID, generated once on first boot&gt;","version":"&lt;current version&gt;","platform":"linux","runtime":"docker","lastSeen":"2026-04-04T12:34:49.943Z"}</pre>
-              <p style="color:var(--t2);font-size:.85rem;margin-bottom:0;">No IP addresses, usernames, file paths, or any personal data is ever collected. The UUID is stored in <code style="color:var(--accent);background:var(--raised);padding:.1rem .3rem;border-radius:3px;">save/conf/instance-id</code> and never changes unless you delete it. To opt out permanently, add <code style="color:var(--accent);background:var(--raised);padding:.1rem .3rem;border-radius:3px;">"telemetry": false</code> to your config file and restart mStream.</p>
+              <p style="color:var(--t2);font-size:.85rem;margin-bottom:0;">{{t('admin.info.telemetryPrivacy')}}</p>
             </div>
           </div>
         </div>
@@ -3109,10 +3136,10 @@ const serverAudioView = Vue.component('server-audio-view', {
         <div class="col s12">
           <div class="card" style="margin-bottom:10px">
             <div class="card-content">
-              <span class="card-title">Server Audio <span style="font-size:.7em;font-weight:400;color:var(--t2)">▸ mpv</span></span>
+              <span class="card-title">{{t('admin.serverAudio.title')}} <span style="font-size:.7em;font-weight:400;color:var(--t2)">{{t('admin.serverAudio.subtitleMpv')}}</span></span>
               <p style="color:var(--t2);font-size:.92rem;margin-bottom:18px">
-                Stream audio directly through the server's speakers.
-                A lightweight browser remote at <code>/server-remote</code> lets you control playback, browse files, and run Auto-DJ from any device.
+                {{t('admin.serverAudio.desc')}}
+                {{t('admin.serverAudio.remoteHint')}}
               </p>
               <div v-if="paramsTS.ts === 0" style="padding:16px 0;display:flex;justify-content:center">
                 <svg class="spinner" width="48px" height="48px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
@@ -3121,47 +3148,45 @@ const serverAudioView = Vue.component('server-audio-view', {
                 <table>
                   <tbody>
                     <tr>
-                      <td><b>Status:</b>&nbsp;
+                      <td><b>{{t('admin.serverAudio.labelStatus')}}</b>&nbsp;
                         <span v-if="params.enabled">
-                          <span v-if="params.running" style="color:var(--green)">● Running</span>
-                          <span v-else style="color:var(--orange,#f97316)">● Enabled, mpv not started</span>
+                          <span v-if="params.running" style="color:var(--green)">{{t('admin.serverAudio.statusRunning')}}</span>
+                          <span v-else style="color:var(--orange,#f97316)">{{t('admin.serverAudio.statusEnabled')}}</span>
                         </span>
-                        <span v-else style="color:var(--t3)">Disabled</span>
+                        <span v-else style="color:var(--t3)">{{t('admin.serverAudio.statusDisabled')}}</span>
                       </td>
-                      <td>
-                        <a v-on:click="toggleEnabled()" class="btn-sm btn-sm-edit">{{params.enabled ? 'Disable' : 'Enable'}}</a>
-                      </td>
+                      <td><a v-on:click="toggleEnabled()" class="btn-sm btn-sm-edit">{{params.enabled ? t('admin.serverAudio.btnDisable') : t('admin.serverAudio.btnEnable')}}</a></td>
                     </tr>
                     <tr>
-                      <td><b>mpv Enabled:</b> {{params.enabled ? 'Yes' : 'No'}}</td>
+                      <td><b>{{t('admin.serverAudio.labelMpvEnabled')}}</b> {{params.enabled ? t('admin.common.yes') || 'Yes' : t('admin.common.no') || 'No'}}</td>
                       <td></td>
                     </tr>
                     <tr>
-                      <td><b>mpv Binary Path:</b> <code>{{params.mpvBin || 'mpv'}}</code></td>
+                      <td><b>{{t('admin.serverAudio.labelMpvPath')}}</b> <code>{{params.mpvBin || 'mpv'}}</code></td>
                       <td>
-                        <a v-on:click="changeMpvBin()" class="btn-sm btn-sm-edit">edit</a>
+                        <a v-on:click="changeMpvBin()" class="btn-sm btn-sm-edit">{{t('admin.common.edit')}}</a>
                       </td>
                     </tr>
                     <tr>
                       <td colspan="2" style="padding-top:10px;padding-bottom:4px">
-                        <a v-on:click="detectMpv()" class="btn-sm" style="margin-right:6px">Detect mpv</a>
-                        <a v-on:click="startMpv()"  class="btn-sm" style="margin-right:6px">Start</a>
-                        <a v-on:click="stopMpv()"   class="btn-sm">Stop</a>
+                        <a v-on:click="detectMpv()" class="btn-sm" style="margin-right:6px">{{t('admin.serverAudio.btnDetectMpv')}}</a>
+                        <a v-on:click="startMpv()"  class="btn-sm" style="margin-right:6px">{{t('admin.serverAudio.btnStart')}}</a>
+                        <a v-on:click="stopMpv()"   class="btn-sm">{{t('admin.serverAudio.btnStop')}}</a>
                       </td>
                     </tr>
                     <tr v-if="detectResult !== null">
                       <td colspan="2" style="font-size:.87rem;color:var(--t2)">
                         <span v-if="detectResult.found" style="color:var(--green)">
-                          ✓ Found mpv {{detectResult.version}} at <code>{{detectResult.path}}</code>
+                          {{t('admin.serverAudio.detectFound', { version: detectResult.version, path: detectResult.path })}}
                         </span>
                         <span v-else style="color:var(--red)">
-                          ✗ mpv not found at <code>{{detectResult.path}}</code>. Install mpv or set path above.
+                          {{t('admin.serverAudio.detectNotFound', { path: detectResult.path })}}
                         </span>
                       </td>
                     </tr>
                     <tr>
                       <td colspan="2" style="padding-top:12px">
-                        <a href="/server-remote" target="_blank" class="btn-sm btn-sm-edit">Open Server Remote ↗</a>
+                        <a href="/server-remote" target="_blank" class="btn-sm btn-sm-edit">{{t('admin.serverAudio.btnOpenRemote')}}</a>
                       </td>
                     </tr>
                   </tbody>
@@ -3171,12 +3196,12 @@ const serverAudioView = Vue.component('server-audio-view', {
           </div>
           <div class="card">
             <div class="card-content">
-              <span class="card-title">How it works</span>
+              <span class="card-title">{{t('admin.serverAudio.howItWorksTitle')}}</span>
               <ul style="color:var(--t2);font-size:.9rem;line-height:1.7;padding-left:1.2em;list-style:disc">
-                <li>mStream starts <b>mpv</b> in <em>idle</em> mode and communicates via a local Unix socket.</li>
-                <li>Your browser becomes a remote control — you never need to install anything on mobile.</li>
-                <li>Auto-DJ in the remote page automatically queues new songs using your library, with optional Last.fm similar-artists matching.</li>
-                <li>mpv must be installed on the server. See the <a href="https://github.com/AroundMyRoom/mStream/blob/master/docs/server-audio.md" target="_blank" style="color:var(--primary)">documentation</a> for install instructions.</li>
+                <li>{{t('admin.serverAudio.how1')}}</li>
+                <li>{{t('admin.serverAudio.how2')}}</li>
+                <li>{{t('admin.serverAudio.how3')}}</li>
+                <li>{{t('admin.serverAudio.how4before')}} <a href="https://github.com/AroundMyRoom/mStream/blob/master/docs/server-audio.md" target="_blank" style="color:var(--primary)">{{t('admin.serverAudio.how4link')}}</a> {{t('admin.serverAudio.how4after')}}</li>
               </ul>
             </div>
           </div>
@@ -3187,9 +3212,9 @@ const serverAudioView = Vue.component('server-audio-view', {
     toggleEnabled() {
       const next = !this.params.enabled;
       adminConfirm(
-        `<b>${next ? 'Enable' : 'Disable'} Server Audio?</b>`,
-        next ? 'This will start mpv on the server.' : 'This will stop mpv on the server.',
-        next ? 'Enable' : 'Disable',
+        `<b>${next ? this.t('admin.serverAudio.confirmEnableTitle') : this.t('admin.serverAudio.confirmDisableTitle')}</b>`,
+        next ? this.t('admin.serverAudio.confirmEnableMsg') : this.t('admin.serverAudio.confirmDisableMsg'),
+        next ? this.t('admin.common.enable') : this.t('admin.common.disable'),
         async () => {
           await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/server-audio`, data: { enabled: next } });
           Vue.set(ADMINDATA.serverAudioParams, 'enabled', next);
@@ -3232,7 +3257,7 @@ const transcodeView = Vue.component('transcode-view', {
   template: `
     <div class="container">
       <div class="powered-by-row">
-        <span class="powered-by-label">Powered by</span>
+        <span class="powered-by-label">{{t('admin.transcode.poweredBy')}}</span>
         <svg class="ffmpeg-logo" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 224.44334 60.186738">
           <defs>
             <radialGradient id="a" gradientUnits="userSpaceOnUse" cy="442.72311" cx="-122.3936" gradientTransform="matrix(1,0,0,-1,134.4463,453.7334)" r="29.5804">
@@ -3278,41 +3303,41 @@ const transcodeView = Vue.component('transcode-view', {
         <div class="col s12">
           <div class="card">
             <div class="card-content">
-              <span class="card-title">Settings</span>
+              <span class="card-title">{{t('admin.transcode.settingsTitle')}}</span>
               <table>
                 <tbody>
                   <tr>
-                    <td><b>Transcoding:</b> {{params.enabled === true ? 'Enabled' : 'Disabled'}}</td>
+                    <td><b>{{t('admin.transcode.labelEnabled')}}</b> {{params.enabled === true ? t('admin.common.enabled') : t('admin.common.disabled')}}</td>
                     <td>
-                      <a v-on:click="toggleEnabled()" class="btn-sm btn-sm-edit">edit</a>
+                      <a v-on:click="toggleEnabled()" class="btn-sm btn-sm-edit">{{t('admin.common.edit')}}</a>
                     </td>
                   </tr>
                   <tr>
-                    <td><b>FFmpeg Directory:</b> {{params.ffmpegDirectory}}</td>
-                    <td style="color:var(--t2);font-size:.82rem">Edit in config file</td>
+                    <td><b>{{t('admin.transcode.labelFfmpegDir')}}</b> {{params.ffmpegDirectory}}</td>
+                    <td style="color:var(--t2);font-size:.82rem">{{t('admin.transcode.editInConfig')}}</td>
                   </tr>
                   <tr>
-                    <td><b>FFmpeg Downloaded:</b> {{downloadPending.val === true ? 'pending...' : params.downloaded}}</td>
+                    <td><b>{{t('admin.transcode.labelFfmpegDownloaded')}}</b> {{downloadPending.val === true ? t('admin.transcode.pending') : params.downloaded}}</td>
                     <td>
-                      <a v-on:click="downloadFFMpeg()" class="btn-sm">download</a>
+                      <a v-on:click="downloadFFMpeg()" class="btn-sm">{{t('admin.transcode.btnDownload')}}</a>
                     </td>
                   </tr>
                   <tr>
-                    <td><b>Default Codec:</b> {{params.defaultCodec}}</td>
+                    <td><b>{{t('admin.transcode.labelDefaultCodec')}}</b> {{params.defaultCodec}}</td>
                     <td>
-                      <a v-on:click="changeCodec()" class="btn-sm btn-sm-edit">edit</a>
+                      <a v-on:click="changeCodec()" class="btn-sm btn-sm-edit">{{t('admin.common.edit')}}</a>
                     </td>
                   </tr>
                   <tr>
-                    <td><b>Default Bitrate:</b> {{params.defaultBitrate}}</td>
+                    <td><b>{{t('admin.transcode.labelDefaultBitrate')}}</b> {{params.defaultBitrate}}</td>
                     <td>
-                      <a v-on:click="changeBitrate()" class="btn-sm btn-sm-edit">edit</a>
+                      <a v-on:click="changeBitrate()" class="btn-sm btn-sm-edit">{{t('admin.common.edit')}}</a>
                     </td>
                   </tr>
                   <tr>
-                  <td><b>Default Algorithm:</b> {{params.algorithm}}</td>
+                  <td><b>{{t('admin.transcode.labelDefaultAlgorithm')}}</b> {{params.algorithm}}</td>
                   <td>
-                    <a v-on:click="changeAlgorithm()" class="btn-sm btn-sm-edit">edit</a>
+                    <a v-on:click="changeAlgorithm()" class="btn-sm btn-sm-edit">{{t('admin.common.edit')}}</a>
                   </td>
                 </tr>
                 </tbody>
@@ -3324,7 +3349,11 @@ const transcodeView = Vue.component('transcode-view', {
     </div>`,
   methods: {
     toggleEnabled: function() {
-            adminConfirm(`<b>${this.params.enabled === true ? 'Disable' : 'Enable'} Transcoding?</b>`, 'Enabling this will download FFmpeg', `${this.params.enabled === true ? 'Disable' : 'Enable'}`, async () => {
+            adminConfirm(
+              `<b>${this.params.enabled === true ? this.t('admin.transcode.confirmDisableTitle') : this.t('admin.transcode.confirmEnableTitle')}</b>`,
+              this.t('admin.transcode.confirmToggleMsg'),
+              this.params.enabled === true ? this.t('admin.common.disable') : this.t('admin.common.enable'),
+              async () => {
         try {
                       await API.axios({
                         method: 'POST',
@@ -3337,18 +3366,19 @@ const transcodeView = Vue.component('transcode-view', {
                       if (this.params.enabled === true) { this.downloadFFMpeg(); }
 
                       iziToast.success({
-                        title: 'Updated Successfully',
+                        title: this.t('admin.common.updatedSuccessfully'),
                         position: 'topCenter',
                         timeout: 3500
                       });
                     } catch (err) {
                       iziToast.error({
-                        title: 'Failed',
+                        title: this.t('admin.common.failed'),
                         position: 'topCenter',
                         timeout: 3500
                       });
                     }
-      });
+      }
+      );
     },
     changeCodec: function() {
       modVM.currentViewModal = 'edit-transcode-codec-modal';
@@ -3375,13 +3405,13 @@ const transcodeView = Vue.component('transcode-view', {
         });
         Vue.set(ADMINDATA.transcodeParams, 'downloaded', true);
         iziToast.success({
-          title: 'FFmpeg Downloaded',
+          title: this.t('admin.transcode.toastFfmpegDownloaded'),
           position: 'topCenter',
           timeout: 3500
         });
       } catch (err) {
         iziToast.error({
-          title: 'Failed To Download FFmpeg',
+          title: this.t('admin.transcode.toastFailedDownload'),
           position: 'topCenter',
           timeout: 3500
         });
@@ -3412,8 +3442,8 @@ const federationMainPanel = Vue.component('federation-main-panel', { // activeTa
   template: `
     <div>
       <div class="tabs">
-        <div class="tab"><button :class="{active: activeTab==='federation'}" @click="activeTab='federation'">Federation</button></div>
-        <div class="tab"><button :class="{active: activeTab==='syncthing'}" @click="activeTab='syncthing'; setSyncthingUrl()">Syncthing</button></div>
+        <div class="tab"><button :class="{active: activeTab==='federation'}" @click="activeTab='federation'">{{t('admin.federation.tabFederation')}}</button></div>
+        <div class="tab"><button :class="{active: activeTab==='syncthing'}" @click="activeTab='syncthing'; setSyncthingUrl()">{{t('admin.federation.tabSyncthing')}}</button></div>
       </div>
       <div id="sync-tab-1" v-show="activeTab==='federation'">
         <div class="container">
@@ -3421,18 +3451,18 @@ const federationMainPanel = Vue.component('federation-main-panel', { // activeTa
             <div class="col s12">
               <div class="card">
                 <div class="card-content">
-                  <span class="card-title">mStream Federation</span>
+                  <span class="card-title">{{t('admin.federation.title')}}</span>
                   <table>
                     <tbody>
                       <tr>
-                        <td><b>Device ID:</b> {{params.deviceId}}</td>
+                        <td><b>{{t('admin.federation.labelDeviceId')}}</b> {{params.deviceId}}</td>
                       </tr>
                     </tbody>
                   </table>
-                  <button type="button" class="btn-flat btn-small" style="margin-top:.25rem;" @click="openFederationGenerateInviteModal()">Generate Invite Token</button>
+                  <button type="button" class="btn-flat btn-small" style="margin-top:.25rem;" @click="openFederationGenerateInviteModal()">{{t('admin.federation.btnGenerateInvite')}}</button>
                 </div>
                 <div class="card-action flow-root">
-                  <a v-on:click="enableFederation()" v-bind:class="{ 'red': enabled.val }" class="btn">Disable Federation</a>
+                  <a v-on:click="enableFederation()" v-bind:class="{ 'red': enabled.val }" class="btn">{{enabled.val ? t('admin.federation.btnDisable') : t('admin.federation.btnEnable')}}</a>
                 </div>
               </div>
             </div>
@@ -3443,23 +3473,23 @@ const federationMainPanel = Vue.component('federation-main-panel', { // activeTa
             <div class="col s12">
               <div class="card">
                 <div class="card-content">
-                  <span class="card-title">Accept Invite Token</span>
+                  <span class="card-title">{{t('admin.federation.acceptInviteTitle')}}</span>
                   <div class="row">
                     <div class="col s12 m12 l6">
                       <div class="row">
                         <div class="col s12">
-                          <label for="fed-invite-token">Federation Token</label>
-                          <textarea id="fed-invite-token" v-model="currentToken" style="height: auto;" rows="4" cols="60" placeholder="Paste your token here"></textarea>
+                          <label for="fed-invite-token">{{t('admin.federation.labelToken')}}</label>
+                          <textarea id="fed-invite-token" v-model="currentToken" style="height: auto;" rows="4" cols="60" :placeholder="t('admin.federation.tokenPlaceholder')"></textarea>
                         </div>
                       </div>
                       <div class="input-field" style="margin-top:.5rem;">
-                        <label for="fed-invite-url">Server URL (optional)</label>
+                        <label for="fed-invite-url">{{t('admin.federation.labelServerUrl')}}</label>
                         <input id="fed-invite-url" v-model="inviteServerUrl" type="text" placeholder="https://your-server.example.com">
                       </div>
                     </div>
                     <div class="col s12 m12 l6">
                       <form @submit.prevent="acceptInvite" v-if="parsedTokenData !== null">
-                        <p>Select and name folders you want to federate:</p>
+                        <p>{{t('admin.federation.labelSelectFolders')}}</p>
                         <div v-for="(item, key, index) in parsedTokenData.vPaths">
                           <label>
                             <input type="checkbox" checked/>
@@ -3467,11 +3497,11 @@ const federationMainPanel = Vue.component('federation-main-panel', { // activeTa
                           </label>
                         </div>
                         <button class="btn" type="submit" :disabled="submitPending === true">
-                          {{submitPending === false ? 'Accept Invite' : 'Working ...'}}
+                          {{submitPending === false ? t('admin.federation.btnAcceptInvite') : t('admin.federation.btnWorking')}}
                         </button>
                       </form>
                       <div v-else>
-                        <p>Paste your token in the textbox to continue</p>
+                        <p>{{t('admin.federation.tokenHint')}}</p>
                       </div>
                     </div>
                   </div>
@@ -3518,7 +3548,7 @@ const federationMainPanel = Vue.component('federation-main-panel', { // activeTa
         });
       } catch (err) {
         iziToast.error({
-          title: 'Failed to accept invite',
+          title: this.t('admin.federation.toastFailedAccept'),
           position: 'topCenter',
           timeout: 3500
         });
@@ -3568,7 +3598,11 @@ const federationMainPanel = Vue.component('federation-main-panel', { // activeTa
       modVM.openModal();
     },
     enableFederation: function() {
-      adminConfirm(`${this.enabled.val === true ? 'Disable' : 'Enable'} Federation?`, '', `${this.enabled.val === true ? 'Disable' : 'Enable'}`, async () => {
+      adminConfirm(
+        this.enabled.val === true ? this.t('admin.federation.confirmDisableTitle') : this.t('admin.federation.confirmEnableTitle'),
+        '',
+        this.enabled.val === true ? this.t('admin.common.disable') : this.t('admin.common.enable'),
+        async () => {
         try {
           this.enablePending = true;
           await API.axios({
@@ -3578,20 +3612,21 @@ const federationMainPanel = Vue.component('federation-main-panel', { // activeTa
           });
           Vue.set(ADMINDATA.federationEnabled, 'val', !this.enabled.val);
           iziToast.success({
-            title: `Syncthing ${this.enabled.val === true ? 'Enabled' : 'Disabled'}`,
+            title: this.enabled.val === true ? this.t('admin.federation.toastEnabled') : this.t('admin.federation.toastDisabled'),
             position: 'topCenter',
             timeout: 3500
           });
         } catch(err) {
           iziToast.error({
-            title: 'Toggle Failed',
+            title: this.t('admin.federation.toastToggleFailed'),
             position: 'topCenter',
             timeout: 3500
           });
         } finally {
           this.enablePending = false;
         }
-      });
+      }
+      );
     }
   }
 });
@@ -3611,10 +3646,10 @@ const federationView = Vue.component('federation-view', {
     <div v-else-if="enabled.val === false" class="row">
       <div class="container">
         <div class="powered-by-row">
-          <span class="powered-by-label">Powered By</span>
+          <span class="powered-by-label">{{t('admin.federation.poweredBy')}}</span>
           <svg xmlns="http://www.w3.org/2000/svg" class="syncthing-logo" viewBox="0 0 429 117.3"><linearGradient id="a" gradientUnits="userSpaceOnUse" x1="58.666" y1="117.332" x2="58.666" y2="0"><stop offset="0" stop-color="#0882c8"/><stop offset="1" stop-color="#26b6db"/></linearGradient><circle fill="url(#a)" cx="58.7" cy="58.7" r="58.7"/><circle fill="none" stroke="#FFF" stroke-width="6" stroke-miterlimit="10" cx="58.7" cy="58.5" r="43.7"/><path fill="#FFF" d="M94.7 47.8c4.7 1.6 9.8-.9 11.4-5.6 1.6-4.7-.9-9.8-5.6-11.4-4.7-1.6-9.8.9-11.4 5.6-1.6 4.7.9 9.8 5.6 11.4z"/><path fill="none" stroke="#FFF" stroke-width="6" stroke-miterlimit="10" d="M97.6 39.4l-30.1 25"/><path fill="#FFF" d="M77.6 91c-.4 4.9 3.2 9.3 8.2 9.8 5 .4 9.3-3.2 9.8-8.2.4-4.9-3.2-9.3-8.2-9.8-5-.4-9.4 3.2-9.8 8.2z"/><path fill="none" stroke="#FFF" stroke-width="6" stroke-miterlimit="10" d="M86.5 91.8l-19-27.4"/><path fill="#FFF" d="M60 69.3c2.7 4.2 8.3 5.4 12.4 2.7 4.2-2.7 5.4-8.3 2.7-12.4-2.7-4.2-8.3-5.4-12.4-2.7-4.2 2.6-5.4 8.2-2.7 12.4z"/><g><path fill="#FFF" d="M21.2 61.4c-4.3-2.5-9.8-1.1-12.3 3.1-2.5 4.3-1.1 9.8 3.1 12.3 4.3 2.5 9.8 1.1 12.3-3.1s1.1-9.7-3.1-12.3z"/><path fill="none" stroke="#FFF" stroke-width="6" stroke-miterlimit="10" d="M16.6 69.1l50.9-4.7"/></g><g fill="#0891D1"><path d="M163.8 50.2c-.6-.7-6.3-4.1-11.4-4.1-3.4 0-5.2 1.2-5.2 3.5 0 2.9 3.2 3.7 8.9 5.2 8.2 2.2 13.3 5 13.3 12.9 0 9.7-7.8 13-16 13-6.2 0-13.1-2-18.2-5.3l4.3-8.6c.8.8 7.5 5 14 5 3.5 0 5.2-1.1 5.2-3.2 0-3.2-4.4-4-10.3-5.8-7.9-2.4-11.5-5.3-11.5-11.8 0-9 7.2-13.9 15.7-13.9 6.1 0 11.6 2.5 15.4 4.7l-4.2 8.4zM175 85.1c1.7.5 3.3.8 4.4.8 2 0 3.3-1.5 4.2-5.5l-11.9-31.5h9.8l7.4 23.3 6.3-23.3h8.9L192 85.5c-1.7 5.3-6.2 8.7-11.8 8.8-1.7 0-3.5-.2-5.3-.9v-8.3zM239.3 80.3h-9.6V62.6c0-4.1-1.7-5.9-4.3-5.9-2.6 0-5.8 2.3-7 5.6v18.1h-9.6V48.8h8.6v5.3c2.3-3.7 6.8-5.9 12.2-5.9 8.2 0 9.5 6.7 9.5 11.9v20.2zM261.6 48.2c7.2 0 12.3 3.4 14.8 8.3l-9.4 2.8c-1.2-1.9-3.1-3-5.5-3-4 0-7 3.2-7 8.2 0 5 3.1 8.3 7 8.3 2.4 0 4.6-1.3 5.5-3.1l9.4 2.9c-2.3 4.9-7.6 8.3-14.8 8.3-10.6 0-16.9-7.7-16.9-16.4s6.2-16.3 16.9-16.3zM302.1 78.7c-2.6 1.1-6.2 2.3-9.7 2.3-4.7 0-8.8-2.3-8.8-8.4V56.1h-4v-7.3h4v-10h9.6v10h6.4v7.3h-6.4v13.1c0 2.1 1.2 2.9 2.8 2.9 1.4 0 3-.6 4.2-1.1l1.9 7.7zM337.2 80.3h-9.6V62.6c0-4.1-1.8-5.9-4.6-5.9-2.3 0-5.5 2.2-6.7 5.6v18.1h-9.6V36.5h9.6v17.6c2.3-3.7 6.3-5.9 10.9-5.9 8.5 0 9.9 6.5 9.9 11.9v20.2zM343.4 45.2v-8.7h9.6v8.7h-9.6zm0 35.1V48.8h9.6v31.5h-9.6zM389.9 80.3h-9.6V62.6c0-4.1-1.7-5.9-4.3-5.9-2.6 0-5.8 2.3-7 5.6v18.1h-9.6V48.8h8.6v5.3c2.3-3.7 6.8-5.9 12.2-5.9 8.2 0 9.5 6.7 9.5 11.9v20.2zM395.5 64.6c0-9.2 6-16.3 14.6-16.3 4.7 0 8.4 2.2 10.6 5.8v-5.2h8.3v29.3c0 9.6-7.5 15.5-18.2 15.5-6.8 0-11.5-2.3-15-6.3l5.1-5.2c2.3 2.6 6 4.3 9.9 4.3 4.6 0 8.6-2.4 8.6-8.3v-3.1c-1.9 3.5-5.9 5.3-10 5.3-8.3.1-13.9-7.1-13.9-15.8zm23.9 3.9v-6.6c-1.3-3.3-4.2-5.5-7.1-5.5-4.1 0-7 4-7 8.4 0 4.6 3.2 8 7.5 8 2.9 0 5.3-1.8 6.6-4.3z"/></g></svg>
         </div>
-        <a v-on:click="enableFederation()" class="btn-large">Enable Federation</a>
+        <a v-on:click="enableFederation()" class="btn-large">{{t('admin.federation.btnEnable')}}</a>
       </div>
     </div>
     <federation-main-panel v-else>
@@ -3636,13 +3671,13 @@ const federationView = Vue.component('federation-view', {
         Vue.set(ADMINDATA.federationEnabled, 'val', !this.enabled.val);
   
         iziToast.success({
-          title: `Syncthing ${this.enabled.val === true ? 'Enabled' : 'Disabled'}`,
+          title: this.enabled.val === true ? this.t('admin.federation.toastEnabled') : this.t('admin.federation.toastDisabled'),
           position: 'topCenter',
           timeout: 3500
         });
       } catch(err) {
         iziToast.error({
-          title: 'Toggle Failed',
+          title: this.t('admin.federation.toastToggleFailed'),
           position: 'topCenter',
           timeout: 3500
         });
@@ -3670,24 +3705,24 @@ const logsView = Vue.component('logs-view', {
           <div class="col s12">
             <div class="card">
               <div class="card-content">
-                <span class="card-title">Logging</span>
+                <span class="card-title">{{ t('admin.logs.title') }}</span>
                 <table>
                   <tbody>
                     <tr>
-                      <td><b>Write Logs:</b> {{params.writeLogs === true ? 'Enabled' : 'Disabled'}}</td>
+                      <td><b>{{ t('admin.logs.labelWriteLogs') }}</b> {{params.writeLogs === true ? t('admin.logs.writeLogsEnabled') : t('admin.logs.writeLogsDisabled')}}</td>
                       <td>
                         <a v-on:click="toggleWriteLogs" class="btn-sm btn-sm-edit">edit</a>
                       </td>
                     </tr>
                     <tr>
-                      <td><b>Logs Directory:</b> {{params.storage.logsDirectory}}</td>
-                      <td style="color:var(--t2);font-size:.82rem">Edit in config file</td>
+                      <td><b>{{ t('admin.logs.labelLogsDirectory') }}</b> {{params.storage.logsDirectory}}</td>
+                      <td style="color:var(--t2);font-size:.82rem">{{ t('admin.settings.editInConfigHint') }}</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
               <div class="card-action">
-                <a v-on:click="downloadLogs()" class="btn">Download Log File</a>
+                <a v-on:click="downloadLogs()" class="btn">{{ t('admin.logs.btnDownload') }}</a>
               </div>
             </div>
           </div>
@@ -3712,7 +3747,7 @@ const logsView = Vue.component('logs-view', {
       } catch (err) {
         console.log(err)
         iziToast.error({
-          title: 'Download Failed',
+          title: this.t('admin.logs.toastDownloadFailed'),
           position: 'topCenter',
           timeout: 3500
         });
@@ -3753,24 +3788,24 @@ const lockView = Vue.component('lock-view', {
     <div class="container">
       <div class="card">
         <div class="card-content">
-          <span class="card-title">Lock Admin Panel</span>
-          <p style="color:var(--t2);">Disabling the admin panel will prevent anyone from making configuration changes through this interface.</p>
-          <p style="color:var(--t2);">To re-enable it you will need to:</p>
+          <span class="card-title">{{ t('admin.lock.title') }}</span>
+          <p style="color:var(--t2);">{{ t('admin.lock.desc') }}</p>
+          <p style="color:var(--t2);">{{ t('admin.lock.reenableIntro') }}</p>
           <ul style="color:var(--t2);padding-left:1.25rem;margin:.25rem 0 1rem;line-height:1.9;">
-            <li>Open the mStream config file</li>
-            <li>Set <code style="color:var(--accent);background:var(--raised);padding:.1rem .35rem;border-radius:4px;">lockAdmin</code> to <code style="color:var(--accent);background:var(--raised);padding:.1rem .35rem;border-radius:4px;">false</code></li>
-            <li>Reboot mStream</li>
+            <li>{{ t('admin.lock.step1') }}</li>
+            <li>{{ t('admin.lock.step2') }}</li>
+            <li>{{ t('admin.lock.step3') }}</li>
           </ul>
         </div>
         <div class="card-action">
-          <button class="btn red" type="button" @click="disableAdmin()">Disable Admin Panel</button>
+          <button class="btn red" type="button" @click="disableAdmin()">{{ t('admin.lock.btnDisable') }}</button>
         </div>
       </div>
     </div>`,
 
     methods: {
       disableAdmin: function() {
-                adminConfirm('<b>Disable Admin Panel?</b>', '', 'Disable', () => {
+                adminConfirm(this.t('admin.lock.confirmTitle'), '', this.t('admin.lock.confirmLabel'), () => {
           API.axios({
                           method: 'POST',
                           url: `${API.url()}/api/v1/admin/lock-api`,
@@ -3779,7 +3814,7 @@ const lockView = Vue.component('lock-view', {
                           window.location.reload();
                         }).catch(() => {
                           iziToast.error({
-                            title: 'Failed to disable admin panel',
+                            title: this.t('admin.lock.toastFailed'),
                             position: 'topCenter',
                             timeout: 3500
                           });
@@ -3802,25 +3837,21 @@ const lyricsView = Vue.component('lyrics-view', {
         <div class="col s12">
           <div class="card">
             <div class="card-content">
-              <span class="card-title">Synced Lyrics</span>
-              <p style="margin-bottom:0.5rem;">
-                When enabled, the visualizer&#x2019;s <b>Lyrics mode</b> fetches time-synced LRC lyrics from
-                <a href="https://lrclib.net" target="_blank" rel="noopener">lrclib.net</a> and displays them in sync with playback.
-                Lyrics are cached locally after the first fetch so repeated plays work offline.
-              </p>
-              <p style="margin-bottom:1rem;font-size:0.85rem;color:#999;">Disable this if the server has no internet access, to avoid timeout delays when the player opens the Lyrics view.</p>
+              <span class="card-title">{{ t('admin.lyrics.title') }}</span>
+              <p style="margin-bottom:0.5rem;">{{t('admin.lyrics.desc1before')}} <a href="https://lrclib.net" target="_blank" rel="noopener">lrclib.net</a> {{t('admin.lyrics.desc1after')}}</p>
+              <p style="margin-bottom:1rem;font-size:0.85rem;color:#999;">{{t('admin.lyrics.desc2')}}</p>
               <table>
                 <tbody>
                   <tr>
-                    <td style="width:140px"><b>Enable</b></td>
-                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> Fetch synced lyrics from lrclib.net</td>
+                    <td style="width:140px"><b>{{ t('admin.lyrics.labelEnable') }}</b></td>
+                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> {{ t('admin.lyrics.checkboxEnable') }}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
             <div class="card-action">
               <button class="btn" v-on:click="save()" :disabled="pending">
-                {{ pending ? &#x27;Saving...&#x27; : &#x27;Save&#x27; }}
+                {{ pending ? t('admin.common.saving') : t('admin.common.save') }}
               </button>
             </div>
           </div>
@@ -3842,9 +3873,9 @@ const lyricsView = Vue.component('lyrics-view', {
           url: `${API.url()}/api/v1/admin/lyrics/config`,
           data: { enabled: this.enabled }
         });
-        iziToast.success({ title: 'Lyrics settings saved', position: 'topCenter', timeout: 3000 });
+        iziToast.success({ title: this.t('admin.lyrics.toastSaved'), position: 'topCenter', timeout: 3000 });
       } catch(err) {
-        iziToast.error({ title: 'Failed to save Lyrics settings', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.lyrics.toastFailed'), position: 'topCenter', timeout: 3000 });
       } finally {
         this.pending = false;
       }
@@ -3867,33 +3898,29 @@ const lastFMView = Vue.component('lastfm-view', {
         <div class="col s12">
           <div class="card">
             <div class="card-content">
-              <span class="card-title">Last.fm</span>
-              <p style="margin-bottom:0.5rem;">
-                When enabled, users can link their Last.fm account to scrobble every track they play.
-                mStream ships with built-in API credentials — you can optionally override them with
-                <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener">your own key &amp; shared secret</a>.
-              </p>
-              <p style="margin-bottom:1rem;font-size:0.85rem;color:#999;">The shared secret is stored server-side only and is never sent to clients.</p>
+              <span class="card-title">{{ t('admin.lastfm.title') }}</span>
+              <p style="margin-bottom:0.5rem;">{{t('admin.lastfm.desc1')}} <a href="https://www.last.fm/api/account/create" target="_blank" rel="noopener">{{t('admin.lastfm.ownKeyLink')}}</a>.</p>
+              <p style="margin-bottom:1rem;font-size:0.85rem;color:#999;">{{t('admin.lastfm.secretHint')}}</p>
               <table>
                 <tbody>
                   <tr>
-                    <td style="width:140px"><b>Enable</b></td>
-                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> Enable Last.fm scrobbling for users</td>
+                    <td style="width:140px"><b>{{ t('admin.lastfm.labelEnable') }}</b></td>
+                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> {{ t('admin.lastfm.checkboxEnable') }}</td>
                   </tr>
                   <tr>
-                    <td><b>API Key</b></td>
-                    <td><input v-model="apiKey" type="text" placeholder="Leave blank to use built-in key" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore spellcheck="false" style="margin:0" /></td>
+                    <td><b>{{ t('admin.lastfm.labelApiKey') }}</b></td>
+                    <td><input v-model="apiKey" type="text" :placeholder="t('admin.lastfm.apiKeyPlaceholder')" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore spellcheck="false" style="margin:0" /></td>
                   </tr>
                   <tr>
-                    <td><b>Shared Secret</b></td>
-                    <td><input v-model="apiSecret" type="password" placeholder="Leave blank to use built-in secret" autocomplete="new-password" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore style="margin:0" /></td>
+                    <td><b>{{ t('admin.lastfm.labelSharedSecret') }}</b></td>
+                    <td><input v-model="apiSecret" type="password" :placeholder="t('admin.lastfm.secretPlaceholder')" autocomplete="new-password" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore style="margin:0" /></td>
                   </tr>
                 </tbody>
               </table>
             </div>
             <div class="card-action">
               <button class="btn" v-on:click="save()" :disabled="pending">
-                {{ pending ? 'Saving...' : 'Save' }}
+                {{ pending ? t('admin.common.saving') : t('admin.common.save') }}
               </button>
             </div>
           </div>
@@ -3917,9 +3944,9 @@ const lastFMView = Vue.component('lastfm-view', {
           url: `${API.url()}/api/v1/admin/lastfm/config`,
           data: { enabled: this.enabled, apiKey: this.apiKey.trim(), apiSecret: this.apiSecret.trim() }
         });
-        iziToast.success({ title: 'Last.fm settings saved', position: 'topCenter', timeout: 3000 });
+        iziToast.success({ title: this.t('admin.lastfm.toastSaved'), position: 'topCenter', timeout: 3000 });
       } catch(err) {
-        iziToast.error({ title: 'Failed to save Last.fm settings', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.lastfm.toastFailed'), position: 'topCenter', timeout: 3000 });
       } finally {
         this.pending = false;
       }
@@ -3937,21 +3964,18 @@ const listenBrainzView = Vue.component('listenbrainz-view', {
         <div class="col s12">
           <div class="card">
             <div class="card-content">
-              <span class="card-title">ListenBrainz</span>
-              <p style="margin-bottom:1rem;">
-                When enabled, users can enter their own ListenBrainz user token to scrobble every track they play.
-                Get a token at <a href="https://listenbrainz.org/profile/" target="_blank" rel="noopener">listenbrainz.org/profile</a>.
-              </p>
+              <span class="card-title">{{ t('admin.listenbrainz.title') }}</span>
+              <p style="margin-bottom:1rem;">{{t('admin.listenbrainz.desc1')}} <a href="https://listenbrainz.org/profile/" target="_blank" rel="noopener">{{t('admin.listenbrainz.profileLink')}}</a>.</p>
               <table><tbody>
                 <tr>
-                  <td style="width:140px"><b>Enable</b></td>
-                  <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> Enable ListenBrainz scrobbling for users</td>
+                  <td style="width:140px"><b>{{ t('admin.listenbrainz.labelEnable') }}</b></td>
+                  <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> {{ t('admin.listenbrainz.checkboxEnable') }}</td>
                 </tr>
               </tbody></table>
             </div>
             <div class="card-action">
               <button class="btn" v-on:click="save()" :disabled="pending">
-                {{ pending ? 'Saving...' : 'Save' }}
+                {{ pending ? t('admin.common.saving') : t('admin.common.save') }}
               </button>
             </div>
           </div>
@@ -3969,10 +3993,105 @@ const listenBrainzView = Vue.component('listenbrainz-view', {
       this.pending = true;
       try {
         await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/listenbrainz/config`, data: { enabled: this.enabled } });
-        iziToast.success({ title: 'ListenBrainz settings saved', position: 'topCenter', timeout: 3000 });
+        iziToast.success({ title: this.t('admin.listenbrainz.toastSaved'), position: 'topCenter', timeout: 3000 });
       } catch(err) {
-        iziToast.error({ title: 'Failed to save ListenBrainz settings', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.listenbrainz.toastFailed'), position: 'topCenter', timeout: 3000 });
       } finally { this.pending = false; }
+    }
+  }
+});
+
+const languagesView = Vue.component('languages-view', {
+  data() {
+    return {
+      all: [
+        { code: 'en', name: 'English' },
+        { code: 'nl', name: 'Nederlands' },
+        { code: 'de', name: 'Deutsch' },
+        { code: 'fr', name: 'Français' },
+        { code: 'es', name: 'Español' },
+        { code: 'it', name: 'Italiano' },
+        { code: 'pt', name: 'Português' },
+        { code: 'pl', name: 'Polski' },
+        { code: 'ru', name: 'Русский' },
+        { code: 'zh', name: '中文' },
+        { code: 'ja', name: '日本語' },
+        { code: 'ko', name: '한국어' },
+      ],
+      enabled: [],
+      pending: false,
+    };
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">{{ t('admin.languages.title') }}</span>
+              <p style="margin-bottom:1rem;">{{ t('admin.languages.desc') }}</p>
+              <table>
+                <tbody>
+                  <tr v-for="lang in all" :key="lang.code">
+                    <td style="width:40px;padding:6px 4px;">
+                      <input
+                        type="checkbox"
+                        :checked="isEnabled(lang.code)"
+                        :disabled="lang.code === 'en'"
+                        @change="toggle(lang.code)"
+                        style="margin:0;width:auto;height:auto;"
+                      />
+                    </td>
+                    <td style="padding:6px 8px;"><b>{{ lang.name }}</b> <small style="color:#888;">({{ lang.code }})</small></td>
+                    <td style="padding:6px 4px;color:#888;font-size:.82rem;font-style:italic;">
+                      <span v-if="lang.code === 'en'">{{ t('admin.languages.alwaysOn') }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-action">
+              <button class="btn" @click="save()" :disabled="pending">
+                {{ pending ? t('admin.common.saving') : t('admin.common.save') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  async mounted() {
+    try {
+      const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/languages/config` });
+      this.enabled = res.data.enabled || this.all.map(l => l.code);
+    } catch(e) {
+      this.enabled = this.all.map(l => l.code);
+    }
+  },
+  methods: {
+    isEnabled(code) {
+      return code === 'en' || this.enabled.includes(code);
+    },
+    toggle(code) {
+      if (code === 'en') return;
+      const idx = this.enabled.indexOf(code);
+      if (idx === -1) this.enabled = [...this.enabled, code];
+      else this.enabled = this.enabled.filter(c => c !== code);
+    },
+    save: async function() {
+      this.pending = true;
+      try {
+        const toSave = ['en', ...this.enabled.filter(c => c !== 'en')];
+        await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/admin/languages/config`,
+          data: { enabled: toSave }
+        });
+        iziToast.success({ title: this.t('admin.languages.toastSaved'), position: 'topCenter', timeout: 3000 });
+      } catch(err) {
+        iziToast.error({ title: this.t('admin.languages.toastFailed'), position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.pending = false;
+      }
     }
   }
 });
@@ -3996,66 +4115,50 @@ const discogsView = Vue.component('discogs-view', {
         <div class="col s12">
           <div class="card">
             <div class="card-content">
-              <span class="card-title">Discogs Cover Art</span>
-              <p style="margin-bottom:0.5rem;">
-                When a song is missing album art &#8212; or has art that looks wrong &#8212; the Now Playing modal
-                shows a <b>"Fix Art"</b> button. Clicking it searches the
-                <a href="https://www.discogs.com/developers/" target="_blank" rel="noopener">Discogs API</a>
-                and presents up to <b>8 front-cover proposals</b> to choose from.
-                Selecting one permanently embeds the image into the audio file (mp3, flac, ogg, m4a&hellip;),
-                so every client sees the correct art from that point on.
-                This picker is only visible to admins.
-              </p>
-              <p style="margin-bottom:0.5rem;">
-                <b>API key &amp; secret are optional.</b>
-                Without them, Discogs allows <b>25 unauthenticated requests per minute</b> — enough for casual use.
-                With your own key + secret (free, register at <a href="https://www.discogs.com/settings/developers" target="_blank" rel="noopener">discogs.com/settings/developers</a>)
-                the limit rises to <b>60 requests per minute</b>.
-                Each cover art search uses up to ~10 requests, so you may hit the unauthenticated limit quickly if you search often.
-              </p>
-              <p style="margin-bottom:1rem; font-size:0.85rem; color:#999;">
-                The key and secret are stored server-side only and are never exposed to non-admin users.
-              </p>
+              <span class="card-title">{{ t('admin.discogs.title') }}</span>
+              <p style="margin-bottom:0.5rem;">{{t('admin.discogs.desc1')}}</p>
+              <p style="margin-bottom:0.5rem;">{{t('admin.discogs.desc2')}}</p>
+              <p style="margin-bottom:1rem; font-size:0.85rem; color:#999;">{{t('admin.discogs.secretHint')}}</p>
               <table>
                 <tbody>
                   <tr>
-                    <td style="width:160px"><b>Enable</b></td>
-                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> Enable Discogs cover art</td>
+                    <td style="width:160px"><b>{{ t('admin.discogs.labelEnable') }}</b></td>
+                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> {{ t('admin.discogs.checkboxEnable') }}</td>
                   </tr>
                   <tr>
-                    <td><b>Allow Art Update</b></td>
+                    <td><b>{{ t('admin.discogs.labelAllowArtUpdate') }}</b></td>
                     <td>
-                      <input type="checkbox" v-model="allowArtUpdate" style="margin:0;width:auto;height:auto;" /> Allow replacing existing album art
-                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">When enabled, the Fix Art button also appears on songs that <i>already have</i> album art, letting you update it. The old art is removed from the cache and database once no other song references it.</div>
+                      <input type="checkbox" v-model="allowArtUpdate" style="margin:0;width:auto;height:auto;" /> {{ t('admin.discogs.checkboxAllowArtUpdate') }}
+                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">{{t('admin.discogs.allowArtUpdateDesc')}}</div>
                     </td>
                   </tr>
                   <tr>
-                    <td><b>API Key</b></td>
-                    <td><input v-model="apiKey" type="text" placeholder="Consumer Key" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore spellcheck="false" style="margin:0" /></td>
+                    <td><b>{{ t('admin.discogs.labelApiKey') }}</b></td>
+                    <td><input v-model="apiKey" type="text" :placeholder="t('admin.discogs.apiKeyPlaceholder')" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore spellcheck="false" style="margin:0" /></td>
                   </tr>
                   <tr>
-                    <td><b>API Secret</b></td>
-                    <td><input v-model="apiSecret" type="password" placeholder="Consumer Secret" autocomplete="new-password" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore style="margin:0" /></td>
+                    <td><b>{{ t('admin.discogs.labelApiSecret') }}</b></td>
+                    <td><input v-model="apiSecret" type="password" :placeholder="t('admin.discogs.apiSecretPlaceholder')" autocomplete="new-password" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore style="margin:0" /></td>
                   </tr>
                   <tr>
-                    <td><b>Instance Tag</b></td>
+                    <td><b>{{ t('admin.discogs.labelInstanceTag') }}</b></td>
                     <td>
                       <input v-model="userAgentTag" type="text" maxlength="4" placeholder="e.g. amr" autocomplete="off" spellcheck="false" style="margin:0;width:80px;text-transform:lowercase" />
-                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">Optional. Up to 4 letters/digits. Your tag is appended to the User-Agent sent to Discogs: <code>mStreamVelvet/dev/{{ userAgentTag || 'tag' }} +&hellip;</code></div>
+                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">{{t('admin.discogs.instanceTagDesc')}}</div>
                     </td>
                   </tr>
                   <tr>
-                    <td><b>iTunes</b></td>
+                    <td><b>{{ t('admin.discogs.labelItunes') }}</b></td>
                     <td>
-                      <input type="checkbox" v-model="itunesEnabled" style="margin:0;width:auto;height:auto;" /> Enable iTunes album art search
-                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">No API key required. Searches the iTunes Search API for album covers.</div>
+                      <input type="checkbox" v-model="itunesEnabled" style="margin:0;width:auto;height:auto;" /> {{ t('admin.discogs.checkboxItunes') }}
+                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">{{t('admin.discogs.itunesDesc')}}</div>
                     </td>
                   </tr>
                   <tr>
-                    <td><b>Deezer</b></td>
+                    <td><b>{{ t('admin.discogs.labelDeezer') }}</b></td>
                     <td>
-                      <input type="checkbox" v-model="deezerEnabled" style="margin:0;width:auto;height:auto;" /> Enable Deezer album art search
-                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">No API key required. Searches the Deezer API for album covers.</div>
+                      <input type="checkbox" v-model="deezerEnabled" style="margin:0;width:auto;height:auto;" /> {{ t('admin.discogs.checkboxDeezer') }}
+                      <div style="font-size:0.78rem;color:#999;margin-top:4px;">{{t('admin.discogs.deezerDesc')}}</div>
                     </td>
                   </tr>
                 </tbody>
@@ -4063,7 +4166,7 @@ const discogsView = Vue.component('discogs-view', {
             </div>
             <div class="card-action">
               <button class="btn" v-on:click="save()" :disabled="pending">
-                {{ pending ? 'Saving...' : 'Save' }}
+                {{ pending ? t('admin.common.saving') : t('admin.common.save') }}
               </button>
             </div>
           </div>
@@ -4099,9 +4202,9 @@ const discogsView = Vue.component('discogs-view', {
             deezerEnabled: this.deezerEnabled,
           }
         });
-        iziToast.success({ title: 'Discogs settings saved', position: 'topCenter', timeout: 3000 });
+        iziToast.success({ title: this.t('admin.discogs.toastSaved'), position: 'topCenter', timeout: 3000 });
       } catch(err) {
-        iziToast.error({ title: 'Failed to save Discogs settings', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.discogs.toastFailed'), position: 'topCenter', timeout: 3000 });
       } finally {
         this.pending = false;
       }
@@ -4123,27 +4226,20 @@ const radioView = Vue.component('radio-view', {
         <div class="col s12">
           <div class="card">
             <div class="card-content">
-              <span class="card-title">Radio Streams</span>
-              <p style="margin-bottom:0.5rem;">
-                When enabled, users see a <b>Radio Streams</b> section under Library in the player.
-                Each user manages their own personal list of internet radio channels — channels are <em>not</em> shared between users.
-              </p>
-              <p style="margin-bottom:1rem;font-size:0.85rem;color:#999;">
-                Only direct HTTP/HTTPS audio stream URLs are supported.
-                M3U/M3U8 playlist URLs are intentionally not accepted.
-                Each channel can have up to 3 fallback stream links.
-              </p>
+              <span class="card-title">{{ t('admin.radio.title') }}</span>
+              <p style="margin-bottom:0.5rem;">{{t('admin.radio.desc1')}}</p>
+              <p style="margin-bottom:1rem;font-size:0.85rem;color:#999;">{{t('admin.radio.desc2')}}</p>
               <table>
                 <tbody>
                   <tr>
-                    <td style="width:140px"><b>Enable</b></td>
-                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> Allow users to add and play internet radio stations</td>
+                    <td style="width:140px"><b>{{ t('admin.radio.labelEnable') }}</b></td>
+                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> {{ t('admin.radio.checkboxEnable') }}</td>
                   </tr>
                   <tr v-if="enabled">
-                    <td><b>Max Recording Duration</b></td>
+                    <td><b>{{ t('admin.radio.labelMaxRecording') }}</b></td>
                     <td>
                       <input type="number" v-model.number="maxRecordingMinutes" min="1" step="1" style="width:80px;display:inline-block;margin:0 6px 0 0;" />
-                      minutes — recordings are auto-stopped after this limit
+                      {{ t('admin.radio.maxRecordingUnit') }}
                     </td>
                   </tr>
                 </tbody>
@@ -4151,7 +4247,7 @@ const radioView = Vue.component('radio-view', {
             </div>
             <div class="card-action">
               <button class="btn" v-on:click="save()" :disabled="pending">
-                {{ pending ? 'Saving...' : 'Save' }}
+                {{ pending ? t('admin.common.saving') : t('admin.common.save') }}
               </button>
             </div>
           </div>
@@ -4181,9 +4277,9 @@ const radioView = Vue.component('radio-view', {
           });
           Vue.set(ADMINDATA.dbParams, 'maxRecordingMinutes', this.maxRecordingMinutes);
         }
-        iziToast.success({ title: 'Radio settings saved', position: 'topCenter', timeout: 3000 });
+        iziToast.success({ title: this.t('admin.radio.toastSaved'), position: 'topCenter', timeout: 3000 });
       } catch(err) {
-        iziToast.error({ title: 'Failed to save Radio settings', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.radio.toastFailed'), position: 'topCenter', timeout: 3000 });
       } finally {
         this.pending = false;
       }
@@ -4238,9 +4334,9 @@ const genreGroupsView = Vue.component('genre-groups-view', {
         <div class="col s12">
           <div class="card">
             <div class="card-content">
-              <span class="card-title">Groups &amp; Genres</span>
-              <p style="margin-bottom:.5rem;">Organise genres into top-level groups for the <b>Genres</b> view and <b>Smart Playlists</b>.<br><small style="color:var(--t2)">Double-click a group name to rename it. Drag a genre chip from the right panel and drop it onto a group name on the left. Groups cannot be deleted — move unwanted genres to <em>Other</em>.</small></p>
-              <div v-if="isDefault" style="background:var(--raised);border-left:3px solid var(--accent,#6366f1);padding:10px 14px;border-radius:4px;margin-top:10px;font-size:.875rem;color:var(--t2);">Auto-detected defaults based on your music library. Edit and <b style="color:var(--t1)">Save</b> to store your custom grouping.</div>
+              <span class="card-title">{{ t('admin.genreGroups.title') }}</span>
+              <p style="margin-bottom:.5rem;">{{ t('admin.genreGroups.desc') }}<br><small style="color:var(--t2)">{{ t('admin.genreGroups.hint') }} {{ t('admin.genreGroups.dropHintNoDelete') }}</small></p>
+              <div v-if="isDefault" style="background:var(--raised);border-left:3px solid var(--accent,#6366f1);padding:10px 14px;border-radius:4px;margin-top:10px;font-size:.875rem;color:var(--t2);">{{ t('admin.genreGroups.autoDetectedNotice') }}</div>
             </div>
           </div>
         </div>
@@ -4255,14 +4351,14 @@ const genreGroupsView = Vue.component('genre-groups-view', {
                @dragover.prevent="dropTargetIdx = gi"
                @dragleave="onDragleave($event, gi)"
                @drop.prevent="onDropToGroup(gi)">
-            <span class="gg-chevron-sm" @click="toggleCollapse(gi)" :title="grp.collapsed ? 'Expand' : 'Collapse'">{{grp.collapsed ? '▶' : '▼'}}</span>
-            <span v-if="renamingIdx !== gi" class="gg-left-name" @dblclick="startRename(gi)" title="Double-click to rename">{{grp.name}}</span>
+            <span class="gg-chevron-sm" @click="toggleCollapse(gi)" :title="grp.collapsed ? t('admin.genreGroups.expand') : t('admin.genreGroups.collapse')">{{grp.collapsed ? '▶' : '▼'}}</span>
+            <span v-if="renamingIdx !== gi" class="gg-left-name" @dblclick="startRename(gi)" :title="t('admin.genreGroups.doubleClickRename')">{{grp.name}}</span>
             <input v-else v-model="renamingVal" class="gg-rename-inp gg-left-rename" @blur="commitRename(gi)" @keydown.enter="commitRename(gi)" @keydown.esc="renamingIdx=null" ref="renameInput">
             <span class="gg-left-cnt">{{grp.genres.length}}</span>
-            <button v-if="grp.genres.length === 0" class="gg-del-btn" @click.stop="deleteGroup(gi)" title="Delete empty group">&#x2715;</button>
+            <button v-if="grp.genres.length === 0" class="gg-del-btn" @click.stop="deleteGroup(gi)" :title="t('admin.genreGroups.deleteEmptyGroup')">&#x2715;</button>
           </div>
           <div class="gg-add-row">
-            <input v-model="newGroupName" type="text" placeholder="New group…" class="gg-add-inp" @keydown.enter="addGroup">
+            <input v-model="newGroupName" type="text" :placeholder="t('admin.genreGroups.newGroupPlaceholder')" class="gg-add-inp" @keydown.enter="addGroup">
             <button class="btn btn-small" @click="addGroup" :disabled="!newGroupName.trim()">+</button>
           </div>
         </div>
@@ -4272,15 +4368,15 @@ const genreGroupsView = Vue.component('genre-groups-view', {
           <!-- Search bar -->
           <div class="gg-search-row">
             <span class="gg-search-icon">&#128269;</span>
-            <input v-model="searchQuery" type="text" placeholder="e.g. house  ·  deep house  ·  house -acid  ·  house +deep" class="gg-search-inp" @keydown.esc="searchQuery=''">
-            <button v-if="searchQuery" class="gg-search-clear" @click="searchQuery=''" title="Clear">&#x2715;</button>
+            <input v-model="searchQuery" type="text" :placeholder="t('admin.genreGroups.searchPlaceholder')" class="gg-search-inp" @keydown.esc="searchQuery=''">
+            <button v-if="searchQuery" class="gg-search-clear" @click="searchQuery=''" :title="t('admin.common.delete')">&#x2715;</button>
           </div>
 
           <!-- Search results panel -->
           <div v-if="searchQuery.trim()" class="gg-search-panel">
-            <div class="gg-search-panel-head">Results for <b>"{{searchQuery.trim()}}"</b> <span style="color:var(--t3);font-weight:400;">· +word = must include &nbsp; -word = exclude</span> — drag a chip to a group on the left</div>
+            <div class="gg-search-panel-head">{{ t('admin.genreGroups.resultsFor') }} <b>"{{searchQuery.trim()}}"</b> <span style="color:var(--t3);font-weight:400;">{{ t('admin.genreGroups.syntaxHint') }}</span></div>
             <div class="gg-chips" style="padding:10px 14px;">
-              <span v-if="searchResults.length === 0" class="gg-empty-hint">No genres match</span>
+              <span v-if="searchResults.length === 0" class="gg-empty-hint">{{ t('admin.genreGroups.noGenresMatch') }}</span>
               <span v-for="(g, si) in searchResults" :key="g"
                     class="gg-chip gg-chip-search"
                     :class="{dragging: dragSrc && dragSrc.groupIdx===-2 && dragSrc.genreIdx===si}"
@@ -4314,14 +4410,14 @@ const genreGroupsView = Vue.component('genre-groups-view', {
                     draggable="true"
                     @dragstart="onDragStart(gi, gei)"
                     @dragend="dragSrc=null">
-                {{g}}<span v-if="gi !== otherGroupIdx && otherGroupIdx !== -1" class="gg-chip-remove" @click.stop="moveToOther(gi, gei)" title="Move to Other">↓</span>
+                {{g}}<span v-if="gi !== otherGroupIdx && otherGroupIdx !== -1" class="gg-chip-remove" @click.stop="moveToOther(gi, gei)" :title="t('admin.genreGroups.moveToOther')">↓</span>
               </span>
-              <span v-if="grp.genres.length === 0" class="gg-empty-hint">Drop genres here</span>
+              <span v-if="grp.genres.length === 0" class="gg-empty-hint">{{ t('admin.genreGroups.dropHere') }}</span>
             </div>
           </div>
           <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px;">
-            <button class="btn-flat" @click="resetToDefault">Reset to Auto</button>
-            <button class="btn" @click="save" :disabled="pending">{{ pending ? 'Saving…' : 'Save' }}</button>
+            <button class="btn-flat" @click="resetToDefault">{{ t('admin.genreGroups.btnResetToAuto') }}</button>
+            <button class="btn" @click="save" :disabled="pending">{{ pending ? t('admin.genreGroups.btnSaving') : t('admin.genreGroups.btnSave') }}</button>
           </div>
         </div>
       </div>
@@ -4343,7 +4439,7 @@ const genreGroupsView = Vue.component('genre-groups-view', {
         this.groups = (res.data.groups || []).map(g => ({ name: g.name, genres: [...g.genres], collapsed: false }));
         // If nothing is in the DB yet, seed it now so it persists immediately
         if (this.isDefault) await this._autoSave();
-      } catch(e) { iziToast.error({ title: 'Failed to load genre groups', position: 'topCenter', timeout: 3000 }); }
+      } catch(e) { iziToast.error({ title: this.t('admin.genreGroups.toastFailedLoad'), position: 'topCenter', timeout: 3000 }); }
     },
     toggleCollapse(gi) {
       this.groups[gi].collapsed = !this.groups[gi].collapsed;
@@ -4382,7 +4478,7 @@ const genreGroupsView = Vue.component('genre-groups-view', {
     onDragStartSearch(si) { this.dragSrc = { groupIdx: -2, genreIdx: si }; this.dropTargetIdx = null; },
     groupOf(genre) {
       const grp = this.groups.find(g => g.genres.includes(genre));
-      return grp ? grp.name : 'unassigned';
+      return grp ? grp.name : this.t('admin.genreGroups.unassigned');
     },
     onDragleave(e, gi) {
       if (!e.currentTarget.contains(e.relatedTarget)) {
@@ -4417,15 +4513,15 @@ const genreGroupsView = Vue.component('genre-groups-view', {
         const payload = this.groups.map(g => ({ name: g.name, genres: g.genres }));
         await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/genre-groups`, data: payload });
         this.isDefault = false;
-      } catch(e) { iziToast.error({ title: 'Auto-save failed', position: 'topCenter', timeout: 3000 }); }
+      } catch(e) { iziToast.error({ title: this.t('admin.genreGroups.toastAutoSaveFailed'), position: 'topCenter', timeout: 3000 }); }
     },
     resetToDefault() {
-      adminConfirm('Reset genre groups?', 'All custom groups will be removed. The player will fall back to automatic genre classification.', 'Reset', async () => {
+      adminConfirm(this.t('admin.genreGroups.confirmResetTitle'), this.t('admin.genreGroups.confirmResetMsg'), this.t('admin.genreGroups.confirmResetLabel'), async () => {
         try {
           await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/genre-groups`, data: [] });
           await this.load();
-          iziToast.success({ title: 'Genre groups reset', position: 'topCenter', timeout: 2500 });
-        } catch(e) { iziToast.error({ title: 'Reset failed', position: 'topCenter', timeout: 3000 }); }
+          iziToast.success({ title: this.t('admin.genreGroups.toastReset'), position: 'topCenter', timeout: 2500 });
+        } catch(e) { iziToast.error({ title: this.t('admin.genreGroups.toastResetFailed'), position: 'topCenter', timeout: 3000 }); }
       });
     },
     async save() {
@@ -4435,8 +4531,8 @@ const genreGroupsView = Vue.component('genre-groups-view', {
         const payload = this.groups.map(g => ({ name: g.name, genres: g.genres }));
         await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/genre-groups`, data: payload });
         this.isDefault = false;
-        iziToast.success({ title: 'Genre groups saved', position: 'topCenter', timeout: 2500 });
-      } catch(e) { iziToast.error({ title: 'Save failed', position: 'topCenter', timeout: 3000 }); }
+        iziToast.success({ title: this.t('admin.genreGroups.toastSaved'), position: 'topCenter', timeout: 2500 });
+      } catch(e) { iziToast.error({ title: this.t('admin.genreGroups.toastSaveFailed'), position: 'topCenter', timeout: 3000 }); }
       finally { this.pending = false; }
     }
   }
@@ -4534,7 +4630,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         if (!Number.isFinite(this.sessionStartMissing)) this.sessionStartMissing = this.counts.missing || 0;
         this.artists = res.data.artists || [];
       } catch (e) {
-        iziToast.error({ title: 'Failed to load artists image audit', message: e.message || '', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.artists.toastFailedLoad'), message: e.message || '', position: 'topCenter', timeout: 3000 });
       } finally {
         this.loading = false;
       }
@@ -4550,9 +4646,9 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         });
         this.hydration = res.data || this.hydration;
         this.counts = res.data?.counts || this.counts;
-        iziToast.success({ title: `Queued ${res.data?.enqueued || 0} artists`, position: 'topCenter', timeout: 1800 });
+        iziToast.success({ title: this.t('admin.artists.toastQueued', { count: res.data?.enqueued || 0 }), position: 'topCenter', timeout: 1800 });
       } catch (e) {
-        iziToast.error({ title: 'Failed to queue hydration', message: e.message || '', position: 'topCenter', timeout: 2500 });
+        iziToast.error({ title: this.t('admin.artists.toastFailedQueue'), message: e.message || '', position: 'topCenter', timeout: 2500 });
       } finally {
         this.seedPending = false;
       }
@@ -4575,7 +4671,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         });
         this.candidates = res.data.candidates || [];
       } catch (e) {
-        iziToast.error({ title: 'Failed to load Discogs candidates', message: e.message || '', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.artists.toastFailedCandidates'), message: e.message || '', position: 'topCenter', timeout: 3000 });
       } finally {
         this.candidateLoading = false;
       }
@@ -4589,10 +4685,10 @@ const artistsAdminView = Vue.component('artists-admin-view', {
           url: `${API.url()}/api/v1/admin/artists/apply-image`,
           data: { artistKey: this.selected.artistKey, imageUrl: url, source }
         });
-        iziToast.success({ title: 'Artist image updated', position: 'topCenter', timeout: 1800 });
+        iziToast.success({ title: this.t('admin.artists.toastImageUpdated'), position: 'topCenter', timeout: 1800 });
         await this.load(this.kind);
       } catch (e) {
-        iziToast.error({ title: 'Failed to set artist image', message: e.message || '', position: 'topCenter', timeout: 3000 });
+        iziToast.error({ title: this.t('admin.artists.toastFailedSetImage'), message: e.message || '', position: 'topCenter', timeout: 3000 });
       } finally {
         this.applying = false;
       }
@@ -4611,13 +4707,13 @@ const artistsAdminView = Vue.component('artists-admin-view', {
           data: { artistKey: row.artistKey, wrong: !!wrong }
         });
         iziToast.success({
-          title: wrong ? 'Marked as wrong image' : 'Marked as image OK',
+          title: wrong ? this.t('admin.artists.toastMarkedWrong') : this.t('admin.artists.toastMarkedOk'),
           position: 'topCenter',
           timeout: 1500
         });
         await this.load(this.kind);
       } catch (e) {
-        iziToast.error({ title: 'Failed to update image status', message: e.message || '', position: 'topCenter', timeout: 2500 });
+        iziToast.error({ title: this.t('admin.artists.toastFailedUpdateStatus'), message: e.message || '', position: 'topCenter', timeout: 2500 });
       }
     },
     imgSrc(imageFile) {
@@ -4629,91 +4725,91 @@ const artistsAdminView = Vue.component('artists-admin-view', {
     <div class="card z-depth-1" style="padding:18px 20px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
         <div>
-          <span class="card-title">Artist Images</span>
-          <div style="font-size:.9rem;color:var(--t2);margin-top:2px;">Review missing or wrong artist portraits and fix them with Discogs suggestions or a direct link. Background fetch is rate-limited to protect upstream services.</div>
+          <span class="card-title">{{ t('admin.artists.title') }}</span>
+          <div style="font-size:.9rem;color:var(--t2);margin-top:2px;">{{ t('admin.artists.desc') }}</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn-flat" @click="load('missing')" :style="kind==='missing' ? 'border-color:var(--primary);color:var(--primary);' : ''">Missing ({{ counts.missing || 0 }})</button>
-          <button class="btn-flat" @click="load('with-image')" :style="kind==='with-image' ? 'border-color:var(--ok,#16a34a);color:var(--ok,#16a34a);' : ''">With image ({{ counts.withImage || 0 }})</button>
-          <button class="btn-flat" @click="load('wrong')" :style="kind==='wrong' ? 'border-color:var(--warn,#b45309);color:var(--warn,#b45309);' : ''">Wrong ({{ counts.wrong || 0 }})</button>
-          <button class="btn-flat" @click="seedHydration(500)" :disabled="seedPending">{{ seedPending ? 'Queueing...' : 'Queue next 500' }}</button>
-          <button class="btn" @click="load(kind)" :disabled="loading">{{ loading ? 'Refreshing...' : 'Refresh' }}</button>
+          <button class="btn-flat" @click="load('missing')" :style="kind==='missing' ? 'border-color:var(--primary);color:var(--primary);' : ''">{{ t('admin.artists.tabMissing', { count: counts.missing || 0 }) }}</button>
+          <button class="btn-flat" @click="load('with-image')" :style="kind==='with-image' ? 'border-color:var(--ok,#16a34a);color:var(--ok,#16a34a);' : ''">{{ t('admin.artists.tabWithImage', { count: counts.withImage || 0 }) }}</button>
+          <button class="btn-flat" @click="load('wrong')" :style="kind==='wrong' ? 'border-color:var(--warn,#b45309);color:var(--warn,#b45309);' : ''">{{ t('admin.artists.tabWrong', { count: counts.wrong || 0 }) }}</button>
+          <button class="btn-flat" @click="seedHydration(500)" :disabled="seedPending">{{ seedPending ? t('admin.artists.btnQueueing') : t('admin.artists.btnQueueNext') }}</button>
+          <button class="btn" @click="load(kind)" :disabled="loading">{{ loading ? t('admin.artists.btnRefreshing') : t('admin.artists.btnRefresh') }}</button>
         </div>
       </div>
 
       <div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;">
-        <div style="font-size:.82rem;color:var(--t2);">Hydration: <b :style="hydration.running ? 'color:var(--ok,#16a34a);' : 'color:var(--t2);'">{{ hydration.running ? 'running' : 'idle' }}</b></div>
-        <div style="font-size:.82rem;color:var(--t2);">Queue: <b>{{ hydration.queueLength || 0 }}</b> / {{ hydration.queueLimit || 0 }}</div>
-        <div style="font-size:.82rem;color:var(--t2);">Session fixed: <b>{{ hydratedThisSession == null ? 0 : hydratedThisSession }}</b></div>
-        <div style="font-size:.82rem;color:var(--t2);">Success / no-image / fail: <b>{{ hydration.stats.succeeded || 0 }}</b> / {{ hydration.stats.noImage || 0 }} / {{ hydration.stats.failed || 0 }}</div>
-        <div style="font-size:.82rem;color:var(--t2);">Dropped (queue cap): <b>{{ hydration.stats.dropped || 0 }}</b></div>
-        <div style="font-size:.82rem;color:var(--t2);">Discogs: <b :style="discogsReady ? 'color:var(--ok,#16a34a);' : 'color:var(--warn,#b45309);'">{{ discogsReady ? 'ready' : 'disabled or missing API keys' }}</b></div>
+        <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationStatus') }} <b :style="hydration.running ? 'color:var(--ok,#16a34a);' : 'color:var(--t2);'">{{ hydration.running ? t('admin.artists.hydrationRunning') : t('admin.artists.hydrationIdle') }}</b></div>
+        <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationQueue') }} <b>{{ hydration.queueLength || 0 }}</b> / {{ hydration.queueLimit || 0 }}</div>
+        <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationSessionFixed') }} <b>{{ hydratedThisSession == null ? 0 : hydratedThisSession }}</b></div>
+        <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationSuccessRate') }} <b>{{ hydration.stats.succeeded || 0 }}</b> / {{ hydration.stats.noImage || 0 }} / {{ hydration.stats.failed || 0 }}</div>
+        <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationDropped') }} <b>{{ hydration.stats.dropped || 0 }}</b></div>
+        <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationDiscogs') }} <b :style="discogsReady ? 'color:var(--ok,#16a34a);' : 'color:var(--warn,#b45309);'">{{ discogsReady ? t('admin.artists.discogsReady') : t('admin.artists.discogsNotReady') }}</b></div>
       </div>
       <div v-if="!hydration.running && (hydration.queueLength || 0) === 0 && (counts.missing || 0) > 0" style="margin-top:8px;font-size:.82rem;color:var(--t2);">
-        Background hydration is idle because no artists are queued. Click <b>Queue next 500</b> to start processing missing artist images.
+        {{ t('admin.artists.hydrationIdleHint') }}
       </div>
     </div>
 
     <div style="display:grid;grid-template-columns:minmax(340px,1fr) minmax(360px,1fr);gap:12px;margin-top:12px;align-items:start;">
       <div class="card z-depth-1" style="padding:10px 0;">
-        <div style="padding:0 14px 8px;font-size:.86rem;color:var(--t2);">{{ artists.length }} artist{{ artists.length === 1 ? '' : 's' }} listed</div>
+        <div style="padding:0 14px 8px;font-size:.86rem;color:var(--t2);">{{ t('admin.artists.artistCount', { count: artists.length }) }}</div>
         <div style="max-height:64vh;overflow:auto;">
-          <div v-if="!artists.length && !loading" style="padding:12px 14px;color:var(--t2);">No artists in this list.</div>
+          <div v-if="!artists.length && !loading" style="padding:12px 14px;color:var(--t2);">{{ t('admin.artists.listEmpty') }}</div>
           <button v-for="a in artists" :key="a.artistKey" @click="selectArtist(a)" class="btn-flat" style="width:100%;text-align:left;display:flex;align-items:center;gap:10px;border-radius:0;border-left:none;border-right:none;border-top:none;padding:9px 14px;">
             <img v-if="a.imageFile" :src="imgSrc(a.imageFile)" alt="" style="width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border);" />
             <div v-else style="width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--raised);color:var(--t2);font-weight:700;flex-shrink:0;">{{ (a.canonicalName||'?').replace(/^The\s+/i,'').charAt(0).toUpperCase() }}</div>
             <div style="min-width:0;flex:1;">
               <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ a.canonicalName }}</div>
-              <div style="font-size:.78rem;color:var(--t2);">{{ a.songCount || 0 }} songs<span v-if="a.imageSource"> • {{ a.imageSource }}</span></div>
+              <div style="font-size:.78rem;color:var(--t2);">{{ t('admin.artists.songCount', { count: a.songCount || 0 }) }}<span v-if="a.imageSource"> • {{ a.imageSource }}</span></div>
             </div>
-            <span v-if="a.wrongFlag" style="font-size:.72rem;padding:3px 7px;border-radius:999px;background:rgba(180,83,9,.18);color:var(--warn,#b45309);">wrong</span>
+            <span v-if="a.wrongFlag" style="font-size:.72rem;padding:3px 7px;border-radius:999px;background:rgba(180,83,9,.18);color:var(--warn,#b45309);">{{ t('admin.artists.badgeWrong') }}</span>
           </button>
         </div>
       </div>
 
       <div class="card z-depth-1" style="padding:14px;min-height:220px;">
-        <div v-if="!selected" style="color:var(--t2);">Select an artist from the left to repair image mapping.</div>
+        <div v-if="!selected" style="color:var(--t2);">{{ t('admin.artists.selectPrompt') }}</div>
         <div v-else>
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
             <div>
               <div style="font-size:1rem;font-weight:700;">{{ selected.canonicalName }}</div>
-              <div style="font-size:.82rem;color:var(--t2);">{{ selected.songCount || 0 }} songs</div>
+              <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.songCount', { count: selected.songCount || 0 }) }}</div>
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
-              <button v-if="kind === 'with-image' || selected.wrongFlag" class="btn-flat" @click="setWrong(selected, false)">Yes: image is OK</button>
-              <button v-if="kind === 'with-image' || !selected.wrongFlag" class="btn-flat" style="border-color:var(--warn,#b45309);color:var(--warn,#b45309);" @click="setWrong(selected, true)">No: mark wrong</button>
+              <button v-if="kind === 'with-image' || selected.wrongFlag" class="btn-flat" @click="setWrong(selected, false)">{{ t('admin.artists.btnImageOk') }}</button>
+              <button v-if="kind === 'with-image' || !selected.wrongFlag" class="btn-flat" style="border-color:var(--warn,#b45309);color:var(--warn,#b45309);" @click="setWrong(selected, true)">{{ t('admin.artists.btnMarkWrong') }}</button>
             </div>
           </div>
 
           <div style="margin-bottom:12px;">
-            <div style="font-size:.82rem;color:var(--t2);margin-bottom:6px;">Apply from URL</div>
+            <div style="font-size:.82rem;color:var(--t2);margin-bottom:6px;">{{ t('admin.artists.labelApplyUrl') }}</div>
             <div style="display:flex;gap:8px;">
-              <input v-model="customImageUrl" @input="customImagePreviewError = false" type="url" placeholder="https://..." style="flex:1;" />
-              <button class="btn" @click="applyImage(customImageUrl, 'custom')" :disabled="!customImageUrl || applying">Apply</button>
+              <input v-model="customImageUrl" @input="customImagePreviewError = false" type="url" :placeholder="t('admin.artists.urlPlaceholder')" style="flex:1;" />
+              <button class="btn" @click="applyImage(customImageUrl, 'custom')" :disabled="!customImageUrl || applying">{{ t('admin.artists.btnApply') }}</button>
             </div>
             <div v-if="customImagePreviewUrl" style="margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);display:flex;gap:12px;align-items:flex-start;">
               <img v-show="!customImagePreviewError" :src="customImagePreviewUrl" @load="onCustomPreviewLoad" @error="onCustomPreviewError" alt="Custom preview" style="width:112px;height:112px;border-radius:10px;object-fit:cover;display:block;background:var(--raised);border:1px solid var(--border);flex-shrink:0;" />
               <div style="min-width:0;display:flex;flex-direction:column;gap:6px;">
-                <div style="font-size:.82rem;font-weight:600;">Preview</div>
-                <div v-if="customImagePreviewError" style="font-size:.8rem;color:var(--warn,#b45309);line-height:1.4;">This URL could not be previewed as an image. Check the link before applying it.</div>
-                <div v-else style="font-size:.8rem;color:var(--t2);line-height:1.4;">The pasted image will be downloaded, resized, and stored for <b>{{ selected.canonicalName }}</b>.</div>
+                <div style="font-size:.82rem;font-weight:600;">{{ t('admin.artists.previewTitle') }}</div>
+                <div v-if="customImagePreviewError" style="font-size:.8rem;color:var(--warn,#b45309);line-height:1.4;">{{ t('admin.artists.previewError') }}</div>
+                <div v-else style="font-size:.8rem;color:var(--t2);line-height:1.4;">{{ t('admin.artists.previewDesc', { artist: selected.canonicalName }) }}</div>
                 <div style="font-size:.74rem;color:var(--t3);word-break:break-all;">{{ customImagePreviewUrl }}</div>
               </div>
             </div>
           </div>
 
-          <div style="font-size:.82rem;color:var(--t2);margin-bottom:8px;">Discogs suggestions</div>
-          <div v-if="!discogsReady" style="padding:8px 0;color:var(--warn,#b45309);">Discogs suggestions are disabled. Enable Discogs and set API key/secret in Admin → Discogs.</div>
-          <div v-else-if="candidateLoading" style="padding:8px 0;color:var(--t2);">Loading Discogs candidates...</div>
-          <div v-else-if="!candidates.length" style="padding:8px 0;color:var(--t2);">No Discogs candidates found for this artist.</div>
+          <div style="font-size:.82rem;color:var(--t2);margin-bottom:8px;">{{ t('admin.artists.labelDiscogsSuggestions') }}</div>
+          <div v-if="!discogsReady" style="padding:8px 0;color:var(--warn,#b45309);">{{ t('admin.artists.discogsDisabledHint') }}</div>
+          <div v-else-if="candidateLoading" style="padding:8px 0;color:var(--t2);">{{ t('admin.artists.discogsLoading') }}</div>
+          <div v-else-if="!candidates.length" style="padding:8px 0;color:var(--t2);">{{ t('admin.artists.discogsNone') }}</div>
           <div v-else style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;">
             <div v-for="c in candidates" :key="c.imageUrl" style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--surface);">
               <img :src="c.thumbUrl || c.imageUrl" alt="" style="width:100%;aspect-ratio:1;object-fit:cover;display:block;" />
               <div style="padding:8px;">
                 <div style="font-size:.76rem;font-weight:600;line-height:1.3;max-height:2.2em;overflow:hidden;">{{ c.title }}</div>
                 <div style="display:flex;gap:6px;margin-top:7px;">
-                  <button class="btn btn-small" style="flex:1;" @click="applyImage(c.imageUrl, 'discogs')" :disabled="applying || !discogsReady">Use</button>
-                  <a v-if="c.sourceUrl" class="btn-flat btn-small" :href="c.sourceUrl" target="_blank" rel="noopener" style="padding:0 8px;">View</a>
+                  <button class="btn btn-small" style="flex:1;" @click="applyImage(c.imageUrl, 'discogs')" :disabled="applying || !discogsReady">{{ t('admin.artists.btnUse') }}</button>
+                  <a v-if="c.sourceUrl" class="btn-flat btn-small" :href="c.sourceUrl" target="_blank" rel="noopener" style="padding:0 8px;">{{ t('admin.artists.btnView') }}</a>
                 </div>
               </div>
             </div>
@@ -4749,6 +4845,7 @@ const vm = new Vue({
     'radio-view': radioView,
     'genre-groups-view': genreGroupsView,
     'artists-admin-view': artistsAdminView,
+    'languages-view': languagesView,
   },
   data: {
     currentViewMain: 'folders-view',

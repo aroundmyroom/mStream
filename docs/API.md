@@ -148,6 +148,10 @@ See [docs/your-stats.md](your-stats.md) for full schema and field reference.
 
 [/user/settings — persist and restore prefs + queue across devices](API/user-settings.md)
 
+## Languages *(v6.9.0-velvet)*
+
+[/api/v1/languages/enabled, /api/v1/admin/languages/config](API/languages_enabled.md)
+
 ## Radio *(GitHub Copilot, 2026-03-20)*
 
 [/radio — stations CRUD, reorder, stream proxy, ICY now-playing, logo caching, admin config; recording stop returns `relPath`, `vpath`, `stationName`, `artFile`](API/radio.md) *(stop response enriched v5.16.32)*

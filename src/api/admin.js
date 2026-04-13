@@ -1321,6 +1321,35 @@ export function setup(mstream) {
     serverPlaybackApi.killMpv();
     res.json({ running: false });
   });
+
+  // ── Languages config ──────────────────────────────────────────
+  const _ALL_LANG_CODES = ['en','nl','de','fr','es','it','pt','pl','ru','zh','ja','ko'];
+
+  mstream.get('/api/v1/admin/languages/config', (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    res.json({ enabled: config.program.languages?.enabled || _ALL_LANG_CODES });
+  });
+
+  mstream.post('/api/v1/admin/languages/config', async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const schema = Joi.object({
+      enabled: Joi.array().items(Joi.string().max(5)).min(1).required()
+    });
+    joiValidate(schema, req.body);
+
+    // English is always first and always present
+    const enabled = ['en', ...req.body.enabled.filter(c => c !== 'en' && _ALL_LANG_CODES.includes(c))];
+
+    const loadConfig = await admin.loadFile(config.configFile);
+    if (!loadConfig.languages) loadConfig.languages = {};
+    loadConfig.languages.enabled = enabled;
+    await admin.saveFile(loadConfig, config.configFile);
+
+    if (!config.program.languages) config.program.languages = {};
+    config.program.languages.enabled = enabled;
+
+    res.json({});
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

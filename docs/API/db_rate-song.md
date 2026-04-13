@@ -47,6 +47,9 @@
 
   - The rating is stored in `user_metadata.rating` keyed by the song's MD5
     hash, so it survives file moves/renames as long as the content hash matches.
+  - In the v2 **Now Playing** modal, the rating helper text is contextual:
+    `Clear rating` is only shown when a rating already exists; otherwise the UI
+    shows a translated hint telling the user to click the stars to add one.
   - Auto-DJ's `minRating` filter uses this value — a `minRating` of `6` means
     only songs rated 3 stars (value ≥ 6) are candidates.
   - `POST /api/v1/db/random-songs` accepts a `minRating` param that filters

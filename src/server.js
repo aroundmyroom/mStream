@@ -178,6 +178,12 @@ export async function serveIt(configFile) {
   // and wipe stale localStorage from a previous instance.
   mstream.get('/api/v1/ping/public', (_req, res) => res.json({ status: 'ok', instanceId: config.program.instanceId }));
 
+  // Public — returns enabled languages so the player picker only shows active ones
+  const _ALL_LANG_CODES = ['en','nl','de','fr','es','it','pt','pl','ru','zh','ja','ko'];
+  mstream.get('/api/v1/languages/enabled', (_req, res) => {
+    res.json({ enabled: config.program.languages?.enabled || _ALL_LANG_CODES });
+  });
+
   // Everything below this line requires authentication
   authApi.setup(mstream);
 

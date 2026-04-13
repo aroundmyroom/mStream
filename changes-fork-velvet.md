@@ -1,5 +1,123 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.9.0-velvet — April 2026 — The localized version
+
+### feat: i18n — player frontend fully translated (Phase 2)
+- `webapp/app.js`: all ~125 user-visible strings replaced with `t('player.*')` calls:
+  - All `setTitle()` calls (25+ page titles) now use `t('player.title.*')` keys.
+  - All `toast()` calls (~106) now use `t('player.toast.*')` keys — covers queue, playlists, downloads, ratings, radio, YouTube, podcasts, settings, scrobbling, sharing, and more.
+  - Boot message `_bootMsg()` now uses `t('player.boot.loadingLibrary')`.
+  - `'Singles'` artist label now uses `t('player.title.singles')`.
+- `webapp/index.html`:
+  - `<script src="/assets/js/i18n.js"></script>` added to `<head>` (blocking, sets `window.t` before any script runs).
+  - All static text wired with `data-i18n` attributes: login form, sidebar nav (all items + section headers), every modal (recording, playlist, upload, share, confirm, delete, rename, add-to-playlist), context menu, rate panel, NP modal, EQ panel, queue panel, player footer.
+  - **Language picker** added to sidebar footer (accessible to all users, admin or not) — `<select id="player-lang-picker">` with all 12 languages, persists to `localStorage`.
+  - Init script calls `I18N.loadLanguage()` immediately, then populates picker after `I18N.ready` resolves.
+- `webapp/locales/en.json`: 1068 keys (was 819) — added `player.*` namespace (~249 keys covering all page titles, nav items, toast messages, modal text, boot messages, EQ, queue labels, login form, lang picker).
+- `webapp/locales/nl.json`: 1068 keys, 100% Dutch-translated (no English fallbacks).
+- All 10 other locale files (de, fr, es, it, pt, pl, ru, zh, ja, ko): updated to 1068 English keys as base for community translation.
+- `.github/copilot-instructions.md`: i18n/taal module development rule added as a required section — all new features must always provide `t()` keys, data-i18n attributes, and NL translations.
+
+### feat: i18n — admin templates: about/server-audio/transcode/federation
+- `webapp/admin/index.js`:
+  - Replaced hardcoded strings with `t('admin.*')` in Federation tabs/forms/buttons/toasts/confirm dialogs.
+  - Replaced hardcoded strings with `t('admin.*')` in About + Telemetry cards.
+  - Replaced hardcoded strings with `t('admin.*')` in Server Audio status/actions/detect messages/confirm dialogs.
+  - Replaced hardcoded strings with `t('admin.*')` in Transcode labels/states/buttons/toasts/confirm dialogs.
+- `webapp/locales/en.json` and `webapp/locales/nl.json`:
+  - Added new keys for admin telemetry copy, federation action states, server-audio detect+confirm text, transcode confirm text, and shared common `enable/disable/yes/no` labels.
+- All 10 additional locale files (de, fr, es, it, pt, pl, ru, zh, ja, ko) were synced to include the newly added English keys.
+
+### feat: i18n — front index artist/album search placeholders
+- `webapp/app.js`:
+  - Artist Home search input now uses `t('player.artists.searchAllPlaceholder', { count })` instead of hardcoded English.
+  - Album Library search input now uses `t('player.albums.searchAlbumsOrSeriesPlaceholder')`.
+  - Albums index search input now uses `t('player.albums.searchAlbumsPlaceholder')`.
+- `webapp/locales/en.json` + `webapp/locales/nl.json`:
+  - Added the 3 new player keys above.
+- All 10 additional locale files were synced with the new keys.
+
+### fix: i18n — block invalid locale JSON on activation
+- `webapp/assets/js/i18n.js`:
+  - Locale activation now validates the fetched JSON before switching language.
+  - Invalid locale JSON no longer activates; the previously active language remains in place.
+  - Player/admin language pickers are automatically reset to the last valid language after a failed switch.
+  - A visible error notification is shown when a locale file is invalid or cannot be loaded.
+- `webapp/admin/index.html`:
+  - Removed the manual picker value override so failed language switches can roll back cleanly.
+- `webapp/locales/en.json` + `webapp/locales/nl.json`:
+  - Added shared error strings for invalid locale JSON and failed language loads.
+- All 10 additional locale files were synced with the new keys.
+
+### fix: now playing — contextual rating helper text
+- `webapp/app.js`:
+  - In the Now Playing details modal, `Clear rating` is now shown only when the current song already has a rating.
+  - Unrated songs now show a non-destructive helper label instead: `Click stars to add rating`.
+  - The clear-rating action is disabled when no rating exists.
+- `webapp/locales/en.json` + `webapp/locales/nl.json`:
+  - Added `player.rate.clickStarsToAdd`.
+- All 10 additional locale files were synced with the new key.
+
+### feat: i18n UI — language pickers use flag buttons instead of dropdowns
+- `webapp/index.html`:
+  - Replaced the player language `<select>` with a one-line row of flag buttons.
+  - The front index now keeps the language picker compact while still honoring `/api/v1/languages/enabled`.
+- `webapp/admin/index.html`:
+  - Replaced the admin language `<select>` with the same flag-button UI.
+- `webapp/assets/js/i18n.js`:
+  - Added shared language metadata (`label` + `flag`) and updated picker syncing so the active language is highlighted correctly for button-based pickers.
+- `webapp/style.css` + `webapp/admin/index.css`:
+  - Added compact flag-button styling for player and admin.
+
+### fix: language picker visuals — force real country flags (not code-like text)
+- `webapp/index.html` + `webapp/admin/index.html`:
+  - Language buttons now render graphic country flag icons from `https://flagcdn.com`.
+  - Emoji fallback remains in place only if a flag image cannot be loaded.
+- `webapp/assets/js/i18n.js`:
+  - Added `country` metadata per language to support deterministic flag icon rendering.
+- `webapp/style.css` + `webapp/admin/index.css`:
+  - Added explicit `.lang-flag-icon` and fallback styling for consistent display.
+
+### fix: admin language flags now respect enabled config
+- `webapp/admin/index.html`:
+  - Admin language picker now loads `/api/v1/languages/enabled` and only renders enabled languages.
+  - Prevents showing all available flags when only a subset is enabled in config.
+
+### fix: language now syncs between admin and player tabs
+- `webapp/assets/js/i18n.js`:
+  - Added cross-tab sync via `storage` event on `mstream-lang`.
+  - Switching language in admin now updates already-open player tabs without requiring reload.
+
+## v6.8.4-velvet — April 2026
+
+### feat: i18n infrastructure — full internationalisation foundation (Phase 1)
+- New `webapp/assets/js/i18n.js` — lightweight i18n engine (IIFE module, no dependencies).
+  - `I18N.t(key, params)` — translates a key with optional `{{param}}` interpolation and plural support (`{one, other, zero, two, few, many}`).
+  - `I18N.loadLanguage(lang?)` — async fetch from `/locales/{lang}.json`; auto-detects from `localStorage['mstream-lang']` or `navigator.language`.
+  - `I18N.onChange(fn)` — pub/sub listener, returns unsubscribe function.
+  - `I18N.ready` — Promise that resolves after the first language load.
+  - `I18N.translatePage()` — walks `[data-i18n]` elements and updates their `textContent` (or a named attribute via `data-i18n-attr`).
+  - `window.t = I18N.t` shorthand alias.
+- New `webapp/locales/en.json` — 811-key comprehensive English source-of-truth file.
+  - Covers all upstream mStream keys plus every Velvet-specific admin string.
+  - Used as the automatic fallback for any missing key in other locales.
+- New `webapp/locales/nl.json` — Dutch (Nederlands) skeleton with 145 translated keys.
+  - Navigation, section labels, common actions, and key admin strings are fully translated.
+  - Falls back to `en.json` for any key not yet present.
+- New `webapp/locales/languages.json` — 12-language index (en, nl, de, fr, es, it, pt, pl, ru, zh, ja, ko).
+- `webapp/admin/index.html` — wired for i18n:
+  - Loads `i18n.js` before the admin script.
+  - All 20+ sidebar nav `<span>` elements and section labels carry `data-i18n` attributes.
+  - Brand label "Admin Panel" carries `data-i18n="admin.nav.brandLabel"`.
+  - New **Language** picker section in the sidebar — `<select>` with all 12 languages; persists choice to localStorage; syncs on load.
+- `webapp/admin/index.js` — Vue 2 reactivity bridge at the top of the file:
+  - `I18NSTATE = Vue.observable({ tick: 0 })` — reactive token.
+  - `Vue.prototype.t(key, params)` — reads `tick` (reactive dep) and calls `I18N.t()`; Vue re-renders templates automatically when the language changes.
+  - `I18N.onChange(() => I18NSTATE.tick++)` installed globally.
+  - `I18N.loadLanguage()` called on startup.
+- Static nav labels update immediately on language switch via `data-i18n` + `translatePage()`.
+- Phase 2 (future): full replacement of hardcoded string literals inside Vue component templates with `t('key')` calls.
+
 ## v6.8.3-velvet — April 2026
 
 ### fix: prevent playback stalls while artist index rebuild runs

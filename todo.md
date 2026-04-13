@@ -16,38 +16,15 @@
 - [ ] Add global media-enrichment budget (shared limiter between artist-image hydration and album-art background tasks)
 - [ ] Add admin performance panel for enrichment throughput (items/min, queue depth, fail rate)
 
-### Localisation (i18n) — Phase 1: Infrastructure + Admin Panel
+### Localisation (i18n) — Phase 2: Remaining admin template strings
 
-Upstream commit `67e11723` added a full i18n system. We have zero i18n infrastructure currently.
-The work is split into two phases. Phase 1 is safe and self-contained.
+Phase 1 (i18n.js engine + admin sidebar + language pickers with real flag-button UI + locale JSON validation on activation) and Phase 3 (full player frontend — app.js + index.html) are complete, including enabled-language filtering in admin and cross-tab language sync (shipped in v6.8.4 and v6.8.5-velvet).
 
-**Phase 1 — copy infrastructure + wire admin panel (do first)**
+**Phase 2 — admin template strings (medium effort)**
 
-- [ ] Copy `webapp/assets/js/i18n.js` from upstream — add `I18N.onChange()` pub/sub and `I18N.ready` Promise (upstream additions)
-- [ ] Create `webapp/assets/js/flags.js` — inline SVG flags for all 12 languages (en, de, es, fr, it, ja, ko, nl, pl, pt, ru, zh)
-- [ ] Create `webapp/assets/js/lang-dropdown.js` — reusable flag+name dropdown (two variants: `.nav-lang-*` top-bar, `.sidenav-lang-*` sidenav-bottom)
-- [ ] Create `webapp/assets/css/lang-dropdown.css` — styles for both dropdown variants
-- [ ] Create `webapp/locales/` directory with all 12 locale JSON files from upstream (`en.json` through `zh.json`), plus `languages.json` index
-- [ ] Add our custom locale keys to all 12 files for features upstream doesn't have: Album Browser, Discogs/Deezer art search, Wrapped stats, Your Stats, zip download, cue markers, podcast player, rate-limit messages (~80–100 new keys)
-- [ ] Wire `webapp/admin/index.html`: add `<script src="../assets/js/flags.js">` after i18n load, add language picker section at bottom of sidebar, add `data-i18n` attrs to all static nav labels
-- [ ] Wire `webapp/admin/index.js`: add `I18NSTATE` Vue.observable + `Vue.prototype.t()` bridge + `I18N.onChange()` listener; update all Vue templates with `{{ t('key') }}` calls
-- [ ] Wire `webapp/admin/admin.css` (or inline styles): add `.admin-lang-*` dropdown styles
-- [ ] Wire `webapp/index.html`: load `flags.js` + `lang-dropdown.js` + `lang-dropdown.css`; add language picker to nav-bar and sidenav bottom
-
-**Phase 2 — wire main webapp app.js (separate release, larger effort)**
-
-- [ ] Audit all hardcoded English strings in `webapp/app.js` — ~200–300 toast messages, status text, button labels, error messages
-- [ ] Add `window.t = (key, params) => I18N.t(key, params)` shim at top of app.js
-- [ ] Replace inline English strings in JS template literals with `t('key')` calls
-- [ ] Add all new keys to all 12 locale files
-- [ ] Test language switching live — verify dynamic UI re-renders (Vue components react via `I18N.onChange`; non-Vue parts need explicit re-render hooks or re-generation of affected DOM)
-
-**Architecture notes:**
-- `i18n.js` uses `data-i18n` attrs for static HTML and `window.t(key)` for dynamic JS — both need wiring
-- Language persisted in `localStorage['mstream-lang']`; detected via `navigator.language` on first visit
-- Locale JSON files use flat dot-delimited keys: `"toast.uploadFailed": "..."`; plurals use `{ "one": "...", "other": "..." }` objects
-- `I18N.onChange(fn)` fires after each language load — Vue bridge increments reactive counter so templates re-render
-- All locale files must stay in sync; `en.json` is the source of truth / fallback
+- [ ] Replace remaining hardcoded English strings in `wrappedAdminView`, `foldersView`, `usersView`, `settingsView`, and `backupView` with `{{ t('admin.*') }}` calls.
+- [ ] Replace remaining hardcoded modal strings in `webapp/admin/index.js` (mpv modal + transcode modals + legacy confirm/modal copy) with i18n keys.
+- [ ] Audit remaining contextual helper text in the player UI (beyond the Now Playing rating helper) for state-aware i18n labels.
 
 ---
 

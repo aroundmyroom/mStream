@@ -44,6 +44,50 @@
 
 ---
 
+## i18n / Taal Module — REQUIRED for all new features
+
+Every new user-visible string MUST use i18n keys — never hardcode text in templates or JS.
+
+- **Player frontend** (`webapp/app.js`): use `t('player.[section].[key]')` — e.g. `toast(t('player.toast.queueEmpty'))`
+- **Admin frontend** (`webapp/admin/index.js`): use `this.t('admin.[section].[key]')` in Petite-Vue templates
+- **Static HTML** (`webapp/index.html`): use `data-i18n="player.[section].[key]"` attributes
+- **Add every new key to `webapp/locales/en.json`** (English, authoritative source)
+- **Add Dutch translation to `webapp/locales/nl.json`** — AI translates NL; keep it natural
+- **MANDATORY: ALL 12 locale files must always stay in sync.** When you add new keys, you MUST add them to every locale file — not just en.json and nl.json. The 10 other locales (de, fr, es, it, pt, pl, ru, zh, ja, ko) get the English value as a placeholder until community translations arrive.
+- **Dynamic values** use `{{param}}` in the key: `t('player.toast.addedSongs', { count: songs.length })`
+- **Key namespaces**: `player.nav.*`, `player.toast.*`, `player.modal.*`, `player.title.*`, `player.boot.*`, `player.player.*`, `admin.*`
+- **After adding keys**, always verify ALL 12 locale files are in sync. Run this script (write to a .cjs file, don't use --eval):
+  ```js
+  const fs = require('fs');
+  const en = JSON.parse(fs.readFileSync('webapp/locales/en.json','utf8'));
+  const enKeys = Object.keys(en);
+  for (const lang of ['nl','de','fr','es','it','pt','pl','ru','zh','ja','ko']) {
+    const d = JSON.parse(fs.readFileSync(`webapp/locales/${lang}.json`,'utf8'));
+    const missing = enKeys.filter(k => !(k in d));
+    if (missing.length) console.log(lang + ' MISSING ' + missing.length + ':', missing.slice(0,5));
+    else console.log(lang + ': OK (' + Object.keys(d).length + ')');
+  }
+  ```
+- **Quick sync command** — adds any missing keys to all 10 other locales using English as base:
+  ```js
+  // /tmp/sync_locales.cjs
+  const fs = require('fs');
+  const en = JSON.parse(fs.readFileSync('webapp/locales/en.json','utf8'));
+  const enKeys = Object.keys(en);
+  for (const lang of ['de','fr','es','it','pt','pl','ru','zh','ja','ko']) {
+    const path = `webapp/locales/${lang}.json`;
+    const d = JSON.parse(fs.readFileSync(path,'utf8'));
+    const missing = enKeys.filter(k => !(k in d));
+    if (!missing.length) { console.log(lang + ': in sync'); continue; }
+    for (const k of missing) d[k] = en[k];
+    const synced = {}; for (const k of enKeys) synced[k] = d[k];
+    fs.writeFileSync(path, JSON.stringify(synced, null, 2));
+    console.log(lang + ': added ' + missing.length);
+  }
+  ```
+
+---
+
 ## Release workflow (full checklist)
 
 Every release follows this exact sequence — do not skip steps:

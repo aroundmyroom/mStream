@@ -845,3 +845,29 @@ tr:hover td { background: var(--raised); }
 .gg-search-panel-head{padding:8px 14px;font-size:.82rem;color:var(--t2);border-bottom:1px solid var(--border);}
 .gg-chip-search{border-color:var(--primary,#6366f1);background:var(--primary-d,rgba(99,102,241,.08));}
 .gg-chip-group-hint{font-size:.7rem;color:var(--t3);margin-left:3px;font-style:italic;}
+
+/* ── Language picker ─────────────────────────────────────────────── */
+.admin-lang-picker-wrap{padding:.45rem .75rem .9rem;}
+.lang-flag-row{display:flex;gap:6px;flex-wrap:wrap;}
+.admin-lang-flag-row{gap:6px;}
+.lang-flag-btn{
+  border:1px solid var(--border);
+  background:var(--c1b,var(--surface));
+  color:var(--t1);
+  border-radius:8px;
+  min-width:34px;
+  height:30px;
+  padding:0;
+  font-size:18px;
+  line-height:1;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  transition:border-color .15s,transform .1s,background .15s,box-shadow .15s;
+}
+.lang-flag-btn:hover{border-color:var(--primary,#6366f1);transform:translateY(-1px);}
+.lang-flag-btn.active{background:var(--primary-d,rgba(99,102,241,.12));border-color:var(--primary,#6366f1);box-shadow:0 0 0 1px var(--primary-d,rgba(99,102,241,.12)) inset;}
+.lang-flag-btn:focus-visible{outline:2px solid var(--primary,#6366f1);outline-offset:2px;}
+.lang-flag-icon{width:22px;height:16px;display:block;border-radius:2px;object-fit:cover;box-shadow:0 0 0 1px rgba(255,255,255,.14) inset;}
+.lang-flag-fallback{font-size:18px;line-height:1;display:inline-block;}
