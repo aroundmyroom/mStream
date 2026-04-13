@@ -1,5 +1,26 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.9.1-velvet — April 2026 — Translation completeness pass
+
+### fix: i18n — missing tooltip and hover translations
+
+- All hardcoded English strings in JavaScript-generated HTML replaced with `t()` calls.
+- **Custom tooltip system fix**: `MutationObserver` now watches `title` attribute mutations in addition to added nodes — fixes player control buttons (play, pause, next, prev, shuffle, repeat, expand NP, EQ, etc.) that set `title` via `data-i18n-attr` after init, which previously bypassed the `#tip-box` system and showed browser-native tooltips.
+- **Radio recording button**: "Record this stream" / "Stop recording" — new keys `player.ctrl.recordStream` / `player.ctrl.stopRecording`.
+- **Expanded Now Playing**: album art search panels (Discogs/Deezer/iTunes/URL), ID3 editor, embed status labels — 41 new `player.npArt.*` and 4 `player.npId3.*` keys.
+- **Queue tooltips**: drag disc, drag handle, remove — `player.ctrl.queueDragDisc/Handle/Remove`.
+- **Song row actions**: "Add to queue", "More options" — `player.ctrl.addToQueue/moreOptions` (5 render functions).
+- **Playlist rows**: Share, Rename, Delete — `player.ctrl.share/rename/delete`.
+- **Smart playlist rows**: Edit, Delete, "Fresh Picks" badge — `player.ctrl.edit/delete/freshPicks`.
+- **Podcast buttons**: Rename, Refresh feed, Unsubscribe — `player.ctrl.rename`, `player.podcast.refreshFeed/unsubscribe`.
+- **Album browser**: Change album art, Add disc to queue, Clear filter, Clear browse — `player.ctrl.changeAlbumArt/addDiscToQueue/clearFilter/clear`.
+- **Home view / artist panel**: shelf drag grip, "Mark artist image as wrong" — `player.ctrl.queueDragHandle/markArtWrong`.
+- **Recording modal**: "Choose a Recordings folder…" paragraph — `player.modal.recChooseFolder`.
+- **Upload**: file remove button — `player.ctrl.uploadRemove`.
+- 13 net new `player.ctrl.*` / `player.podcast.*` keys; Dutch (`nl`) translations provided for all; all 12 locale files in sync.
+
+---
+
 ## v6.9.0-velvet — April 2026 — The localized version
 
 ### feat: i18n — player frontend fully translated (Phase 2)
@@ -78,6 +99,24 @@
 - `webapp/style.css` + `webapp/admin/index.css`:
   - Added explicit `.lang-flag-icon` and fallback styling for consistent display.
 
+### fix: your stats week navigation (earlier/later)
+- `webapp/app.js`:
+  - Fixed **Your Stats** period navigation button logic so **← Earlier** is enabled whenever another historical offset is available.
+  - Removed the broken hardcoded threshold that blocked week-by-week navigation long before reaching the server limit.
+- `docs/your-stats.md`:
+  - Clarified Earlier/Later behavior and documented week-by-week offset navigation.
+
+### feat: i18n sweep — wrapped, play history, mobile apps, now playing metadata
+- `webapp/app.js`:
+  - Localized **Now Playing** metadata labels (Title, Artist, Album, Year, Genre, Track, Disc, Rating, Replay Gain, File Path) by switching to i18n keys.
+  - Localized **Play History** cards and reset confirmation dialogs (Most Played / Recently Played).
+  - Localized **Your Stats** (`wrapped`) UI copy: error/empty states, period labels, Earlier/Later buttons, summary labels, card titles, fact labels, radio/podcast stat labels, and session/facts text.
+  - Localized **Mobile Apps** menu content and QR helper texts.
+- `webapp/locales/en.json` + `webapp/locales/nl.json`:
+  - Added new key groups: `player.apps.*`, `player.playHistory.*`, `player.wrapped.*`.
+- `webapp/locales/{de,fr,es,it,pt,pl,ru,zh,ja,ko}.json`:
+  - Synced all newly added keys from English to keep all 12 locale files in lockstep.
+
 ### fix: admin language flags now respect enabled config
 - `webapp/admin/index.html`:
   - Admin language picker now loads `/api/v1/languages/enabled` and only renders enabled languages.
@@ -87,6 +126,29 @@
 - `webapp/assets/js/i18n.js`:
   - Added cross-tab sync via `storage` event on `mstream-lang`.
   - Switching language in admin now updates already-open player tabs without requiring reload.
+
+### fix: player i18n sweep for missing menu/modal sections
+- `webapp/app.js`:
+  - Localized remaining hardcoded text in **Play History** (Most Played / Recently Played reset panels + confirm dialogs).
+  - Localized **Now Playing** metadata labels (Title/Artist/Album/Year/Genre/Track/Disc/Rating/Replay Gain + File Path label).
+  - Localized **Your Stats** (wrapped) headings, summary labels, period navigation, empty/error states, and fact text.
+  - Localized **Mobile Apps** view labels and QR helper text.
+  - Localized additional menu/view labels in Artist shelves and Smart Playlist sort/filter UI.
+- `webapp/locales/en.json` + `webapp/locales/nl.json`:
+  - Added missing `player.playHistory.*`, `player.wrapped.*`, `player.apps.*`, `player.artists.*`, `player.smart.*`, and `player.ctrl.clear` keys.
+- All 10 additional locale files (de, fr, es, it, pt, pl, ru, zh, ja, ko) were synced with English placeholder values for the new keys.
+
+### fix: artist images admin queue now separates pending from no-image retries
+- `src/api/artists-browse.js` + `src/db/sqlite-backend.js`:
+  - Artist image audit now distinguishes between artists that have never been tried and artists already marked with `last_fetched` after an upstream no-image result.
+  - Admin hydration seeding and queue stats now treat `missing` as the actionable pending queue, while already-tried artists live in a separate `no-image` bucket.
+- `webapp/admin/index.js`:
+  - Admin → Artists now shows a dedicated **No image found** tab instead of mixing those rows into the pending queue.
+  - The panel also shows an inline hint when already-tried no-image artists exist, so admins can review them without confusing them with work that still needs hydration.
+- `webapp/locales/en.json` + `webapp/locales/nl.json`:
+  - Added labels and hints for the new pending/no-image split.
+- `docs/artists.md`:
+  - Documented the new `no-image` audit kind and the pending-vs-tried queue behavior.
 
 ## v6.8.4-velvet — April 2026
 

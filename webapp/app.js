@@ -232,9 +232,9 @@ function _toggleTimeFlipped(e) {
 // Specifically translates HTTP 429 from the server into a rate-limit hint.
 function _artSearchErrMsg(e) {
   if (e?.httpStatus === 429 || e?.status === 429) {
-    return 'Rate limited — too many requests in a short time. Please wait a minute and try again.';
+    return t('player.npArt.rateLimited');
   }
-  return e?.message || 'Search failed';
+  return e?.message || t('player.npArt.searchFailed');
 }
 function artUrl(f, size) {
   if (!f) return null;
@@ -1439,11 +1439,11 @@ function refreshQueueUI() {
     const isActive = i === S.idx;
     const prevLabel = i > 0 ? S.queue[i - 1]._discLabel : undefined;
     const sep = (s._discLabel && s._discLabel !== prevLabel)
-      ? `<div class="q-disc-sep" draggable="true" data-disc-label="${esc(s._discLabel)}" title="Drag to move entire disc"><span>${esc(s._discLabel)}</span></div>`
+      ? `<div class="q-disc-sep" draggable="true" data-disc-label="${esc(s._discLabel)}" title="${t('player.ctrl.queueDragDisc')}"><span>${esc(s._discLabel)}</span></div>`
       : '';
     return sep + `
       <div class="q-item${isActive ? ' q-active' : ''}" data-qi="${i}" draggable="true">
-        <div class="q-drag-handle" title="Drag to reorder">
+        <div class="q-drag-handle" title="${t('player.ctrl.queueDragHandle')}">
           <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" opacity=".7">
             <circle cx="3" cy="2.5" r="1.2"/><circle cx="7" cy="2.5" r="1.2"/>
             <circle cx="3" cy="7"   r="1.2"/><circle cx="7" cy="7"   r="1.2"/>
@@ -1461,7 +1461,7 @@ function refreshQueueUI() {
           <div class="q-title">${esc(s.title || s.filepath?.split('/').pop() || '?')}</div>
           <div class="q-artist">${esc(s.artist || '')}</div>
         </div>
-        <button class="q-remove" data-qi="${i}" title="Remove from queue">
+        <button class="q-remove" data-qi="${i}" title="${t('player.ctrl.queueRemove')}">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>`;
@@ -1692,10 +1692,10 @@ function renderSongRows(songs) {
       </div>
       <div class="row-stars" data-ci="${i}">${stars}</div>
       <div class="row-actions">
-        <button class="row-act-btn add-btn" data-ci="${i}" title="Add to queue">
+        <button class="row-act-btn add-btn" data-ci="${i}" title="${t('player.ctrl.addToQueue')}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
-        <button class="row-act-btn ctx-btn" data-ci="${i}" title="More options">
+        <button class="row-act-btn ctx-btn" data-ci="${i}" title="${t('player.ctrl.moreOptions')}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
         </button>
       </div>
@@ -1729,10 +1729,10 @@ function renderSongRowsWithPath(songs) {
       </div>
       <div class="row-stars" data-ci="${i}">${stars}</div>
       <div class="row-actions">
-        <button class="row-act-btn add-btn" data-ci="${i}" title="Add to queue">
+        <button class="row-act-btn add-btn" data-ci="${i}" title="${t('player.ctrl.addToQueue')}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
-        <button class="row-act-btn ctx-btn" data-ci="${i}" title="More options">
+        <button class="row-act-btn ctx-btn" data-ci="${i}" title="${t('player.ctrl.moreOptions')}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
         </button>
       </div>
@@ -1761,10 +1761,10 @@ function renderSearchRows(songs) {
         ${pathDir ? `<div class="song-path" title="${esc(s.filepath)}">📁 ${esc(pathDir)}</div>` : ''}
       </div>
       <div class="row-actions">
-        <button class="row-act-btn add-btn" data-ci="${i}" title="Add to queue">
+        <button class="row-act-btn add-btn" data-ci="${i}" title="${t('player.ctrl.addToQueue')}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
-        <button class="row-act-btn ctx-btn" data-ci="${i}" title="More options">
+        <button class="row-act-btn ctx-btn" data-ci="${i}" title="${t('player.ctrl.moreOptions')}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
         </button>
       </div>
@@ -1799,10 +1799,10 @@ function renderMostPlayedRows(songs, maxPlays) {
       </div>
       <div class="row-stars" data-ci="${i}">${stars}</div>
       <div class="row-actions">
-        <button class="row-act-btn add-btn" data-ci="${i}" title="Add to queue">
+        <button class="row-act-btn add-btn" data-ci="${i}" title="${t('player.ctrl.addToQueue')}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
-        <button class="row-act-btn ctx-btn" data-ci="${i}" title="More options">
+        <button class="row-act-btn ctx-btn" data-ci="${i}" title="${t('player.ctrl.moreOptions')}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
         </button>
       </div>
@@ -1982,18 +1982,19 @@ function renderNPModal() {
   function mv(val) {
     return val != null ? `<span class="np-meta-v">${esc(String(val))}</span>` : `<span class="np-meta-v dim">—</span>`;
   }
+  const _metaLabel = (k) => String(t(k) || '').replace(/:\s*$/, '');
   const starStr = s.rating ? `${'\u2605'.repeat(Math.round(s.rating/2))}${'\u2606'.repeat(5-Math.round(s.rating/2))}` : null;
   const rgStr   = s.replaygain != null ? `${s.replaygain > 0 ? '+' : ''}${Number(s.replaygain).toFixed(2)} dB` : null;
   const rows = [
-    ['Title',       s.title],
-    ['Artist',      s.artist],
-    ['Album',       s.album],
-    ['Year',        s.year],
-    ['Genre',       s.genre],
-    ['Track',       s.track],
-    ['Disc',        s.disk],
-    ['Rating',      starStr],
-    ['Replay Gain', rgStr],
+    [_metaLabel('metadata.title'),      s.title],
+    [_metaLabel('metadata.artist'),     s.artist],
+    [_metaLabel('metadata.album'),      s.album],
+    [_metaLabel('metadata.year'),       s.year],
+    [_metaLabel('player.radio.searchLabelGenre'), s.genre],
+    [_metaLabel('metadata.track'),      s.track],
+    [_metaLabel('metadata.disc'),       s.disk],
+    [_metaLabel('metadata.rating'),     starStr],
+    [_metaLabel('metadata.replayGain'), rgStr],
   ];
   document.getElementById('np-meta').innerHTML = isRadio ? '' : rows.map(([k, v]) =>
     `<span class="np-meta-k">${k}</span>${mv(v)}`
@@ -2005,7 +2006,7 @@ function renderNPModal() {
     const fname = parts.pop();
     const dirParts = parts.filter(Boolean);
     const dirHtml = dirParts.map(p => `<span class="np-fp-dir">${esc(p)}</span><span class="np-fp-sep">\\</span>`).join('');
-    fpEl.innerHTML = `<span class="np-fp-label">File Path</span><div class="np-fp-path">${dirHtml}<span class="np-fp-file">${esc(fname)}</span></div>`;
+    fpEl.innerHTML = `<span class="np-fp-label">${esc(_metaLabel('metadata.filePath'))}</span><div class="np-fp-path">${dirHtml}<span class="np-fp-file">${esc(fname)}</span></div>`;
     fpEl.classList.remove('hidden');
   } else {
     fpEl.innerHTML = '';
@@ -2021,12 +2022,12 @@ function renderNPModal() {
         _dsEl.dataset.songFp = s.filepath || '';
         const _ext = (s.filepath || '').split('.').pop().toLowerCase();
         const _wavLike = ['wav','aiff','aif','w64'].includes(_ext);
-        const _btn    = S.discogsEnabled ? `<button class="np-discogs-btn" id="np-discogs-search-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search Album Art on Discogs</button>` : '';
-        const _dzbtn  = S.deezerEnabled  ? `<button class="np-discogs-btn" id="np-deezer-search-btn" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search Album Art on Deezer</button>` : '';
-        const _itbtn  = S.itunesEnabled  ? `<button class="np-discogs-btn" id="np-itunes-search-btn" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search Album Art on iTunes</button>` : '';
-        const _urlbtn = `<button class="np-discogs-btn" id="np-url-paste-btn" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Paste Image URL</button>`;
+        const _btn    = S.discogsEnabled ? `<button class="np-discogs-btn" id="np-discogs-search-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> ${t('player.npArt.searchDiscogs')}</button>` : '';
+        const _dzbtn  = S.deezerEnabled  ? `<button class="np-discogs-btn" id="np-deezer-search-btn" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> ${t('player.npArt.searchDeezer')}</button>` : '';
+        const _itbtn  = S.itunesEnabled  ? `<button class="np-discogs-btn" id="np-itunes-search-btn" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> ${t('player.npArt.searchItunes')}</button>` : '';
+        const _urlbtn = `<button class="np-discogs-btn" id="np-url-paste-btn" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> ${t('player.npArt.pasteUrlBtn')}</button>`;
         _dsEl.innerHTML = _wavLike
-          ? _btn + _dzbtn + _itbtn + _urlbtn + `<span class="np-discogs-note" style="margin-top:5px;display:block">WAV files can\'t store embedded art — art will be saved to the database only.<br>It is lost on a DB reset or album-art cache delete.</span>`
+          ? _btn + _dzbtn + _itbtn + _urlbtn + `<span class="np-discogs-note" style="margin-top:5px;display:block">${t('player.npArt.wavNote')}</span>`
           : _btn + _dzbtn + _itbtn + _urlbtn;
       }
     } else {
@@ -2037,7 +2038,7 @@ function renderNPModal() {
   const _id3El = document.getElementById('np-id3-section');
   if (_id3El) {
     _id3El.innerHTML = (!isRadio && S.isAdmin && S.allowId3Edit && s)
-      ? `<button class="np-id3-edit-btn" id="np-id3-edit-btn">&#9998; Edit Tags</button>`
+      ? `<button class="np-id3-edit-btn" id="np-id3-edit-btn">${t('player.npArt.editTagsBtn')}</button>`
       : '';
   }
 }
@@ -2063,7 +2064,7 @@ async function _npItunesSearch(song) {
   const dsEl   = document.getElementById('np-discogs-section');
   const npLeft = document.getElementById('np-left');
   if (!dsEl || !song) return;
-  dsEl.innerHTML = `<span class="np-discogs-status">Searching iTunes…</span>`;
+  dsEl.innerHTML = `<span class="np-discogs-status">${t('player.npArt.searchingItunes')}</span>`;
   npLeft?.classList.add('np-left--picking');
   try {
     const params = new URLSearchParams();
@@ -2073,16 +2074,16 @@ async function _npItunesSearch(song) {
     if (!_itunesArtist && !song.album && song.title) params.set('album', song.title);
     if (!params.toString()) {
       dsEl.innerHTML =
-        `<span class="np-discogs-status">No artist or album info available for search</span>` +
-        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
+        `<span class="np-discogs-status">${t('player.npArt.noArtistAlbum')}</span>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">${t('player.npArt.back')}</button>`;
       return;
     }
     const d = await api('GET', `api/v1/itunes/search?${params}`);
     if (!d.results || !d.results.length) {
       dsEl.innerHTML =
-        `<span class="np-discogs-status">No results found on iTunes</span>` +
-        `<button class="np-discogs-btn" id="np-itunes-search-btn" style="margin-top:8px">Try again</button>` +
-        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
+        `<span class="np-discogs-status">${t('player.npArt.noResultsItunes')}</span>` +
+        `<button class="np-discogs-btn" id="np-itunes-search-btn" style="margin-top:8px">${t('player.npArt.tryAgain')}</button>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">${t('player.npArt.back')}</button>`;
       return;
     }
     const thumbsHtml = d.results.map(r =>
@@ -2094,16 +2095,16 @@ async function _npItunesSearch(song) {
     ).join('');
     dsEl.innerHTML =
       `<div class="np-discogs-pick-header">` +
-        `<span class="np-discogs-pick-title">Pick a cover (iTunes)</span>` +
-        `<button class="np-discogs-cancel" id="np-discogs-back-btn">← Cancel</button>` +
+        `<span class="np-discogs-pick-title">${t('player.npArt.pickCoverItunes')}</span>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn">${t('player.npArt.cancel')}</button>` +
       `</div>` +
       `<div class="np-discogs-choices">${thumbsHtml}</div>` +
-      `<span class="np-discogs-note">via iTunes</span>`;
+      `<span class="np-discogs-note">${t('player.npArt.viaItunes')}</span>`;
     dsEl.dataset.songFp = song.filepath || '';
   } catch(e) {
     dsEl.innerHTML =
       `<span class="np-discogs-status">${esc(_artSearchErrMsg(e))}</span>` +
-      `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
+      `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">${t('player.npArt.back')}</button>`;
   }
 }
 
@@ -2112,7 +2113,7 @@ async function _npDeezerSearch(song) {
   const dsEl   = document.getElementById('np-discogs-section');
   const npLeft = document.getElementById('np-left');
   if (!dsEl || !song) return;
-  dsEl.innerHTML = `<span class="np-discogs-status">Searching Deezer…</span>`;
+dsEl.innerHTML = `<span class="np-discogs-status">${t('player.npArt.searchingDeezer')}</span>`;
   npLeft?.classList.add('np-left--picking');
   try {
     const artist = song.artist || _folderArtistFromPath(song.filepath);
@@ -2125,9 +2126,9 @@ async function _npDeezerSearch(song) {
     const hits = (data.data || []).filter(h => h.cover_medium);
     if (!hits.length) {
       dsEl.innerHTML =
-        `<span class="np-discogs-status">No results found on Deezer</span>` +
-        `<button class="np-discogs-btn" id="np-deezer-search-btn" style="margin-top:8px">Try again</button>` +
-        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
+        `<span class="np-discogs-status">${t('player.npArt.noResultsDeezer')}</span>` +
+        `<button class="np-discogs-btn" id="np-deezer-search-btn" style="margin-top:8px">${t('player.npArt.tryAgain')}</button>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">${t('player.npArt.back')}</button>`;
       return;
     }
     const thumbsHtml = hits.map(h =>
@@ -2135,20 +2136,20 @@ async function _npDeezerSearch(song) {
         src="${h.cover_medium}" alt=""
         title="${esc(h.title)}${h.artist?.name ? ' — ' + esc(h.artist.name) : ''}"
         data-cover-xl="${esc(h.cover_xl || h.cover_big || h.cover_medium)}"
-        data-filepath="${esc(song.filepath || '')}">`
+        data-filepath="${esc(song.filepath || '')}">` 
     ).join('');
     dsEl.innerHTML =
       `<div class="np-discogs-pick-header">` +
-        `<span class="np-discogs-pick-title">Pick a cover (Deezer)</span>` +
-        `<button class="np-discogs-cancel" id="np-discogs-back-btn">← Cancel</button>` +
+        `<span class="np-discogs-pick-title">${t('player.npArt.pickCoverDeezer')}</span>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn">${t('player.npArt.cancel')}</button>` +
       `</div>` +
       `<div class="np-discogs-choices">${thumbsHtml}</div>` +
-      `<span class="np-discogs-note">via Deezer</span>`;
+      `<span class="np-discogs-note">${t('player.npArt.viaDeezer')}</span>`;
     dsEl.dataset.songFp = song.filepath || '';
   } catch(e) {
     dsEl.innerHTML =
       `<span class="np-discogs-status">${esc(_artSearchErrMsg(e))}</span>` +
-      `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
+      `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">${t('player.npArt.back')}</button>`;
   }
 }
 
@@ -2161,12 +2162,12 @@ function _npUrlPaste(song) {
   dsEl.dataset.songFp = song.filepath || '';
   dsEl.innerHTML =
     `<div class="np-discogs-pick-header">` +
-      `<span class="np-discogs-pick-title">Paste an image URL</span>` +
-      `<button class="np-discogs-cancel" id="np-discogs-back-btn">← Cancel</button>` +
+      `<span class="np-discogs-pick-title">${t('player.npArt.pasteUrlTitle')}</span>` +
+      `<button class="np-discogs-cancel" id="np-discogs-back-btn">${t('player.npArt.cancel')}</button>` +
     `</div>` +
     `<div class="np-url-paste-row">` +
       `<input class="np-url-paste-inp" id="np-url-paste-inp" type="url" placeholder="https://…" autocomplete="off" spellcheck="false">` +
-      `<button class="np-url-paste-go" id="np-url-paste-go-btn">Use</button>` +
+      `<button class="np-url-paste-go" id="np-url-paste-go-btn">${t('player.npArt.useBtn')}</button>` +
     `</div>` +
     `<span id="np-url-paste-preview-wrap" class="np-url-paste-preview-wrap hidden">` +
       `<img id="np-url-paste-preview" class="np-url-paste-preview" alt="">` +
@@ -2184,7 +2185,7 @@ async function _npDiscogsSearch(song) {
   const dsEl  = document.getElementById('np-discogs-section');
   const npLeft = document.getElementById('np-left');
   if (!dsEl || !song) return;
-  dsEl.innerHTML = `<span class="np-discogs-status">Searching Discogs…</span>`;
+  dsEl.innerHTML = `<span class="np-discogs-status">${t('player.npArt.searchingDiscogs')}</span>`;
   npLeft?.classList.add('np-left--picking');
   try {
     const params = new URLSearchParams();
@@ -2204,9 +2205,9 @@ async function _npDiscogsSearch(song) {
     const d = await api('GET', `api/v1/discogs/coverart?${params}`);
     if (!d.choices || !d.choices.length) {
       dsEl.innerHTML =
-        `<span class="np-discogs-status">No results found</span>` +
-        `<button class="np-discogs-btn" id="np-discogs-search-btn" style="margin-top:8px">Try again</button>` +
-        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
+        `<span class="np-discogs-status">${t('player.npArt.noResults')}</span>` +
+        `<button class="np-discogs-btn" id="np-discogs-search-btn" style="margin-top:8px">${t('player.npArt.tryAgain')}</button>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">${t('player.npArt.back')}</button>`;
       return;
     }
     const thumbsHtml = d.choices.map(c =>
@@ -2218,19 +2219,19 @@ async function _npDiscogsSearch(song) {
     ).join('');
     dsEl.innerHTML =
       `<div class="np-discogs-pick-header">` +
-        `<span class="np-discogs-pick-title">Pick a cover</span>` +
-        `<button class="np-discogs-cancel" id="np-discogs-back-btn">← Cancel</button>` +
+        `<span class="np-discogs-pick-title">${t('player.npArt.pickCover')}</span>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn">${t('player.npArt.cancel')}</button>` +
       `</div>` +
       `<div class="np-discogs-choices">${thumbsHtml}</div>` +
-      `<span class="np-discogs-note">via Discogs</span>`;
+      `<span class="np-discogs-note">${t('player.npArt.viaDiscogs')}</span>`;
     dsEl.dataset.songFp = song.filepath || '';
   } catch(e) {
     const msg = e?.status === 404
-      ? 'Discogs not enabled — configure in admin'
+      ? t('player.npArt.discogsNotEnabled')
       : esc(_artSearchErrMsg(e));
     dsEl.innerHTML =
       `<span class="np-discogs-status">${msg}</span>` +
-      `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">← Back</button>`;
+      `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:6px">${t('player.npArt.back')}</button>`;
   }
 } 
 
@@ -2240,16 +2241,16 @@ function _npId3Edit(song) {
   if (!id3El || !song) return;
   const v = x => esc(String(x ?? ''));
   id3El.innerHTML = `<div class="np-id3-form">
-    <div class="np-id3-row"><label class="np-id3-lbl">Title</label><input class="np-id3-inp" id="id3-title" value="${v(song.title)}"></div>
-    <div class="np-id3-row"><label class="np-id3-lbl">Artist</label><input class="np-id3-inp" id="id3-artist" value="${v(song.artist)}"></div>
-    <div class="np-id3-row"><label class="np-id3-lbl">Album</label><input class="np-id3-inp" id="id3-album" value="${v(song.album)}"></div>
-    <div class="np-id3-row"><label class="np-id3-lbl">Year</label><input class="np-id3-inp" id="id3-year" value="${v(song.year)}"></div>
-    <div class="np-id3-row"><label class="np-id3-lbl">Genre</label><input class="np-id3-inp" id="id3-genre" value="${v(song.genre)}"></div>
-    <div class="np-id3-row"><label class="np-id3-lbl">Track</label><input class="np-id3-inp" id="id3-track" value="${v(song.track)}"></div>
-    <div class="np-id3-row"><label class="np-id3-lbl">Disc</label><input class="np-id3-inp" id="id3-disk" value="${v(song.disk)}"></div>
+    <div class="np-id3-row"><label class="np-id3-lbl">${t('metadata.title')}</label><input class="np-id3-inp" id="id3-title" value="${v(song.title)}"></div>
+    <div class="np-id3-row"><label class="np-id3-lbl">${t('metadata.artist')}</label><input class="np-id3-inp" id="id3-artist" value="${v(song.artist)}"></div>
+    <div class="np-id3-row"><label class="np-id3-lbl">${t('metadata.album')}</label><input class="np-id3-inp" id="id3-album" value="${v(song.album)}"></div>
+    <div class="np-id3-row"><label class="np-id3-lbl">${t('metadata.year')}</label><input class="np-id3-inp" id="id3-year" value="${v(song.year)}"></div>
+    <div class="np-id3-row"><label class="np-id3-lbl">${t('metadata.genre')}</label><input class="np-id3-inp" id="id3-genre" value="${v(song.genre)}"></div>
+    <div class="np-id3-row"><label class="np-id3-lbl">${t('metadata.track')}</label><input class="np-id3-inp" id="id3-track" value="${v(song.track)}"></div>
+    <div class="np-id3-row"><label class="np-id3-lbl">${t('metadata.disc')}</label><input class="np-id3-inp" id="id3-disk" value="${v(song.disk)}"></div>
     <div class="np-id3-btns">
-      <button class="np-discogs-btn" id="np-id3-apply-btn">Apply</button>
-      <button class="np-discogs-cancel" id="np-id3-cancel-btn">Cancel</button>
+      <button class="np-discogs-btn" id="np-id3-apply-btn">${t('player.npId3.apply')}</button>
+      <button class="np-discogs-cancel" id="np-id3-cancel-btn">${t('player.npId3.cancel')}</button>
     </div>
     <span id="np-id3-status" class="np-discogs-status" style="display:none"></span>
   </div>`;
@@ -2258,7 +2259,7 @@ function _npId3Edit(song) {
 async function _npId3ApplyTags(song) {
   const statusEl = document.getElementById('np-id3-status');
   const applyBtn = document.getElementById('np-id3-apply-btn');
-  if (statusEl) { statusEl.textContent = 'Saving\u2026'; statusEl.style.display = ''; }
+  if (statusEl) { statusEl.textContent = t('player.npId3.saving'); statusEl.style.display = ''; }
   if (applyBtn) applyBtn.disabled = true;
   // Snapshot playback state BEFORE the API call so we can reload seamlessly.
   // Pause immediately — the tag write takes 2-4 seconds (3 ffmpeg passes:
@@ -2316,7 +2317,7 @@ async function _npId3ApplyTags(song) {
   } catch(e) {
     // Resume playback as-is — the file wasn't changed
     if (_isCurrentSong && _wasPlaying) audioEl.play().catch(() => {});
-    if (statusEl) { statusEl.textContent = 'Error: ' + esc(e?.message || 'failed'); statusEl.style.display = ''; }
+    if (statusEl) { statusEl.textContent = t('player.npId3.errorSaving', { msg: esc(e?.message || 'failed') }); statusEl.style.display = ''; }
     if (applyBtn) applyBtn.disabled = false;
   }
 }
@@ -4666,7 +4667,7 @@ function openUploadModal(dir) {
           <span class="upload-file-name" title="${esc(pf.file.name)}">${esc(pf.file.name)}</span>
           <span class="upload-file-size">${fmtSize(pf.file.size)}</span>
           ${pf.status === 'waiting'
-            ? `<button class="upload-file-remove" data-idx="${i}" title="Remove">✕</button>`
+            ? `<button class="upload-file-remove" data-idx="${i}" title="${t('player.ctrl.uploadRemove')}">✕</button>`
             : `<span class="upload-file-status">${pf.status === 'done' ? '✓' : pf.status === 'error' ? '✗' : '…'}</span>`}
         </div>
         <div class="upload-progress"><div class="upload-progress-bar" id="upb-${i}" style="width:${pf.progress || 0}%"></div></div>
@@ -4879,11 +4880,11 @@ function renderPlaylistNav() {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
         ${esc(p.name)}
       </button>
-      <button class="pl-row-share" data-pl="${esc(p.name)}" title="Share">
+      <button class="pl-row-share" data-pl="${esc(p.name)}" title="${t('player.ctrl.share')}">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
       </button>
-      <button class="pl-row-edit" data-pl="${esc(p.name)}" title="Rename">✎</button>
-      <button class="pl-row-del" data-pl="${esc(p.name)}" title="Delete">×</button>
+      <button class="pl-row-edit" data-pl="${esc(p.name)}" title="${t('player.ctrl.rename')}">✎</button>
+      <button class="pl-row-del" data-pl="${esc(p.name)}" title="${t('player.ctrl.delete')}">×</button>
     </div>`).join('');
 
   nav.querySelectorAll('.pl-row-btn').forEach(btn => {
@@ -5097,7 +5098,7 @@ async function viewArtists() {
 
     function _wrongBtn(a) {
       if (!S.isAdmin) return '';
-      return `<button type="button" class="artist-wrong-btn" title="Mark artist image as wrong" aria-label="Mark artist image as wrong" data-mark-wrong="1" data-akey="${esc(a.artistKey)}" data-aname="${esc(a.canonicalName)}">⚑</button>`;
+      return `<button type="button" class="artist-wrong-btn" title="${t('player.ctrl.markArtWrong')}" aria-label="${t('player.ctrl.markArtWrong')}" data-mark-wrong="1" data-akey="${esc(a.artistKey)}" data-aname="${esc(a.canonicalName)}">⚑</button>`;
     }
 
     // ── artist card helper (HOME-shelf style) ──────────────────────────────
@@ -5126,7 +5127,7 @@ async function viewArtists() {
       if (!cards) return '';
       return `<div class="home-shelf" data-shelf="${id}" draggable="true">
         <div class="home-shelf-header">
-          <span class="home-grip" title="Drag to reorder">${_ART_GRIP}</span>
+          <span class="home-grip" title="${t('player.ctrl.queueDragHandle')}">${_ART_GRIP}</span>
           <span class="home-shelf-title">${title}</span>
         </div>
         <div class="home-row">${cards}</div>
@@ -5147,9 +5148,9 @@ async function viewArtists() {
     }
 
     const _artShelfDefs = [
-      { id: 'art-most-songs', html: artistShelf('art-most-songs', 'Most Songs in Library', validTop.slice(0, 8).map(artistCard).join('') || null) },
-      { id: 'art-most-played',html: artistShelf('art-most-played','Most Played Artists',  validMostPlayed.slice(0, 8).map(artistCard).join('') || null) },
-      { id: 'art-recent',     html: artistShelf('art-recent',     'Recently Listened',     validRecent.map(artistCard).join('')          || null) },
+      { id: 'art-most-songs', html: artistShelf('art-most-songs', t('player.artists.shelfMostSongs'), validTop.slice(0, 8).map(artistCard).join('') || null) },
+      { id: 'art-most-played',html: artistShelf('art-most-played', t('player.artists.shelfMostPlayedArtists'), validMostPlayed.slice(0, 8).map(artistCard).join('') || null) },
+      { id: 'art-recent',     html: artistShelf('art-recent', t('player.artists.shelfRecentlyListened'), validRecent.map(artistCard).join('') || null) },
     ];
     const _artShelfMap  = Object.fromEntries(_artShelfDefs.map(s => [s.id, s.html]));
     const _artDefOrder  = _artShelfDefs.map(s => s.id);
@@ -5170,7 +5171,7 @@ async function viewArtists() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input id="art-search" class="fe-filter-input" type="text" placeholder="${t('player.artists.searchAllPlaceholder', { count: totalCount.toLocaleString() })}" autocomplete="off">
           <span id="art-match-count" class="fe-match-count"></span>
-          <button id="art-search-clear" class="fe-filter-clear hidden" title="Clear">✕</button>
+          <button id="art-search-clear" class="fe-filter-clear hidden" title="${t('player.ctrl.clear')}">✕</button>
         </div>
         <div id="art-letter-results" class="artist-list"></div>
       </div>
@@ -5462,7 +5463,7 @@ async function viewAlbumLibrary() {
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <input id="allib-filter" class="fe-filter-input" type="text" placeholder="${t('player.albums.searchAlbumsOrSeriesPlaceholder')}" autocomplete="off">
         <span id="allib-count" class="fe-match-count"></span>
-        <button id="allib-clear" class="fe-filter-clear hidden" title="Clear filter">✕</button>
+        <button id="allib-clear" class="fe-filter-clear hidden" title="${t('player.ctrl.clearFilter')}">✕</button>
       </div>
       ${showSourcePills ? `<div class="search-vpath-pills" id="allib-source-pills">${sourcesInData.map(v => `<button class="dj-vpath-pill on" data-alb-source="${esc(v)}">${esc(v)}</button>`).join('')}</div>` : ''}
       <div id="allib-grid" class="album-grid"></div>`;
@@ -5615,11 +5616,11 @@ function _albArtPickerReset() {
   const el = document.getElementById('albd-art-picker');
   if (!el) return;
   const sv = '\u{1F50D}';
-  const _dsbtn  = S.discogsEnabled ? `<button class="np-discogs-btn albd-art-src-btn" data-src="discogs"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search on Discogs</button>` : '';
-  const _dzbtn  = S.deezerEnabled  ? `<button class="np-discogs-btn albd-art-src-btn" data-src="deezer"  style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search on Deezer</button>`  : '';
-  const _itbtn  = S.itunesEnabled  ? `<button class="np-discogs-btn albd-art-src-btn" data-src="itunes"  style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Search on iTunes</button>`  : '';
-  const _urlbtn = `<button class="np-discogs-btn albd-art-src-btn" data-src="url" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Paste Image URL</button>`;
-  el.innerHTML = (_dsbtn || _dzbtn || _itbtn ? '' : '<span class="np-discogs-status">No art sources enabled (enable Discogs/Deezer/iTunes in admin)</span>') +
+  const _dsbtn  = S.discogsEnabled ? `<button class="np-discogs-btn albd-art-src-btn" data-src="discogs"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> ${t('player.npArt.searchOnDiscogs')}</button>` : '';
+  const _dzbtn  = S.deezerEnabled  ? `<button class="np-discogs-btn albd-art-src-btn" data-src="deezer"  style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> ${t('player.npArt.searchOnDeezer')}</button>`  : '';
+  const _itbtn  = S.itunesEnabled  ? `<button class="np-discogs-btn albd-art-src-btn" data-src="itunes"  style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> ${t('player.npArt.searchOnItunes')}</button>`  : '';
+  const _urlbtn = `<button class="np-discogs-btn albd-art-src-btn" data-src="url" style="margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> ${t('player.npArt.pasteUrlBtn')}</button>`;
+  el.innerHTML = (_dsbtn || _dzbtn || _itbtn ? '' : `<span class="np-discogs-status">${t('player.npArt.noSourcesEnabled')}</span>`) +
     _dsbtn + _dzbtn + _itbtn + _urlbtn;
   document.getElementById('albd-art-picker-section')?.classList.remove('hidden');
 }
@@ -5628,7 +5629,7 @@ async function _albDiscogsSearch() {
   const album = _albDetailAlbum;
   const el    = document.getElementById('albd-art-picker');
   if (!el || !album) return;
-  el.innerHTML = `<span class="np-discogs-status">Searching Discogs\u2026</span>`;
+  el.innerHTML = `<span class="np-discogs-status">${t('player.npArt.searchingDiscogs')}</span>`;
   try {
     const params = new URLSearchParams();
     const artist = album.artist || _folderArtistFromPath(album.path);
@@ -5637,15 +5638,15 @@ async function _albDiscogsSearch() {
     if (album.year)        params.set('year',   String(album.year));
     const d = await api('GET', `api/v1/discogs/coverart?${params}`);
     if (!d.choices || !d.choices.length) {
-      el.innerHTML = `<span class="np-discogs-status">No results found</span>
-        <button class="np-discogs-btn albd-art-src-btn" data-src="discogs" style="margin-top:8px">Try again</button>
-        <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
+      el.innerHTML = `<span class="np-discogs-status">${t('player.npArt.noResults')}</span>
+        <button class="np-discogs-btn albd-art-src-btn" data-src="discogs" style="margin-top:8px">${t('player.npArt.tryAgain')}</button>
+        <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">${t('player.npArt.back')}</button>`;
       return;
     }
     el.innerHTML =
       `<div class="np-discogs-pick-header">` +
-        `<span class="np-discogs-pick-title">Pick a cover (Discogs)</span>` +
-        `<button class="np-discogs-cancel" id="albd-art-back-btn">\u2190 Cancel</button>` +
+        `<span class="np-discogs-pick-title">${t('player.npArt.pickCoverDiscogs')}</span>` +
+        `<button class="np-discogs-cancel" id="albd-art-back-btn">${t('player.npArt.cancel')}</button>` +
       `</div>` +
       `<div class="np-discogs-choices">` +
         d.choices.map(c =>
@@ -5655,10 +5656,10 @@ async function _albDiscogsSearch() {
             data-release-id="${c.releaseId}">`
         ).join('') +
       `</div>` +
-      `<span class="np-discogs-note">via Discogs — click a cover to save as cover.jpg</span>`;
+      `<span class="np-discogs-note">${t('player.npArt.viaDiscogsAlbum')}</span>`;
   } catch(e) {
     el.innerHTML = `<span class="np-discogs-status">${esc(_artSearchErrMsg(e))}</span>
-      <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
+      <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">${t('player.npArt.back')}</button>`;
   }
 }
 
@@ -5666,7 +5667,7 @@ async function _albDeezerSearch() {
   const album = _albDetailAlbum;
   const el    = document.getElementById('albd-art-picker');
   if (!el || !album) return;
-  el.innerHTML = `<span class="np-discogs-status">Searching Deezer\u2026</span>`;
+  el.innerHTML = `<span class="np-discogs-status">${t('player.npArt.searchingDeezer')}</span>`;
   try {
     const artist = album.artist || _folderArtistFromPath(album.path);
     const params = new URLSearchParams();
@@ -5676,15 +5677,15 @@ async function _albDeezerSearch() {
     const d = await api('GET', `api/v1/deezer/search?${params}`);
     const hits = (d.data || []).filter(h => h.cover_medium);
     if (!hits.length) {
-      el.innerHTML = `<span class="np-discogs-status">No results found on Deezer</span>
-        <button class="np-discogs-btn albd-art-src-btn" data-src="deezer" style="margin-top:8px">Try again</button>
-        <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
+      el.innerHTML = `<span class="np-discogs-status">${t('player.npArt.noResultsDeezer')}</span>
+        <button class="np-discogs-btn albd-art-src-btn" data-src="deezer" style="margin-top:8px">${t('player.npArt.tryAgain')}</button>
+        <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">${t('player.npArt.back')}</button>`;
       return;
     }
     el.innerHTML =
       `<div class="np-discogs-pick-header">` +
-        `<span class="np-discogs-pick-title">Pick a cover (Deezer)</span>` +
-        `<button class="np-discogs-cancel" id="albd-art-back-btn">\u2190 Cancel</button>` +
+        `<span class="np-discogs-pick-title">${t('player.npArt.pickCoverDeezer')}</span>` +
+        `<button class="np-discogs-cancel" id="albd-art-back-btn">${t('player.npArt.cancel')}</button>` +
       `</div>` +
       `<div class="np-discogs-choices">` +
         hits.map(h =>
@@ -5694,10 +5695,10 @@ async function _albDeezerSearch() {
             data-cover-url="${esc(h.cover_xl || h.cover_big || h.cover_medium)}">`
         ).join('') +
       `</div>` +
-      `<span class="np-discogs-note">via Deezer — click a cover to save as cover.jpg</span>`;
+      `<span class="np-discogs-note">${t('player.npArt.viaDeezerAlbum')}</span>`;
   } catch(e) {
     el.innerHTML = `<span class="np-discogs-status">${esc(_artSearchErrMsg(e))}</span>
-      <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
+      <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">${t('player.npArt.back')}</button>`;
   }
 }
 
@@ -5705,7 +5706,7 @@ async function _albItunesSearch() {
   const album = _albDetailAlbum;
   const el    = document.getElementById('albd-art-picker');
   if (!el || !album) return;
-  el.innerHTML = `<span class="np-discogs-status">Searching iTunes\u2026</span>`;
+  el.innerHTML = `<span class="np-discogs-status">${t('player.npArt.searchingItunes')}</span>`;
   try {
     const params = new URLSearchParams();
     const artist = album.artist || _folderArtistFromPath(album.path);
@@ -5713,15 +5714,15 @@ async function _albItunesSearch() {
     if (album.displayName) params.set('album',  album.displayName);
     const d = await api('GET', `api/v1/itunes/search?${params}`);
     if (!d.results || !d.results.length) {
-      el.innerHTML = `<span class="np-discogs-status">No results found on iTunes</span>
-        <button class="np-discogs-btn albd-art-src-btn" data-src="itunes" style="margin-top:8px">Try again</button>
-        <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
+      el.innerHTML = `<span class="np-discogs-status">${t('player.npArt.noResultsItunes')}</span>
+        <button class="np-discogs-btn albd-art-src-btn" data-src="itunes" style="margin-top:8px">${t('player.npArt.tryAgain')}</button>
+        <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">${t('player.npArt.back')}</button>`;
       return;
     }
     el.innerHTML =
       `<div class="np-discogs-pick-header">` +
-        `<span class="np-discogs-pick-title">Pick a cover (iTunes)</span>` +
-        `<button class="np-discogs-cancel" id="albd-art-back-btn">\u2190 Cancel</button>` +
+        `<span class="np-discogs-pick-title">${t('player.npArt.pickCoverItunes')}</span>` +
+        `<button class="np-discogs-cancel" id="albd-art-back-btn">${t('player.npArt.cancel')}</button>` +
       `</div>` +
       `<div class="np-discogs-choices">` +
         d.results.map(r =>
@@ -5731,10 +5732,10 @@ async function _albItunesSearch() {
             data-cover-url="${esc(r.coverUrl)}">`
         ).join('') +
       `</div>` +
-      `<span class="np-discogs-note">via iTunes — click a cover to save as cover.jpg</span>`;
+      `<span class="np-discogs-note">${t('player.npArt.viaItunesAlbum')}</span>`;
   } catch(e) {
     el.innerHTML = `<span class="np-discogs-status">${esc(_artSearchErrMsg(e))}</span>
-      <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
+      <button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">${t('player.npArt.back')}</button>`;
   }
 }
 
@@ -5743,12 +5744,12 @@ function _albUrlPaste() {
   if (!el) return;
   el.innerHTML =
     `<div class="np-discogs-pick-header">` +
-      `<span class="np-discogs-pick-title">Paste an image URL</span>` +
-      `<button class="np-discogs-cancel" id="albd-art-back-btn">\u2190 Cancel</button>` +
+      `<span class="np-discogs-pick-title">${t('player.npArt.pasteUrlTitle')}</span>` +
+      `<button class="np-discogs-cancel" id="albd-art-back-btn">${t('player.npArt.cancel')}</button>` +
     `</div>` +
     `<div class="np-url-paste-row">` +
       `<input class="np-url-paste-inp" id="albd-url-paste-inp" type="url" placeholder="https://\u2026" autocomplete="off" spellcheck="false">` +
-      `<button class="np-url-paste-go" id="albd-url-paste-go-btn">Use</button>` +
+      `<button class="np-url-paste-go" id="albd-url-paste-go-btn">${t('player.npArt.useBtn')}</button>` +
     `</div>` +
     `<span id="albd-url-paste-preview-wrap" class="np-url-paste-preview-wrap hidden">` +
       `<img id="albd-url-paste-preview" class="np-url-paste-preview" alt="">` +
@@ -5794,7 +5795,7 @@ async function _albSetArt(opts) {
   } catch(err) {
     el.innerHTML =
       `<span class="np-discogs-status" style="color:rgba(255,100,100,.8)">Failed: ${esc(err?.message || 'error')}</span>` +
-      `<button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">\u2190 Back</button>`;
+      `<button class="np-discogs-cancel" id="albd-art-back-btn" style="margin-top:6px">${t('player.npArt.back')}</button>`;
   }
 }
 
@@ -5839,7 +5840,7 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
     const isCueAlbum = discs.some(d => d.tracks.length === 1 && d.tracks[0].cuepoints?.length >= 2);
 
     const artEditOverlay = S.isAdmin
-      ? `<div class="alb-art-edit-overlay" id="albd-art-edit-btn" title="Change album art">
+      ? `<div class="alb-art-edit-overlay" id="albd-art-edit-btn" title="${t('player.ctrl.changeAlbumArt')}">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
@@ -5874,7 +5875,7 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
         ${discs.map((d, i) => {
           const lbl = esc(d.label || ('Disc ' + (i+1)));
           return `<div class="disc-tab-group">
-            <button class="disc-tab-btn${i === discIdx ? ' active' : ''}" data-disc="${i}">${lbl}</button><button class="disc-tab-add" data-disc="${i}" title="Add ${lbl} to queue">+</button>
+            <button class="disc-tab-btn${i === discIdx ? ' active' : ''}" data-disc="${i}">${lbl}</button><button class="disc-tab-add" data-disc="${i}" title="${t('player.ctrl.addDiscToQueue', {disc: lbl})}">+</button>
           </div>`;
         }).join('')}
       </div>` : ''}
@@ -6141,7 +6142,7 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants, _parentRestoreFn
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       <input id="lib-filter" class="fe-filter-input" type="text" placeholder="${t('player.albums.searchAlbumsPlaceholder')}" autocomplete="off">
       <span id="lib-match-count" class="fe-match-count"></span>
-      <button id="lib-filter-clear" class="fe-filter-clear hidden" title="Clear filter">✕</button>
+      <button id="lib-filter-clear" class="fe-filter-clear hidden" title="${t('player.ctrl.clearFilter')}">✕</button>
     </div>
     <div class="az-strip" id="az-strip">${
       AZ_KEYS.map(l => `<button class="az-btn" data-letter="${l}"${hasLetter.has(l) ? '' : ' disabled'}>${l}</button>`).join('')
@@ -7650,10 +7651,10 @@ function _mountSongVScroll(allSongs, container) {
       </div>
       <div class="row-stars" data-ci="${i}">${stars}</div>
       <div class="row-actions">
-        <button class="row-act-btn add-btn" data-ci="${i}" title="Add to queue">
+        <button class="row-act-btn add-btn" data-ci="${i}" title="${t('player.ctrl.addToQueue')}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
-        <button class="row-act-btn ctx-btn" data-ci="${i}" title="More options">
+        <button class="row-act-btn ctx-btn" data-ci="${i}" title="${t('player.ctrl.moreOptions')}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
         </button>
       </div>
@@ -7801,7 +7802,7 @@ async function viewGenreDetail(genre, defaultTab) {
         </div>
         <div class="browse-filter-wrap">
           <input id="browse-filter" class="browse-filter-input" placeholder="Filter…" autocomplete="off" spellcheck="false">
-          <button class="browse-filter-clear${_fv ? '' : ' hidden'}" id="browse-filter-clear" title="Clear">×</button>
+          <button class="browse-filter-clear${_fv ? '' : ' hidden'}" id="browse-filter-clear" title="${t('player.ctrl.clear')}">×</button>
         </div>
       </div>
       <div id="browse-content"></div>`;
@@ -7883,7 +7884,7 @@ async function viewDecadeDetail(decade, label, defaultTab) {
         </div>
         <div class="browse-filter-wrap">
           <input id="browse-filter" class="browse-filter-input" placeholder="Filter…" autocomplete="off" spellcheck="false">
-          <button class="browse-filter-clear${_fv ? '' : ' hidden'}" id="browse-filter-clear" title="Clear">×</button>
+          <button class="browse-filter-clear${_fv ? '' : ' hidden'}" id="browse-filter-clear" title="${t('player.ctrl.clear')}">×</button>
         </div>
       </div>
       <div id="browse-content"></div>`;
@@ -7962,11 +7963,11 @@ function _renderSmartPlaylistNav() {
     <div class="pl-row" data-splid="${p.id}">
       <button class="pl-row-btn" data-splid="${p.id}">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22,3 2,3 10,12.46 10,19 14,21 14,12.46"/></svg>
-        ${p.filters?.freshPicks ? '<svg class="pl-fresh-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" title="Fresh Picks"><polyline points="17,1 21,5 17,9"/><path d="M3,11V9a4,4,0,0,1,4-4h14"/><polyline points="7,23 3,19 7,15"/><path d="M21,13v2a4,4,0,0,1-4,4H3"/></svg>' : ''}
+        ${p.filters?.freshPicks ? `<svg class="pl-fresh-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" title="${t('player.ctrl.freshPicks')}"><polyline points="17,1 21,5 17,9"/><path d="M3,11V9a4,4,0,0,1,4-4h14"/><polyline points="7,23 3,19 7,15"/><path d="M21,13v2a4,4,0,0,1-4,4H3"/></svg>` : ''}
         ${esc(p.name)}
       </button>
-      <button class="pl-row-edit" data-splid="${p.id}" title="Edit">✎</button>
-      <button class="pl-row-del" data-splid="${p.id}" title="Delete">×</button>
+      <button class="pl-row-edit" data-splid="${p.id}" title="${t('player.ctrl.edit')}">✎</button>
+      <button class="pl-row-del" data-splid="${p.id}" title="${t('player.ctrl.delete')}">×</button>
     </div>`).join('');
 
   nav.querySelectorAll('.pl-row-btn').forEach(btn => {
@@ -8095,18 +8096,18 @@ async function viewSmartPlaylists(editData) {
   } catch(_) {}
 
   const SORTS = [
-    { v: 'artist',      l: 'Artist / Album' },
-    { v: 'album',       l: 'Album' },
-    { v: 'year_asc',    l: 'Year ↑' },
-    { v: 'year_desc',   l: 'Year ↓' },
-    { v: 'rating',      l: 'Top Rated' },
-    { v: 'play_count',  l: 'Most Played' },
-    { v: 'last_played', l: 'Recently Played' },
-    { v: 'random',      l: 'Random' },
+    { v: 'artist',      l: t('player.smart.sortArtistAlbum') },
+    { v: 'album',       l: t('player.smart.sortAlbum') },
+    { v: 'year_asc',    l: t('player.smart.sortYearAsc') },
+    { v: 'year_desc',   l: t('player.smart.sortYearDesc') },
+    { v: 'rating',      l: t('player.smart.sortTopRated') },
+    { v: 'play_count',  l: t('player.smart.sortMostPlayed') },
+    { v: 'last_played', l: t('player.smart.sortRecentlyPlayed') },
+    { v: 'random',      l: t('player.smart.sortRandom') },
   ];
   const LIMITS = [25, 50, 100, 200, 500, 1000];
   const RATING_OPTS = [
-    { db: 0,  label: 'Any' },
+    { db: 0,  label: t('player.smart.ratingAny') },
     { db: 2,  label: '★' },
     { db: 4,  label: '★★' },
     { db: 6,  label: '★★★' },
@@ -8123,14 +8124,14 @@ async function viewSmartPlaylists(editData) {
     // Any genre from allGenres not in a group
     const assigned = new Set(_splSectionList.flatMap(g => g.genres));
     const other = genres.filter(g => !assigned.has(g));
-    if (other.length) _splSectionList.push({ name: 'Other', genres: other });
+    if (other.length) _splSectionList.push({ name: t('player.smart.genreOther'), genres: other });
   } else {
-    const _splBucketOrder = [...GENRE_BUCKETS.map(([l]) => l), 'Other'];
+    const _splBucketOrder = [...GENRE_BUCKETS.map(([l]) => l), t('player.smart.genreOther')];
     const _splGrouped = {};
     for (const g of genres) { const cat = classifyGenre(g); (_splGrouped[cat] = _splGrouped[cat] || []).push(g); }
     _splSectionList = _splBucketOrder.filter(cat => _splGrouped[cat]).map(cat => ({ name: cat, genres: _splGrouped[cat] }));
   }
-  const genreGroupsHTML = !genres.length ? '<span class="spl-hint">No genres found</span>' :
+  const genreGroupsHTML = !genres.length ? `<span class="spl-hint">${t('player.smart.noGenresFound')}</span>` :
     _splSectionList.map(grp => {
       const chips = grp.genres;
       const activeCount = chips.filter(g => f.genres.includes(g)).length;
@@ -8708,28 +8709,28 @@ function viewApps() {
 
   setBody(`
     <div class="apps-panel">
-      <h2>Mobile Apps</h2>
-      <p class="apps-desc">Listen to your music on the go with the official mStream apps.</p>
+      <h2>${t('player.apps.title')}</h2>
+      <p class="apps-desc">${t('player.apps.desc')}</p>
       <div class="apps-grid">
         <a class="app-card" href="https://play.google.com/store/apps/details?id=mstream.music" target="_blank" rel="noopener">
           <svg class="app-card-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3.18 23.76A1.51 1.51 0 0 1 2 22.36V1.64A1.51 1.51 0 0 1 3.18.24L13.6 12 3.18 23.76zM16.2 9.06l-2.58-2.58L5.8 1.68l8.37 4.83 2.03 2.55zm1.94 1.81L16.2 9.06 14.6 12l1.6 2.94 1.94-1.13a.97.97 0 0 0 0-1.94zM5.8 22.32l7.82-4.8-2.03-2.55-5.79 7.35z"/></svg>
           <div>
-            <div class="app-card-title">Android</div>
-            <div class="app-card-sub">Get it on Google Play</div>
+            <div class="app-card-title">${t('player.apps.androidTitle')}</div>
+            <div class="app-card-sub">${t('player.apps.androidSub')}</div>
           </div>
         </a>
         <a class="app-card" href="https://apps.apple.com/us/app/mstream-player/id1605378892" target="_blank" rel="noopener">
           <svg class="app-card-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
           <div>
-            <div class="app-card-title">iOS</div>
-            <div class="app-card-sub">Download on the App Store</div>
+            <div class="app-card-title">${t('player.apps.iosTitle')}</div>
+            <div class="app-card-sub">${t('player.apps.iosSub')}</div>
           </div>
         </a>
       </div>
       <div class="apps-qr-section">
-        <h3>Add this server to the app</h3>
-        <p>Use the QR code tool to quickly connect a mobile device to this server.</p>
-        <a class="btn-primary" href="/qr" target="_blank" rel="noopener">Open QR Tool</a>
+        <h3>${t('player.apps.qrTitle')}</h3>
+        <p>${t('player.apps.qrDesc')}</p>
+        <a class="btn-primary" href="/qr" target="_blank" rel="noopener">${t('player.apps.qrButton')}</a>
       </div>
     </div>`);
 }
@@ -8747,58 +8748,58 @@ function viewPlayHistory() {
         <div class="playback-section-hdr">
           <div class="playback-section-icon">🏆</div>
           <div>
-            <div class="playback-section-title">Most Played</div>
-            <div class="playback-section-desc">Reset all play-count statistics to zero. The Most Played list will be empty until songs are played again.</div>
+            <div class="playback-section-title">${t('player.playHistory.mostPlayedTitle')}</div>
+            <div class="playback-section-desc">${t('player.playHistory.mostPlayedDesc')}</div>
           </div>
         </div>
         <div class="playback-row">
           <div class="playback-row-label">
-            <div class="playback-row-name">Play counts</div>
-            <div class="playback-row-hint">Clears the play-count number on every song</div>
+            <div class="playback-row-name">${t('player.playHistory.playCountsLabel')}</div>
+            <div class="playback-row-hint">${t('player.playHistory.playCountsHint')}</div>
           </div>
-          <button class="btn-danger" id="reset-play-counts-btn">Reset</button>
+          <button class="btn-danger" id="reset-play-counts-btn">${t('player.playHistory.btnReset')}</button>
         </div>
       </div>
       <div class="playback-section">
         <div class="playback-section-hdr">
           <div class="playback-section-icon">🕐</div>
           <div>
-            <div class="playback-section-title">Recently Played</div>
-            <div class="playback-section-desc">Reset all last-played timestamps. The Recently Played list will be empty until songs are played again.</div>
+            <div class="playback-section-title">${t('player.playHistory.recentlyPlayedTitle')}</div>
+            <div class="playback-section-desc">${t('player.playHistory.recentlyPlayedDesc')}</div>
           </div>
         </div>
         <div class="playback-row">
           <div class="playback-row-label">
-            <div class="playback-row-name">Last-played timestamps</div>
-            <div class="playback-row-hint">Clears the date each song was last played</div>
+            <div class="playback-row-name">${t('player.playHistory.lastPlayedLabel')}</div>
+            <div class="playback-row-hint">${t('player.playHistory.lastPlayedHint')}</div>
           </div>
-          <button class="btn-danger" id="reset-recently-played-btn">Reset</button>
+          <button class="btn-danger" id="reset-recently-played-btn">${t('player.playHistory.btnReset')}</button>
         </div>
       </div>
     </div>`);
 
   document.getElementById('reset-play-counts-btn').addEventListener('click', () => {
     showConfirmModal(
-      'Reset Most Played',
-      'All play counts will be set to zero. This cannot be undone.',
+      t('player.playHistory.confirmMostPlayedTitle'),
+      t('player.playHistory.confirmMostPlayedMsg'),
       async () => {
         try {
           await api('POST', 'api/v1/db/stats/reset-play-counts', {});
           toast(t('player.toast.mostPlayedReset'));
-        } catch(e) { toast(`Error: ${esc(e.message)}`); }
+        } catch(e) { toast(t('player.toast.errorMsg', { error: esc(e.message) })); }
       }
     );
   });
 
   document.getElementById('reset-recently-played-btn').addEventListener('click', () => {
     showConfirmModal(
-      'Reset Recently Played',
-      'All last-played timestamps will be cleared. This cannot be undone.',
+      t('player.playHistory.confirmRecentlyPlayedTitle'),
+      t('player.playHistory.confirmRecentlyPlayedMsg'),
       async () => {
         try {
           await api('POST', 'api/v1/db/stats/reset-recently-played', {});
           toast(t('player.toast.recentlyPlayedReset'));
-        } catch(e) { toast(`Error: ${esc(e.message)}`); }
+        } catch(e) { toast(t('player.toast.errorMsg', { error: esc(e.message) })); }
       }
     );
   });
@@ -8829,7 +8830,7 @@ async function _renderWrapped() {
       api('GET', 'api/v1/user/wrapped/periods'),
     ]);
   } catch(e) {
-    setBody(`<div class="empty-state"><p>Could not load stats.</p></div>`);
+    setBody(`<div class="empty-state"><p>${t('player.wrapped.loadFailed')}</p></div>`);
     return;
   }
   if (S.view !== 'wrapped') return;
@@ -8840,7 +8841,9 @@ async function _renderWrapped() {
     `<button class="wrapped-period-tab${_wrappedPeriod === p ? ' active' : ''}" data-p="${p}">${_wrappedPeriodLabel(p)}</button>`
   ).join('');
 
-  const canPrev = _wrappedOffset < -35;   // arbitrary hard limit
+  // Offset range is constrained server-side to [-60, 0].
+  // Earlier means moving further negative until -60.
+  const canPrev = _wrappedOffset > -60;
   const canNext = _wrappedOffset < 0;
 
   // ── Helper renderers ───────────────────────────────────────────────────────
@@ -8864,7 +8867,7 @@ async function _renderWrapped() {
           </div>
           <span class="wrapped-top-count">${s.play_count}×</span>
         </div>`).join('')
-    : '<div class="wrapped-empty-section">No data yet</div>';
+    : `<div class="wrapped-empty-section">${t('player.wrapped.noDataYet')}</div>`;
 
   // Top artists list
   const topArtistsHtml = stats.top_artists.length
@@ -8873,23 +8876,30 @@ async function _renderWrapped() {
           <span class="wrapped-rank">${i + 1}</span>
           <div class="wrapped-top-info">
             <div class="wrapped-top-title">${esc(a.artist)}</div>
-            <div class="wrapped-top-sub">${fmtMs(a.total_played_ms)} listened</div>
+            <div class="wrapped-top-sub">${fmtMs(a.total_played_ms)} ${t('player.wrapped.listenedUnit')}</div>
           </div>
           <span class="wrapped-top-count">${a.play_count}×</span>
         </div>`).join('')
-    : '<div class="wrapped-empty-section">No data yet</div>';
+    : `<div class="wrapped-empty-section">${t('player.wrapped.noDataYet')}</div>`;
 
   // Heatmap — 24 rows × 7 columns (hours × weekdays)
   const heatmapMax = Math.max(1, ...stats.listening_by_hour);
-  const dayLabels  = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-  const timeLabels = ['0h','3h','6h','9h','12h','15h','18h','21h'];
+  const dayLabels  = [
+    t('player.wrapped.dayMon'),
+    t('player.wrapped.dayTue'),
+    t('player.wrapped.dayWed'),
+    t('player.wrapped.dayThu'),
+    t('player.wrapped.dayFri'),
+    t('player.wrapped.daySat'),
+    t('player.wrapped.daySun'),
+  ];
 
   // Build a 24×7 grid from per-hour and per-weekday data (approximated)
   // We only have 1D data from the server, so we show two separate 1D bar charts
   const hourBars = stats.listening_by_hour.map((c, h) => {
-    if (c === 0) return `<div class="hr-bar-cell" title="${h}:00 — no plays"><div class="hr-bar-fill bar-zero"></div></div>`;
+    if (c === 0) return `<div class="hr-bar-cell" title="${t('player.wrapped.hourNoPlays', { hour: h })}"><div class="hr-bar-fill bar-zero"></div></div>`;
     const pct = Math.max(6, Math.round(c / heatmapMax * 100));
-    return `<div class="hr-bar-cell" title="${h}:00 — ${c} play${c !== 1 ? 's' : ''}"><div class="hr-bar-fill bar-val" style="--bar-h:${pct}%"></div></div>`;
+    return `<div class="hr-bar-cell" title="${t('player.wrapped.hourPlays', { hour: h, count: c })}"><div class="hr-bar-fill bar-val" style="--bar-h:${pct}%"></div></div>`;
   }).join('');
 
   const wdMax = Math.max(1, ...stats.listening_by_weekday);
@@ -8901,20 +8911,20 @@ async function _renderWrapped() {
 
   // Top listening day
   const topDayHtml = stats.top_listening_day
-    ? `<div class="wrapped-fact-item">📅 Best day: <b>${esc(stats.top_listening_day.date)}</b> — ${fmtMs(stats.top_listening_day.total_listening_ms)}</div>`
+    ? `<div class="wrapped-fact-item">📅 ${t('player.wrapped.factBestDay', { date: esc(stats.top_listening_day.date), duration: fmtMs(stats.top_listening_day.total_listening_ms) })}</div>`
     : '';
 
   // Fun facts
   const ff = stats.fun_facts;
   const funFactsHtml = [
-    ff.top_song_hours ? `<div class="wrapped-fact-item">🎵 Top song <b>${esc(ff.top_song_hours.song || '')}</b> — ${ff.top_song_hours.hours}h total</div>` : '',
-    ff.most_loyal_song ? `<div class="wrapped-fact-item">💪 Always finish: <b>${esc(ff.most_loyal_song.title || '')}</b> by ${esc(ff.most_loyal_song.artist || '')}</div>` : '',
-    ff.most_skipped_artist ? `<div class="wrapped-fact-item">⏭ Most skipped: <b>${esc(ff.most_skipped_artist.artist)}</b> (${pct(ff.most_skipped_artist.skip_rate)} skip rate)</div>` : '',
-    ff.most_replayed_song ? `<div class="wrapped-fact-item">🔁 Most replayed: <b>${esc(ff.most_replayed_song.title || '')}</b> — ${ff.most_replayed_song.replay_count}× in a row</div>` : '',
-    ff.earliest_play ? `<div class="wrapped-fact-item">⏰ Earliest play: <b>${esc(ff.earliest_play)}</b></div>` : '',
+    ff.top_song_hours ? `<div class="wrapped-fact-item">🎵 ${t('player.wrapped.factTopSongHours', { song: esc(ff.top_song_hours.song || ''), hours: ff.top_song_hours.hours })}</div>` : '',
+    ff.most_loyal_song ? `<div class="wrapped-fact-item">💪 ${t('player.wrapped.factMostLoyalSong', { title: esc(ff.most_loyal_song.title || ''), artist: esc(ff.most_loyal_song.artist || '') })}</div>` : '',
+    ff.most_skipped_artist ? `<div class="wrapped-fact-item">⏭ ${t('player.wrapped.factMostSkippedArtist', { artist: esc(ff.most_skipped_artist.artist), rate: pct(ff.most_skipped_artist.skip_rate) })}</div>` : '',
+    ff.most_replayed_song ? `<div class="wrapped-fact-item">🔁 ${t('player.wrapped.factMostReplayedSong', { title: esc(ff.most_replayed_song.title || ''), count: ff.most_replayed_song.replay_count })}</div>` : '',
+    ff.earliest_play ? `<div class="wrapped-fact-item">⏰ ${t('player.wrapped.factEarliestPlay', { time: esc(ff.earliest_play) })}</div>` : '',
     topDayHtml,
-    stats.new_discoveries > 0 ? `<div class="wrapped-fact-item">🔭 New discoveries: <b>${stats.new_discoveries}</b> songs heard for the first time</div>` : '',
-  ].filter(Boolean).join('') || '<div class="wrapped-empty-section">Play more music to unlock fun facts</div>';
+    stats.new_discoveries > 0 ? `<div class="wrapped-fact-item">🔭 ${t('player.wrapped.factNewDiscoveries', { count: stats.new_discoveries })}</div>` : '',
+  ].filter(Boolean).join('') || `<div class="wrapped-empty-section">${t('player.wrapped.factsEmpty')}</div>`;
 
   const noData = stats.total_plays === 0 && stats.radio.total_sessions === 0 && stats.podcast.episodes_played === 0;
 
@@ -8924,37 +8934,37 @@ async function _renderWrapped() {
       <div class="wrapped-period-bar">
         <div class="wrapped-period-tabs">${periodTabs}</div>
         <div class="wrapped-nav-row">
-          <button class="wrapped-nav-btn" id="wr-prev" ${canPrev ? '' : 'disabled'}>&#8592; Earlier</button>
+          <button class="wrapped-nav-btn" id="wr-prev" ${canPrev ? '' : 'disabled'}>&#8592; ${t('player.wrapped.earlier')}</button>
           <span class="wrapped-period-label">${esc(stats.period_label || '')}</span>
-          <button class="wrapped-nav-btn" id="wr-next" ${canNext ? '' : 'disabled'}>Later &#8594;</button>
+          <button class="wrapped-nav-btn" id="wr-next" ${canNext ? '' : 'disabled'}>${t('player.wrapped.later')} &#8594;</button>
         </div>
       </div>
 
-      ${noData ? `<div class="empty-state"><p>No listening data for this period yet.<br>Start playing music and come back!</p></div>` : `
+      ${noData ? `<div class="empty-state"><p>${t('player.wrapped.noListeningData')}<br>${t('player.wrapped.playAndReturn')}</p></div>` : `
 
       <div class="wrapped-summary-strip">
-        <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.total_plays.toLocaleString()}</span><span class="wrapped-stat-lbl">plays</span></div>
-        <div class="wrapped-stat"><span class="wrapped-stat-val">${fmtMs(stats.total_listening_ms)}</span><span class="wrapped-stat-lbl">listened</span></div>
-        <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.unique_songs.toLocaleString()}</span><span class="wrapped-stat-lbl">unique songs</span></div>
-        <div class="wrapped-stat"><span class="wrapped-stat-val">${(stats.pause_count ?? 0).toLocaleString()}</span><span class="wrapped-stat-lbl">pauses</span></div>
-        <div class="wrapped-stat"><span class="wrapped-stat-val">${pct(stats.skip_rate)}</span><span class="wrapped-stat-lbl">skip rate</span></div>
-        <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.library_coverage_pct.toFixed(1)}%</span><span class="wrapped-stat-lbl">library covered</span></div>
+        <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.total_plays.toLocaleString()}</span><span class="wrapped-stat-lbl">${t('player.wrapped.summaryPlays')}</span></div>
+        <div class="wrapped-stat"><span class="wrapped-stat-val">${fmtMs(stats.total_listening_ms)}</span><span class="wrapped-stat-lbl">${t('player.wrapped.summaryListened')}</span></div>
+        <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.unique_songs.toLocaleString()}</span><span class="wrapped-stat-lbl">${t('player.wrapped.summaryUniqueSongs')}</span></div>
+        <div class="wrapped-stat"><span class="wrapped-stat-val">${(stats.pause_count ?? 0).toLocaleString()}</span><span class="wrapped-stat-lbl">${t('player.wrapped.summaryPauses')}</span></div>
+        <div class="wrapped-stat"><span class="wrapped-stat-val">${pct(stats.skip_rate)}</span><span class="wrapped-stat-lbl">${t('player.wrapped.summarySkipRate')}</span></div>
+        <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.library_coverage_pct.toFixed(1)}%</span><span class="wrapped-stat-lbl">${t('player.wrapped.summaryLibraryCovered')}</span></div>
       </div>
 
       <div class="wrapped-grid">
 
         <div class="wrapped-card">
-          <div class="wrapped-card-hdr">Top Songs</div>
+          <div class="wrapped-card-hdr">${t('player.wrapped.cardTopSongs')}</div>
           <div class="wrapped-top-list">${topSongsHtml}</div>
         </div>
 
         <div class="wrapped-card">
-          <div class="wrapped-card-hdr">Top Artists</div>
+          <div class="wrapped-card-hdr">${t('player.wrapped.cardTopArtists')}</div>
           <div class="wrapped-top-list">${topArtistsHtml}</div>
         </div>
 
         <div class="wrapped-card wrapped-card-wide">
-          <div class="wrapped-card-hdr">Listening by Hour</div>
+          <div class="wrapped-card-hdr">${t('player.wrapped.cardByHour')}</div>
           <div class="wrapped-hour-chart">${hourBars}</div>
           <div class="wrapped-hour-labels">
             ${[0,3,6,9,12,15,18,21].map(h => `<span>${h}h</span>`).join('')}
@@ -8962,36 +8972,36 @@ async function _renderWrapped() {
         </div>
 
         <div class="wrapped-card">
-          <div class="wrapped-card-hdr">Listening by Day</div>
+          <div class="wrapped-card-hdr">${t('player.wrapped.cardByDay')}</div>
           <div class="wrapped-wd-chart">${wdBars}</div>
         </div>
 
         <div class="wrapped-card">
-          <div class="wrapped-card-hdr">Your Personality</div>
+          <div class="wrapped-card-hdr">${t('player.wrapped.cardPersonality')}</div>
           <div class="wrapped-personality">
             <div class="wrapped-personality-type">${esc(stats.personality.type)}</div>
             <div class="wrapped-personality-desc">${esc(stats.personality.desc)}</div>
           </div>
           <div class="wrapped-completion-row">
-            <div class="wrapped-completion-label">Completion rate <b>${pct(stats.completion_rate)}</b></div>
+            <div class="wrapped-completion-label">${t('player.wrapped.completionRate')} <b>${pct(stats.completion_rate)}</b></div>
             <div class="wrapped-bar-track"><div class="wrapped-bar-fill" style="width:${pct(stats.completion_rate)}"></div></div>
           </div>
-          ${stats.longest_session ? `<div class="wrapped-session-stat">Longest session: <b>${fmtMs(stats.longest_session.ended_at - stats.longest_session.started_at)}</b> · ${stats.longest_session.total_tracks} tracks</div>` : ''}
-          ${stats.avg_session_length_ms ? `<div class="wrapped-session-stat">Avg session: <b>${fmtMs(stats.avg_session_length_ms)}</b></div>` : ''}
+          ${stats.longest_session ? `<div class="wrapped-session-stat">${t('player.wrapped.longestSession', { duration: fmtMs(stats.longest_session.ended_at - stats.longest_session.started_at), tracks: stats.longest_session.total_tracks })}</div>` : ''}
+          ${stats.avg_session_length_ms ? `<div class="wrapped-session-stat">${t('player.wrapped.avgSession', { duration: fmtMs(stats.avg_session_length_ms) })}</div>` : ''}
         </div>
 
         <div class="wrapped-card">
-          <div class="wrapped-card-hdr">Fun Facts</div>
+          <div class="wrapped-card-hdr">${t('player.wrapped.cardFunFacts')}</div>
           <div class="wrapped-facts-list">${funFactsHtml}</div>
         </div>
 
         ${stats.radio.total_sessions > 0 ? `
         <div class="wrapped-card">
-          <div class="wrapped-card-hdr">📻 Radio</div>
+          <div class="wrapped-card-hdr">📻 ${t('player.wrapped.cardRadio')}</div>
           <div class="wrapped-summary-strip" style="margin-bottom:.75rem">
-            <div class="wrapped-stat"><span class="wrapped-stat-val">${fmtMs(stats.radio.total_ms)}</span><span class="wrapped-stat-lbl">listened</span></div>
-            <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.radio.total_sessions.toLocaleString()}</span><span class="wrapped-stat-lbl">sessions</span></div>
-            ${stats.radio.top_stations.length ? `<div class="wrapped-stat"><span class="wrapped-stat-val wrapped-stat-val--sm">${esc(stats.radio.top_stations[0].station_name)}</span><span class="wrapped-stat-lbl">favourite</span></div>` : ''}
+            <div class="wrapped-stat"><span class="wrapped-stat-val">${fmtMs(stats.radio.total_ms)}</span><span class="wrapped-stat-lbl">${t('player.wrapped.summaryListened')}</span></div>
+            <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.radio.total_sessions.toLocaleString()}</span><span class="wrapped-stat-lbl">${t('player.wrapped.radioSessions')}</span></div>
+            ${stats.radio.top_stations.length ? `<div class="wrapped-stat"><span class="wrapped-stat-val wrapped-stat-val--sm">${esc(stats.radio.top_stations[0].station_name)}</span><span class="wrapped-stat-lbl">${t('player.wrapped.radioFavourite')}</span></div>` : ''}
           </div>
           ${stats.radio.top_stations.length > 1 ? `
           <div class="wrapped-top-list">
@@ -9000,7 +9010,7 @@ async function _renderWrapped() {
                 <span class="wrapped-rank">${i + 1}</span>
                 <div class="wrapped-top-info">
                   <div class="wrapped-top-title">${esc(st.station_name)}</div>
-                  <div class="wrapped-top-sub">${st.sessions} session${st.sessions !== 1 ? 's' : ''}</div>
+                  <div class="wrapped-top-sub">${t('player.wrapped.radioSessionCount', { count: st.sessions })}</div>
                 </div>
                 <span class="wrapped-top-count">${fmtMs(st.total_ms)}</span>
               </div>`).join('')}
@@ -9009,12 +9019,12 @@ async function _renderWrapped() {
 
         ${stats.podcast.episodes_played > 0 ? `
         <div class="wrapped-card">
-          <div class="wrapped-card-hdr">🎙️ Podcasts</div>
+          <div class="wrapped-card-hdr">🎙️ ${t('player.wrapped.cardPodcasts')}</div>
           <div class="wrapped-summary-strip" style="margin-bottom:.75rem">
-            <div class="wrapped-stat"><span class="wrapped-stat-val">${fmtMs(stats.podcast.total_ms)}</span><span class="wrapped-stat-lbl">listened</span></div>
-            <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.podcast.episodes_played.toLocaleString()}</span><span class="wrapped-stat-lbl">episodes</span></div>
-            <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.podcast.shows_heard}</span><span class="wrapped-stat-lbl">shows</span></div>
-            ${stats.podcast.episodes_completed > 0 ? `<div class="wrapped-stat"><span class="wrapped-stat-val">${Math.round(stats.podcast.episodes_completed / stats.podcast.episodes_played * 100)}%</span><span class="wrapped-stat-lbl">completed</span></div>` : ''}
+            <div class="wrapped-stat"><span class="wrapped-stat-val">${fmtMs(stats.podcast.total_ms)}</span><span class="wrapped-stat-lbl">${t('player.wrapped.summaryListened')}</span></div>
+            <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.podcast.episodes_played.toLocaleString()}</span><span class="wrapped-stat-lbl">${t('player.wrapped.podcastEpisodes')}</span></div>
+            <div class="wrapped-stat"><span class="wrapped-stat-val">${stats.podcast.shows_heard}</span><span class="wrapped-stat-lbl">${t('player.wrapped.podcastShows')}</span></div>
+            ${stats.podcast.episodes_completed > 0 ? `<div class="wrapped-stat"><span class="wrapped-stat-val">${Math.round(stats.podcast.episodes_completed / stats.podcast.episodes_played * 100)}%</span><span class="wrapped-stat-lbl">${t('player.wrapped.podcastCompleted')}</span></div>` : ''}
           </div>
           ${stats.podcast.top_shows.length ? `
           <div class="wrapped-top-list">
@@ -9023,8 +9033,8 @@ async function _renderWrapped() {
                 <span class="wrapped-rank">${i + 1}</span>
                 ${sh.feed_img ? `<img class="wrapped-thumb" src="${esc(artUrl(sh.feed_img,'s'))}" alt="" loading="lazy">` : `<div class="wrapped-thumb wrapped-thumb-empty"></div>`}
                 <div class="wrapped-top-info">
-                  <div class="wrapped-top-title">${esc(sh.feed_title || '(Unknown)')}</div>
-                  <div class="wrapped-top-sub">${sh.episodes_played} ep${sh.episodes_played !== 1 ? 's' : ''}</div>
+                  <div class="wrapped-top-title">${esc(sh.feed_title || t('player.wrapped.unknownFeed'))}</div>
+                  <div class="wrapped-top-sub">${t('player.wrapped.podcastEpisodeCount', { count: sh.episodes_played })}</div>
                 </div>
                 <span class="wrapped-top-count">${fmtMs(sh.total_ms)}</span>
               </div>`).join('')}
@@ -9049,7 +9059,13 @@ async function _renderWrapped() {
 }
 
 function _wrappedPeriodLabel(p) {
-  return { weekly: 'Week', monthly: 'Month', quarterly: 'Quarter', 'half-yearly': 'Half-Year', yearly: 'Year' }[p] || p;
+  return {
+    weekly: t('player.wrapped.periodWeek'),
+    monthly: t('player.wrapped.periodMonth'),
+    quarterly: t('player.wrapped.periodQuarter'),
+    'half-yearly': t('player.wrapped.periodHalfYear'),
+    yearly: t('player.wrapped.periodYear')
+  }[p] || p;
 }
 
 // ── PLAYBACK VIEW ─────────────────────────────────────────────
@@ -9828,7 +9844,7 @@ function _renderRadioView() {
 
   const stationRows = filtered.map(s => `
     <div class="rs-row" data-id="${s.id}">
-      <div class="rs-drag-handle" title="Drag to reorder"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg></div>
+      <div class="rs-drag-handle" title="${t('player.ctrl.queueDragHandle')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg></div>
       <div class="rs-card-art">${_radioArtHtml(s.img)}</div>
       <div class="rs-info">
         <div class="rs-name">${esc(s.name)}</div>
@@ -10282,7 +10298,7 @@ function _renderPodcastFeedsView() {
       : pfPlaceholder;
     return `<div class="pf-item" data-id="${f.id}">
       <div class="pf-feed-row">
-        <div class="pf-handle pf-no-open" title="Drag to reorder"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg></div>
+        <div class="pf-handle pf-no-open" title="${t('player.ctrl.queueDragHandle')}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="5" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="19" r="1.5"/><circle cx="15" cy="5" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="19" r="1.5"/></svg></div>
         <div class="pf-art">${artHtml}</div>
         <div class="pf-info">
           <div class="pf-title">${esc(f.title || f.url)}</div>
@@ -10291,9 +10307,9 @@ function _renderPodcastFeedsView() {
           ${f.description ? `<div class="pf-desc">${esc(f.description)}</div>` : ''}
         </div>
         <div class="pf-btns pf-no-open">
-          <button class="pf-edit-btn ctrl-btn ctrl-sm" data-id="${f.id}" title="Rename"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
-          <button class="pf-refresh-btn ctrl-btn ctrl-sm" data-id="${f.id}" title="Refresh feed"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
-          <button class="pf-delete-btn ctrl-btn ctrl-sm" data-id="${f.id}" title="Unsubscribe" style="color:var(--err,#f38ba8)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6l-1,14H6L5,6"/><path d="M10,11v6"/><path d="M14,11v6"/><path d="M9,6V4h6v2"/></svg></button>
+          <button class="pf-edit-btn ctrl-btn ctrl-sm" data-id="${f.id}" title="${t('player.ctrl.rename')}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+          <button class="pf-refresh-btn ctrl-btn ctrl-sm" data-id="${f.id}" title="${t('player.podcast.refreshFeed')}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+          <button class="pf-delete-btn ctrl-btn ctrl-sm" data-id="${f.id}" title="${t('player.podcast.unsubscribe')}" style="color:var(--err,#f38ba8)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19,6l-1,14H6L5,6"/><path d="M10,11v6"/><path d="M14,11v6"/><path d="M9,6V4h6v2"/></svg></button>
         </div>
       </div>
       <div class="pf-edit-panel" id="pf-edit-panel-${f.id}">
@@ -11087,7 +11103,7 @@ function _updateRecordBtn() {
   if (elapsed) elapsed.classList.toggle('hidden', !shouldShow || !S.recordingActive);
   if (shouldShow) {
     btn.classList.toggle('recording', S.recordingActive);
-    btn.title = S.recordingActive ? 'Stop recording' : 'Record this stream';
+    btn.title = S.recordingActive ? t('player.ctrl.stopRecording') : t('player.ctrl.recordStream');
     const inner = btn.querySelector('.rec-icon circle:last-child');
     if (inner) inner.setAttribute('r', S.recordingActive ? '5' : '8');
   }
@@ -14227,7 +14243,7 @@ document.getElementById('np-left').addEventListener('click', async e => {
     const dsEl   = document.getElementById('np-discogs-section');
     const npLeft = document.getElementById('np-left');
     const _cacheOnly = ['wav','aiff','aif','w64'].includes((filepath || '').split('.').pop().toLowerCase());
-    const _label = _cacheOnly ? 'Saving art to database…' : 'Embedding cover art…';
+    const _label = _cacheOnly ? t('player.npArt.savingArt') : t('player.npArt.embeddingArt');
     const _isCurrentSong = S.queue[S.idx]?.filepath === filepath;
     const _wasPlaying    = _isCurrentSong && !audioEl.paused;
     if (_isCurrentSong && _wasPlaying) audioEl.pause();
@@ -14256,9 +14272,9 @@ document.getElementById('np-left').addEventListener('click', async e => {
       npLeft?.classList.remove('np-left--embedding');
       if (_isCurrentSong && _wasPlaying) audioEl.play().catch(() => {});
       if (dsEl) dsEl.innerHTML =
-        `<span class="np-discogs-status" style="color:rgba(255,100,100,.8)">Embed failed: ${esc(err?.message || 'error')}</span>` +
-        `<button class="np-discogs-btn" id="np-url-paste-btn" style="margin-top:6px">Try again</button>` +
-        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:4px">← Back</button>`;
+        `<span class="np-discogs-status" style="color:rgba(255,100,100,.8)">${t('player.npArt.embedFailed', { msg: esc(err?.message || 'error') })}</span>` +
+        `<button class="np-discogs-btn" id="np-url-paste-btn" style="margin-top:6px">${t('player.npArt.tryAgain')}</button>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:4px">${t('player.npArt.back')}</button>`;
     }
     return;
   }
@@ -14272,7 +14288,7 @@ document.getElementById('np-left').addEventListener('click', async e => {
     const dsEl   = document.getElementById('np-discogs-section');
     const npLeft = document.getElementById('np-left');
     const _cacheOnly = ['wav','aiff','aif','w64'].includes((filepath || '').split('.').pop().toLowerCase());
-    const _label = _cacheOnly ? 'Saving art to database…' : 'Embedding cover art…';
+    const _label = _cacheOnly ? t('player.npArt.savingArt') : t('player.npArt.embeddingArt');
     const _isCurrentSong = S.queue[S.idx]?.filepath === filepath;
     const _wasPlaying    = _isCurrentSong && !audioEl.paused;
     if (_isCurrentSong && _wasPlaying) audioEl.pause();
@@ -14301,9 +14317,9 @@ document.getElementById('np-left').addEventListener('click', async e => {
       npLeft?.classList.remove('np-left--embedding');
       if (_isCurrentSong && _wasPlaying) audioEl.play().catch(() => {});
       if (dsEl) dsEl.innerHTML =
-        `<span class="np-discogs-status" style="color:rgba(255,100,100,.8)">Embed failed: ${esc(err?.message || 'error')}</span>` +
-        `<button class="np-deezer-search-btn" id="np-deezer-search-btn" style="margin-top:6px">Try again</button>` +
-        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:4px">← Back</button>`;
+        `<span class="np-discogs-status" style="color:rgba(255,100,100,.8)">${t('player.npArt.embedFailed', { msg: esc(err?.message || 'error') })}</span>` +
+        `<button class="np-deezer-search-btn" id="np-deezer-search-btn" style="margin-top:6px">${t('player.npArt.tryAgain')}</button>` +
+        `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:4px">${t('player.npArt.back')}</button>`;
       deezerThumb.classList.remove('selected');
     }
     return;
@@ -14319,7 +14335,7 @@ document.getElementById('np-left').addEventListener('click', async e => {
   const dsEl    = document.getElementById('np-discogs-section');
   const npLeft  = document.getElementById('np-left');
   const _cacheOnly = ['wav','aiff','aif','w64'].includes((filepath || '').split('.').pop().toLowerCase());
-  const _label  = _cacheOnly ? 'Saving art to database…' : 'Embedding cover art…';
+  const _label  = _cacheOnly ? t('player.npArt.savingArt') : t('player.npArt.embeddingArt');
 
   // Snapshot playback state and pause BEFORE the API call.
   // ffmpeg atomically replaces the file on disk; the browser must not be
@@ -14371,9 +14387,9 @@ document.getElementById('np-left').addEventListener('click', async e => {
     // Resume playback if we paused it — the file wasn't changed
     if (_isCurrentSong && _wasPlaying) audioEl.play().catch(() => {});
     if (dsEl) dsEl.innerHTML =
-      `<span class="np-discogs-status" style="color:rgba(255,100,100,.8)">Embed failed: ${esc(err?.message || 'error')}</span>` +
-      `<button class="np-discogs-btn" id="np-discogs-search-btn" style="margin-top:6px">Try again</button>` +
-      `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:4px">← Back</button>`;
+      `<span class="np-discogs-status" style="color:rgba(255,100,100,.8)">${t('player.npArt.embedFailed', { msg: esc(err?.message || 'error') })}</span>` +
+      `<button class="np-discogs-btn" id="np-discogs-search-btn" style="margin-top:6px">${t('player.npArt.tryAgain')}</button>` +
+      `<button class="np-discogs-cancel" id="np-discogs-back-btn" style="margin-top:4px">${t('player.npArt.back')}</button>`;
     thumb.classList.remove('selected');
   }
 });
@@ -15017,8 +15033,14 @@ try {
   }
   convertTitles();
   new MutationObserver(muts => {
-    muts.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) convertTitles(n); }));
-  }).observe(document.body, { childList: true, subtree: true });
+    muts.forEach(m => {
+      if (m.type === 'childList') {
+        m.addedNodes.forEach(n => { if (n.nodeType === 1) convertTitles(n); });
+      } else if (m.type === 'attributes' && m.target.hasAttribute('title')) {
+        convertTitles(m.target);
+      }
+    });
+  }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['title'] });
 
   document.addEventListener('mouseover', e => {
     const el = e.target.closest('[data-tip]');

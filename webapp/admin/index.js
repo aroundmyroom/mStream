@@ -4543,7 +4543,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
     return {
       loading: false,
       kind: 'missing',
-      counts: { missing: 0, wrong: 0, withImage: 0 },
+      counts: { missing: 0, noImage: 0, wrong: 0, withImage: 0 },
       sessionStartMissing: null,
       artists: [],
       selected: null,
@@ -4626,7 +4626,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
           url: `${API.url()}/api/v1/admin/artists/image-audit`,
           params: { kind, limit: 300 }
         });
-        this.counts = res.data.counts || { missing: 0, wrong: 0, withImage: 0 };
+        this.counts = res.data.counts || { missing: 0, noImage: 0, wrong: 0, withImage: 0 };
         if (!Number.isFinite(this.sessionStartMissing)) this.sessionStartMissing = this.counts.missing || 0;
         this.artists = res.data.artists || [];
       } catch (e) {
@@ -4729,7 +4729,8 @@ const artistsAdminView = Vue.component('artists-admin-view', {
           <div style="font-size:.9rem;color:var(--t2);margin-top:2px;">{{ t('admin.artists.desc') }}</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn-flat" @click="load('missing')" :style="kind==='missing' ? 'border-color:var(--primary);color:var(--primary);' : ''">{{ t('admin.artists.tabMissing', { count: counts.missing || 0 }) }}</button>
+          <button class="btn-flat" @click="load('missing')" :style="kind==='missing' ? 'border-color:var(--primary);color:var(--primary);' : ''">{{ t('admin.artists.tabPending', { count: counts.missing || 0 }) }}</button>
+          <button class="btn-flat" @click="load('no-image')" :style="kind==='no-image' ? 'border-color:var(--warn,#b45309);color:var(--warn,#b45309);' : ''">{{ t('admin.artists.tabNoImage', { count: counts.noImage || 0 }) }}</button>
           <button class="btn-flat" @click="load('with-image')" :style="kind==='with-image' ? 'border-color:var(--ok,#16a34a);color:var(--ok,#16a34a);' : ''">{{ t('admin.artists.tabWithImage', { count: counts.withImage || 0 }) }}</button>
           <button class="btn-flat" @click="load('wrong')" :style="kind==='wrong' ? 'border-color:var(--warn,#b45309);color:var(--warn,#b45309);' : ''">{{ t('admin.artists.tabWrong', { count: counts.wrong || 0 }) }}</button>
           <button class="btn-flat" @click="seedHydration(500)" :disabled="seedPending">{{ seedPending ? t('admin.artists.btnQueueing') : t('admin.artists.btnQueueNext') }}</button>
@@ -4748,6 +4749,9 @@ const artistsAdminView = Vue.component('artists-admin-view', {
       <div v-if="!hydration.running && (hydration.queueLength || 0) === 0 && (counts.missing || 0) > 0" style="margin-top:8px;font-size:.82rem;color:var(--t2);">
         {{ t('admin.artists.hydrationIdleHint') }}
       </div>
+      <div v-if="(counts.noImage || 0) > 0" style="margin-top:8px;font-size:.82rem;color:var(--t2);">
+        {{ t('admin.artists.noImageHint', { count: counts.noImage || 0 }) }}
+      </div>
     </div>
 
     <div style="display:grid;grid-template-columns:minmax(340px,1fr) minmax(360px,1fr);gap:12px;margin-top:12px;align-items:start;">
@@ -4760,7 +4764,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
             <div v-else style="width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--raised);color:var(--t2);font-weight:700;flex-shrink:0;">{{ (a.canonicalName||'?').replace(/^The\s+/i,'').charAt(0).toUpperCase() }}</div>
             <div style="min-width:0;flex:1;">
               <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ a.canonicalName }}</div>
-              <div style="font-size:.78rem;color:var(--t2);">{{ t('admin.artists.songCount', { count: a.songCount || 0 }) }}<span v-if="a.imageSource"> • {{ a.imageSource }}</span></div>
+              <div style="font-size:.78rem;color:var(--t2);">{{ t('admin.artists.songCount', { count: a.songCount || 0 }) }}<span v-if="a.imageSource"> • {{ a.imageSource }}</span><span v-if="kind === 'no-image'"> • {{ t('admin.artists.statusNoImageTried') }}</span></div>
             </div>
             <span v-if="a.wrongFlag" style="font-size:.72rem;padding:3px 7px;border-radius:999px;background:rgba(180,83,9,.18);color:var(--warn,#b45309);">{{ t('admin.artists.badgeWrong') }}</span>
           </button>
@@ -4773,7 +4777,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
             <div>
               <div style="font-size:1rem;font-weight:700;">{{ selected.canonicalName }}</div>
-              <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.songCount', { count: selected.songCount || 0 }) }}</div>
+              <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.songCount', { count: selected.songCount || 0 }) }}<span v-if="kind === 'no-image'"> • {{ t('admin.artists.statusNoImageTried') }}</span></div>
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
               <button v-if="kind === 'with-image' || selected.wrongFlag" class="btn-flat" @click="setWrong(selected, false)">{{ t('admin.artists.btnImageOk') }}</button>

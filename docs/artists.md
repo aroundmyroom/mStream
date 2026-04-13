@@ -111,7 +111,7 @@ A naive approach would JOIN `files` with a normalisation function on every reque
 | POST | `/api/v1/artists/mark-image-wrong` | admin | Flag/unflag an artist image as wrong from the player view |
 | POST | `/api/v1/db/artists-albums-multi` | user | Albums for one artist (accepts an array of variant names to handle all tag forms) |
 | POST | `/api/v1/admin/artists/rebuild-index` | admin | Trigger an immediate index rebuild without a full scan |
-| GET | `/api/v1/admin/artists/image-audit?kind=missing|wrong|with-image` | admin | List artists for missing/wrong review and with-image validation |
+| GET | `/api/v1/admin/artists/image-audit?kind=missing|no-image|wrong|with-image` | admin | List pending missing artists, already-tried no-image artists, wrong-image review, and with-image validation |
 | GET | `/api/v1/admin/artists/hydration-status` | admin | Live hydration queue status, counters, delay profile, and Discogs readiness |
 | POST | `/api/v1/admin/artists/hydration-seed` | admin | Enqueue missing artists on demand (used by the Queue next 500 action) |
 | GET | `/api/v1/admin/artists/discogs-candidates?artistKey=...` | admin | Fetch Discogs artist image candidates |
@@ -181,12 +181,14 @@ For admin users, artist cards/rows include a flag action to mark an artist image
 - When an upstream lookup yields no usable image, the system records the fetch attempt (`last_fetched`) so missing artists are not repeatedly retried and hammered.
 - Admin can monitor live queue/rate/error counters via `GET /api/v1/admin/artists/hydration-status` (used by Admin → Artists status panel).
 - Admin can force-start hydration on demand with `POST /api/v1/admin/artists/hydration-seed` (wired to **Queue next 500** in Admin → Artists).
+- Admin counts now separate **pending missing** artists (never tried yet) from **no image found** artists that were already checked upstream and returned nothing.
 
 ### Admin image repair workflow
 
 `Admin → Artists` provides:
 
 - **Missing** queue: artists with no stored image.
+- **No image found** queue: artists already checked upstream with no usable result; shown separately so the pending queue stays actionable.
 - **With image** queue: artists that already have an image, for manual quality review.
 - **Wrong** queue: artists flagged from the player as incorrect image.
 - Discogs candidate grid (multiple options) with direct apply.

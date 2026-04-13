@@ -1428,7 +1428,9 @@ export function getArtistImageAudit(kind, limit = 200) {
   const n = Math.max(1, Math.min(1000, Number(limit) || 200));
   let where = "artist_clean != ''";
   if (kind === 'missing') {
-    where += " AND (image_file IS NULL OR image_file = '')";
+    where += " AND (image_file IS NULL OR image_file = '') AND last_fetched IS NULL";
+  } else if (kind === 'no-image') {
+    where += " AND (image_file IS NULL OR image_file = '') AND last_fetched IS NOT NULL";
   } else if (kind === 'wrong') {
     where += ' AND image_flag_wrong = 1';
   } else if (kind === 'with-image') {
@@ -1455,14 +1457,16 @@ export function getArtistImageAudit(kind, limit = 200) {
 export function getArtistImageAuditCounts() {
   const row = db.prepare(`
     SELECT
-      SUM(CASE WHEN image_file IS NULL OR image_file = '' THEN 1 ELSE 0 END) AS missing,
+      SUM(CASE WHEN (image_file IS NULL OR image_file = '') AND last_fetched IS NULL THEN 1 ELSE 0 END) AS missing,
+      SUM(CASE WHEN (image_file IS NULL OR image_file = '') AND last_fetched IS NOT NULL THEN 1 ELSE 0 END) AS no_image,
       SUM(CASE WHEN image_flag_wrong = 1 THEN 1 ELSE 0 END) AS wrong,
       SUM(CASE WHEN image_file IS NOT NULL AND image_file != '' THEN 1 ELSE 0 END) AS withImage
     FROM artists_normalized
     WHERE artist_clean != ''
-  `).get() || { missing: 0, wrong: 0, withImage: 0 };
+  `).get() || { missing: 0, no_image: 0, wrong: 0, withImage: 0 };
   return {
     missing: Number(row.missing || 0),
+    noImage: Number(row.no_image || 0),
     wrong: Number(row.wrong || 0),
     withImage: Number(row.withImage || 0),
   };

@@ -79,7 +79,7 @@
 
     <!-- Record Now panel -->
     <div id="rec-panel-now" class="rec-panel">
-      <p style="font-size:.85rem;color:var(--t2);margin:.25rem 0 .75rem;">Choose a Recordings folder to save to. The recording starts immediately.</p>
+      <p style="font-size:.85rem;color:var(--t2);margin:.25rem 0 .75rem;" data-i18n="player.modal.recChooseFolder">Choose a Recordings folder to save to. The recording starts immediately.</p>
       <div class="rec-field">
         <label data-i18n="player.modal.recSaveTo">Save to folder</label>
         <select id="radio-rec-vpath" class="modal-select" style="width:100%;"></select>
@@ -442,7 +442,7 @@
     <div class="sidebar-scroll">
 
       <div class="nav-section" data-section="library">
-      <div class="nav-label nav-toggle" data-i18n="player.nav.musicLibrary">Music Library<svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
+      <div class="nav-label nav-toggle"><span data-i18n="player.nav.musicLibrary">Music Library</span><svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
       <nav class="sidenav">
         <button class="nav-btn active" data-view="home">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>
@@ -484,7 +484,7 @@
       </div>
 
       <div class="nav-section hidden" id="podcasts-section" data-section="podcasts">
-      <div class="nav-label nav-toggle" data-i18n="player.nav.mediaStreams">Media &amp; Streams<svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
+      <div class="nav-label nav-toggle"><span data-i18n="player.nav.mediaStreams">Media &amp; Streams</span><svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
       <nav class="sidenav">
         <button class="nav-btn hidden" id="radio-nav-btn" data-view="radio">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M7.76 7.76a6 6 0 0 0 0 8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/></svg>
@@ -506,7 +506,7 @@
       </div>
 
       <div class="nav-section" data-section="stats">
-      <div class="nav-label nav-toggle" data-i18n="player.nav.stats">Stats<svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
+      <div class="nav-label nav-toggle"><span data-i18n="player.nav.stats">Stats</span><svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
       <nav class="sidenav">
         <button class="nav-btn" data-view="rated">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>
@@ -554,7 +554,7 @@
       </div>
 
       <div class="nav-section" id="connectors-section" data-section="connectors">
-      <div class="nav-label nav-toggle" data-i18n="player.nav.connectors">Connectors<svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
+      <div class="nav-label nav-toggle"><span data-i18n="player.nav.connectors">Connectors</span><svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
       <nav class="sidenav">
         <button class="nav-btn hidden" id="lastfm-nav-btn" data-view="lastfm">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
@@ -576,7 +576,7 @@
       </div>
 
       <div class="nav-section" data-section="tools">
-      <div class="nav-label nav-toggle" data-i18n="player.nav.tools">Tools<svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
+      <div class="nav-label nav-toggle"><span data-i18n="player.nav.tools">Tools</span><svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
       <nav class="sidenav">
         <button class="nav-btn" data-view="playback">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>

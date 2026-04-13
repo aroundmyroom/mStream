@@ -92,16 +92,21 @@ Response:
 
 Triggers immediate rebuild of `artists_normalized` without waiting for full scan.
 
-### GET /api/v1/admin/artists/image-audit?kind=missing|wrong|with-image&limit=300
+### GET /api/v1/admin/artists/image-audit?kind=missing|no-image|wrong|with-image&limit=300
 
 Lists artists for moderation queues.
+
+- `missing`: artist has no stored image and has not been tried upstream yet
+- `no-image`: artist has no stored image, but an upstream fetch already returned no usable result
+- `wrong`: artist image exists but was flagged as incorrect
+- `with-image`: artist image exists for validation/review
 
 Response:
 
 ```json
 {
   "kind": "missing",
-  "counts": { "missing": 18060, "wrong": 1, "withImage": 392 },
+  "counts": { "missing": 18060, "noImage": 7244, "wrong": 1, "withImage": 392 },
   "artists": [
     {
       "artistKey": "chicane",

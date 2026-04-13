@@ -369,6 +369,7 @@ async function _hydrateArtistImage(artistKey, canonicalName) {
 
   const row = db.getArtistRow(canonicalName || artistKey);
   if (!row || row.imageFile) return 'skip';
+  if (row.lastFetched) return 'skip';
 
   // Prefer Discogs for artist photos; use Last.fm only as fallback.
   let imageUrl = await fetchArtistImageFromDiscogs(row.canonicalName);
@@ -402,6 +403,8 @@ async function _hydrateArtistImage(artistKey, canonicalName) {
 function _enqueueHydration(artistKey, canonicalName) {
   const key = String(artistKey || '').toLowerCase().trim();
   if (!key || _imgHydrateQueued.has(key)) return;
+  const row = db.getArtistRow(canonicalName || artistKey);
+  if (!row || row.imageFile || row.lastFetched) return;
   if (_imgHydrateQueue.length >= HYDRATE_QUEUE_LIMIT) {
     _imgHydrateStats.dropped += 1;
     return;
@@ -498,11 +501,11 @@ function hydrationStatusSnapshot() {
 }
 
 function seedHydrationFromMissing(limit = 500) {
-  const rows = db.getArtistImageAudit('missing', Math.max(1, Math.min(2000, Number(limit) || 500)));
+  const rows = db.getArtistsNeedingFetch().slice(0, Math.max(1, Math.min(2000, Number(limit) || 500)));
   let enqueued = 0;
   for (const a of rows) {
     const before = _imgHydrateQueue.length;
-    _enqueueHydration(a.artistKey, a.canonicalName);
+    _enqueueHydration(a, a);
     if (_imgHydrateQueue.length > before) enqueued += 1;
   }
   _drainHydrationQueue().catch(() => {});
@@ -745,12 +748,12 @@ export function setup(mstream) {
     res.json({ ok: true, artistKey: artistRow.artistKey, wrong: !!wrong });
   });
 
-  // ── GET /api/v1/admin/artists/image-audit?kind=missing|wrong|with-image&limit=200 ───
+  // ── GET /api/v1/admin/artists/image-audit?kind=missing|no-image|wrong|with-image&limit=200 ───
   mstream.get('/api/v1/admin/artists/image-audit', (req, res) => {
     if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
     const kind = String(req.query.kind || 'missing').toLowerCase();
     const limit = Number(req.query.limit || 200);
-    if (kind !== 'missing' && kind !== 'wrong' && kind !== 'with-image') {
+    if (kind !== 'missing' && kind !== 'no-image' && kind !== 'wrong' && kind !== 'with-image') {
       return res.status(400).json({ error: 'Invalid kind' });
     }
     try {

@@ -10,6 +10,7 @@
 - [ ] Admin Artists: add pagination/filter by minimum song count for very large libraries
 - [ ] Admin Artists: add image-dimension / file-size details to manual URL preview before apply
 - [ ] Admin Artists: add bulk Yes/No validation actions in the With image review list
+- [ ] Admin Artists: add retry/reset action for rows in the separate no-image queue
 - [ ] Admin Directories: add bulk Artists On/Off actions by folder type (music/audio-books/recordings)
 - [ ] Admin Directories: add visual parent/child relationship badges for Albums Only and Artists On/Off inheritance
 - [ ] Player Artist Library: optional badge for already-flagged wrong artists (admin-only)
@@ -24,7 +25,7 @@ Phase 1 (i18n.js engine + admin sidebar + language pickers with real flag-button
 
 - [ ] Replace remaining hardcoded English strings in `wrappedAdminView`, `foldersView`, `usersView`, `settingsView`, and `backupView` with `{{ t('admin.*') }}` calls.
 - [ ] Replace remaining hardcoded modal strings in `webapp/admin/index.js` (mpv modal + transcode modals + legacy confirm/modal copy) with i18n keys.
-- [ ] Audit remaining contextual helper text in the player UI (beyond the Now Playing rating helper) for state-aware i18n labels.
+- [ ] Player i18n: final sweep of remaining utility panels (Jukebox + Transcode + other info cards) to eliminate last hardcoded strings
 
 ---
 
@@ -182,6 +183,7 @@ Audit completed 2026-03-26. Strategy: **Option A — separate `mobile.css`** loa
 ### Stats View
 - [ ] `GET /api/v1/stats/summary?range=7d|30d|all`
 - [ ] **Stats** view in sidebar — plays-per-day sparkline, top-10 artists/albums/tracks, streak
+- [ ] Your Stats: add direct jump controls (e.g. "Now" / calendar jump) for faster long-range period navigation
 
 ---
 

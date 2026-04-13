@@ -38,7 +38,14 @@ Choose the time window at the top:
 | Half-Year | H1 (Jan–Jun) or H2 (Jul–Dec) |
 | Year | Full calendar year |
 
-Use **← Earlier** / **Later →** to navigate to previous periods.
+Use **← Earlier** / **Later →** to navigate between period offsets.
+
+- **Earlier** goes further back in time (up to 60 offsets).
+- **Later** moves toward the current period.
+- For **Week**, this means week-by-week navigation (ISO weeks).
+
+All labels in the Your Stats view (navigation, summary cards, headings, and fact blocks) are now language-key based via the i18n module, so they follow the active UI language.
+- All visible labels in this view are now translated through i18n keys (`player.wrapped.*`).
 
 ### Summary strip
 
