@@ -1,5 +1,22 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.9.2-velvet — April 2026 — Translation fixes & recording deletion fix
+
+### fix: wrong song played after deleting a recording
+- After deleting a recording row, remaining `[data-ci]` attributes were not renumbered, causing clicks to look up the wrong index in `S.curSongs`.
+- Fix: use exact `.song-row[data-ci="${idx}"]` selector to remove the row, then decrement all `[data-ci]` values `> idx` by 1 to keep DOM and array in sync.
+- Also fixed fragile row-removal by title text — two songs with the same name could remove the wrong row.
+
+### fix: i18n — additional missing translations
+- Auto-DJ info strip: "Similar to", "We will play:", "Other choices were:", "Queue restored · N songs" → `player.autodj.strip*` keys.
+- Album detail: "▶ Play", "+ Add to Queue", play-hint text (single and multi-disc variants) → `player.ctrl.alb*` keys.
+- Recording modal: "Choose a Recordings folder…" paragraph → `player.modal.recChooseFolder`.
+- Radio recording button: "Record this stream" + "Stop recording" → `player.ctrl.recordStream/stopRecording`.
+- Custom tooltip `MutationObserver` now watches `title` attribute mutations — fixes all player control buttons that set `title` via `data-i18n-attr` after page load showing native browser tooltip instead of `#tip-box`.
+- All 12 locale files in sync throughout.
+
+---
+
 ## v6.9.1-velvet — April 2026 — Translation completeness pass
 
 ### fix: i18n — missing tooltip and hover translations

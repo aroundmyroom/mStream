@@ -262,7 +262,7 @@ Open **http://localhost:3000** — on a fresh install with no users the admin pa
 Or pin to a specific release:
 
 ```shell
-docker pull ghcr.io/aroundmyroom/mstream-velvet:v6.9.1-velvet
+docker pull ghcr.io/aroundmyroom/mstream-velvet:v6.9.2-velvet
 ```
 
 **Build from source** (optional):

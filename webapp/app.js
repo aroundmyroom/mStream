@@ -408,11 +408,11 @@ function _showDJStrip(song) {
   const title = esc(song.title || song.filepath?.split('/').pop() || '');
   const played = title ? `${esc(song.artist || '?')} · ${title}` : esc(song.artist || '?');
   const html =
-    `<span class="dj-strip-label">Similar to <strong>${esc(_djSimilarFor)}</strong></span>` +
+    `<span class="dj-strip-label">${t('player.autodj.stripSimilarTo')} <strong>${esc(_djSimilarFor)}</strong></span>` +
     `<span class="dj-strip-sep">—</span>` +
-    `<span class="dj-strip-label">We will play:</span>` +
+    `<span class="dj-strip-label">${t('player.autodj.stripWillPlay')}</span>` +
     `<span class="dj-strip-queued">${played}</span>` +
-    (pills ? `<span class="dj-strip-sep">—</span><span class="dj-strip-label">Other choices were:</span><span class="dj-strip-sep">&nbsp;</span><span class="dj-strip-pills">${pills}</span>` : '');
+    (pills ? `<span class="dj-strip-sep">—</span><span class="dj-strip-label">${t('player.autodj.stripOtherChoices')}</span><span class="dj-strip-sep">&nbsp;</span><span class="dj-strip-pills">${pills}</span>` : '');
   _showInfoStrip('DJ', html, 30000); // stays until crossfade dismisses it
 }
 
@@ -469,7 +469,7 @@ function restoreQueue(silent = false) {
   refreshQueueUI();
   if (!silent) {
     _showInfoStrip('✓',
-      `<span class="dj-strip-label">Queue restored</span><span class="dj-strip-sep">·</span><span class="dj-strip-queued">${S.queue.length}</span><span class="dj-strip-title">&nbsp;song${S.queue.length !== 1 ? 's' : ''}</span>`,
+      `<span class="dj-strip-label">${t('player.autodj.stripQueueRestored')}</span><span class="dj-strip-sep">·</span><span class="dj-strip-queued">${S.queue.length}</span><span class="dj-strip-title">&nbsp;${t('label.getLastSongs', {count: S.queue.length})}</span>`,
       5000);
   }
 
@@ -5861,8 +5861,8 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
           <div class="alb-detail-title">${esc(album.displayName)}</div>
           <div class="alb-detail-sub">${album.artist ? esc(album.artist) + (album.year ? ' · ' + album.year : '') : (album.year || '')}</div>
           <div class="alb-detail-actions">
-            <button id="albd-play-all" class="primary-btn">▶ Play</button>
-            <button id="albd-add-all" class="secondary-btn">+ Add to Queue</button>
+            <button id="albd-play-all" class="primary-btn">${t('player.ctrl.albPlayAll')}</button>
+            <button id="albd-add-all" class="secondary-btn">${t('player.ctrl.albAddAll')}</button>
           </div>
           ${isCueAlbum ? '<div class="alb-cue-badge">Cue Album</div>' : ''}
         </div>
@@ -5879,7 +5879,7 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
           </div>`;
         }).join('')}
       </div>` : ''}
-      <div class="alb-play-hint">Clicking a track plays that disc from that track${multiDisc ? ' — use <strong>+</strong> on a disc tab to append it to the queue' : ''}.</div>
+      <div class="alb-play-hint">${multiDisc ? t('player.ctrl.albPlayHintDisc') : t('player.ctrl.albPlayHint')}</div>
       <div id="albd-tracklist" class="song-list"></div>`;
 
     // Render track list
@@ -12773,7 +12773,7 @@ function showApp() {
   const _restoredSong = S.queue.length > 0 && S.idx >= 0 ? S.queue[S.idx] : null;
   if (S.queue.length) {
     _bootOnDismiss = () => _showInfoStrip('✓',
-      `<span class="dj-strip-label">Queue restored</span><span class="dj-strip-sep">·</span><span class="dj-strip-queued">${S.queue.length}</span><span class="dj-strip-title">&nbsp;song${S.queue.length !== 1 ? 's' : ''}</span>`,
+      `<span class="dj-strip-label">${t('player.autodj.stripQueueRestored')}</span><span class="dj-strip-sep">·</span><span class="dj-strip-queued">${S.queue.length}</span><span class="dj-strip-title">&nbsp;${t('label.getLastSongs', {count: S.queue.length})}</span>`,
       5000);
   }
   if (_restoredSong && !_restoredSong.isRadio) {
@@ -13366,13 +13366,14 @@ document.getElementById('ctx-menu').querySelectorAll('.ctx-item').forEach(btn =>
             const idx = S.curSongs.findIndex(s => s.filepath === song.filepath);
             if (idx !== -1) {
               S.curSongs.splice(idx, 1);
-              // Re-render current view body if we're in the file browser
               const body = document.getElementById('content-body');
-              const rows = body.querySelectorAll('.song-row');
-              rows.forEach(r => {
-                if (r.querySelector('.song-title')?.textContent === (song.title || fname)) {
-                  r.remove();
-                }
+              // Remove the exact row by its data-ci index (reliable, unlike title text match)
+              const rowToRemove = body.querySelector(`.song-row[data-ci="${idx}"]`);
+              if (rowToRemove) rowToRemove.remove();
+              // Re-index all remaining rows with data-ci > idx so click handlers stay correct
+              body.querySelectorAll('[data-ci]').forEach(el => {
+                const ci = parseInt(el.dataset.ci);
+                if (ci > idx) el.dataset.ci = ci - 1;
               });
             }
             // Remove from queue if present
