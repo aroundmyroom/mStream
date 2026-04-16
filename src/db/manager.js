@@ -53,6 +53,32 @@ export function getLastScannedMs() { return backend.getLastScannedMs(); }
 export function rebuildFolderIndex() { backend.rebuildFolderIndex(); }
 export function rebuildArtistIndex(onComplete) { backend.rebuildArtistIndex(onComplete); }
 
+// AcoustID fingerprinting helpers
+export function getAcoustidQueue(limit, retryAfterSec) { return backend.getAcoustidQueue(limit, retryAfterSec); }
+export function setAcoustidPending(filepath, vpath) { return backend.setAcoustidPending(filepath, vpath); }
+export function setAcoustidResult(filepath, vpath, result) { return backend.setAcoustidResult(filepath, vpath, result); }
+export function resetAcoustidPending() { return backend.resetAcoustidPending(); }
+export function getAcoustidStats() { return backend.getAcoustidStats(); }
+
+// Tag Workshop — MB enrichment + tag review
+export function getMbEnrichQueue(limit) { return backend.getMbEnrichQueue(limit); }
+export function setMbEnrichPending(filepath, vpath) { return backend.setMbEnrichPending(filepath, vpath); }
+export function setMbEnrichResult(filepath, vpath, data) { return backend.setMbEnrichResult(filepath, vpath, data); }
+export function resetMbEnrichPending() { return backend.resetMbEnrichPending(); }
+export function getMbEnrichStats() { return backend.getMbEnrichStats(); }
+export function getMbEnrichErrors(limit) { return backend.getMbEnrichErrors(limit); }
+export function retryMbEnrichErrors() { return backend.retryMbEnrichErrors(); }
+export function getTagWorkshopStatus() { return backend.getTagWorkshopStatus(); }
+export function getTagWorkshopAlbums(filter, sort, page, search) { return backend.getTagWorkshopAlbums(filter, sort, page, search); }
+export function getTagWorkshopAlbumTracks(mb_release_id, album_dir) { return backend.getTagWorkshopAlbumTracks(mb_release_id, album_dir); }
+export function getTracksForAccept(mb_release_id, album_dir) { return backend.getTracksForAccept(mb_release_id, album_dir); }
+export function getTrackForAccept(filepath, vpath) { return backend.getTrackForAccept(filepath, vpath); }
+export function markTrackAccepted(filepath, vpath) { return backend.markTrackAccepted(filepath, vpath); }
+export function skipAlbumTags(mb_release_id, album_dir) { return backend.skipAlbumTags(mb_release_id, album_dir); }
+export function unshelveAlbum(mb_release_id, album_dir) { return backend.unshelveAlbum(mb_release_id, album_dir); }
+export function getShelvedAlbums(page) { return backend.getShelvedAlbums(page); }
+export function getCasingOnlyCandidates() { return backend.getCasingOnlyCandidates(); }
+
 // Metadata Queries
 export function updateFileArt(filepath, vpath, aaFile, scanId, artSource) { return backend.updateFileArt(filepath, vpath, aaFile, scanId, artSource); }
 export function countArtUsage(aaFile) { return backend.countArtUsage(aaFile); }
@@ -68,6 +94,7 @@ export function getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, include
 export function getAlbumSongs(album, vpaths, username, opts) { return backend.getAlbumSongs(album, vpaths, username, opts); }
 export function getFilesForAlbumsBrowse(sources) { return backend.getFilesForAlbumsBrowse(sources); }
 export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
+export function listAllSongs(vpaths, ignoreVPaths, excludeFilepathPrefixes, filepathPrefix, offset, limit) { return backend.listAllSongs(vpaths, ignoreVPaths, excludeFilepathPrefixes, filepathPrefix, offset, limit); }
 export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
 export function searchFolders(query, vpaths, ignoreVPaths) { return backend.searchFolders(query, vpaths, ignoreVPaths); }
 export function searchArtistsNormalized(query, vpaths, ignoreVPaths) { return backend.searchArtistsNormalized(query, vpaths, ignoreVPaths); }

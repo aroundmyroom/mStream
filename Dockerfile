@@ -29,6 +29,27 @@ RUN arch="$(uname -m)"; \
       fi; \
     fi
 
+# Pre-download fpcalc (Chromaprint) for AcoustID fingerprinting.
+# Static binary, no system dependencies. Falls back gracefully if download fails.
+RUN arch="$(uname -m)"; \
+    case "$arch" in \
+      x86_64)  url="https://github.com/acoustid/chromaprint/releases/download/v1.5.1/chromaprint-fpcalc-1.5.1-linux-x86_64.tar.gz" ;; \
+      aarch64) url="https://github.com/acoustid/chromaprint/releases/download/v1.5.1/chromaprint-fpcalc-1.5.1-linux-aarch64.tar.gz" ;; \
+      *)       url="" ;; \
+    esac; \
+    if [ -n "$url" ]; then \
+      mkdir -p bin/fpcalc && \
+      if wget -q -O /tmp/fpcalc.tar.gz "$url" && \
+         tar -xzf /tmp/fpcalc.tar.gz -C bin/fpcalc --strip-components=1 --wildcards '*/fpcalc' && \
+         chmod +x bin/fpcalc/fpcalc && \
+         rm -f /tmp/fpcalc.tar.gz && \
+         bin/fpcalc/fpcalc -version; then \
+        echo "fpcalc pre-download OK"; \
+      else \
+        rm -rf bin/fpcalc && echo "fpcalc pre-download failed (will auto-download at runtime)"; \
+      fi; \
+    fi
+
 # Pre-create runtime directories so SQLite and the config writer
 # can initialise even when no volume is mounted on first start.
 RUN mkdir -p save/conf save/db save/logs save/sync image-cache waveform-cache

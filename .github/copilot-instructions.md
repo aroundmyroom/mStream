@@ -137,7 +137,40 @@ See `src/db/sqlite-backend.js` → `includePrefixClauses()` and `excludePrefixCl
 
 **When reviewing ANY new code that builds a filepath for playback:** ask "does this use the child vpath name or the DB parent vpath?" If child vpath name → BUG.
 
-### Vpath indexing architecture — NO duplicate indexing
+### CRITICAL — child-vpath type/permission checks (403 bug — fixed multiple times, DO NOT regress)
+**Any server endpoint or client code that checks `type`, `allowRecordDelete`, or other vpath properties MUST NOT assume the first path segment is the vpath with those properties.**
+
+**Why it breaks:** Files under a child vpath (e.g. `Recordings`, root `/media/music/Recordings`) are stored in the DB with `vpath='Music'` and `filepath='Recordings/filename.opus'`. The first segment of a song filepath is always the ROOT vpath (`Music`), which has `type=music`. Checking `folders[firstSegment].type === 'recordings'` → **always false** → 403.
+
+**The correct pattern for permission/type checks:**
+```js
+// Find the MOST SPECIFIC vpath whose root is a prefix of the resolved full path
+const matchingVpath = Object.entries(config.program.folders).find(([, cfg]) => {
+  if (!cfg.allowRecordDelete) return false;  // or whatever property you need
+  const base = cfg.root.endsWith(path.sep) ? cfg.root : cfg.root + path.sep;
+  return fullPath === cfg.root || fullPath.startsWith(base);
+});
+```
+
+**Client-side canDelete check (vpathMeta-based):**
+```js
+// fp = full filepath like "Music/Recordings/song.opus"
+function canDeleteFp(fp) {
+  return Object.entries(S.vpathMeta || {}).some(([vpName, meta]) => {
+    if (!meta.allowRecordDelete) return false;
+    if (fp.startsWith(vpName + '/')) return true;                          // direct root vpath
+    if (meta.parentVpath && meta.filepathPrefix)
+      return fp.startsWith(meta.parentVpath + '/' + meta.filepathPrefix); // child vpath
+    return false;
+  });
+}
+```
+
+**Known locations fixed:**
+- `src/api/download.js` DELETE `/api/v1/files/recording`: uses full-path prefix match against all folders (fixed)
+- `webapp/app.js` file-explorer `canDelete` and ctx-menu `canDelete`: uses `canDeleteFp()` helper (fixed)
+
+
 **Only ROOT vpaths are indexed in the database.** A ROOT vpath is one whose `root` path is not a sub-path of any other configured vpath.
 
 VCHILDs (child vpaths) are **shortcuts / filters only** — their files are already stored in the DB under the parent ROOT. They are never indexed separately. Treating a child vpath as a separate indexed source would cause duplicate rows.

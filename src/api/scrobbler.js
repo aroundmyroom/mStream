@@ -249,7 +249,9 @@ export function updateApiKeys(apiKey, apiSecret) {
 
 // ── ListenBrainz ─────────────────────────────────────────────────────────────
 
-// In no-auth mode there are no persistent user objects, so we hold the token here.
+// In no-auth mode there is no persistent user object, so the token is stored
+// under config.program.listenBrainz.noAuthToken in default.json.
+// Initialized in setupListenBrainz() once config.program is available.
 let _noAuthLbToken = null;
 
 /**
@@ -298,6 +300,9 @@ function lbSubmit(token, artist, track, release, listenedAt) {
 }
 
 export function setupListenBrainz(mstream) {
+  // Restore no-auth token from config file (survives server restarts)
+  _noAuthLbToken = config.program.listenBrainz?.noAuthToken || null;
+
   // ── Admin: enable/disable ───────────────────────────────────────────────────
   mstream.get('/api/v1/admin/listenbrainz/config', (req, res) => {
     if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
@@ -347,10 +352,16 @@ export function setupListenBrainz(mstream) {
       throw new WebError('Invalid ListenBrainz token — check and try again', 401);
     }
 
-    // Persist token — no-auth uses in-memory only; real users go to config file
+    // Persist token — no-auth uses listenBrainz.noAuthToken in config file
     const username = req.user.username;
     if (username === 'mstream-user') {
       _noAuthLbToken = token;
+      const loadConfig = JSON.parse(await fs.readFile(config.configFile, 'utf-8'));
+      if (!loadConfig.listenBrainz) loadConfig.listenBrainz = {};
+      loadConfig.listenBrainz.noAuthToken = token;
+      await fs.writeFile(config.configFile, JSON.stringify(loadConfig, null, 2), 'utf8');
+      if (!config.program.listenBrainz) config.program.listenBrainz = {};
+      config.program.listenBrainz.noAuthToken = token;
     } else {
       const loadConfig = JSON.parse(await fs.readFile(config.configFile, 'utf-8'));
       if (!loadConfig.users) loadConfig.users = {};
@@ -366,6 +377,12 @@ export function setupListenBrainz(mstream) {
     const username = req.user.username;
     if (username === 'mstream-user') {
       _noAuthLbToken = null;
+      const loadConfig = JSON.parse(await fs.readFile(config.configFile, 'utf-8'));
+      if (loadConfig.listenBrainz) {
+        delete loadConfig.listenBrainz.noAuthToken;
+        await fs.writeFile(config.configFile, JSON.stringify(loadConfig, null, 2), 'utf8');
+      }
+      if (config.program.listenBrainz) delete config.program.listenBrainz.noAuthToken;
     } else {
       const loadConfig = JSON.parse(await fs.readFile(config.configFile, 'utf-8'));
       if (loadConfig.users?.[username]) {

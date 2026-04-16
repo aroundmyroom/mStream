@@ -187,6 +187,16 @@ export function setup(mstream) {
     res.json({});
   });
 
+  mstream.post("/api/v1/admin/db/params/boot-scan-enabled", async (req, res) => {
+    const schema = Joi.object({
+      bootScanEnabled: Joi.boolean().required()
+    });
+    joiValidate(schema, req.body);
+
+    await admin.editBootScanEnabled(req.body.bootScanEnabled);
+    res.json({});
+  });
+
   mstream.post("/api/v1/admin/db/params/max-concurrent-scans", async (req, res) => {
     const schema = Joi.object({
       maxConcurrentTasks:  Joi.number().integer().min(0).required()
@@ -1020,6 +1030,49 @@ export function setup(mstream) {
 
     if (!config.program.lyrics) config.program.lyrics = {};
     config.program.lyrics.enabled = req.body.enabled;
+
+    res.json({});
+  });
+
+  // ── AcoustID config ───────────────────────────────────────────
+  mstream.get("/api/v1/admin/acoustid/config", (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const apiKey = config.program.acoustid?.apiKey || '';
+    // Mask the key — show first 6 chars + asterisks so admin can confirm which key is set
+    const maskedKey = apiKey.length > 6
+      ? apiKey.slice(0, 6) + '*'.repeat(apiKey.length - 6)
+      : apiKey.replace(/./g, '*');
+    res.json({
+      enabled: config.program.acoustid?.enabled === true,
+      apiKey:  maskedKey,
+      hasKey:  apiKey.length >= 4,
+    });
+  });
+
+  mstream.post("/api/v1/admin/acoustid/config", async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const schema = Joi.object({
+      enabled: Joi.boolean().required(),
+      // Allow empty string (clearing key) or a non-empty key string
+      apiKey:  Joi.string().allow('').max(64).required(),
+    });
+    joiValidate(schema, req.body);
+
+    // If apiKey is the masked value (contains asterisks) from the GET response,
+    // the admin didn't change it — preserve the existing stored key instead of saving asterisks.
+    const incomingKey = req.body.apiKey.trim();
+    const isUnchangedMask = incomingKey.includes('*') && incomingKey.length > 0;
+    const newKey = isUnchangedMask ? (config.program.acoustid?.apiKey || '') : incomingKey;
+
+    const loadConfig = await admin.loadFile(config.configFile);
+    if (!loadConfig.acoustid) loadConfig.acoustid = {};
+    loadConfig.acoustid.enabled = req.body.enabled;
+    loadConfig.acoustid.apiKey  = newKey;
+    await admin.saveFile(loadConfig, config.configFile);
+
+    if (!config.program.acoustid) config.program.acoustid = {};
+    config.program.acoustid.enabled = req.body.enabled;
+    config.program.acoustid.apiKey  = newKey;
 
     res.json({});
   });

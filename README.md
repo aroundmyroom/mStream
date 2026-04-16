@@ -262,7 +262,7 @@ Open **http://localhost:3000** — on a fresh install with no users the admin pa
 Or pin to a specific release:
 
 ```shell
-docker pull ghcr.io/aroundmyroom/mstream-velvet:v6.9.2-velvet
+docker pull ghcr.io/aroundmyroom/mstream-velvet:v6.10.0-velvet
 ```
 
 **Build from source** (optional):
@@ -325,10 +325,14 @@ systemctl restart music.service   # or: pm2 restart all
 
 The built-in Subsonic REST API also lets you use any Subsonic-compatible app:
 
-- **DSub** (Android)
-- **Substreamer** (iOS)
-- **Symfonium** (Android)
-- **Ultrasonic** (Android)
+| Client | Platform | Tested |
+|---|---|---|
+| **DSub** | Android | ✅ |
+| **Substreamer** | iOS | ✅ |
+| **Symfonium** | Android | ✅ Full sync verified |
+| **Ultrasonic** | Android | ✅ |
+| **Feishin** | Desktop | ✅ |
+| Any Subsonic 1.16.1 client | — | Should work |
 
 ---
 

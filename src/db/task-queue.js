@@ -195,7 +195,9 @@ export function runAfterBoot() {
   setTimeout(() => {
     // This only gets run once after boot. Will not be run on server restart b/c scanIntervalTimer is already set
     if (config.program.scanOptions.scanInterval > 0 && scanIntervalTimer === null) {
-      scanAll();
+      if (config.program.scanOptions.bootScanEnabled === true) {
+        scanAll();
+      }
       scanIntervalTimer = setInterval(() => scanAll(), config.program.scanOptions.scanInterval * 60 * 60 * 1000);
     }
   }, config.program.scanOptions.bootScanDelay * 1000);

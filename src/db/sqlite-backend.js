@@ -21,6 +21,19 @@ function _makeAlbumId(artist, album) {
     .digest('hex').slice(0, 16);
 }
 
+/**
+ * Compute the "physical album directory" from a file's relative filepath.
+ * Strips the filename, then collapses any trailing /CD N / Disc N / Side N
+ * indicator so that multi-disc albums group together under one directory key.
+ */
+function _normalizeAlbumDir(filepath) {
+  const lastSlash = filepath.lastIndexOf('/');
+  let dir = lastSlash > 0 ? filepath.slice(0, lastSlash) : '';
+  // Collapse trailing disc-indicator segment so CD 1 and CD 2 share the same key
+  dir = dir.replace(/\/(CD|Disc|Disk|Side)\s*\d+\s*$/i, '');
+  return dir;
+}
+
 let db;
 let _dbPath = null;
 let _rebuildInFlight = false;
@@ -35,6 +48,9 @@ export function init(dbDirectory) {
   // NORMAL skips per-write fsync (safe with WAL); prevents 50-200ms event-loop
   // stalls on slow storage (SD card, HDD) that would interrupt audio streaming.
   db.exec('PRAGMA synchronous = NORMAL');
+  // Wait up to 30 s for write locks before throwing "database is locked".
+  // Needed when the acoustid worker thread also writes to the same DB.
+  db.exec('PRAGMA busy_timeout = 30000');
   // Raise auto-checkpoint threshold so SQLite never triggers a blocking
   // checkpoint while a song is streaming. The WAL is cleaned up on DB close.
   db.exec('PRAGMA wal_autocheckpoint(10000)');
@@ -277,11 +293,55 @@ export function init(dbDirectory) {
   try { db.exec('ALTER TABLE files ADD COLUMN cover_file TEXT'); } catch (_e) {}
   // Migration: add pause_count to play_events to track user-initiated pauses
   try { db.exec('ALTER TABLE play_events ADD COLUMN pause_count INTEGER DEFAULT 0'); } catch (_e) {}
+  // Migration: AcoustID fingerprinting columns
+  try { db.exec('ALTER TABLE files ADD COLUMN acoustid_id TEXT'); }     catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN mbid TEXT'); }             catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN acoustid_score REAL'); }   catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN acoustid_status TEXT'); }  catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN acoustid_ts INTEGER'); }   catch (_e) {}
+  // Migration: AcoustID v2 — canonical MB title/artist stored from recordings meta
+  try { db.exec('ALTER TABLE files ADD COLUMN mb_title TEXT'); }         catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN mb_artist TEXT'); }        catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN mb_artist_id TEXT'); }     catch (_e) {}
+  // Migration: Tag Workshop — MusicBrainz enrichment columns (Phase 2)
+  try { db.exec('ALTER TABLE files ADD COLUMN mb_album TEXT'); }              catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN mb_year INTEGER'); }            catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN mb_track INTEGER'); }           catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN mb_release_id TEXT'); }         catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN mb_enrichment_status TEXT'); }  catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN mb_enriched_ts INTEGER'); }     catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN mb_enrichment_error TEXT'); }   catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN tag_status TEXT'); }            catch (_e) {}
+  // Migration: Tag Workshop Phase 3 — per-physical-album grouping
+  try { db.exec('ALTER TABLE files ADD COLUMN mb_album_dir TEXT'); }          catch (_e) {}
+  // Backfill mb_album_dir for all existing enriched rows (idempotent)
+  try {
+    const _bfDir = db.prepare(
+      "SELECT filepath, vpath FROM files WHERE mb_release_id IS NOT NULL AND mb_album_dir IS NULL"
+    ).all();
+    if (_bfDir.length > 0) {
+      const _bfDirUpd = db.prepare('UPDATE files SET mb_album_dir = ? WHERE filepath = ? AND vpath = ?');
+      db.exec('BEGIN');
+      for (const r of _bfDir) _bfDirUpd.run(_normalizeAlbumDir(r.filepath), r.filepath, r.vpath);
+      db.exec('COMMIT');
+    }
+  } catch (_e) {}
+  db.exec('CREATE INDEX IF NOT EXISTS idx_files_mb_enrichment_status ON files(mb_enrichment_status)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_files_tag_status ON files(tag_status)');
+  // Reset any 'found' rows that have null mbid (processed with broken meta flag) so they re-queue
+  try {
+    const _fixCount = db.prepare("SELECT COUNT(*) AS n FROM files WHERE acoustid_status='found' AND mbid IS NULL").get().n;
+    if (_fixCount > 0) {
+      db.exec("UPDATE files SET acoustid_status = NULL, acoustid_ts = NULL WHERE acoustid_status = 'found' AND mbid IS NULL");
+    }
+  } catch (_e) {}
   // Ensure indexes exist (IF NOT EXISTS is idempotent — safe on every startup)
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_artist_id ON files(artist_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_album_id ON files(album_id)');
   // Covering index for getAaFileForDir: fast folder-art lookups by (vpath, filepath prefix)
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_vpath_filepath_aa ON files(vpath, filepath, aaFile)');
+  // AcoustID: worker scans for NULL status to find unprocessed files
+  db.exec('CREATE INDEX IF NOT EXISTS idx_files_acoustid_status ON files(acoustid_status)');
   // One-time backfill: compute artist_id / album_id for all records added before this migration
   const _bfCount = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE artist_id IS NULL').get().cnt;
   if (_bfCount > 0) {
@@ -1537,6 +1597,29 @@ export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix
   return rows.map(mapFileRow);
 }
 
+// Paginated "list all songs" — used by Subsonic search3 with empty query.
+// OpenSubsonic spec: "A blank query will return everything."
+export function listAllSongs(vpaths, ignoreVPaths, excludeFilepathPrefixes, filepathPrefix, offset, limit) {
+  const filtered = vpathFilter(vpaths, ignoreVPaths);
+  if (filtered.length === 0) { return []; }
+  const vIn = inClause('vpath', filtered);
+  const ep = excludePrefixClauses(excludeFilepathPrefixes);
+  const params = [...vIn.params, ...ep.params];
+  let sql = `SELECT rowid AS id, * FROM files WHERE ${vIn.sql}${ep.sql}`;
+  if (filepathPrefix && typeof filepathPrefix === 'string') {
+    sql += " AND filepath LIKE ? ESCAPE '\\'";
+    params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
+  }
+  // NULLs/whitespace-only last so properly tagged songs are returned first in paginated sync
+  // Use REPLACE to strip all whitespace types (tabs, newlines) before TRIM check
+  const wsNull = c => `CASE WHEN TRIM(REPLACE(REPLACE(REPLACE(COALESCE(${c},''),CHAR(9),' '),CHAR(10),' '),CHAR(13),' '))='' THEN 1 ELSE 0 END`;
+  sql += ` ORDER BY ${wsNull('artist')}, artist COLLATE NOCASE,` +
+         ` ${wsNull('album')}, album COLLATE NOCASE, track LIMIT ? OFFSET ?`;
+  params.push(limit, offset);
+  const rows = db.prepare(sql).all(...params);
+  return rows.map(mapFileRow);
+}
+
 export function getUserSettings(username) {
   const row = db.prepare('SELECT prefs, queue FROM user_settings WHERE username = ?').get(username);
   if (!row) return { prefs: {}, queue: null };
@@ -1860,7 +1943,16 @@ export function resetRecentlyPlayed(username) {
 
 // Playlists
 export function getUserPlaylists(username) {
-  return db.prepare('SELECT name FROM playlists WHERE user = ? AND filepath IS NULL').all(username);
+  return db.prepare(`
+    SELECT p.name,
+           COUNT(f.rowid) AS songCount,
+           CAST(COALESCE(SUM(f.duration), 0) AS INTEGER) AS totalDuration
+    FROM playlists p
+    LEFT JOIN playlists e ON e.user = p.user AND e.name = p.name AND e.filepath IS NOT NULL
+    LEFT JOIN files f ON f.vpath || '/' || f.filepath = e.filepath
+    WHERE p.user = ? AND p.filepath IS NULL
+    GROUP BY p.name
+  `).all(username);
 }
 
 export function findPlaylist(username, playlistName) {
@@ -2245,15 +2337,19 @@ export function getAllAlbumIds(vpaths, opts = {}) {
   if (filtered.length === 0) return [];
   const vIn = inClause('vpath', filtered);
   const pf = prefixClause(opts.filepathPrefix);
+  const ep = excludePrefixClauses(opts.excludeFilepathPrefixes);
+  const limit  = opts.limit  != null ? opts.limit  : -1;  // -1 = no limit in SQLite
+  const offset = opts.offset != null ? opts.offset :  0;
   const rows = db.prepare(`
     SELECT DISTINCT album_id, artist_id, album, artist,
            MAX(year) AS year, MAX(aaFile) AS aaFile, COUNT(*) AS songCount,
            CAST(SUM(duration) AS INTEGER) AS totalDuration, MAX(ts) AS ts
     FROM files
-    WHERE ${vIn.sql}${pf.sql} AND album IS NOT NULL
+    WHERE ${vIn.sql}${pf.sql}${ep.sql} AND album IS NOT NULL AND TRIM(REPLACE(REPLACE(REPLACE(album, CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' ')) != ''
     GROUP BY album_id
     ORDER BY album COLLATE NOCASE
-  `).all(...vIn.params, ...pf.params);
+    LIMIT ? OFFSET ?
+  `).all(...vIn.params, ...pf.params, ...ep.params, limit, offset);
   return rows;
 }
 
@@ -2262,14 +2358,18 @@ export function getAllArtistIds(vpaths, opts = {}) {
   if (filtered.length === 0) return [];
   const vIn = inClause('vpath', filtered);
   const pf = prefixClause(opts.filepathPrefix);
+  const ep = excludePrefixClauses(opts.excludeFilepathPrefixes);
+  const limit  = opts.limit  != null ? opts.limit  : -1;
+  const offset = opts.offset != null ? opts.offset :  0;
   const rows = db.prepare(`
     SELECT DISTINCT artist_id, artist, MAX(aaFile) AS aaFile,
            COUNT(DISTINCT album_id) AS albumCount
     FROM files
-    WHERE ${vIn.sql}${pf.sql} AND artist IS NOT NULL
+    WHERE ${vIn.sql}${pf.sql}${ep.sql} AND artist IS NOT NULL AND TRIM(REPLACE(REPLACE(REPLACE(artist, CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' ')) != ''
     GROUP BY artist_id
     ORDER BY artist COLLATE NOCASE
-  `).all(...vIn.params, ...pf.params);
+    LIMIT ? OFFSET ?
+  `).all(...vIn.params, ...pf.params, ...ep.params, limit, offset);
   return rows;
 }
 
@@ -2865,4 +2965,315 @@ export function getPodcastStatsInRange(userId, fromMs, toMs) {
     GROUP BY ppe.feed_id
     ORDER BY total_ms DESC
   `).all(userId, fromMs, toMs);
+}
+
+// ── AcoustID Fingerprinting ───────────────────────────────────────────────────
+
+/**
+ * Returns a batch of up to `limit` files that need fingerprinting:
+ *  - acoustid_status IS NULL (never attempted)
+ *  - OR status='error' with a timestamp older than retryAfterSec seconds
+ * Ordered oldest-indexed-first so newly scanned songs complete roughly in
+ * library order rather than most-recently-added order.
+ */
+export function getAcoustidQueue(limit, retryAfterSec) {
+  const cutoff = Math.floor(Date.now() / 1000) - retryAfterSec;
+  return db.prepare(`
+    SELECT filepath, vpath, duration
+    FROM files
+    WHERE format IS NOT NULL
+      AND (
+        acoustid_status IS NULL
+        OR (acoustid_status = 'error' AND (acoustid_ts IS NULL OR acoustid_ts < ?))
+      )
+    ORDER BY ts ASC
+    LIMIT ?
+  `).all(cutoff, limit);
+}
+
+/** Mark a file as pending (in-progress) so a restart doesn't double-process it. */
+export function setAcoustidPending(filepath, vpath) {
+  db.prepare(
+    `UPDATE files SET acoustid_status = 'pending', acoustid_ts = ? WHERE filepath = ? AND vpath = ?`
+  ).run(Math.floor(Date.now() / 1000), filepath, vpath);
+}
+
+/** Persist the result of a successful AcoustID lookup. */
+export function setAcoustidResult(filepath, vpath, { acoustid_id, mbid, score, status }) {
+  db.prepare(
+    `UPDATE files SET acoustid_id = ?, mbid = ?, acoustid_score = ?, acoustid_status = ?, acoustid_ts = ?
+     WHERE filepath = ? AND vpath = ?`
+  ).run(acoustid_id ?? null, mbid ?? null, score ?? null, status, Math.floor(Date.now() / 1000), filepath, vpath);
+}
+
+/** Reset any 'pending' rows back to NULL so they are retried on next worker start. */
+export function resetAcoustidPending() {
+  db.prepare(`UPDATE files SET acoustid_status = NULL WHERE acoustid_status = 'pending'`).run();
+}
+
+/** Return aggregate fingerprinting statistics for the admin UI. */
+export function getAcoustidStats() {
+  return db.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      COUNT(CASE WHEN acoustid_status = 'found'     THEN 1 END) AS found,
+      COUNT(CASE WHEN acoustid_status = 'not_found' THEN 1 END) AS not_found,
+      COUNT(CASE WHEN acoustid_status = 'error'     THEN 1 END) AS errors,
+      COUNT(CASE WHEN acoustid_status = 'pending'   THEN 1 END) AS pending,
+      COUNT(CASE WHEN acoustid_status IS NULL        THEN 1 END) AS queued
+    FROM files
+    WHERE format IS NOT NULL
+  `).get();
+}
+
+// ── Tag Workshop — MB Enrichment ──────────────────────────────────────────────
+
+/** Fetch next batch of files awaiting MusicBrainz enrichment. */
+export function getMbEnrichQueue(limit) {
+  return db.prepare(`
+    SELECT filepath, vpath, mbid, title, artist, album, year, track
+    FROM files
+    WHERE mbid IS NOT NULL
+      AND mb_enrichment_status IS NULL
+      AND acoustid_status = 'found'
+    LIMIT ?
+  `).all(limit);
+}
+
+/** Mark a row as pending for MB enrichment. */
+export function setMbEnrichPending(filepath, vpath) {
+  db.prepare(
+    `UPDATE files SET mb_enrichment_status = 'pending', mb_enriched_ts = ? WHERE filepath = ? AND vpath = ?`
+  ).run(Math.floor(Date.now() / 1000), filepath, vpath);
+}
+
+/** Persist the result of a MusicBrainz recording lookup. */
+export function setMbEnrichResult(filepath, vpath, data) {
+  db.prepare(`
+    UPDATE files
+    SET mb_album = ?, mb_year = ?, mb_track = ?, mb_release_id = ?,
+        mb_enrichment_status = ?, mb_enriched_ts = ?, tag_status = ?
+    WHERE filepath = ? AND vpath = ?
+  `).run(
+    data.mb_album ?? null, data.mb_year ?? null, data.mb_track ?? null, data.mb_release_id ?? null,
+    data.status, Math.floor(Date.now() / 1000), data.tag_status ?? null,
+    filepath, vpath
+  );
+}
+
+/** Reset any rows stuck in 'pending' back to NULL so they are retried on next worker start. */
+export function resetMbEnrichPending() {
+  db.prepare(`UPDATE files SET mb_enrichment_status = NULL WHERE mb_enrichment_status = 'pending'`).run();
+}
+
+/** Aggregate MB enrichment statistics for the admin UI. */
+export function getMbEnrichStats() {
+  return db.prepare(`
+    SELECT
+      COUNT(CASE WHEN mbid IS NOT NULL AND acoustid_status = 'found' THEN 1 END) AS total,
+      COUNT(CASE WHEN mb_enrichment_status = 'done'    THEN 1 END) AS done,
+      COUNT(CASE WHEN mb_enrichment_status = 'error'   THEN 1 END) AS errors,
+      COUNT(CASE WHEN mb_enrichment_status = 'no_data' THEN 1 END) AS no_data,
+      COUNT(CASE WHEN mb_enrichment_status IS NULL AND mbid IS NOT NULL AND acoustid_status = 'found' THEN 1 END) AS queued,
+      COUNT(CASE WHEN acoustid_status IS NOT NULL THEN 1 END) AS acoustid_attempted,
+      COUNT(CASE WHEN acoustid_status = 'found' THEN 1 END) AS acoustid_found
+    FROM files
+  `).get();
+}
+
+/** Files that failed MB enrichment — filepath + mbid + error reason for diagnosis. */
+export function getMbEnrichErrors(limit = 200) {
+  return db.prepare(`
+    SELECT filepath, vpath, mbid, mb_enriched_ts, mb_enrichment_error
+    FROM files
+    WHERE mb_enrichment_status = 'error' AND mbid IS NOT NULL
+    ORDER BY mb_enriched_ts DESC
+    LIMIT ?
+  `).all(limit);
+}
+
+/** Reset all error rows back to NULL so they are retried on next worker run. */
+export function retryMbEnrichErrors() {
+  const r = db.prepare(`
+    UPDATE files SET mb_enrichment_status = NULL, mb_enrichment_error = NULL
+    WHERE mb_enrichment_status = 'error'
+  `).run();
+  return { reset: r.changes };
+}
+
+/** Combined status for the Tag Workshop dashboard. */
+export function getTagWorkshopStatus() {
+  const mb   = getMbEnrichStats();
+  const tags = db.prepare(`
+    SELECT
+      COUNT(CASE WHEN tag_status = 'needs_review' THEN 1 END) AS needs_review,
+      COUNT(CASE WHEN tag_status = 'confirmed'    THEN 1 END) AS confirmed,
+      COUNT(CASE WHEN tag_status = 'accepted'     THEN 1 END) AS accepted,
+      COUNT(CASE WHEN tag_status = 'skipped'      THEN 1 END) AS skipped
+    FROM files
+    WHERE mb_enrichment_status = 'done'
+  `).get();
+  return { mb, tags };
+}
+
+const _TWS_PAGE_SIZE = 40;
+
+/** Paginated album cards grouped by mb_release_id. */
+export function getTagWorkshopAlbums(filter = 'all', sort = 'broken', page = 1, search = '') {
+  const offset = (Math.max(1, Number(page) || 1) - 1) * _TWS_PAGE_SIZE;
+
+  const searchSql = search.trim()
+    ? `AND (mb_album LIKE '%' || ? || '%' OR mb_artist LIKE '%' || ? || '%')`
+    : '';
+  const searchParams = search.trim() ? [search.trim(), search.trim()] : [];
+
+  // Filter is a HAVING condition on aggregated values so track_count always
+  // reflects the full album (not just the filtered subset of tracks).
+  let havingSql;
+  switch (filter) {
+    case 'missing': havingSql = `HAVING SUM(CASE WHEN title IS NULL OR title = '' OR artist IS NULL OR artist = '' OR album IS NULL OR album = '' THEN 1 ELSE 0 END) > 0`; break;
+    case 'year':    havingSql = `HAVING SUM(CASE WHEN mb_year IS NOT NULL AND (year IS NULL OR ABS(year - mb_year) > 1) THEN 1 ELSE 0 END) > 0`; break;
+    case 'artist':  havingSql = `HAVING SUM(CASE WHEN mb_artist IS NOT NULL AND lower(REPLACE(COALESCE(artist,''),' ','')) != lower(REPLACE(mb_artist,' ','')) THEN 1 ELSE 0 END) > 0`; break;
+    default:        havingSql = '';
+  }
+
+  let orderSql;
+  switch (sort) {
+    case 'tracks': orderSql = `track_count DESC, COALESCE(mb_artist,'') COLLATE NOCASE, COALESCE(mb_album,'') COLLATE NOCASE`; break;
+    case 'alpha':  orderSql = `COALESCE(mb_artist,'') COLLATE NOCASE, COALESCE(mb_album,'') COLLATE NOCASE`; break;
+    default:       orderSql = `tracks_needing_fix DESC, COALESCE(mb_artist,'') COLLATE NOCASE, COALESCE(mb_album,'') COLLATE NOCASE`;
+  }
+
+  const albums = db.prepare(`
+    SELECT
+      mb_release_id,
+      COALESCE(mb_album_dir, '') AS mb_album_dir,
+      mb_album,
+      mb_artist,
+      mb_year,
+      COUNT(*) AS track_count,
+      COUNT(CASE WHEN
+        (mb_title IS NOT NULL AND lower(REPLACE(COALESCE(title,''),' ','')) != lower(REPLACE(mb_title,' ','')))
+        OR (mb_artist IS NOT NULL AND lower(REPLACE(COALESCE(artist,''),' ','')) != lower(REPLACE(mb_artist,' ','')))
+        OR (mb_album IS NOT NULL AND lower(REPLACE(COALESCE(album,''),' ','')) != lower(REPLACE(mb_album,' ','')))
+        OR (mb_year IS NOT NULL AND ABS(COALESCE(year,0) - mb_year) > 1)
+        THEN 1 END) AS tracks_needing_fix,
+      MAX(aaFile) AS album_art
+    FROM files
+    WHERE tag_status = 'needs_review' AND mb_release_id IS NOT NULL ${searchSql}
+    GROUP BY mb_release_id, COALESCE(mb_album_dir, '')
+    ${havingSql}
+    ORDER BY ${orderSql}
+    LIMIT ? OFFSET ?
+  `).all(...searchParams, _TWS_PAGE_SIZE, offset);
+
+  const countRow = db.prepare(
+    `SELECT COUNT(*) AS cnt FROM (
+       SELECT mb_release_id, COALESCE(mb_album_dir,'') FROM files
+       WHERE tag_status = 'needs_review' AND mb_release_id IS NOT NULL ${searchSql}
+       GROUP BY mb_release_id, COALESCE(mb_album_dir, '')
+       ${havingSql}
+     )`
+  ).get(...searchParams);
+
+  return { albums, total: countRow.cnt, page: Number(page), pageSize: _TWS_PAGE_SIZE };
+}
+
+/** All tracks for one release card (side-by-side file vs MB comparison). */
+export function getTagWorkshopAlbumTracks(mb_release_id, album_dir = null) {
+  const dirFilter = album_dir != null ? `AND COALESCE(mb_album_dir, '') = '${album_dir.replace(/'/g, "''")}'` : '';
+  return db.prepare(`
+    SELECT filepath, vpath, title, artist, album, year, track, format,
+           mb_title, mb_artist, mb_album, mb_year, mb_track,
+           mb_release_id, tag_status, aaFile
+    FROM files
+    WHERE mb_release_id = ? ${dirFilter}
+    ORDER BY COALESCE(mb_track, track, 0), filepath COLLATE NOCASE
+  `).all(mb_release_id);
+}
+
+/** Return tracks needing tag updates for an accept operation. */
+export function getTracksForAccept(mb_release_id, album_dir = null) {
+  const dirFilter = album_dir != null ? `AND COALESCE(mb_album_dir, '') = '${album_dir.replace(/'/g, "''")}'` : '';
+  return db.prepare(`
+    SELECT filepath, vpath, mb_title, mb_artist, mb_album, mb_year, mb_track, title, artist, album, year, track, format
+    FROM files
+    WHERE mb_release_id = ? AND tag_status IN ('needs_review', 'confirmed') ${dirFilter}
+  `).all(mb_release_id);
+}
+
+/** Single-track lookup by filepath + vpath for per-track accept operations. */
+export function getTrackForAccept(filepath, vpath) {
+  return db.prepare(`
+    SELECT filepath, vpath, mb_title, mb_artist, mb_album, mb_year, mb_track, title, artist, album, year, track, format
+    FROM files
+    WHERE filepath = ? AND vpath = ? AND tag_status IN ('needs_review', 'confirmed')
+  `).get(filepath, vpath);
+}
+
+/** Mark a single track's tag_status as accepted after a successful disk write. */
+export function markTrackAccepted(filepath, vpath) {
+  db.prepare(`UPDATE files SET tag_status = 'accepted' WHERE filepath = ? AND vpath = ?`).run(filepath, vpath);
+}
+
+/** Mark all tracks in a release as skipped. */
+export function skipAlbumTags(mb_release_id, album_dir = null) {
+  const dirFilter = album_dir != null ? `AND COALESCE(mb_album_dir, '') = '${album_dir.replace(/'/g, "''")}'` : '';
+  db.prepare(`
+    UPDATE files SET tag_status = 'skipped'
+    WHERE mb_release_id = ? AND tag_status IN ('needs_review', 'confirmed') ${dirFilter}
+  `).run(mb_release_id);
+}
+
+/** Move a shelved (skipped) album back into the review queue. */
+export function unshelveAlbum(mb_release_id, album_dir = null) {
+  const dirFilter = album_dir != null ? `AND COALESCE(mb_album_dir, '') = '${album_dir.replace(/'/g, "''")}'` : '';
+  db.prepare(`
+    UPDATE files SET tag_status = 'needs_review'
+    WHERE mb_release_id = ? AND tag_status = 'skipped' ${dirFilter}
+  `).run(mb_release_id);
+}
+
+/** Return paginated shelved (skipped) albums. */
+export function getShelvedAlbums(page = 1) {
+  const offset = (Math.max(1, Number(page) || 1) - 1) * _TWS_PAGE_SIZE;
+  const albums = db.prepare(`
+    SELECT mb_release_id, COALESCE(mb_album_dir,'') AS mb_album_dir, mb_album, mb_artist, mb_year,
+           COUNT(*) AS track_count,
+           MAX(aaFile) AS album_art
+    FROM files
+    WHERE tag_status = 'skipped' AND mb_release_id IS NOT NULL
+    GROUP BY mb_release_id, COALESCE(mb_album_dir, '')
+    ORDER BY mb_artist COLLATE NOCASE, mb_album COLLATE NOCASE
+    LIMIT ? OFFSET ?
+  `).all(_TWS_PAGE_SIZE, offset);
+  const countRow = db.prepare(
+    `SELECT COUNT(*) AS cnt FROM (
+       SELECT DISTINCT mb_release_id, COALESCE(mb_album_dir,'') FROM files WHERE tag_status = 'skipped' AND mb_release_id IS NOT NULL
+     )`
+  ).get();
+  return { albums, total: countRow.cnt, page: Number(page), pageSize: _TWS_PAGE_SIZE };
+}
+
+/** Find tracks where normalised file tags already match MB tags (casing/punctuation only).
+    Returns their rows; caller updates DB + disk. */
+export function getCasingOnlyCandidates() {
+  const rows = db.prepare(`
+    SELECT filepath, vpath, title, artist, album, year, track,
+           mb_title, mb_artist, mb_album, mb_year, mb_track
+    FROM files
+    WHERE tag_status = 'needs_review'
+      AND mb_enrichment_status = 'done'
+      AND mb_release_id IS NOT NULL
+  `).all();
+
+  const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  return rows.filter(r => {
+    const titleOk  = !r.mb_title  || norm(r.title)  === norm(r.mb_title);
+    const artistOk = !r.mb_artist || norm(r.artist) === norm(r.mb_artist);
+    const albumOk  = !r.mb_album  || norm(r.album)  === norm(r.mb_album);
+    const yearOk   = !r.mb_year   || Math.abs((r.year || 0) - r.mb_year) <= 1;
+    return titleOk && artistOk && albumOk && yearOk;
+  });
 }

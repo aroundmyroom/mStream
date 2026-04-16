@@ -242,12 +242,42 @@ function resolvePrefix(req) {
   return (req.subsonicVpathMeta || {})[vp]?.filepathPrefix ?? null;
 }
 
+/**
+ * When a ROOT vpath is selected, return filepath-prefix exclusions for ALL
+ * its child vpaths. This prevents duplicate songs appearing in both the root
+ * folder AND a child folder when a Subsonic client iterates all musicFolderIds.
+ * Child vpaths have their own prefix filter and need no exclusions.
+ */
+function resolveExcludePrefixes(req) {
+  const rawId = req.query.musicFolderId ?? req.body?.musicFolderId;
+  if (rawId === undefined || rawId === null || rawId === '') return null;
+  const id = parseInt(rawId, 10);
+  if (isNaN(id) || id < 1 || id > req.subsonicVpaths.length) return null;
+  const vp = req.subsonicVpaths[id - 1];
+  const meta = req.subsonicVpathMeta || {};
+  // Child vpath — already filtered by its own prefix, no additional exclusions
+  if (meta[vp]?.parentVpath) return null;
+  // Root vpath — exclude all direct child vpath filepath prefixes
+  const excl = Object.entries(meta)
+    .filter(([, m]) => m.parentVpath === vp && m.filepathPrefix)
+    .map(([, m]) => ({ vpath: vp, prefix: m.filepathPrefix }));
+  return excl.length > 0 ? excl : null;
+}
+
 // ── Song/Album/Artist object builders ────────────────────────────────────────
 
 function isoOrNull(epochSec) {
   if (!epochSec) return null;
   return new Date(epochSec * 1000).toISOString().replace('.000Z', 'Z');
 }
+
+// Format-based bitRate estimates (kbps) for uncompressed / lossless / lossy
+const FORMAT_BITRATE = {
+  wav: 1411, aiff: 1411, aif: 1411,
+  flac: 800, ape: 700, wv: 700,
+  mp3: 320, ogg: 192, opus: 192,
+  aac: 256, m4a: 256, wma: 192, mpc: 192,
+};
 
 function buildSong(row, vpaths) {
   // contentType heuristic from format
@@ -261,29 +291,41 @@ function buildSong(row, vpaths) {
   };
   const contentType = mimeMap[fmt] || 'audio/mpeg';
 
+  // Estimate bitRate from format average — avoids slow fs.statSync on network mounts
+  const bitRate = FORMAT_BITRATE[fmt] || 128;
+
+  // created: use file mtime stored in DB (milliseconds since epoch)
+  const created = row.modified ? new Date(row.modified).toISOString() : null;
+
+  // Normalise artist/album: treat whitespace-only as null so IDs don't orphan
+  const artist    = row.artist?.trim()  || null;
+  const album     = row.album?.trim()   || null;
+  const artistId  = artist  ? (row.artist_id  || null) : null;
+  const albumId   = album   ? (row.album_id   || null) : null;
+
   const song = {
     id: row.hash,
-    parent: row.album_id || row.artist_id || 'root',
+    parent: albumId || artistId || 'root',
     isDir: false,
     title: row.title || path.basename(row.filepath || '', path.extname(row.filepath || '')),
-    album: row.album || null,
-    artist: row.artist || null,
-    track: row.track || null,
-    year: row.year || null,
-    genre: row.genre || null,
-    coverArt: row.aaFile || null,
-    size: null,
     contentType,
     suffix: fmt,
-    duration: row.duration ? Math.round(row.duration) : null,
-    bitRate: null,
+    bitRate,
     path: path.join(row.vpath, row.filepath).replace(/\\/g, '/'),
     isVideo: false,
     playCount: row.playCount || row.pc || 0,
-    albumId: row.album_id || null,
-    artistId: row.artist_id || null,
     type: 'music',
     mediaType: 'song',
+    ...(album ? { album } : {}),
+    ...(artist ? { artist } : {}),
+    ...(albumId ? { albumId } : {}),
+    ...(artistId ? { artistId } : {}),
+    ...(row.track ? { track: row.track } : {}),
+    ...(row.year ? { year: row.year } : {}),
+    ...(row.genre ? { genre: row.genre } : {}),
+    ...(row.aaFile ? { coverArt: row.aaFile } : {}),
+    ...(row.duration ? { duration: Math.round(row.duration) } : {}),
+    ...(created ? { created } : {}),
   };
 
   if (row.starred) {
@@ -310,16 +352,21 @@ function buildAlbum(albumRow, songs) {
   const duration = songs
     ? songs.reduce((s, r) => s + (r.duration || 0), 0)
     : (albumRow.totalDuration != null ? albumRow.totalDuration : null);
+  const albumName = albumRow.album?.trim() || '(Unknown)';
+  const artist = albumRow.artist?.trim() || null;
   const album = {
     id: albumRow.album_id,
-    name: albumRow.album || '(Unknown)',
-    artist: albumRow.artist || null,
-    artistId: albumRow.artist_id || null,
-    coverArt: albumRow.aaFile || null,
+    name: albumName,
     songCount,
-    year: albumRow.year || null,
+    // duration is REQUIRED by OpenSubsonic AlbumID3 spec — always send (default 0)
+    duration: duration !== null ? Math.round(duration) : 0,
+    // created is REQUIRED by OpenSubsonic AlbumID3 spec — use ts from DB or now()
+    created: isoOrNull(albumRow.ts) || new Date().toISOString().replace('.000Z', 'Z'),
+    ...(artist ? { artist } : {}),
+    ...(artist && albumRow.artist_id ? { artistId: albumRow.artist_id } : {}),
+    ...(albumRow.aaFile ? { coverArt: albumRow.aaFile } : {}),
+    ...(albumRow.year ? { year: albumRow.year } : {}),
   };
-  if (duration !== null) album.duration = Math.round(duration);
   if (songs) {
     album.song = songs.map(s => buildSong(s));
   }
@@ -344,9 +391,9 @@ function serveFolderIcon(res) {
 function buildArtist(artistRow, albums) {
   const artist = {
     id: artistRow.artist_id,
-    name: artistRow.artist || '(Unknown)',
+    name: artistRow.artist?.trim() || '(Unknown)',
     albumCount: albums ? albums.length : (artistRow.albumCount || 0),
-    coverArt: artistRow.aaFile || null,
+    ...(artistRow.aaFile ? { coverArt: artistRow.aaFile } : {}),
   };
   if (albums) {
     artist.album = albums.map(a => buildAlbum(a, null));
@@ -638,17 +685,46 @@ export function setup(mstream) {
 
   // ── search2 / search3 ────────────────────────────────────────────────────────
   const handleSearch = (req, res) => {
-    const query = req.query.query || req.body?.query || '';
-    const artistCount = parseInt(req.query.artistCount || req.body?.artistCount || '20', 10);
-    const albumCount  = parseInt(req.query.albumCount  || req.body?.albumCount  || '20', 10);
-    const songCount   = parseInt(req.query.songCount   || req.body?.songCount   || '20', 10);
+    // Symfonium (and some other clients) send query="" — the two-char string `""`,
+    // not an empty string. Strip surrounding quotes so the empty-query path triggers.
+    const rawQuery = req.query.query ?? req.body?.query ?? '';
+    const query = rawQuery.replace(/^["']+|["']+$/g, '');
+    const artistCount  = parseInt(req.query.artistCount  ?? req.body?.artistCount  ?? '20', 10);
+    const albumCount   = parseInt(req.query.albumCount   ?? req.body?.albumCount   ?? '20', 10);
+    const songCount    = parseInt(req.query.songCount    ?? req.body?.songCount    ?? '20', 10);
+    const artistOffset = parseInt(req.query.artistOffset ?? req.body?.artistOffset ?? '0',  10);
+    const albumOffset  = parseInt(req.query.albumOffset  ?? req.body?.albumOffset  ?? '0',  10);
+    const songOffset   = parseInt(req.query.songOffset   ?? req.body?.songOffset   ?? '0',  10);
 
-    const vp = resolveVpaths(req);
+    const vp  = resolveVpaths(req);
+    const pfx = resolvePrefix(req);
     const user = req.subsonicUser;
 
     let artists = [], albums = [], songs = [];
 
-    if (query.trim()) {
+    if (!query.trim()) {
+      // Empty query = enumerate entire library (OpenSubsonic spec: "A blank query will return everything")
+      // excl: exclude child-vpath prefixes from root folder so each song only
+      // appears in ONE musicFolderId — prevents Symfonium dup-detection failures
+      const excl = resolveExcludePrefixes(req);
+      if (songCount > 0) {
+        songs = db.listAllSongs(vp, null, excl, pfx, songOffset, songCount).map(r => buildSong(r));
+      }
+      if (albumCount > 0) {
+        const _t0 = Date.now();
+        const page = db.getAllAlbumIds(vp, { filepathPrefix: pfx, excludeFilepathPrefixes: excl, limit: albumCount, offset: albumOffset });
+        const _t1 = Date.now();
+        albums = page.map(a => buildAlbum(a, null));
+        const _t2 = Date.now();
+        winston.info(`[SUBSONIC-TIMING] album query=${_t1-_t0}ms build=${_t2-_t1}ms rows=${page.length} folder=${req.query.musicFolderId} offset=${albumOffset}`);
+      }
+      if (artistCount > 0) {
+        const page = db.getAllArtistIds(vp, { filepathPrefix: pfx, excludeFilepathPrefixes: excl, limit: artistCount, offset: artistOffset });
+        artists = page.map(a => ({
+          id: a.artist_id, name: a.artist?.trim() || '(Unknown)', albumCount: a.albumCount || 0
+        }));
+      }
+    } else {
       const rawArtists = db.searchFiles('artist', query, vp, null);
       const rawAlbums  = db.searchFiles('album',  query, vp, null);
       const rawSongs   = db.searchFiles('title',  query, vp, null);
@@ -677,14 +753,12 @@ export function setup(mstream) {
       songs = rawSongs.slice(0, songCount).map(r => buildSong(r));
     }
 
-    const resultKey = 'searchResult3';
+    const resultKey = req.path.includes('search2') ? 'searchResult2' : 'searchResult3';
     sendResponse(req, res, makeResponse('ok', {
       [resultKey]: {
         artist: artists,
         album: albums,
         song: songs,
-        artistOffset: 0, albumOffset: 0, songOffset: 0,
-        artistCount: artists.length, albumCount: albums.length, songCount: songs.length
       }
     }));
   };
@@ -1148,9 +1222,12 @@ export function setup(mstream) {
     });
   });
 
-  // ── getLyrics ────────────────────────────────────────────────────────────────
+  // ── getLyrics / getLyricsBySongId ────────────────────────────────────────────
   router('getLyrics', (req, res) => {
     sendResponse(req, res, makeResponse('ok', { lyrics: {} }));
+  });
+  router('getLyricsBySongId', (req, res) => {
+    sendResponse(req, res, makeResponse('ok', { lyricsList: { structuredLyrics: [] } }));
   });
 
   // ── getUser ───────────────────────────────────────────────────────────────────
@@ -1211,8 +1288,8 @@ export function setup(mstream) {
       name: pl.name,
       owner: req.subsonicUser,
       public: false,
-      songCount: 0,
-      duration: 0
+      songCount: pl.songCount || 0,
+      duration: pl.totalDuration || 0
     }));
     sendResponse(req, res, makeResponse('ok', { playlists: { playlist: playlists } }));
   });
@@ -1222,26 +1299,28 @@ export function setup(mstream) {
     const id = req.query.id || req.body?.id;
     if (!id) return sendResponse(req, res, makeError(ERRORS.MISSING_PARAM.code, 'id required'));
 
-    const vpathMeta = req.subsonicVpathMeta || {};
     const entries = db.loadPlaylistEntries(req.subsonicUser, id);
-    const songs = [];
+    const vpaths  = req.subsonicVpaths;
+    const songs   = [];
+
     for (const entry of entries) {
       if (!entry.filepath) continue;
-      // filepath stored as "vpath/relative" — split on first /
-      const sep = entry.filepath.indexOf('/');
-      if (sep === -1) continue;
-      const vp = entry.filepath.slice(0, sep);
-      const fp = entry.filepath.slice(sep + 1);
-      if (!req.subsonicVpaths.includes(vp)) continue;
-      // Resolve child vpath → root DB vpath + filepathPrefix
-      // (songs added by the web client via a child vpath are stored with the
-      //  child vpath name, but the DB only has the root parent vpath)
-      const meta = vpathMeta[vp] || {};
-      const dbVpath = meta.parentVpath || vp;
-      const dbFp    = meta.filepathPrefix ? meta.filepathPrefix + fp : fp;
-      const row = db.getFileWithMetadata(dbFp, dbVpath, req.subsonicUser);
+      // Entries are stored as "vpath/relative/path" — find the matching vpath
+      // by trying each allowed vpath as a prefix (handles spaces in vpath names)
+      let matchVpath = null, matchFp = null;
+      for (const vp of vpaths) {
+        const prefix = vp + '/';
+        if (entry.filepath.startsWith(prefix)) {
+          matchVpath = vp;
+          matchFp    = entry.filepath.slice(prefix.length);
+          break;
+        }
+      }
+      if (!matchVpath) continue;
+      const row = db.getFileWithMetadata(matchFp, matchVpath, req.subsonicUser);
       if (row) songs.push(buildSong(row));
     }
+
     const duration = songs.reduce((s, r) => s + (r.duration || 0), 0);
     sendResponse(req, res, makeResponse('ok', {
       playlist: {

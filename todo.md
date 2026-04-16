@@ -77,18 +77,6 @@ Audit completed 2026-03-26. Strategy: **Option A — separate `mobile.css`** loa
 
 ## FUTURE — Library Management
 
-### Tag Workshop — Phase 1: Filename Heuristics
-- [ ] DB: `tag_proposals` table — `filepath, source, proposed_title, proposed_artist, proposed_album, proposed_year, proposed_genre, proposed_track, confidence, status`
-- [ ] Server: background scan job — parse filepath patterns → INSERT with confidence score
-- [ ] Admin UI: **"Tag Workshop"** card — table with Accept / Edit / Skip actions
-- [ ] Bulk-accept button: "Accept all confidence ≥ 0.85"
-- [ ] On accept: write tags via `node-id3` / `music-metadata`, queue re-index
-
-### Tag Workshop — Phase 2: AcoustID Fingerprinting
-- [ ] Add `fpcalc` (Chromaprint) binary to `bin/`
-- [ ] Fingerprint job — run `fpcalc`, POST to `api.acoustid.org/v2/lookup`, store MusicBrainz Recording ID
-- [ ] Enrich with full MusicBrainz metadata via second API call
-
 ### Tag Workshop — Phase 3: Manual Fallback
 - [ ] Inline edit row in Tag Workshop
 - [ ] "Use filename as title" quick-fill button

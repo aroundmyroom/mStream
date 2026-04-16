@@ -22,6 +22,7 @@ const scanOptions = Joi.object({
   saveInterval: Joi.number().default(250),
   pause: Joi.number().min(0).default(0),
   bootScanDelay: Joi.number().default(3),
+  bootScanEnabled: Joi.boolean().default(false),
   maxConcurrentTasks: Joi.number().integer().min(1).default(1),
   compressImage: Joi.boolean().default(true),
   scanErrorRetentionHours: Joi.number().integer().valid(12, 24, 48, 72, 168, 336, 720).default(48),
@@ -81,6 +82,12 @@ const serverAudioOptions = Joi.object({
   mpvBin:  Joi.string().default('mpv'),
 });
 
+const acoustidOptions = Joi.object({
+  enabled:   Joi.boolean().default(false),
+  apiKey:    Joi.string().allow('').default(''),
+  autostart: Joi.boolean().default(false),
+});
+
 const schema = Joi.object({
   address: Joi.string().ip({ cidr: 'forbidden' }).default('::'),
   port: Joi.number().default(3000),
@@ -136,6 +143,7 @@ const schema = Joi.object({
   }).optional(),
   federation: federationOptions.default(federationOptions.validate({}).value),
   serverAudio: serverAudioOptions.default(serverAudioOptions.validate({}).value),
+  acoustid: acoustidOptions.default(acoustidOptions.validate({}).value),
   ui: Joi.string().valid('velvet', 'velvet-dark', 'velvet-light').default('velvet'),
   instanceId: Joi.string().optional(),
 });
@@ -165,10 +173,14 @@ export async function setup(configFileArg) {
   const programData = JSON.parse(await fs.readFile(configFileArg, 'utf8'));
   configFile = configFileArg;
 
-  // Verify paths are real
+  // Verify paths are real; auto-create app-managed folders (recordings/youtube)
   for (const folder in programData.folders) {
-    if (!(await fs.stat(programData.folders[folder].root)).isDirectory()) {
-      throw new Error('Path does not exist: ' + programData.folders[folder].root);
+    const folderCfg = programData.folders[folder];
+    if (folderCfg.type === 'recordings' || folderCfg.type === 'youtube') {
+      await fs.mkdir(folderCfg.root, { recursive: true }).catch(() => {});
+    }
+    if (!(await fs.stat(folderCfg.root)).isDirectory()) {
+      throw new Error('Path does not exist: ' + folderCfg.root);
     }
   }
 

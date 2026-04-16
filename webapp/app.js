@@ -1901,10 +1901,14 @@ function showCtxMenu(x, y) {
   menu.querySelector('.ctx-remove-pl').classList.toggle('hidden', !inPlaylist);
   // Show delete-recording only when song is from a recordings vpath with allowRecordDelete
   const song = S.ctxSong;
-  const songVpath = song?.filepath?.split('/')[0];
-  const canDelete = songVpath &&
-    (S.vpathMeta?.[songVpath]?.type === 'recordings' || S.vpathMeta?.[songVpath]?.type === 'youtube') &&
-    S.vpathMeta?.[songVpath]?.allowRecordDelete === true;
+  const canDelete = song?.filepath && Object.entries(S.vpathMeta || {}).some(([vpName, meta]) => {
+    if ((meta.type !== 'recordings' && meta.type !== 'youtube') || !meta.allowRecordDelete) return false;
+    if (song.filepath.startsWith(vpName + '/') || song.filepath === vpName) return true;
+    if (meta.parentVpath && meta.filepathPrefix) {
+      return song.filepath.startsWith(meta.parentVpath + '/' + meta.filepathPrefix);
+    }
+    return false;
+  });
   menu.querySelector('.ctx-delete-rec').classList.toggle('hidden', !canDelete);
   menu.querySelector('.ctx-delete-rec-divider').classList.toggle('hidden', !canDelete);
   // Keep within viewport
@@ -7014,9 +7018,23 @@ function renderFileExplorer(d) {
   });
 
   const feVpath = parts[0] || '';
-  const canDelete = feVpath &&
-    (S.vpathMeta?.[feVpath]?.type === 'recordings' || S.vpathMeta?.[feVpath]?.type === 'youtube') &&
-    S.vpathMeta?.[feVpath]?.allowRecordDelete === true;
+  // A file can be deletable even when its root vpath is type=music, if it lives
+  // inside a child vpath that has type=recordings and allowRecordDelete=true.
+  // Check all vpathMeta entries whose filepathPrefix (or root) contains curPath.
+  function canDeleteFp(fp) {
+    if (!fp) return false;
+    return Object.entries(S.vpathMeta || {}).some(([vpName, meta]) => {
+      if ((meta.type !== 'recordings' && meta.type !== 'youtube') || !meta.allowRecordDelete) return false;
+      // Direct root vpath match: fp starts with vpName/
+      if (fp.startsWith(vpName + '/') || fp === vpName) return true;
+      // Child vpath: fp starts with parentVpath/filepathPrefix
+      if (meta.parentVpath && meta.filepathPrefix) {
+        return fp.startsWith(meta.parentVpath + '/' + meta.filepathPrefix);
+      }
+      return false;
+    });
+  }
+  const canDelete = canDeleteFp(curPath + '/') || canDeleteFp(curPath);
 
   const dirs = (d.directories || []).map(dir => `
     <div class="fe-dir" data-dir="${esc(curPath + dir.name)}">
@@ -12617,12 +12635,14 @@ async function tryLogin(username, password) {
   try { const rd = await api('GET', 'api/v1/radio/enabled'); S.radioEnabled = rd?.enabled === true; } catch(_) { S.radioEnabled = false; }
   S.feedsEnabled = true; // Podcasts always available — user needs the section to add their first feed
   await _loadServerSettings();
+  if (window.I18N?.setUser) { await window.I18N.setUser(S.username); }
 }
 
 async function checkSession() {
   if (S.token) {
     // Restore username from localStorage so queue key resolves correctly
     if (!S.username) S.username = localStorage.getItem('ms2_user') || '';
+    if (S.username && window.I18N?.setUser) { await window.I18N.setUser(S.username); }
     try {
       const d = await api('GET', 'api/v1/db/status');
       S.vpaths = d.vpaths || [];
@@ -13226,6 +13246,7 @@ document.getElementById('logout-btn').addEventListener('click', () => {
   audioEl.load();
   VU_NEEDLE.stop();
   syncPlayIcons();  // guarantee ▶ icon before login screen appears
+  if (window.I18N?.setUser) { window.I18N.setUser(''); }
   S.token = ''; S.username = '';
   localStorage.removeItem('ms2_token'); localStorage.removeItem('ms2_user');
   // Expire the server-set cookie so a page refresh cannot re-authenticate

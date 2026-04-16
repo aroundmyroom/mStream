@@ -1,6 +1,19 @@
 # mStream Subsonic API
 
-mStream implements the **Subsonic REST API 1.16.1** plus the **Open Subsonic** extensions, making it compatible with the large ecosystem of Subsonic-compatible clients (DSub, Ultrasonic, Symfonium, Clementine, Strawberry, Airsonic Remote, Substreamer, Nautiline, etc.).
+mStream implements the **Subsonic REST API 1.16.1** plus the **Open Subsonic** extensions, making it compatible with the large ecosystem of Subsonic-compatible clients.
+
+### Tested clients (confirmed working)
+
+| Client | Platform | Notes |
+|---|---|---|
+| **Symfonium** | Android | Full library sync verified (v6.10.0+) |
+| **DSub** | Android | ✅ |
+| **Substreamer** | iOS | ✅ |
+| **Ultrasonic** | Android | ✅ |
+| **Feishin** | Desktop | ✅ |
+| Clementine / Strawberry | Desktop | ✅ |
+| Nautiline | iOS | ✅ |
+| Any Subsonic 1.16.1 client | — | Should work |
 
 ---
 
@@ -443,31 +456,39 @@ Subsonic song objects returned by mStream include:
 | Field | Notes |
 |---|---|
 | `id` | SHA256 hash of the filepath |
-| `title`, `artist`, `album` | From file tags |
-| `track`, `disc`, `year`, `genre` | From file tags |
-| `duration` | Seconds (float) |
+| `title` | Always present |
+| `artist`, `album` | From file tags; **omitted** (not null) when blank |
+| `track`, `disc`, `year`, `genre` | From file tags; **omitted** when not set |
+| `duration` | Seconds (integer); omitted when unknown |
 | `bitRate` | kbps |
-| `size` | Bytes |
 | `suffix`, `contentType` | e.g. `mp3`, `audio/mpeg` |
-| `coverArt` | Album ID for cover art lookup |
-| `artistId`, `albumId` | Pre-computed 16-char hex MD5 slugs |
+| `coverArt` | Album art cache filename; **omitted** when no art |
+| `artistId`, `albumId` | Pre-computed 16-char hex MD5 slugs; omitted when blank |
 | `starred` | ISO date string if starred, omitted otherwise |
 | `userRating` | 1–5 or omitted |
 | `playCount`, `lastPlayed` | From user_metadata |
-| `replayGainStatus`, `trackReplayGain` | Open Subsonic extension |
+| `replayGain` | Open Subsonic extension (`trackGain` field) |
 | `mediaType` | Always `"song"` |
 | `isDir` | Always `false` |
 | `isVideo` | Always `false` |
 
+> **Note:** Optional fields are **omitted entirely** when their value is null or blank. They are never sent as `null`. This is correct per the OpenSubsonic spec and required for compatibility with strict JSON parsers (e.g. Symfonium's Moshi `@NonNull` annotations).
+
 ---
 
-## Client Setup Example (DSub / Ultrasonic)
+## Client Setup
 
-1. Server URL: `https://your-server:3000`
-2. Username: your mStream username
-3. Password: your **Subsonic password** (set separately from mStream login)
-4. Use HTTPS: yes
-5. API version: leave at default (1.16.1 or auto)
+All clients follow the same pattern:
+
+1. **Server URL:** `https://your-server:3000`
+2. **Username:** your mStream username (or `mstream-user` in no-auth mode)
+3. **Password:** your **Subsonic password** (set separately — see Authentication above)
+4. **Use HTTPS:** yes
+5. **API version:** leave at default (1.16.1 or auto)
+
+### Symfonium-specific notes
+
+Symfonium requires a **Force Full Resync** after first setup to import the full library. Go to: Library → your mStream server → ⋮ menu → Force Full Resync.
 
 ---
 
@@ -475,6 +496,8 @@ Subsonic song objects returned by mStream include:
 
 - **No transcoding:** `stream` always serves the original file. Clients requesting a lower bitRate will still get the original.
 - **Cover art:** Pulled from mStream's existing album art cache. The `size` parameter in `getCoverArt` is accepted but ignored.
+- **Optional fields:** All optional fields are omitted entirely when null (never sent as `null`). Required by strict clients like Symfonium.
 - **Starred timestamps:** When starring, mStream records the current UTC time as ISO-8601 string.
 - **Playlist IDs:** mStream playlist IDs are the playlist filename (without `.json`). Subsonic client playlist IDs are the same string.
 - **Artist/Album IDs:** Stable MD5 slugs derived from artist name (and album title for albums). These do not change when tags are edited via mStream's tag editor.
+- **Empty library enumeration:** When `query` is empty, mStream returns the full library paginated — this is the mechanism Symfonium and DSub use for initial sync.

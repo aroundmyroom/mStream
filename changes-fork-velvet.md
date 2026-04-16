@@ -1,5 +1,132 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.10.0-velvet — April 2026 — Deep Tag Dive
+
+### new: AcoustID audio fingerprinting (from v6.9.3)
+- New background worker fingerprints every song in the library using `fpcalc` (Chromaprint) and matches against the AcoustID API to obtain MBIDs.
+- Five new DB columns: `acoustid_id`, `mbid`, `acoustid_score`, `acoustid_status`, `acoustid_ts`.
+- Worker processes at ~2 songs/second with persistent progress — survives restarts.
+- `fpcalc` static binary pre-baked into Docker image for `linux/amd64` and `linux/arm64`.
+- New AcoustID admin panel: enable toggle, API key (masked), live progress bar, start/stop.
+
+### new: Tag Workshop — MusicBrainz enrichment + tag writing (from v6.9.4)
+- New background worker fetches metadata from MusicBrainz for every song with an AcoustID MBID.
+- Side-by-side review UI: compare current file tags vs MusicBrainz data, accept writes tags to disk via ffmpeg.
+- Multi-select batch accept, filter/sort controls, prerequisite banners (no fingerprints / no matches / all done).
+- Supports mp3, flac, ogg, opus, m4a/aac, wav, wma, aiff tag writing via atomic temp-file pattern.
+- 57 new `admin.tagworkshop.*` i18n keys across all 12 locale files.
+
+### fix: Subsonic API — full Symfonium resync now works
+- Strip literal quote chars from empty `query=""` parameter sent by Symfonium.
+- Fix `||` → `??` for `songCount`, `artistCount`, `albumCount`, `songOffset`, `artistOffset`, `albumOffset` — zero values were incorrectly falling through to default of 20.
+- Remove non-standard extra fields (`albumCount`, `artistOffset`, etc.) from `searchResult3` response body that caused Symfonium to misread pagination state.
+- Omit `coverArt`, `year`, and all other optional fields entirely when null — sending `null` for `@NonNull` fields crashes Symfonium's Moshi parser.
+- Add `LIMIT ? OFFSET ?` to `getAllAlbumIds` and `getAllArtistIds` SQL — previously loaded entire table into memory before paging.
+- Always include required `duration` and `created` fields on album objects per OpenSubsonic spec.
+- Add `resolveExcludePrefixes()` to prevent child-vpath songs from appearing twice under parent folder.
+
+## v6.9.4-velvet — (unreleased) — Tag Workshop: MusicBrainz enrichment + tag writing
+
+### new: Tag Workshop
+- New dedicated feature for reviewing and applying MusicBrainz-sourced metadata to your music files.
+- **MB enrichment worker** (`src/util/mb-enrich-worker.mjs`): independent worker thread that queries `musicbrainz.org/ws/2/recording/{mbid}` for every song with an AcoustID MBID. Processes at ~1 song/second (1100 ms rate-limit delay). Recovers stuck-pending rows on startup.
+- **Release selection logic**: prefers Album type over Single by `release-group.primary-type`, then picks the earliest available release date.
+- **7 new DB columns** added to the `files` table: `mb_album`, `mb_year`, `mb_track`, `mb_release_id`, `mb_enrichment_status`, `mb_enriched_ts`, `tag_status`.
+- **`tag_status` flow**: `NULL` → enrichment → `confirmed` (all key tags match) or `needs_review` (mismatches found) → user action → `accepted` (tags written to disk) or `skipped`.
+
+### new: Tag Workshop REST API (`src/api/tagworkshop.js`)
+- `GET /api/v1/tagworkshop/status` — returns MB enrichment stats + tag review stats + worker running state.
+- `GET /api/v1/tagworkshop/albums` — paginated album cards, filterable/sortable (filter: all/missing/year/artist, sort: broken/tracks/alpha).
+- `GET /api/v1/tagworkshop/album/:mb_release_id` — all tracks for one release with side-by-side file vs MB metadata.
+- `POST /api/v1/tagworkshop/accept` — write MusicBrainz tags to disk via ffmpeg for all tracks in a release. Supports per-field overrides (artist/album).
+- `POST /api/v1/tagworkshop/skip` — mark all tracks in a release as skipped (no changes written).
+- `POST /api/v1/tagworkshop/bulk-accept-casing` — bulk accept releases where the only difference is letter casing.
+- `POST /api/v1/tagworkshop/enrich/start` — start MB enrichment worker.
+- `POST /api/v1/tagworkshop/enrich/stop` — stop worker cleanly.
+
+### new: ffmpeg-based tag writing
+- Writes `title`, `artist`, `album`, `date`, `track` metadata to `mp3`, `flac`, `ogg`, `opus`, `m4a/aac`, `wav`, `wma`, `aiff` files.
+- Uses atomic write: encodes to a `.tagtmp_<timestamp>` temp file, then renames over the original.
+
+### new: Tag Workshop admin panel
+- New **Tag Workshop** entry in the admin sidebar (pencil icon), after AcoustID.
+- **Enrichment card**: Start/Stop controls, live progress bar, stats (total/done/no-data/errors/queued).
+- **Review cards**: album grid with art, filter/sort controls, paginated. Each card shows album title, track count, issue count with "Review"/"Skip" buttons.
+- **Review modal**: side-by-side table comparing current file tags vs MusicBrainz data. Fields highlighted orange (mismatch) or green (match). Override fields for artist and album. Accept writes to all tracks in the release.
+- **Bulk accept casing**: one-click accept for albums where only letter casing differs.
+
+### new: Tag Workshop — multi-select batch accept
+- Album cards now have individual checkboxes. A "Select all on page" checkbox in the toolbar selects every card on the current page.
+- Green action bar appears when albums are selected: shows selected count, "Accept Selected" button (writes tags for all selected albums in one batch), and "Deselect all".
+- **Two-phase progress**: the batch first pre-fetches track lists for all selected albums (to calculate the total track count), then writes per-track — so the progress bar updates every track rather than every album.
+- Progress bar shows: album counter (`Album N / M`), per-track progress bar, `N / M tracks`, current album name.
+
+### new: Tag Workshop — filter / sort toolbar layout
+- Filter buttons and Sort buttons now live on separate rows, preventing overflow at narrow widths and in non-English locales.
+- Row 1: "Filter:" label + filter buttons (All / Missing / Year differs / Artist differs).
+- Row 2: "Sort:" label + sort buttons (Most differences / Most tracks / A–Z) + bulk-casing button + select-all checkbox.
+- "Filter:" and "Sort:" labels are clearly visible so their respective button groups are unambiguous.
+
+### new: Tag Workshop — AcoustID prerequisite banners
+- Orange banner (no fingerprints at all): shown when `mb.acoustid_attempted === 0` — includes a link to open the AcoustID settings panel.
+- Red banner (fingerprints done, zero MB matches): shown when `mb.acoustid_found === 0` but attempts > 0 — prompts user to check their AcoustID API key.
+- Green banner (enrichment complete): shown when `mb.queued === 0` and at least some songs were processed — confirmatory, not an error.
+- "Start Download" button is disabled when `mb.queued === 0` (nothing left to enrich).
+
+### new: Tag Workshop sidebar section
+- Tag Workshop moved out of External Services and into its own "Tools" sidebar section, placed between Config and External Services.
+
+### i18n
+- Added 57 `admin.tagworkshop.*` + `admin.nav.tagworkshop` keys to all 12 locale files. Dutch (nl.json) fully translated.
+- Additional keys added (all 12 locales): `admin.tagworkshop.selectAll`, `selectAllHint`, `selectHint`, `selectedCount`, `deselectAll`, `btnAcceptSelected`, `batchProgressAlbum`, `batchDone`, `batchErrors`, `tracksSuffix`, `labelFilter`, `labelSort`, `prereqNoAcoustid`, `prereqNoAcoustidHint`, `prereqNoMatches`, `prereqAllDone`.
+- `admin.nav.sectionTools` key added to all 12 locales.
+
+### bug fix: MusicBrainz track number
+- `inc=media` added to MB recording API URL — track positions now correctly populated from release medium data.
+
+## v6.9.3-velvet — (unreleased) — AcoustID audio fingerprinting
+
+### new: AcoustID fingerprinting for the entire library
+- New independent worker thread (`src/util/acoustid-worker.mjs`) runs in the background, fingerprinting every song in the library using `fpcalc` (Chromaprint) and matching results against the AcoustID API.
+- Five new columns added to the `files` table via live migration: `acoustid_id`, `mbid`, `acoustid_score`, `acoustid_status`, `acoustid_ts`.
+- New songs inserted by the file scanner are automatically queued for fingerprinting (`acoustid_status IS NULL`).
+- Worker processes at ~2 songs/second (500 ms rate-limit delay per AcoustID API requirement). Start/stop at any time — progress is persistent.
+- Worker recovers from crashes automatically: any rows stuck as `pending` are reset to queued on next startup.
+
+### new: fpcalc pre-baked in Docker image
+- `Dockerfile` downloads and installs `chromaprint-fpcalc v1.5.1` static binary for `linux/amd64` and `linux/arm64` at build time, matching the ffmpeg and yt-dlp pattern.
+- `src/util/fpcalc-bootstrap.js` handles runtime download for bare-metal installs (same pattern as `ffmpeg-bootstrap.js`).
+
+### new: AcoustID admin panel
+- New **AcoustID** entry in the admin sidebar, under External Services.
+- Settings card: enable toggle, API key input (password field — key is never returned to the client unmasked).
+- Progress card: live stats (total / matched / no match / errors / queued), progress bar, Start/Stop controls, auto-refresh every 5 s.
+- Feature is fully disabled when no valid API key is configured.
+
+### new: AcoustID config REST API
+- `GET /api/v1/admin/acoustid/config` — returns `{ enabled, apiKey (masked), hasKey }` (admin-only).
+- `POST /api/v1/admin/acoustid/config` — saves `{ enabled, apiKey }` to `save/conf/default.json` (admin-only). Masked values preserved (key not overwritten with asterisks).
+- `GET /api/v1/acoustid/status` — returns running state + stats aggregate (admin-only).
+- `POST /api/v1/acoustid/start` — launches worker thread; validates key + fpcalc availability first.
+- `POST /api/v1/acoustid/stop` — sends clean stop signal to worker thread.
+
+### i18n
+- Added 24 `admin.acoustid.*` + `admin.nav.acoustid` keys to all 12 locale files.
+
+---
+
+## v6.9.2-velvet (previously labelled 6.9.3) — April 2026 — Per-user language preference
+
+### fix: language preference is now scoped per user
+- `mstream-lang` in localStorage was a single global key shared across all users on the same browser — switching language as user B would overwrite user A's preference.
+- `i18n.js` now stores the language under `mstream-lang_${username}` when a user is logged in, falling back to the bare `mstream-lang` key for anonymous/pre-login state.
+- `I18N.setUser(username)` added — called from `app.js` after login and after session restore via `checkSession()`. Reads the user's saved preference and switches language automatically if it differs from the current one.
+- On logout `I18N.setUser('')` resets to the anonymous key so the next user starts from their own stored preference.
+- Cross-tab `storage` listener updated to react to both the global key and the per-user key.
+- No new locale keys needed — purely a storage-scoping change.
+
+---
+
 ## v6.9.2-velvet — April 2026 — Translation fixes & recording deletion fix
 
 ### fix: wrong song played after deleting a recording

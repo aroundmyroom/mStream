@@ -31,7 +31,11 @@ This enables the feature server-wide. Users who have not connected a token are u
 
 ## Token Storage
 
-Tokens are stored in the mStream config file (`save/conf/default.json`) under `users.<username>.listenbrainz-token`. In no-auth mode the token is stored in memory only and will need to be re-entered after a server restart.
+Tokens are stored in the mStream config file (`save/conf/default.json`):
+- **Multi-user mode**: under `users.<username>.listenbrainz-token`
+- **No-auth mode**: under `listenBrainz.noAuthToken`
+
+Tokens survive server restarts in both modes.
 
 ## Listening Now (Now Playing)
 

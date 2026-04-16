@@ -49,6 +49,7 @@ function excludePrefixClauses(prefixes) {
 try {
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA journal_mode=WAL');
+  db.exec('PRAGMA busy_timeout = 30000');
   db.exec('PRAGMA synchronous = NORMAL');
   db.exec('PRAGMA cache_size = -8000');
 

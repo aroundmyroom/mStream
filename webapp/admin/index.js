@@ -2273,6 +2273,12 @@ const dbView = Vue.component('db-view', {
                       </td>
                     </tr>
                     <tr>
+                      <td><b>{{ t('admin.db.labelBootScanEnabled') }}</b> {{dbParams.bootScanEnabled}}</td>
+                      <td>
+                        <a v-on:click="toggleBootScanEnabled()" class="btn-sm btn-sm-edit">{{ t('admin.common.edit') }}</a>
+                      </td>
+                    </tr>
+                    <tr>
                       <td><b>{{ t('admin.db.labelSkipImageMetadata') }}</b> {{dbParams.skipImg}}</td>
                       <td>
                         <a v-on:click="toggleSkipImg()" class="btn-sm btn-sm-edit">{{ t('admin.common.edit') }}</a>
@@ -2792,6 +2798,28 @@ const dbView = Vue.component('db-view', {
                       }).catch(() => {
                         iziToast.error({ title: 'Failed', position: 'topCenter', timeout: 3500 });
                       });
+        }
+      );
+    },
+    toggleBootScanEnabled: function() {
+      const enabling = !this.dbParams.bootScanEnabled;
+      adminConfirm(
+        `<b>${enabling ? 'Enable' : 'Disable'} Boot Scan?</b>`,
+        enabling
+          ? 'The database will be scanned automatically when the server starts.'
+          : 'The database will NOT be scanned on startup. You can still trigger a manual scan at any time.',
+        enabling ? 'Enable' : 'Disable',
+        () => {
+          API.axios({
+            method: 'POST',
+            url: `${API.url()}/api/v1/admin/db/params/boot-scan-enabled`,
+            data: { bootScanEnabled: enabling }
+          }).then(() => {
+            Vue.set(ADMINDATA.dbParams, 'bootScanEnabled', enabling);
+            iziToast.success({ title: this.t('admin.common.updated'), position: 'topCenter', timeout: 3500 });
+          }).catch(() => {
+            iziToast.error({ title: this.t('admin.common.failed'), position: 'topCenter', timeout: 3500 });
+          });
         }
       );
     },
@@ -4212,6 +4240,846 @@ const discogsView = Vue.component('discogs-view', {
   }
 });
 
+const acoustidView = Vue.component('acoustid-view', {
+  data() {
+    return {
+      enabled:  false,
+      apiKey:   '',
+      hasKey:   false,
+      pending:  false,
+      // worker status
+      running:  false,
+      stopping: false,
+      stats: { total: 0, found: 0, not_found: 0, errors: 0, pending: 0, queued: 0 },
+      _pollTimer: null,
+    };
+  },
+  computed: {
+    fingerprinted() { return (this.stats.found || 0) + (this.stats.not_found || 0); },
+    pct() {
+      const t = this.stats.total || 0;
+      if (!t) return 0;
+      return Math.round((this.fingerprinted / t) * 100);
+    },
+    statusLabel() {
+      if (this.stopping) return this.t('admin.acoustid.statusStopping');
+      if (this.running)  return this.t('admin.acoustid.statusRunning');
+      return this.t('admin.acoustid.statusIdle');
+    },
+    statusColor() {
+      if (this.running)  return 'var(--accent)';
+      if (this.stopping) return '#f0a500';
+      return '#888';
+    },
+    canStart() {
+      return this.enabled && this.hasKey && !this.running && !this.stopping;
+    },
+    canStop() {
+      return this.running && !this.stopping;
+    },
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+
+          <!-- Settings card -->
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">{{ t('admin.acoustid.title') }}</span>
+              <p style="margin-bottom:0.5rem;">{{ t('admin.acoustid.desc1') }}</p>
+              <p style="margin-bottom:0.5rem; font-size:0.85rem; color:#999;">{{ t('admin.acoustid.secretHint') }}</p>
+              <div v-if="!hasKey" style="background:#3a2a00;border-left:3px solid #f0a500;padding:8px 12px;border-radius:4px;margin-bottom:1rem;font-size:0.85rem;">
+                ⚠ {{ t('admin.acoustid.warnNoKey') }}
+              </div>
+              <table>
+                <tbody>
+                  <tr>
+                    <td style="width:160px"><b>{{ t('admin.acoustid.labelEnable') }}</b></td>
+                    <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> {{ t('admin.acoustid.checkboxEnable') }}</td>
+                  </tr>
+                  <tr>
+                    <td><b>{{ t('admin.acoustid.labelApiKey') }}</b></td>
+                    <td>
+                      <input v-model="apiKey" type="password"
+                        :placeholder="t('admin.acoustid.apiKeyPlaceholder')"
+                        autocomplete="new-password" data-form-type="other"
+                        data-lpignore="true" data-1p-ignore data-bwignore
+                        spellcheck="false" style="margin:0;font-family:monospace;" />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-action">
+              <button class="btn" v-on:click="save()" :disabled="pending">
+                {{ pending ? t('admin.common.saving') : t('admin.common.save') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Progress card -->
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">
+                {{ t('admin.acoustid.progressTitle') }}
+                <span :style="{ color: statusColor, fontSize: '0.75rem', marginLeft: '10px', fontWeight: 'normal' }">
+                  ● {{ statusLabel }}
+                </span>
+              </span>
+              <div style="margin-bottom:1rem;">
+                <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.9rem;">
+                  <span>{{ t('admin.acoustid.statsFingerprinted') }}: <b>{{ fingerprinted.toLocaleString() }} / {{ stats.total.toLocaleString() }}</b></span>
+                  <span><b>{{ pct }}%</b></span>
+                </div>
+                <div style="background:#333;border-radius:4px;height:8px;overflow:hidden;">
+                  <div :style="{ width: pct + '%', background: 'var(--accent)', height: '100%', transition: 'width 0.5s' }"></div>
+                </div>
+              </div>
+              <table style="font-size:0.85rem;width:auto;">
+                <tbody>
+                  <tr>
+                    <td style="padding:2px 12px 2px 0;color:#4caf50;">{{ t('admin.acoustid.statsFound') }}</td>
+                    <td><b>{{ (stats.found||0).toLocaleString() }}</b></td>
+                  </tr>
+                  <tr>
+                    <td style="padding:2px 12px 2px 0;color:#888;">{{ t('admin.acoustid.statsNotFound') }}</td>
+                    <td><b>{{ (stats.not_found||0).toLocaleString() }}</b></td>
+                  </tr>
+                  <tr>
+                    <td style="padding:2px 12px 2px 0;color:#e57373;">{{ t('admin.acoustid.statsErrors') }}</td>
+                    <td><b>{{ (stats.errors||0).toLocaleString() }}</b></td>
+                  </tr>
+                  <tr>
+                    <td style="padding:2px 12px 2px 0;color:#aaa;">{{ t('admin.acoustid.statsQueued') }}</td>
+                    <td><b>{{ (stats.queued||0).toLocaleString() }}</b></td>
+                  </tr>
+                </tbody>
+              </table>
+              <p style="margin-top:0.75rem;font-size:0.78rem;color:#888;">{{ t('admin.acoustid.rateNote') }}</p>
+            </div>
+            <div class="card-action" style="display:flex;gap:0.5rem;">
+              <button class="btn" v-on:click="startScan()" :disabled="!canStart">
+                {{ t('admin.acoustid.btnStart') }}
+              </button>
+              <button class="btn btn-flat" v-on:click="stopScan()" :disabled="!canStop" style="margin-left:0;">
+                {{ stopping ? t('admin.acoustid.btnStopping') : t('admin.acoustid.btnStop') }}
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>`,
+  async mounted() {
+    await this.loadConfig();
+    await this.loadStatus();
+    // Poll status every 5 s while component is mounted
+    this._pollTimer = setInterval(() => this.loadStatus(), 5000);
+  },
+  beforeUnmount() {
+    if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
+  },
+  methods: {
+    async loadConfig() {
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/acoustid/config` });
+        this.enabled = !!res.data.enabled;
+        this.apiKey  = res.data.apiKey  || '';
+        this.hasKey  = !!res.data.hasKey;
+      } catch(_e) {}
+    },
+    async loadStatus() {
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/acoustid/status` });
+        this.running  = !!res.data.running;
+        this.stopping = !!res.data.stopping;
+        if (res.data.stats) this.stats = res.data.stats;
+      } catch(_e) {}
+    },
+    async save() {
+      this.pending = true;
+      try {
+        await API.axios({
+          method: 'POST',
+          url:  `${API.url()}/api/v1/admin/acoustid/config`,
+          data: { enabled: this.enabled, apiKey: this.apiKey.trim() },
+        });
+        iziToast.success({ title: this.t('admin.acoustid.toastSaved'), position: 'topCenter', timeout: 3000 });
+        await this.loadConfig();
+      } catch(_err) {
+        iziToast.error({ title: this.t('admin.acoustid.toastFailed'), position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.pending = false;
+      }
+    },
+    async startScan() {
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/acoustid/start` });
+        await this.loadStatus();
+      } catch(err) {
+        const msg = err?.response?.data?.error || err.message || 'Unknown error';
+        iziToast.error({ title: msg, position: 'topCenter', timeout: 4000 });
+      }
+    },
+    async stopScan() {
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/acoustid/stop` });
+        this.stopping = true;
+      } catch(_err) {}
+    },
+  }
+});
+
+const tagWorkshopView = Vue.component('tagworkshop-view', {
+  data() {
+    return {
+      // status overview
+      mb: { total: 0, done: 0, errors: 0, no_data: 0, queued: 0, acoustid_attempted: 0, acoustid_found: 0 },
+      tags: { needs_review: 0, confirmed: 0, accepted: 0, skipped: 0 },
+      enrich: { running: false, stopping: false },
+      // album list
+      albums: [], total: 0, page: 1, pageSize: 40,
+      filter: 'all', sort: 'broken',
+      search: '', searchDebounce: null,
+      pageJump: '',
+      // shelved tab
+      tab: 'review',  // 'review' | 'shelved'
+      shelvedAlbums: [], shelvedTotal: 0, shelvedPage: 1,
+      // multi-select + batch accept
+      selectedAlbums: [],
+      batchRunning: false,
+      batchAlbumDone: 0,
+      batchAlbumTotal: 0,
+      batchTrackDone: 0,
+      batchTrackTotal: 0,
+      batchCurrentAlbum: '',
+      _lastFilter: '', _lastSort: '',
+      // album detail modal
+      showDetail: false,
+      detailTracks: [],
+      detailEdits: {},
+      detailReleaseId: '',
+      detailAlbumDir: '',
+      detailLabel: '',
+      detailArtistOverride: '',
+      detailAlbumOverride: '',
+      acceptErrors: [],
+      acceptWriteDone: 0,
+      acceptWriteTotal: 0,
+      pending: false,
+      bulkCasingConfirm: false,
+      showEnrichErrors: false,
+      enrichErrors: [],
+      msg: '',
+    };
+  },
+  computed: {
+    totalPages() { return Math.ceil(this.total / (this.pageSize || 20)); },
+    shelvedTotalPages() { return Math.ceil(this.shelvedTotal / (this.pageSize || 20)); },
+    enrichProgress() {
+      if (!this.mb.total) return 0;
+      return Math.round(((this.mb.done + this.mb.errors + this.mb.no_data) / this.mb.total) * 100);
+    },
+    allOnPageSelected() {
+      return this.albums.length > 0 && this.albums.every(a => this.isSelected(a));
+    },
+  },
+  mounted() { this.loadStatus(); this.loadAlbums(); this.loadShelved(); },
+  beforeUnmount() {
+    if (this._statusTimer) { clearTimeout(this._statusTimer); this._statusTimer = null; }
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+      <div class="card">
+        <div class="card-content">
+        <span class="card-title">{{ t('admin.tagworkshop.title') }}</span>
+        <p style="margin-bottom:0.5rem; color:#aaa; font-size:0.88rem;">{{ t('admin.tagworkshop.desc') }}</p>
+        <div style="background:rgba(255,255,255,0.04); border-left:3px solid var(--primary); border-radius:0 4px 4px 0; padding:0.5rem 0.75rem; margin-bottom:1rem; font-size:0.82rem; color:#bbb; line-height:1.7;">
+          <div>ℹ {{ t('admin.tagworkshop.infoWriteFiles') }}</div>
+          <div>ℹ {{ t('admin.tagworkshop.infoNoRecentlyAdded') }}</div>
+        </div>
+
+        <!-- Step 1: MB Enrichment section -->
+        <div style="background:var(--raised2); border-radius:8px; padding:1rem; margin-bottom:1.25rem;">
+          <b style="display:block; margin-bottom:0.25rem;">{{ t('admin.tagworkshop.enrichTitle') }}</b>
+          <p style="color:#aaa; font-size:0.82rem; margin:0 0 0.75rem 0;">{{ t('admin.tagworkshop.enrichHint') }}</p>
+
+          <!-- Prereq: AcoustID never ran -->
+          <div v-if="mb.acoustid_attempted === 0" style="background:rgba(255,152,0,0.1); border:1px solid rgba(255,152,0,0.35); border-radius:6px; padding:0.65rem 0.9rem; margin-bottom:0.85rem; font-size:0.83rem; color:#ffb74d; line-height:1.6;">
+            ⚠ {{ t('admin.tagworkshop.prereqNoAcoustid') }}
+            <span style="display:block; margin-top:0.2rem; font-size:0.78rem; color:#e6a020;">{{ t('admin.tagworkshop.prereqNoAcoustidHint') }}</span>
+          </div>
+          <!-- Prereq: AcoustID ran but zero matches -->
+          <div v-else-if="mb.acoustid_found === 0" style="background:rgba(229,115,115,0.08); border:1px solid rgba(229,115,115,0.3); border-radius:6px; padding:0.65rem 0.9rem; margin-bottom:0.85rem; font-size:0.83rem; color:#ef9a9a; line-height:1.6;">
+            ⚠ {{ t('admin.tagworkshop.prereqNoMatches', { attempted: mb.acoustid_attempted.toLocaleString() }) }}
+          </div>
+          <!-- All already enriched — nothing queued -->
+          <div v-else-if="mb.queued === 0 && mb.total > 0 && !enrich.running" style="background:rgba(76,175,80,0.08); border:1px solid rgba(76,175,80,0.25); border-radius:6px; padding:0.65rem 0.9rem; margin-bottom:0.85rem; font-size:0.83rem; color:#81c784; line-height:1.5;">
+            ✓ {{ t('admin.tagworkshop.prereqAllDone', { total: mb.total.toLocaleString() }) }}
+          </div>
+
+          <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; margin-bottom:0.75rem;">
+            <button class="btn" style="min-width:140px;" :disabled="enrich.running || enrich.stopping || mb.queued === 0" @click="startEnrich">{{ t('admin.tagworkshop.btnStartEnrich') }}</button>
+            <button class="btn btn-secondary" :disabled="!enrich.running || enrich.stopping" @click="stopEnrich">{{ enrich.stopping ? t('admin.tagworkshop.btnStopping') : t('admin.tagworkshop.btnStopEnrich') }}</button>
+            <span v-if="enrich.running" style="color:#4caf50; font-size:0.85rem;">● {{ t('admin.tagworkshop.enrichRunning') }}</span>
+            <span v-else-if="enrich.stopping" style="color:#ff9800; font-size:0.85rem;">● {{ t('admin.tagworkshop.enrichStopping') }}</span>
+            <span v-else style="color:#888; font-size:0.85rem;">{{ t('admin.tagworkshop.enrichIdle') }}</span>
+          </div>
+          <div v-if="mb.total > 0">
+            <div style="background:var(--raised3); border-radius:4px; height:6px; margin-bottom:0.4rem; overflow:hidden;">
+              <div :style="{width: enrichProgress + '%', background:'#4caf50', height:'100%', transition:'width .3s'}"></div>
+            </div>
+            <div style="display:flex; gap:1.5rem; font-size:0.82rem; flex-wrap:wrap; align-items:center;">
+              <span>{{ t('admin.tagworkshop.statsMbTotal') }}: <b>{{ mb.total.toLocaleString() }}</b></span>
+              <span style="color:#4caf50;">{{ t('admin.tagworkshop.statsMbDone') }}: <b>{{ mb.done.toLocaleString() }}</b></span>
+              <span style="color:#888;">{{ t('admin.tagworkshop.statsMbNoData') }}: <b>{{ mb.no_data.toLocaleString() }}</b></span>
+              <span style="color:#e57373;">
+                {{ t('admin.tagworkshop.statsMbErrors') }}: <b>{{ mb.errors.toLocaleString() }}</b>
+                <button v-if="mb.errors > 0" class="btn-flat btn-small" style="margin-left:0.35rem; font-size:0.75rem; color:#e57373; padding:1px 7px;" @click="toggleEnrichErrors">{{ showEnrichErrors ? '▲' : '▼' }}</button>
+              </span>
+              <span style="color:#aaa;">{{ t('admin.tagworkshop.statsMbQueued') }}: <b>{{ mb.queued.toLocaleString() }}</b></span>
+            </div>
+            <!-- Error file list -->
+            <div v-if="showEnrichErrors && enrichErrors.length > 0" style="margin-top:0.65rem; max-height:220px; overflow-y:auto; background:var(--raised3); border-radius:5px; border:1px solid rgba(229,115,115,0.25); padding:0.5rem 0.75rem;">
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem;">
+                <div style="font-size:0.75rem; color:#e57373; font-weight:600;">{{ t('admin.tagworkshop.enrichErrorsTitle') }} ({{ enrichErrors.length }})</div>
+                <button class="btn-flat btn-small" style="font-size:0.75rem; color:#e57373; border-color:rgba(229,115,115,0.4);" @click="retryEnrichErrors" :title="t('admin.tagworkshop.enrichRetryHint')">{{ t('admin.tagworkshop.enrichRetry') }}</button>
+              </div>
+              <div v-for="row in enrichErrors" :key="row.filepath" style="font-size:0.75rem; padding:0.2rem 0; border-bottom:1px solid rgba(255,255,255,0.04);">
+                <div style="color:#bbb; word-break:break-all;">{{ row.filepath }}</div>
+                <div style="color:#e57373; margin-top:1px;">{{ row.mb_enrichment_error || t('admin.tagworkshop.enrichErrorUnknown') }}</div>
+              </div>
+            </div>
+          </div>
+          <p v-else style="color:#666; font-size:0.81rem; margin:0.5rem 0 0 0; line-height:1.5;">{{ t('admin.tagworkshop.enrichExplainLong') }}</p>
+        </div>
+
+        <!-- Step 2: Tab bar -->
+        <div v-if="tags.needs_review > 0 || tags.accepted > 0 || tags.skipped > 0">
+          <div style="display:flex; border-bottom:2px solid var(--border); margin-bottom:1rem; gap:0;">
+            <button @click="tab='review'" class="btn-flat" :style="{borderBottom: tab==='review' ? '2px solid var(--primary)' : 'none', marginBottom:'-2px', fontWeight: tab==='review' ? '600':'normal', paddingBottom:'6px'}">
+              {{ t('admin.tagworkshop.reviewTitle') }}
+              <span v-if="tags.needs_review > 0" style="margin-left:5px; background:#ff9800; color:#000; border-radius:10px; padding:1px 7px; font-size:0.75rem;">{{ tags.needs_review }}</span>
+            </button>
+            <button @click="tab='shelved'; loadShelved()" class="btn-flat" :style="{borderBottom: tab==='shelved' ? '2px solid var(--primary)' : 'none', marginBottom:'-2px', fontWeight: tab==='shelved' ? '600':'normal', paddingBottom:'6px'}">
+              {{ t('admin.tagworkshop.shelvedTitle') }}
+              <span v-if="tags.skipped > 0" style="margin-left:5px; background:var(--raised3); color:#aaa; border-radius:10px; padding:1px 7px; font-size:0.75rem;">{{ tags.skipped }}</span>
+            </button>
+          </div>
+
+          <!-- REVIEW tab -->
+          <div v-if="tab==='review'">
+            <p style="color:#aaa; font-size:0.82rem; margin:0 0 0.75rem 0; line-height:1.5;">{{ t('admin.tagworkshop.reviewExplain') }}</p>
+            <div style="display:flex; gap:1.5rem; font-size:0.85rem; flex-wrap:wrap; margin-bottom:0.9rem;">
+              <span style="color:#ff9800;">{{ t('admin.tagworkshop.statsNeedsReview') }}: <b>{{ tags.needs_review.toLocaleString() }}</b></span>
+              <span style="color:#aaa;">{{ t('admin.tagworkshop.statsConfirmed') }}: <b>{{ tags.confirmed.toLocaleString() }}</b></span>
+              <span style="color:#4caf50;">{{ t('admin.tagworkshop.statsAccepted') }}: <b>{{ tags.accepted.toLocaleString() }}</b></span>
+            </div>
+
+            <!-- Search box -->
+            <div style="margin-bottom:0.75rem;">
+              <input v-model="search" @input="onSearchInput" type="text" style="width:100%; box-sizing:border-box; padding:0.45rem 0.65rem; border-radius:6px; border:1px solid var(--border); background:var(--raised2); color:var(--t1); font-size:0.88rem;" :placeholder="t('admin.tagworkshop.searchPlaceholder')">
+            </div>
+
+            <!-- Filters + bulk actions -->
+            <div style="display:flex; flex-direction:column; gap:0.35rem; margin-bottom:0.75rem;">
+              <!-- Row 1: Filter -->
+              <div style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;">
+                <span style="font-size:0.75rem; color:#666; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap; min-width:44px;">{{ t('admin.tagworkshop.labelFilter') }}</span>
+                <button class="btn-flat btn-small" :class="{select: filter==='all'}"   :title="t('admin.tagworkshop.filterHint_all')"    @click="filter='all';    page=1; loadAlbums()">{{ t('admin.tagworkshop.filter_all') }}</button>
+                <button class="btn-flat btn-small" :class="{select: filter==='missing'}" :title="t('admin.tagworkshop.filterHint_missing')" @click="filter='missing'; page=1; loadAlbums()">{{ t('admin.tagworkshop.filter_missing') }}</button>
+                <button class="btn-flat btn-small" :class="{select: filter==='year'}"  :title="t('admin.tagworkshop.filterHint_year')"   @click="filter='year';   page=1; loadAlbums()">{{ t('admin.tagworkshop.filter_year') }}</button>
+                <button class="btn-flat btn-small" :class="{select: filter==='artist'}" :title="t('admin.tagworkshop.filterHint_artist')" @click="filter='artist'; page=1; loadAlbums()">{{ t('admin.tagworkshop.filter_artist') }}</button>
+              </div>
+              <!-- Row 2: Sort + bulk actions -->
+              <div style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;">
+                <span style="font-size:0.75rem; color:#666; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap; min-width:44px;">{{ t('admin.tagworkshop.labelSort') }}</span>
+                <button class="btn-flat btn-small" :class="{select: sort==='broken'}" :title="t('admin.tagworkshop.sortHint_broken')" @click="sort='broken'; page=1; loadAlbums()">{{ t('admin.tagworkshop.sort_broken') }}</button>
+                <button class="btn-flat btn-small" :class="{select: sort==='tracks'}" :title="t('admin.tagworkshop.sortHint_tracks')" @click="sort='tracks'; page=1; loadAlbums()">{{ t('admin.tagworkshop.sort_tracks') }}</button>
+                <button class="btn-flat btn-small" :class="{select: sort==='alpha'}"  :title="t('admin.tagworkshop.sortHint_alpha')"  @click="sort='alpha';  page=1; loadAlbums()">{{ t('admin.tagworkshop.sort_alpha') }}</button>
+                <span style="margin:0 0.3rem; color:#555;">|</span>
+                <button class="btn-flat btn-small" :disabled="pending"
+                  :title="bulkCasingConfirm ? t('admin.tagworkshop.btnBulkCasingConfirmHint') : t('admin.tagworkshop.btnBulkCasingHint')"
+                  :style="bulkCasingConfirm ? 'color:#e53935; font-weight:600;' : ''"
+                  @click="bulkCasingConfirm ? bulkAcceptCasing() : (bulkCasingConfirm=true)"
+                  @blur="bulkCasingConfirm=false">
+                  {{ bulkCasingConfirm ? t('admin.tagworkshop.btnBulkCasingConfirm') : t('admin.tagworkshop.btnBulkCasing') }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Batch selection bar (always visible to prevent layout shift) -->
+            <div style="padding:0.5rem 0.75rem; background:rgba(76,175,80,0.06); border:1px solid rgba(76,175,80,0.18); border-radius:6px; margin-bottom:0.75rem;">
+              <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap; margin-bottom:0.35rem;">
+                <span v-if="!batchRunning" style="font-size:0.85rem; font-weight:600;" :style="selectedAlbums.length > 0 ? 'color:#4caf50;' : 'color:#666;'">{{ t('admin.tagworkshop.selectedCount', { count: selectedAlbums.length }) }}</span>
+                <span v-else style="font-size:0.85rem; color:#4caf50; font-weight:600;">{{ t('admin.tagworkshop.batchProgressAlbum', { done: batchAlbumDone, total: batchAlbumTotal }) }}</span>
+                <button class="btn btn-small" :disabled="pending || batchRunning || selectedAlbums.length === 0" @click="batchAcceptSelected" style="min-width:155px;">{{ t('admin.tagworkshop.btnAcceptSelected') }}</button>
+                <!-- Select all + Deselect all grouped together on the right -->
+                <div style="display:flex; align-items:center; gap:0.4rem; margin-left:auto; flex-shrink:0;">
+                  <label style="display:flex; align-items:center; gap:0.3rem; font-size:0.82rem; cursor:pointer; color:var(--t2); white-space:nowrap; user-select:none;" :title="t('admin.tagworkshop.selectAllHint')">
+                    <input type="checkbox" :checked="allOnPageSelected" @change="allOnPageSelected ? deselectAll() : selectAll()" :disabled="pending || batchRunning" style="cursor:pointer; width:15px; height:15px; accent-color:var(--primary);">
+                    {{ t('admin.tagworkshop.selectAll') }}
+                  </label>
+                  <button class="btn-flat btn-small" :disabled="pending || batchRunning || selectedAlbums.length === 0" @click="deselectAll">{{ t('admin.tagworkshop.deselectAll') }}</button>
+                </div>
+              </div>
+              <div v-if="batchRunning">
+                <!-- Track progress bar -->
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.2rem;">
+                  <div style="flex:1; background:var(--border); border-radius:4px; height:5px; overflow:hidden;">
+                    <div :style="{ width: (batchTrackTotal ? (batchTrackDone/batchTrackTotal*100) : 0)+'%', background:'#4caf50', height:'100%', transition:'width 0.15s' }"></div>
+                  </div>
+                  <span style="font-size:0.78rem; color:#aaa; white-space:nowrap;">{{ batchTrackDone }} / {{ batchTrackTotal }} {{ t('admin.tagworkshop.tracksSuffix') }}</span>
+                </div>
+                <div v-if="batchCurrentAlbum" style="font-size:0.75rem; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ batchCurrentAlbum }}</div>
+              </div>
+            </div>
+
+            <!-- Album cards -->
+            <div v-if="albums.length === 0" style="color:#888; font-size:0.88rem; padding:1rem 0;">{{ t('admin.tagworkshop.noAlbums') }}</div>
+            <div v-else>
+              <div v-for="alb in albums" :key="alb.mb_release_id + '|' + (alb.mb_album_dir || '')"
+                style="display:flex; align-items:center; gap:0.75rem; padding:0.65rem 0; border-bottom:1px solid var(--border);">
+                <input type="checkbox" :checked="isSelected(alb)" @change="toggleSelect(alb)" :disabled="batchRunning" style="cursor:pointer; flex-shrink:0; width:16px; height:16px; accent-color:var(--primary);" :title="t('admin.tagworkshop.selectHint')">
+                <img v-if="alb.album_art" :src="'/album-art/' + alb.album_art" style="width:48px; height:48px; border-radius:4px; object-fit:cover; flex-shrink:0;" alt="">
+                <div v-else style="width:48px; height:48px; border-radius:4px; background:var(--raised3); flex-shrink:0;"></div>
+                <div style="flex:1; min-width:0;">
+                  <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ alb.mb_album }}</div>
+                  <div style="font-size:0.82rem; color:#aaa;">{{ alb.mb_artist }}<span v-if="alb.mb_year"> · {{ alb.mb_year }}</span></div>
+                  <div style="font-size:0.78rem; margin-top:3px;">
+                    <span v-if="alb.tracks_needing_fix" style="color:#ff9800;">
+                      ⚠ {{ alb.tracks_needing_fix }}/{{ alb.track_count }} {{ t('admin.tagworkshop.tracksNeedFix') }}
+                    </span>
+                    <span v-else style="color:#4caf50;">✓ {{ t('admin.tagworkshop.allTracksMatch') }}</span>
+                  </div>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:0.3rem; flex-shrink:0; align-items:flex-end;">
+                  <button class="btn btn-small" :disabled="pending" @click="openDetail(alb)" style="white-space:nowrap; min-width:130px;">{{ t('admin.tagworkshop.btnReview') }}</button>
+                  <button class="btn-flat btn-small" style="font-size:0.75rem; color:#888;" :disabled="pending" @click="shelve(alb.mb_release_id, alb.mb_album_dir || '')" :title="t('admin.tagworkshop.shelveHint')">{{ t('admin.tagworkshop.btnShelve') }}</button>
+                </div>
+              </div>
+
+              <!-- Pagination -->
+              <div style="display:flex; gap:0.5rem; justify-content:center; margin-top:0.75rem; font-size:0.85rem; align-items:center; flex-wrap:wrap;">
+                <button class="btn-flat btn-small" :disabled="page<=1" @click="page=1; loadAlbums()">«</button>
+                <button class="btn-flat btn-small" :disabled="page<=1" @click="page--; loadAlbums()">‹</button>
+                <span style="color:#aaa;">{{ t('admin.tagworkshop.pageOf', { page, total: totalPages || 1 }) }}</span>
+                <span style="color:#666; font-size:0.78rem;">({{ total.toLocaleString() }} {{ t('admin.tagworkshop.albumsTotal') }})</span>
+                <input v-model.number="pageJump" @keydown.enter="jumpToPage" type="number" min="1" :max="totalPages" :placeholder="t('admin.tagworkshop.goToPage')" style="width:70px; padding:2px 6px; border-radius:4px; border:1px solid var(--border); background:var(--raised2); color:var(--t1); font-size:0.82rem; text-align:center;">
+                <button class="btn-flat btn-small" @click="jumpToPage">{{ t('admin.tagworkshop.btnGo') }}</button>
+                <button class="btn-flat btn-small" :disabled="page>=totalPages" @click="page++; loadAlbums()">›</button>
+                <button class="btn-flat btn-small" :disabled="page>=totalPages" @click="page=totalPages; loadAlbums()">»</button>
+              </div>
+            </div>
+          </div><!-- /review tab -->
+
+          <!-- SHELVED tab -->
+          <div v-if="tab==='shelved'">
+            <p style="color:#aaa; font-size:0.82rem; margin:0 0 0.75rem 0; line-height:1.5;">{{ t('admin.tagworkshop.shelvedExplain') }}</p>
+            <div v-if="shelvedAlbums.length === 0" style="color:#888; font-size:0.88rem; padding:1rem 0;">{{ t('admin.tagworkshop.shelvedEmpty') }}</div>
+            <div v-else>
+              <div v-for="alb in shelvedAlbums" :key="alb.mb_release_id + '|' + (alb.mb_album_dir || '')"
+                style="display:flex; align-items:center; gap:0.75rem; padding:0.65rem 0; border-bottom:1px solid var(--border);">
+                <img v-if="alb.album_art" :src="'/album-art/' + alb.album_art" style="width:48px; height:48px; border-radius:4px; object-fit:cover; flex-shrink:0; opacity:0.5;" alt="">
+                <div v-else style="width:48px; height:48px; border-radius:4px; background:var(--raised3); flex-shrink:0;"></div>
+                <div style="flex:1; min-width:0;">
+                  <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; opacity:0.7;">{{ alb.mb_album }}</div>
+                  <div style="font-size:0.82rem; color:#777;">{{ alb.mb_artist }}<span v-if="alb.mb_year"> · {{ alb.mb_year }}</span></div>
+                  <div style="font-size:0.78rem; color:#666;">{{ alb.track_count }} {{ t('admin.tagworkshop.tracks') }}</div>
+                </div>
+                <div style="flex-shrink:0;">
+                  <button class="btn btn-secondary btn-small" :disabled="pending" @click="unshelve(alb.mb_release_id, alb.mb_album_dir || '')">{{ t('admin.tagworkshop.btnUnshelve') }}</button>
+                </div>
+              </div>
+              <!-- Pagination -->
+              <div style="display:flex; gap:0.5rem; justify-content:center; margin-top:0.75rem; font-size:0.85rem; align-items:center;">
+                <button class="btn-flat btn-small" :disabled="shelvedPage<=1" @click="shelvedPage--; loadShelved()">&laquo;</button>
+                <span>{{ shelvedPage }} / {{ shelvedTotalPages || 1 }}</span>
+                <button class="btn-flat btn-small" :disabled="shelvedPage>=shelvedTotalPages" @click="shelvedPage++; loadShelved()">&raquo;</button>
+              </div>
+            </div>
+          </div><!-- /shelved tab -->
+        </div>
+        <div v-else-if="mb.done > 0" style="color:#4caf50; font-size:0.9rem; padding:0.5rem 0;">{{ t('admin.tagworkshop.allClean') }}</div>
+
+        <p v-if="msg" style="margin-top:0.75rem; font-size:0.85rem; color:#4caf50;">{{ msg }}</p>
+        </div><!-- /card-content -->
+      </div><!-- /card -->
+        </div><!-- /col -->
+      </div><!-- /row -->
+
+      <!-- Detail modal -->
+      <div v-if="showDetail" style="position:fixed; inset:0; background:rgba(0,0,0,0.72); z-index:9999; display:flex; align-items:flex-start; justify-content:center; padding:2rem 1rem; overflow-y:auto;">
+        <div style="background:var(--bg); border-radius:10px; max-width:960px; width:100%; padding:1.5rem; position:relative;">
+          <button @click="showDetail=false; acceptErrors=[]" style="position:absolute; top:.75rem; right:.75rem; background:none; border:none; color:var(--t1); font-size:1.4rem; cursor:pointer;">&times;</button>
+          <h5 style="margin:0 0 0.2rem;">{{ t('admin.tagworkshop.reviewModalTitle') }}</h5>
+          <p v-if="detailLabel" style="color:#aaa; font-size:0.85rem; margin:0 0 1rem 0;">{{ detailLabel }}</p>
+
+          <!-- What will happen notice -->
+          <div style="background:rgba(255,152,0,0.1); border:1px solid rgba(255,152,0,0.3); border-radius:6px; padding:0.65rem 0.9rem; margin-bottom:1rem; font-size:0.83rem; color:#ffb74d; line-height:1.5;">
+            {{ t('admin.tagworkshop.acceptWarning', { count: detailTracks.length }) }}
+          </div>
+
+          <!-- Tracks comparison table -->
+          <div style="overflow-x:auto; margin-bottom:0.75rem;">
+            <table style="width:100%; border-collapse:collapse; font-size:0.82rem;">
+              <thead>
+                <tr style="text-align:left; border-bottom:2px solid var(--border);">
+                  <th style="padding:4px 8px; color:#aaa; font-weight:normal;">#</th>
+                  <th style="padding:4px 8px; color:#aaa; font-weight:normal;">{{ t('admin.tagworkshop.colTitle') }}</th>
+                  <th style="padding:4px 8px; color:#aaa; font-weight:normal;">{{ t('admin.tagworkshop.colArtist') }}</th>
+                  <th style="padding:4px 8px; color:#aaa; font-weight:normal;">{{ t('admin.tagworkshop.colAlbum') }}</th>
+                  <th style="padding:4px 8px; color:#aaa; font-weight:normal;">{{ t('admin.tagworkshop.colYear') }}</th>
+                  <th style="padding:4px 8px; color:#aaa; font-weight:normal;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <template v-for="t_ in detailTracks" :key="t_.filepath">
+                  <!-- Label row -->
+                  <tr>
+                    <td colspan="6" style="padding:6px 8px 1px 8px; font-size:0.72rem; color:#888; font-style:italic; border-top:1px solid var(--border); word-break:break-all;">{{ t_.filepath }}</td>
+                  </tr>
+                  <!-- Current file row -->
+                  <tr style="opacity:0.7;" :title="t('admin.tagworkshop.yourFile')">
+                    <td style="padding:2px 8px; color:#888; font-size:0.78rem;">{{ t_.track || '–' }}</td>
+                    <td style="padding:2px 8px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ t_.title || '–' }}</td>
+                    <td style="padding:2px 8px; white-space:nowrap;">{{ t_.artist || '–' }}</td>
+                    <td style="padding:2px 8px; white-space:nowrap;">{{ t_.album || '–' }}</td>
+                    <td style="padding:2px 8px;">{{ t_.year || '–' }}</td>
+                    <td style="padding:2px 8px; font-size:0.72rem; color:#888; white-space:nowrap;">← {{ t('admin.tagworkshop.labelYourFile') }}</td>
+                  </tr>
+                  <!-- MusicBrainz suggestion row — per-cell color, inline-editable -->
+                  <tr style="font-weight:500; border-bottom:1px solid var(--border);" :title="t('admin.tagworkshop.cellEditHint')">
+                    <td style="padding:2px 8px; font-size:0.78rem;" :style="{color: cellColor(t_,'track')}">{{ t_.mb_track || '–' }}</td>
+                    <td style="padding:2px 8px; max-width:180px;" :style="{color: cellColor(t_,'title')}"><input type="text" :value="detailEdits[t_.filepath] !== undefined && detailEdits[t_.filepath].title !== undefined ? detailEdits[t_.filepath].title : (t_.mb_title || '')" @input="setDetailEdit(t_.filepath, 'title', $event.target.value)" style="border:none; background:transparent; color:inherit; font:inherit; width:100%; padding:0; cursor:text;" /></td>
+                    <td style="padding:2px 8px;" :style="{color: cellColor(t_,'artist')}"><input type="text" :value="detailEdits[t_.filepath] !== undefined && detailEdits[t_.filepath].artist !== undefined ? detailEdits[t_.filepath].artist : (t_.mb_artist || '')" @input="setDetailEdit(t_.filepath, 'artist', $event.target.value)" style="border:none; background:transparent; color:inherit; font:inherit; width:100%; padding:0; cursor:text;" /></td>
+                    <td style="padding:2px 8px;" :style="{color: cellColor(t_,'album')}"><input type="text" :value="detailEdits[t_.filepath] !== undefined && detailEdits[t_.filepath].album !== undefined ? detailEdits[t_.filepath].album : (t_.mb_album || '')" @input="setDetailEdit(t_.filepath, 'album', $event.target.value)" style="border:none; background:transparent; color:inherit; font:inherit; width:100%; padding:0; cursor:text;" /></td>
+                    <td style="padding:2px 8px;" :style="{color: cellColor(t_,'year')}"><input type="text" :value="detailEdits[t_.filepath] !== undefined && detailEdits[t_.filepath].year !== undefined ? detailEdits[t_.filepath].year : (t_.mb_year || '')" @input="setDetailEdit(t_.filepath, 'year', $event.target.value)" style="border:none; background:transparent; color:inherit; font:inherit; width:60px; padding:0; cursor:text;" /></td>
+                    <td style="padding:2px 8px; font-size:0.72rem; white-space:nowrap;" :style="{color: '#aaa'}">← {{ t('admin.tagworkshop.labelMbSuggestion') }}</td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Legend -->
+          <div style="font-size:0.78rem; color:#aaa; margin-bottom:1rem; display:flex; gap:1.25rem; flex-wrap:wrap;">
+            <span style="opacity:0.5;">── {{ t('admin.tagworkshop.labelYourFile') }}</span>
+            <span><b style="color:#4caf50;">■</b> {{ t('admin.tagworkshop.legendMatch') }}</span>
+            <span><b style="color:#ff9800;">■</b> {{ t('admin.tagworkshop.legendDiff') }}</span>
+          </div>
+
+          <!-- Optional overrides -->
+          <details style="margin-bottom:1.25rem; border:1px solid var(--border); border-radius:6px; padding:0.6rem 0.75rem;">
+            <summary style="font-size:0.84rem; color:#aaa; cursor:pointer; user-select:none;">{{ t('admin.tagworkshop.overrideTitle') }}</summary>
+            <p style="font-size:0.8rem; color:#aaa; margin:0.5rem 0 0.75rem 0; line-height:1.5;">{{ t('admin.tagworkshop.overrideNote') }}</p>
+            <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+              <div style="flex:1; min-width:160px;">
+                <label style="font-size:0.8rem; color:#888;">{{ t('admin.tagworkshop.overrideArtist') }}</label>
+                <input v-model="detailArtistOverride" type="text" style="width:100%; box-sizing:border-box;" :placeholder="t('admin.tagworkshop.overridePlaceholder')">
+              </div>
+              <div style="flex:1; min-width:160px;">
+                <label style="font-size:0.8rem; color:#888;">{{ t('admin.tagworkshop.overrideAlbum') }}</label>
+                <input v-model="detailAlbumOverride" type="text" style="width:100%; box-sizing:border-box;" :placeholder="t('admin.tagworkshop.overridePlaceholder')">
+              </div>
+            </div>
+          </details>
+
+          <!-- Write errors (shown after a failed accept) -->
+          <div v-if="acceptErrors.length" style="background:rgba(229,115,115,0.1); border:1px solid rgba(229,115,115,0.4); border-radius:6px; padding:0.65rem 0.9rem; margin-bottom:1rem; font-size:0.83rem; color:#ef9a9a; line-height:1.5;">
+            <b>{{ t('admin.tagworkshop.writeErrorsTitle') }}</b><br>
+            <span v-for="e in acceptErrors" :key="e.filepath" style="display:block; font-size:0.78rem; margin-top:2px; opacity:0.85;">{{ e.filepath.split('/').pop() }}: {{ e.error }}</span>
+          </div>
+
+          <!-- Write progress (shown while accepting) -->
+          <div v-if="pending && acceptWriteTotal > 0" style="margin-bottom:1rem;">
+            <div style="font-size:0.83rem; color:#aaa; margin-bottom:0.4rem;">{{ t('admin.tagworkshop.progressWriting', { done: acceptWriteDone, total: acceptWriteTotal }) }}</div>
+            <div style="background:var(--border); border-radius:4px; height:6px; overflow:hidden;">
+              <div :style="{ width: (acceptWriteTotal ? (acceptWriteDone / acceptWriteTotal * 100) : 0) + '%', background: '#4caf50', height: '100%', transition: 'width 0.2s' }"></div>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:0.75rem; justify-content:flex-end; align-items:center; flex-wrap:wrap;">
+            <button class="btn btn-secondary" :disabled="pending" @click="showDetail=false; acceptErrors=[]">{{ t('admin.tagworkshop.btnCancel') }}</button>
+            <button class="btn btn-secondary" :disabled="pending" @click="shelveDetail" :title="t('admin.tagworkshop.shelveHint')">{{ t('admin.tagworkshop.btnShelve') }}</button>
+            <button class="btn" style="min-width:170px;" :disabled="pending" @click="acceptDetail">{{ pending ? t('admin.tagworkshop.btnAccepting') : t('admin.tagworkshop.btnAccept') }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `,
+  methods: {
+    cellColor(t_, field) {
+      const n = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      switch (field) {
+        case 'track':  return (!t_.mb_track  || t_.mb_track == t_.track)                           ? '#4caf50' : '#ff9800';
+        case 'title':  return (!t_.mb_title  || n(t_.title)  === n(t_.mb_title))                   ? '#4caf50' : '#ff9800';
+        case 'artist': return (!t_.mb_artist || n(t_.artist) === n(t_.mb_artist))                  ? '#4caf50' : '#ff9800';
+        case 'album':  return (!t_.mb_album  || n(t_.album)  === n(t_.mb_album))                   ? '#4caf50' : '#ff9800';
+        case 'year':   return (!t_.mb_year   || Math.abs((t_.year || 0) - t_.mb_year) <= 1)        ? '#4caf50' : '#ff9800';
+        default: return '';
+      }
+    },
+    async loadStatus() {
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/tagworkshop/status` });
+        this.mb   = res.data.mb   || this.mb;
+        this.tags = res.data.tags || this.tags;
+        this.enrich = res.data.enrich || this.enrich;
+        // Only reschedule when the request succeeded and the worker is still running
+        if (this.enrich.running) {
+          this._statusTimer = setTimeout(() => { this.loadStatus(); this.loadAlbums(); }, 8000);
+        }
+      } catch(_) {
+        // Server unreachable — stop polling to avoid console flood
+      }
+    },
+    async loadAlbums() {
+      try {
+        // Clear selection when filter or sort changes (but not on page change alone)
+        if (this.filter !== this._lastFilter || this.sort !== this._lastSort) {
+          this.selectedAlbums = [];
+          this._lastFilter = this.filter;
+          this._lastSort = this.sort;
+        }
+        const q = this.search.trim();
+        const url = `${API.url()}/api/v1/tagworkshop/albums?page=${this.page}&filter=${this.filter}&sort=${this.sort}${q ? '&q=' + encodeURIComponent(q) : ''}`;
+        const res = await API.axios({ method: 'GET', url });
+        this.albums   = res.data.albums   || [];
+        this.total    = res.data.total    || 0;
+        this.pageSize = res.data.pageSize || 40;
+      } catch(_) {}
+    },
+    onSearchInput() {
+      clearTimeout(this.searchDebounce);
+      this.searchDebounce = setTimeout(() => { this.page = 1; this.loadAlbums(); }, 350);
+    },
+    jumpToPage() {
+      const p = parseInt(this.pageJump, 10);
+      if (p >= 1 && p <= (this.totalPages || 1)) {
+        this.page = p;
+        this.loadAlbums();
+      }
+      this.pageJump = '';
+    },
+    async startEnrich() {
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/tagworkshop/enrich/start` });
+        this.enrich.running = true;
+        this._statusTimer = setTimeout(() => { this.loadStatus(); }, 2000);
+      } catch(_) {}
+    },
+    async stopEnrich() {
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/tagworkshop/enrich/stop` });
+        this.enrich.stopping = true;
+      } catch(_) {}
+    },
+    async toggleEnrichErrors() {
+      this.showEnrichErrors = !this.showEnrichErrors;
+      if (this.showEnrichErrors && this.enrichErrors.length === 0) {
+        try {
+          const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/tagworkshop/enrich/errors` });
+          this.enrichErrors = res.data.errors || [];
+        } catch(_) {}
+      }
+    },
+    async retryEnrichErrors() {
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/tagworkshop/enrich/retry-errors` });
+        this.enrichErrors = [];
+        this.showEnrichErrors = false;
+        await this.loadStatus();
+      } catch(_) {}
+    },
+    setDetailEdit(fp, field, val) {
+      this.detailEdits = { ...this.detailEdits, [fp]: { ...(this.detailEdits[fp] || {}), [field]: val } };
+    },
+    async openDetail(alb) {
+      this.detailReleaseId     = alb.mb_release_id;
+      this.detailAlbumDir      = alb.mb_album_dir || '';
+      this.detailLabel         = [alb.mb_artist, alb.mb_album, alb.mb_year ? '(' + alb.mb_year + ')' : ''].filter(Boolean).join(' — ');
+      this.detailArtistOverride = '';
+      this.detailAlbumOverride  = '';
+      this.detailEdits = {};
+      this.acceptErrors = [];
+      this.detailTracks = [];
+      this.showDetail = true;
+      try {
+        const albumDirParam = this.detailAlbumDir !== '' ? `&album_dir=${encodeURIComponent(this.detailAlbumDir)}` : '';
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/tagworkshop/album/${encodeURIComponent(alb.mb_release_id)}?dummy=1${albumDirParam}` });
+        this.detailTracks = res.data.tracks || [];
+      } catch(_) {}
+    },
+    async acceptDetail() {
+      if (!this.detailReleaseId) return;
+      this.pending = true;
+      this.acceptErrors = [];
+      this.acceptWriteDone  = 0;
+      this.acceptWriteTotal = this.detailTracks.length;
+      try {
+        const albumOverrides = {};
+        if (this.detailArtistOverride.trim()) albumOverrides.artist = this.detailArtistOverride.trim();
+        if (this.detailAlbumOverride.trim())  albumOverrides.album  = this.detailAlbumOverride.trim();
+
+        let accepted = 0;
+        for (const track of this.detailTracks) {
+          try {
+            const perTrack = this.detailEdits[track.filepath] || {};
+            const overrides = {
+              ...albumOverrides,
+              ...(perTrack.artist !== undefined ? { artist: perTrack.artist } : {}),
+              ...(perTrack.album  !== undefined ? { album:  perTrack.album  } : {}),
+              ...(perTrack.title  !== undefined ? { title:  perTrack.title  } : {}),
+              ...(perTrack.year   !== undefined ? { year:   perTrack.year   } : {}),
+            };
+            const r = await API.axios({
+              method: 'POST',
+              url: `${API.url()}/api/v1/tagworkshop/accept-track`,
+              data: { mb_release_id: this.detailReleaseId, filepath: track.filepath, vpath: track.vpath, overrides },
+            });
+            if (r.data.error) {
+              this.acceptErrors.push({ filepath: track.filepath, error: r.data.error });
+            } else if (!r.data.skipped) {
+              accepted++;
+            }
+          } catch(_) {
+            this.acceptErrors.push({ filepath: track.filepath, error: this.t('admin.tagworkshop.toastError') });
+          }
+          this.acceptWriteDone++;
+        }
+
+        if (this.acceptErrors.length) {
+          this.msg = this.t('admin.tagworkshop.toastWritePartial', { written: accepted, failed: this.acceptErrors.length });
+        } else {
+          this.msg = this.t('admin.tagworkshop.toastAccepted', { count: accepted });
+          this.showDetail = false;
+        }
+        await this.loadStatus();
+        await this.loadAlbums();
+      } catch(_) {
+        this.msg = this.t('admin.tagworkshop.toastError');
+      } finally {
+        this.pending = false;
+        this.acceptWriteTotal = 0;
+        this.acceptWriteDone  = 0;
+      }
+    },
+    async shelve(mb_release_id, album_dir = '') {
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/tagworkshop/skip`, data: { mb_release_id, album_dir } });
+        await this.loadAlbums();
+        await this.loadStatus();
+        await this.loadShelved();
+      } catch(_) {}
+    },
+    async shelveDetail() {
+      await this.shelve(this.detailReleaseId, this.detailAlbumDir);
+      this.showDetail = false;
+    },
+    async unshelve(mb_release_id, album_dir = '') {
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/tagworkshop/unshelve`, data: { mb_release_id, album_dir } });
+        await this.loadShelved();
+        await this.loadAlbums();
+        await this.loadStatus();
+      } catch(_) {}
+    },
+    async loadShelved() {
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/tagworkshop/shelved?page=${this.shelvedPage}` });
+        this.shelvedAlbums = res.data.albums || [];
+        this.shelvedTotal  = res.data.total  || 0;
+      } catch(_) {}
+    },
+    albumKey(a) { return a.mb_release_id + '|' + (a.mb_album_dir || ''); },
+    isSelected(a) { const k = this.albumKey(a); return this.selectedAlbums.some(s => this.albumKey(s) === k); },
+    toggleSelect(a) {
+      const k = this.albumKey(a);
+      const idx = this.selectedAlbums.findIndex(s => this.albumKey(s) === k);
+      if (idx === -1) this.selectedAlbums.push(a);
+      else this.selectedAlbums.splice(idx, 1);
+    },
+    selectAll() {
+      for (const a of this.albums) { if (!this.isSelected(a)) this.selectedAlbums.push(a); }
+    },
+    deselectAll() { this.selectedAlbums = []; },
+    async batchAcceptSelected() {
+      if (!this.selectedAlbums.length || this.batchRunning) return;
+      this.batchRunning = true;
+      const batch = [...this.selectedAlbums];
+      this.batchAlbumTotal = batch.length;
+      this.batchAlbumDone  = 0;
+      this.batchTrackDone  = 0;
+      this.batchTrackTotal = 0;
+      this.batchCurrentAlbum = '';
+      let totalTracks = 0, totalErrors = 0;
+      try {
+        // Phase 1: fetch all track lists to get a total track count up-front
+        const trackLists = [];
+        for (const alb of batch) {
+          try {
+            const albumDirParam = alb.mb_album_dir ? `&album_dir=${encodeURIComponent(alb.mb_album_dir)}` : '';
+            const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/tagworkshop/album/${encodeURIComponent(alb.mb_release_id)}?dummy=1${albumDirParam}` });
+            trackLists.push({ alb, tracks: res.data.tracks || [] });
+            this.batchTrackTotal += (res.data.tracks || []).length;
+          } catch(_) { trackLists.push({ alb, tracks: [] }); totalErrors++; }
+        }
+        // Phase 2: write tracks, update counters immediately after each one
+        for (const { alb, tracks } of trackLists) {
+          this.batchCurrentAlbum = [alb.mb_artist, alb.mb_album].filter(Boolean).join(' — ');
+          for (const track of tracks) {
+            try {
+              const r = await API.axios({
+                method: 'POST',
+                url: `${API.url()}/api/v1/tagworkshop/accept-track`,
+                data: { mb_release_id: alb.mb_release_id, filepath: track.filepath, vpath: track.vpath, overrides: {} },
+              });
+              if (r.data.error) totalErrors++;
+              else if (!r.data.skipped) totalTracks++;
+            } catch(_) { totalErrors++; }
+            this.batchTrackDone++;
+          }
+          this.batchAlbumDone++;
+        }
+        this.selectedAlbums = [];
+        this.batchCurrentAlbum = '';
+        this.msg = totalErrors > 0
+          ? this.t('admin.tagworkshop.batchErrors', { albums: batch.length, errors: totalErrors })
+          : this.t('admin.tagworkshop.batchDone', { albums: batch.length, tracks: totalTracks });
+        await this.loadStatus();
+        await this.loadAlbums();
+      } catch(_) {
+        this.msg = this.t('admin.tagworkshop.toastError');
+      } finally {
+        this.batchRunning = false;
+        this.batchAlbumDone  = 0;
+        this.batchAlbumTotal = 0;
+        this.batchTrackDone  = 0;
+        this.batchTrackTotal = 0;
+        this.batchCurrentAlbum = '';
+      }
+    },
+    async bulkAcceptCasing() {
+      this.bulkCasingConfirm = false;
+      this.pending = true;
+      try {
+        const res = await API.axios({ method: 'POST', url: `${API.url()}/api/v1/tagworkshop/bulk-accept-casing` });
+        this.msg = this.t('admin.tagworkshop.toastBulkAccepted', { count: res.data.accepted + res.data.dbOnly });
+        await this.loadStatus();
+        await this.loadAlbums();
+      } catch(_) {
+        this.msg = this.t('admin.tagworkshop.toastError');
+      } finally {
+        this.pending = false;
+      }
+    },
+  }
+});
+
 const radioView = Vue.component('radio-view', {
   data() {
     return {
@@ -4847,6 +5715,8 @@ const vm = new Vue({
     'discogs-view': discogsView,
     'lyrics-view': lyricsView,
     'radio-view': radioView,
+    'acoustid-view': acoustidView,
+    'tagworkshop-view': tagWorkshopView,
     'genre-groups-view': genreGroupsView,
     'artists-admin-view': artistsAdminView,
     'languages-view': languagesView,

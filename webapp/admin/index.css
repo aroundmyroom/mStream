@@ -113,7 +113,7 @@ p { margin: 0 0 .75rem; color: var(--t2); }
 
 /* ── Buttons ───────────────────────────────────────────────── */
 .btn, .btn-large, .btn-small, .btn-flat {
-  display: inline-flex; align-items: center; gap: .4rem; padding: .45rem 1.1rem;
+  display: inline-flex; align-items: center; justify-content: center; gap: .4rem; padding: .45rem 1.1rem;
   border-radius: var(--r); font-family: inherit; font-size: .85rem; font-weight: 600;
   cursor: pointer; border: none; transition: opacity .15s, background .15s;
   white-space: nowrap; text-decoration: none; color: #fff; background: var(--primary); line-height: 1.5;
@@ -123,6 +123,7 @@ p { margin: 0 0 .75rem; color: var(--t2); }
 .btn-small { padding: .28rem .75rem; font-size: .78rem; }
 .btn-flat { background: transparent; color: var(--t2); border: 1px solid var(--border2); }
 .btn-flat:hover { background: var(--raised); color: var(--t1); opacity: 1; }
+.btn-flat.select { background: var(--raised); color: var(--primary); border-color: var(--primary); }
 .btn.red, .btn-small.red { background: var(--red); }
 .btn.blue, .btn-small.blue { background: var(--accent); }
 .btn[disabled], .btn-small[disabled] { opacity: .4; cursor: not-allowed; }

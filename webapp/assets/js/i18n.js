@@ -79,8 +79,11 @@ const I18N = (() => {
   };
 
   // ── Language detection ────────────────────────────────────────
+  let _langUser = ''; // set after login via I18N.setUser(username)
+  function _langKey() { return _langUser ? 'mstream-lang_' + _langUser : 'mstream-lang'; }
+
   function detectLanguage() {
-    const stored = localStorage.getItem('mstream-lang');
+    const stored = localStorage.getItem(_langKey()) || localStorage.getItem('mstream-lang');
     if (stored && SUPPORTED.includes(stored)) { return stored; }
     const nav = (navigator.language || navigator.userLanguage || DEFAULT_LANG);
     const code = nav.split('-')[0].toLowerCase();
@@ -237,7 +240,8 @@ const I18N = (() => {
     }
 
     currentLang = lang;
-    localStorage.setItem('mstream-lang', lang);
+    localStorage.setItem(_langKey(), lang);
+    localStorage.setItem('mstream-lang', lang); // keep global fallback in sync
     syncLanguagePickers(lang);
     mod.translatePage();
     changeListeners.forEach(fn => { try { fn(lang); } catch (_) { /* noop */ } });
@@ -281,17 +285,38 @@ const I18N = (() => {
   mod.listLanguages = () => SUPPORTED.map(code => ({ code, ...LANGUAGE_META[code] }));
   mod.getLanguageMeta = (code) => LANGUAGE_META[code] || { label: code.toUpperCase(), flag: code.toUpperCase(), country: null };
 
+  // ── Per-user language preference ────────────────────────────
+  // Called by app.js after login (username known). Reads this user's saved
+  // language preference and applies it if it differs from the current one.
+  // Pass '' (empty string) to reset to the anonymous/global key (on logout).
+  mod.setUser = async (username) => {
+    _langUser = username || '';
+    const userLang = localStorage.getItem(_langKey());
+    if (userLang && SUPPORTED.includes(userLang)) {
+      // Per-user key exists — switch to it if different from current language.
+      if (userLang !== currentLang) { await mod.loadLanguage(userLang); }
+    } else if (_langUser && currentLang) {
+      // First login for this user — seed the per-user key with the current
+      // language so their preference is isolated from other users immediately.
+      localStorage.setItem(_langKey(), currentLang);
+    }
+  };
+
   // Keep language in sync across browser tabs (admin <-> player).
-  // When one tab updates localStorage('mstream-lang'), other tabs receive a
-  // storage event and activate the same locale immediately.
+  // Listens for both the global key ('mstream-lang') and the per-user key
+  // ('mstream-lang_USERNAME') so changes made in one tab reach the other.
   window.addEventListener('storage', (ev) => {
-    if (ev.key !== 'mstream-lang' || !ev.newValue) { return; }
+    if (!ev.newValue) { return; }
+    const globalKey = 'mstream-lang';
+    const userKey   = _langUser ? 'mstream-lang_' + _langUser : null;
+    if (ev.key !== globalKey && ev.key !== userKey) { return; }
     if (!SUPPORTED.includes(ev.newValue) || ev.newValue === currentLang) { return; }
     mod.loadLanguage(ev.newValue);
   });
 
   // Global shorthand: window.t(key, params)
-  window.t = mod.t;
+  window.t    = mod.t;
+  window.I18N = mod;   // expose on window so other scripts can call I18N.setUser()
 
   return mod;
 })();

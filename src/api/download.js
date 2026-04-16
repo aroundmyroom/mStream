@@ -9,6 +9,7 @@ import Joi from 'joi';
 import winston from 'winston';
 import * as config from '../state/config.js';
 import * as vpath from '../util/vpath.js';
+import * as db from '../db/manager.js';
 import * as shared from '../api/shared.js';
 import * as m3u from '../util/m3u.js';
 import WebError from '../util/web-error.js';
@@ -151,12 +152,20 @@ export function setup(mstream) {
       return res.status(403).json({ error: e.message });
     }
 
-    const folderCfg = config.program.folders[pathInfo.vpath];
-    if (!folderCfg || folderCfg.type !== 'recordings') {
-      return res.status(403).json({ error: 'Not a recordings folder' });
-    }
-    if (!folderCfg.allowRecordDelete) {
-      return res.status(403).json({ error: 'Deletion not permitted for this folder' });
+    // The file may live under a parent (root) vpath in the DB, but belong to a
+    // child vpath that has type=recordings and allowRecordDelete=true.
+    // Check all configured vpaths whose root is a prefix of the resolved path.
+    const allFolders = config.program.folders || {};
+    const normalizedFull = pathInfo.fullPath;
+
+    const recordingVpath = Object.entries(allFolders).find(([, cfg]) => {
+      if (cfg.type !== 'recordings' || !cfg.allowRecordDelete) return false;
+      const base = cfg.root.endsWith(path.sep) ? cfg.root : cfg.root + path.sep;
+      return normalizedFull === cfg.root || normalizedFull.startsWith(base);
+    });
+
+    if (!recordingVpath) {
+      return res.status(403).json({ error: 'Not a recordings folder or deletion not permitted' });
     }
 
     // Only allow deleting audio files (no directory traversal to other types)
@@ -168,6 +177,11 @@ export function setup(mstream) {
 
     try {
       await fs.unlink(pathInfo.fullPath);
+      // Remove the row from the database so it disappears from all views
+      // immediately. The DB stores filepath relative to the root vpath, e.g.
+      // request has "Music/Recordings/song.opus", DB has filepath="Recordings/song.opus" vpath="Music".
+      const dbFilepath = path.relative(pathInfo.vpath, value.filepath);
+      db.removeFileByPath(dbFilepath, pathInfo.vpath);
       winston.info(`Recording deleted by ${req.user.username}: ${pathInfo.fullPath}`);
       res.json({ deleted: true });
     } catch (e) {

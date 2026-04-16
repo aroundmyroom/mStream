@@ -311,6 +311,15 @@ export async function editBootScanDelay(val) {
   config.program.scanOptions.bootScanDelay = val;
 }
 
+export async function editBootScanEnabled(val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
+  loadConfig.scanOptions.bootScanEnabled = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.scanOptions.bootScanEnabled = val;
+}
+
 export async function editMaxConcurrentTasks(val) {
   const loadConfig = await loadFile(config.configFile);
   if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
