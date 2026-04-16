@@ -3278,7 +3278,7 @@ export function getCasingOnlyCandidates() {
   });
 }
 
-export function getHomeSummary(userId, vpaths, todayStart, weekStart, onThisDayFrom, onThisDayTo) {
+export function getHomeSummary(userId, vpaths, todayStart, weekStart, timeWindows) {
   // songs played today
   const todayCount = db.prepare(
     'SELECT COUNT(*) AS c FROM play_events WHERE user_id=? AND started_at>=?'
@@ -3290,34 +3290,37 @@ export function getHomeSummary(userId, vpaths, todayStart, weekStart, onThisDayF
   ).get(userId, weekStart).c;
 
   // listening streak: consecutive calendar days (UTC midnight boundaries) with at least 1 play
-  // Walk backwards from today to find unbroken chain
   const DAY_MS = 86400000;
   let streak = 0;
-  let dayStart = todayStart;
   for (let i = 0; i < 365; i++) {
     const r = db.prepare(
       'SELECT 1 AS found FROM play_events WHERE user_id=? AND started_at>=? AND started_at<? LIMIT 1'
-    ).get(userId, dayStart - i * DAY_MS, dayStart - i * DAY_MS + DAY_MS);
+    ).get(userId, todayStart - i * DAY_MS, todayStart - (i - 1) * DAY_MS);
     if (r) streak++;
     else if (i === 0) { /* today may have no plays yet — don't break streak */ }
     else break;
   }
 
-  // On This Day: songs played on this same calendar day in any previous year
-  // onThisDayFrom/To span 48h window around same month+day across a 10-year lookback
-  // collected as distinct file_hashes, then joined to files for metadata
-  const otdRows = db.prepare(`
+  // How many days of play history do we have?
+  const earliestRow = db.prepare('SELECT MIN(started_at) AS t FROM play_events WHERE user_id=?').get(userId);
+  const dataSpanDays = earliestRow?.t ? Math.floor((todayStart - earliestRow.t) / DAY_MS) : 0;
+
+  // Temporal sections: query each eligible window for distinct songs played
+  const vpathSet = new Set(vpaths);
+  const stmtWindow = db.prepare(`
     SELECT DISTINCT pe.file_hash, f.title, f.artist, f.album, f.aaFile, f.filepath, f.vpath
     FROM play_events pe
     LEFT JOIN files f ON f.hash = pe.file_hash
     WHERE pe.user_id = ? AND pe.started_at >= ? AND pe.started_at < ?
-      AND pe.started_at < ?
-    LIMIT 20
-  `).all(userId, onThisDayFrom, onThisDayTo, todayStart);
+    LIMIT 10
+  `);
+  const sections = [];
+  for (const w of (timeWindows || [])) {
+    if (dataSpanDays < (w.minDays || 0)) continue;
+    const rows = stmtWindow.all(userId, w.from, w.to);
+    const songs = rows.filter(r => r.vpath && vpathSet.has(r.vpath));
+    if (songs.length) sections.push({ key: w.key, songs });
+  }
 
-  // Filter to vpaths user can access
-  const vpathSet = new Set(vpaths);
-  const onThisDay = otdRows.filter(r => r.vpath && vpathSet.has(r.vpath));
-
-  return { todayCount, weekCount, streak, onThisDay };
+  return { todayCount, weekCount, streak, dataSpanDays, sections };
 }

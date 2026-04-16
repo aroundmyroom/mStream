@@ -17,6 +17,7 @@ import winston from 'winston';
 import sharp from 'sharp';
 import * as config from '../state/config.js';
 import * as db from '../db/manager.js';
+import * as scrobblerApi from './scrobbler.js';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../../package.json');
@@ -1027,14 +1028,31 @@ export function setup(mstream) {
     if (id && submission) {
       // Clear now-playing entry when submission is complete
       nowPlayingStore.delete(req.subsonicUser);
-      const existing = db.findUserMetadata(id, req.subsonicUser);
       const now = Math.floor(Date.now() / 1000);
+      const existing = db.findUserMetadata(id, req.subsonicUser);
       if (existing) {
         db.updateUserMetadata({ ...existing, pc: (existing.pc || 0) + 1, lp: now });
       } else {
         db.insertUserMetadata({ hash: id, user: req.subsonicUser, rating: null, pc: 1, lp: now });
       }
       db.saveUserDB();
+
+      // Insert into play_events so this play is visible in Home stats, Yesterday shelf, etc.
+      try {
+        db.insertPlayEvent({ user_id: req.subsonicUser, file_hash: id, started_at: Date.now(), duration_ms: null, source: 'subsonic', session_id: null });
+      } catch (_) {}
+
+      // Forward to Last.fm and/or ListenBrainz if the user has enabled it
+      const userObj = config.program.users[req.subsonicUser];
+      const doLastfm = userObj?.['subsonic-scrobble-lastfm'] === true;
+      const doLb     = userObj?.['subsonic-scrobble-lb']     === true;
+      if (doLastfm || doLb) {
+        const row = db.getSongByHash(id, req.subsonicUser);
+        if (row) {
+          if (doLastfm) scrobblerApi.scrobbleLastfmForUser(userObj, { artist: row.artist, album: row.album, track: row.title });
+          if (doLb)     scrobblerApi.scrobbleLbForUser(req.subsonicUser, { artist: row.artist, album: row.album, track: row.title });
+        }
+      }
     }
     sendResponse(req, res, makeResponse());
   });

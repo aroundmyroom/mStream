@@ -2,6 +2,19 @@
 
 ## v6.10.1-velvet — May 2026
 
+### fix: gapless playback — blup/click and silent-track race restored to v6.7.0 behaviour
+- Gapless `_doXfadeHandoff` was changed in v6.7.5 (crossfade volume-spike fix) to stop hard-setting the incoming gain node to 1.0 on element swap. That fix was correct for crossfade (a `setValueCurveAtTime` is still running mid-swap), but it regressed gapless: the incoming `_nextElGain` was left at the end of a 20ms micro-ramp instead of a clean 1.0, causing audible "blups" on every track transition. Also covered the rare race where the 80ms warmup timer fired after `ended` (gain stuck at 0 → next track silent).
+- Fix: in `_doXfadeHandoff`, when `S.gapless` is true, cancel scheduled values and hard-set `_curElGain.value = 1.0` immediately — exactly as v6.7.0 did. Crossfade path is untouched (guarded by `!S.gapless`).
+
+### new: Subsonic scrobble forwarding (Last.fm + ListenBrainz)
+- Subsonic `scrobble` submissions (source=`'subsonic'`) now insert into `play_events` so they count in Your Stats, Home screen history, and Wrapped.
+- Per-user opt-in flags: `subsonic-scrobble-lastfm` and `subsonic-scrobble-lb` in config.
+- New `GET /api/v1/subsonic/scrobble-settings` — returns availability + current prefs.
+- New `POST /api/v1/admin/users/subsonic-scrobble` — saves preferences (admin can change any user; normal users only their own).
+- `scrobbleLastfmForUser()` + `scrobbleLbForUser()` exported from `scrobbler.js`.
+- Subsonic settings page shows a second "Scrobble from External Apps" card with toggle switches, visible only when at least one service is linked.
+- 6 new `player.subsonic.scrobble*` i18n keys, all 12 locales in sync.
+
 ### new: Home screen — full 6-section implementation
 - New "Home" view replaces Shortcuts as the default landing screen.
 - **Section 1 — Hero greeting + stats strip**: time-aware greeting ("Good morning/afternoon/evening, [name]") with today's song count, this-week count, and listening streak (highlighted when > 1 day).

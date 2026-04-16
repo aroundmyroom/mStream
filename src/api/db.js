@@ -351,30 +351,50 @@ export function setup(mstream) {
     res.json(songs);
   });
 
-  // ── home summary (stats strip + On This Day) ────────────────
+  // ── home summary (stats strip + temporal "On This Day" sections) ──
   mstream.get('/api/v1/db/home-summary', (req, res) => {
     const now  = Date.now();
     const d    = new Date(now);
     // UTC midnight of today
     const todayStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
     // UTC midnight of Monday this week
-    const dow = d.getUTCDay(); // 0=Sun
+    const dow = d.getUTCDay();
     const weekStart = todayStart - ((dow === 0 ? 6 : dow - 1)) * 86400000;
-    // On This Day: same calendar day across past 10 years
-    const month = d.getUTCMonth(), day = d.getUTCDate();
-    let otdFrom = Infinity, otdTo = -Infinity;
-    for (let y = d.getUTCFullYear() - 1; y >= d.getUTCFullYear() - 10; y--) {
-      const from = Date.UTC(y, month, day);
-      const to   = from + 86400000;
-      if (from < otdFrom) otdFrom = from;
-      if (to   > otdTo)   otdTo   = to;
-    }
-    const summary = db.getHomeSummary(req.user.username, req.user.vpaths, todayStart, weekStart, otdFrom, otdTo);
-    // Enrich onThisDay with renderMetadataObj shape
-    summary.onThisDay = summary.onThisDay.map(r => ({
-      filepath: path.join(r.vpath, r.filepath).replace(/\\/g, '/'),
-      metadata: { title: r.title || null, artist: r.artist || null, album: r.album || null, 'album-art': r.aaFile || null }
+
+    // Yesterday: the full day before today
+    const yesterdayStart = todayStart - 86400000;
+
+    // Last week same day: same weekday 7 days ago
+    const lastWeekStart  = todayStart - 7 * 86400000;
+    const lastWeekEnd    = lastWeekStart + 86400000;
+
+    // Last month same day: same date 1 month ago (handles month-length differences)
+    const lmDate         = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, d.getUTCDate()));
+    const lastMonthStart = lmDate.getTime();
+    const lastMonthEnd   = lastMonthStart + 86400000;
+
+    // Last year same day: same calendar date 1 year ago
+    const lastYearStart  = Date.UTC(d.getUTCFullYear() - 1, d.getUTCMonth(), d.getUTCDate());
+    const lastYearEnd    = lastYearStart + 86400000;
+
+    const timeWindows = [
+      { key: 'yesterday',        from: yesterdayStart, to: todayStart,    minDays: 1   },
+      { key: 'lastWeekSameDay',  from: lastWeekStart,  to: lastWeekEnd,   minDays: 7   },
+      { key: 'lastMonthSameDay', from: lastMonthStart, to: lastMonthEnd,  minDays: 30  },
+      { key: 'lastYearSameDay',  from: lastYearStart,  to: lastYearEnd,   minDays: 365 },
+    ];
+
+    const summary = db.getHomeSummary(req.user.username, req.user.vpaths, todayStart, weekStart, timeWindows);
+
+    // Enrich section songs with renderMetadataObj shape
+    summary.sections = summary.sections.map(sec => ({
+      key: sec.key,
+      songs: sec.songs.map(r => ({
+        filepath: path.join(r.vpath, r.filepath).replace(/\\/g, '/'),
+        metadata: { title: r.title || null, artist: r.artist || null, album: r.album || null, 'album-art': r.aaFile || null }
+      }))
     }));
+
     res.json(summary);
   });
 

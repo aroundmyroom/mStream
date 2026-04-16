@@ -653,6 +653,34 @@ export function setup(mstream) {
     res.json({});
   });
 
+  // Per-user: toggle Subsonic scrobble forwarding for Last.fm and/or ListenBrainz.
+  // A normal user can only change their own settings; admins can set any user.
+  mstream.post("/api/v1/admin/users/subsonic-scrobble", async (req, res) => {
+    const schema = Joi.object({
+      username:       Joi.string().required(),
+      scrobbleLastfm: Joi.boolean().optional(),
+      scrobbleLb:     Joi.boolean().optional(),
+    });
+    joiValidate(schema, req.body);
+    const { username, scrobbleLastfm, scrobbleLb } = req.body;
+    // Only admins can change other users; regular users can only change themselves
+    if (req.user.admin !== true && req.user.username !== username) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const userConf = config.program.users[username];
+    if (!userConf) return res.status(404).json({ error: 'User not found' });
+    if (scrobbleLastfm !== undefined) userConf['subsonic-scrobble-lastfm'] = scrobbleLastfm;
+    if (scrobbleLb     !== undefined) userConf['subsonic-scrobble-lb']     = scrobbleLb;
+    // Persist to config file
+    const raw = JSON.parse(await fs.promises.readFile(config.configFile, 'utf-8'));
+    if (!raw.users) raw.users = {};
+    if (!raw.users[username]) raw.users[username] = {};
+    if (scrobbleLastfm !== undefined) raw.users[username]['subsonic-scrobble-lastfm'] = scrobbleLastfm;
+    if (scrobbleLb     !== undefined) raw.users[username]['subsonic-scrobble-lb']     = scrobbleLb;
+    await fs.promises.writeFile(config.configFile, JSON.stringify(raw, null, 2), 'utf8');
+    res.json({});
+  });
+
   mstream.post("/api/v1/admin/users/lastfm", async (req, res) => {
     const schema = Joi.object({
       username: Joi.string().required(),

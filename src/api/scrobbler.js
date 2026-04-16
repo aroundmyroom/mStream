@@ -166,6 +166,30 @@ export function setup(mstream) {
     });
   });
 
+  // ── Subsonic scrobble forwarding settings (per user) ─────────
+  // Returns whether each service is available+linked and what the user's
+  // current forwarding preferences are.
+  mstream.get('/api/v1/subsonic/scrobble-settings', (req, res) => {
+    const lastfmAvailable = !!(
+      config.program.lastFM?.enabled !== false &&
+      config.program.lastFM?.apiKey &&
+      (req.user['lastfm-session'] || req.user['lastfm-password']) &&
+      req.user['lastfm-user']
+    );
+    const lbAvailable = !!(
+      config.program.listenBrainz?.enabled === true &&
+      (req.user.username === 'mstream-user'
+        ? _noAuthLbToken
+        : req.user['listenbrainz-token'])
+    );
+    res.json({
+      lastfmAvailable,
+      lbAvailable,
+      scrobbleLastfm: lastfmAvailable && req.user['subsonic-scrobble-lastfm'] === true,
+      scrobbleLb:     lbAvailable     && req.user['subsonic-scrobble-lb']     === true,
+    });
+  });
+
   mstream.post('/api/v1/lastfm/connect', async (req, res) => {
     const schema = Joi.object({
       lastfmUser:     Joi.string().required(),
@@ -245,6 +269,28 @@ export function reset() {
 // Allow admin.js to update the runtime API keys without restarting
 export function updateApiKeys(apiKey, apiSecret) {
   Scrobbler.setKeys(apiKey, apiSecret);
+}
+
+/**
+ * Submit a Last.fm scrobble on behalf of a user object from config.program.users.
+ * No-op if the user hasn't linked Last.fm or the API key is missing.
+ */
+export function scrobbleLastfmForUser(userObj, { artist, album, track }) {
+  if (!userObj['lastfm-user']) return;
+  if (!config.program.lastFM?.apiKey) return;
+  Scrobbler.Scrobble({ artist, album, track }, userObj['lastfm-user'], () => {});
+}
+
+/**
+ * Submit a ListenBrainz scrobble on behalf of a username string.
+ * No-op if the user hasn't linked LB or LB is disabled.
+ */
+export function scrobbleLbForUser(username, { artist, album, track }) {
+  const token = username === 'mstream-user'
+    ? _noAuthLbToken
+    : config.program.users?.[username]?.['listenbrainz-token'];
+  if (!token) return;
+  lbSubmit(token, artist, track, album, Math.floor(Date.now() / 1000)).catch(() => {});
 }
 
 // ── ListenBrainz ─────────────────────────────────────────────────────────────

@@ -6691,7 +6691,14 @@ async function viewHome() {
   recentlyPlayed = recentlyPlayed.map(norm);
   mostPlayed     = mostPlayed.map(s => { const n = norm(s); n._playCount = s.metadata?.['play-count']; return n; });
   recentlyAdded  = recentlyAdded.map(norm);
-  const onThisDay = (summary.onThisDay || []).map(r => norm(r));
+
+  // Temporal sections from home-summary
+  const _temporalSections = (summary.sections || []).map(sec => ({
+    key: sec.key,
+    songs: (sec.songs || []).map(r => norm(r)),
+  })).filter(s => s.songs.length > 0);
+  // flat list of all temporal songs for click handler
+  const _allTemporal = _temporalSections.flatMap(s => s.songs);
 
   // ── 1. Hero greeting + stats strip ──────────────────────────
   const hr = new Date().getHours();
@@ -6753,10 +6760,20 @@ async function viewHome() {
     ? strip(t('player.home.shelfContinue'), continueItems.map(s => songCard(s, false)).join(''))
     : '';
 
-  // ── 4. On This Day ───────────────────────────────────────────
-  const otdHtml = onThisDay.length
-    ? strip(t('player.home.shelfOnThisDay'), onThisDay.map(s => songCard(s, false)).join(''))
-    : '';
+  // ── 4. Temporal "On This Day" sections ───────────────────────
+  const _sectionKeyLabels = {
+    yesterday:        'player.home.shelfYesterday',
+    lastWeekSameDay:  'player.home.shelfLastWeekSameDay',
+    lastMonthSameDay: 'player.home.shelfLastMonthSameDay',
+    lastYearSameDay:  'player.home.shelfLastYearSameDay',
+  };
+  const temporalHtml = _temporalSections
+    .map(sec => {
+      const lk = _sectionKeyLabels[sec.key];
+      return lk ? strip(t(lk), sec.songs.map(s => songCard(s, false)).join('')) : '';
+    })
+    .filter(Boolean)
+    .join('');
 
   // ── 5. Mood Quick-Picks ──────────────────────────────────────
   // Derive from most-played: group by decade as proxy for era/nostalgia
@@ -6783,7 +6800,7 @@ async function viewHome() {
     greetHtml,
     recentAddedHtml,
     continueHtml,
-    otdHtml,
+    temporalHtml,
     ...moodShelves,
     mostPlayedFallback,
     (!recentlyPlayed.length && !recentlyAdded.length && !mostPlayed.length)
@@ -6793,7 +6810,7 @@ async function viewHome() {
   setBody(`<div class="home-view">${sections}</div>`);
   const body = document.getElementById('content-body');
 
-  const _allSongs = [...recentlyPlayed, ...mostPlayed, ...recentlyAdded, ...onThisDay, ...continueItems];
+  const _allSongs = [...recentlyPlayed, ...mostPlayed, ...recentlyAdded, ..._allTemporal, ...continueItems];
   body.querySelectorAll('.home-song').forEach(card => {
     card.addEventListener('click', () => {
       const fp = card.dataset.fp;
@@ -6801,6 +6818,30 @@ async function viewHome() {
       if (s) { _setPlaySource('home', 'Home'); Player.queueAndPlay(s); }
     });
   });
+
+  // On-demand art fetch for cards that have no cached aaFile
+  const _homeView = body.querySelector('.home-view');
+  const _seenFp = new Set();
+  for (const s of _allSongs) {
+    if (s['album-art'] || s.isRadio || !s.filepath || _seenFp.has(s.filepath)) continue;
+    _seenFp.add(s.filepath);
+    const _fp = s.filepath;
+    api('GET', `api/v1/files/art?fp=${encodeURIComponent(_fp)}`)
+      .then(d => {
+        if (!d?.aaFile) return;
+        // update every song object sharing this filepath
+        for (const x of _allSongs) { if (x.filepath === _fp) x['album-art'] = d.aaFile; }
+        // patch every matching card — use dataset.fp (auto-unescapes HTML entities)
+        _homeView?.querySelectorAll('.home-song').forEach(card => {
+          if (card.dataset.fp !== _fp) return;
+          const artDiv = card.querySelector('.hc-art');
+          if (artDiv && !artDiv.querySelector('img')) {
+            artDiv.innerHTML = `<img src="${artUrl(d.aaFile, 's')}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`;
+          }
+        });
+      })
+      .catch(() => {});
+  }
 }
 
 // ── SHORTCUTS ────────────────────────────────────────────────
@@ -9404,6 +9445,55 @@ async function viewSubsonic() {
   document.getElementById('play-all-btn').onclick = null;
   document.getElementById('add-all-btn').onclick  = null;
 
+  // Fetch scrobble settings (Last.fm + LB availability + current user prefs)
+  let scrobble = { lastfmAvailable: false, lbAvailable: false, scrobbleLastfm: false, scrobbleLb: false };
+  try { scrobble = await api('GET', 'api/v1/subsonic/scrobble-settings'); } catch(_) {}
+
+  function scrobbleSection() {
+    // Don't show section at all if neither service is linked
+    if (!scrobble.lastfmAvailable && !scrobble.lbAvailable) return '';
+    const rows = [];
+    if (scrobble.lastfmAvailable) {
+      rows.push(`
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">${t('player.subsonic.scrobbleLastfm')}</div>
+            <div class="playback-row-hint">${t('player.subsonic.scrobbleLastfmHint')}</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="subsonic-scrobble-lfm" ${scrobble.scrobbleLastfm ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>`);
+    }
+    if (scrobble.lbAvailable) {
+      rows.push(`
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">${t('player.subsonic.scrobbleLb')}</div>
+            <div class="playback-row-hint">${t('player.subsonic.scrobbleLbHint')}</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="subsonic-scrobble-lb" ${scrobble.scrobbleLb ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>`);
+    }
+    return `
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          </div>
+          <div>
+            <div class="playback-section-title">${t('player.subsonic.scrobbleTitle')}</div>
+            <div class="playback-section-desc">${t('player.subsonic.scrobbleDesc')}</div>
+          </div>
+        </div>
+        ${rows.join('')}
+      </div>`;
+  }
+
   setBody(`
     <div class="playback-panel">
       <div class="playback-section">
@@ -9447,6 +9537,7 @@ async function viewSubsonic() {
           </div>
         </div>
       </div>
+      ${scrobbleSection()}
     </div>`);
 
   document.getElementById('copy-server-url-btn')?.addEventListener('click', () => {
@@ -9479,6 +9570,21 @@ async function viewSubsonic() {
 
   document.getElementById('subsonic-new-pw')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') document.getElementById('subsonic-save-pw-btn')?.click();
+  });
+
+  // Scrobble forwarding toggles
+  async function _saveScrobblePref(key, value) {
+    try {
+      await api('POST', 'api/v1/admin/users/subsonic-scrobble', { username: S.username || '', [key]: value });
+    } catch(e) {
+      toast(t('player.toast.errorMsg', { error: e.message || 'Save failed' }));
+    }
+  }
+  document.getElementById('subsonic-scrobble-lfm')?.addEventListener('change', e => {
+    _saveScrobblePref('scrobbleLastfm', e.target.checked);
+  });
+  document.getElementById('subsonic-scrobble-lb')?.addEventListener('change', e => {
+    _saveScrobblePref('scrobbleLb', e.target.checked);
   });
 }
 
@@ -11884,7 +11990,7 @@ function _startGapless(nextIdx) {
     _gaplessTimer = null;
     if (!_xfadeFired || !_xfadeEl || !audioCtx || !_curElGain || !_nextElGain) return;
     const r = audioEl.duration - audioEl.currentTime;
-    if (r <= 0) return;
+    if (r <= 0) return;  // ended fired already; _doXfadeHandoff handles gain
     const endAt = audioCtx.currentTime + r;
     // Use a 20ms linear ramp instead of a hard cut.
     // 2ms is enough to kill high-frequency clicks but bass content (~50Hz =
@@ -12382,6 +12488,18 @@ function _doXfadeHandoff(nextIdx) {
     const t = audioCtx ? audioCtx.currentTime : 0;
     oldCurGain.gain.cancelScheduledValues(t);
     oldCurGain.gain.value = 0;
+  }
+  // Gapless: restore v6.7.0 behaviour — cancel the 20ms micro-ramp and
+  // hard-set incoming gain to 1 immediately.  Safe because the outgoing
+  // element is fully exhausted when 'ended' fires, so there is no click
+  // source.  This also covers the rare race where the warmup timer never
+  // fired (ended before 80 ms window) and _nextElGain was still at 0.
+  // Crossfade must NOT do this — its incoming setValueCurveAtTime is still
+  // running on the audio thread; cancelling it mid-curve causes a volume
+  // spike (see v6.7.5 fix).  Crossfade is always !S.gapless, so safe.
+  if (S.gapless && _curElGain && audioCtx) {
+    _curElGain.gain.cancelScheduledValues(audioCtx.currentTime);
+    _curElGain.gain.value = 1.0;
   }
 
   S.idx = nextIdx;
@@ -14069,7 +14187,7 @@ function _onAudioTimeupdateUI() {
     _renderTimes();
   }
   VIZ.lyricTick(audioEl.currentTime);
-  if (S.crossfade > 0 && !_xfadeFired) {
+  if (S.crossfade > 0 && !S.gapless && !_xfadeFired) {
     if (!S.queue[S.idx]?.isRadio) {
       const remaining = audioEl.duration - audioEl.currentTime;
       if (remaining > 0 && remaining <= S.crossfade) {
@@ -14092,7 +14210,7 @@ function _onAudioTimeupdateUI() {
   // Gapless playback: pre-buffer next track ~8 s before end when crossfade is off.
   // We need the buffer window to be large enough so the browser has time to
   // fetch+decode the start of the next FLAC before audioEl fires 'ended'.
-  if (S.gapless && S.crossfade === 0 && !_xfadeFired && audioEl.duration > 0 && !S.queue[S.idx]?.isRadio) {
+  if (S.gapless && !_xfadeFired && audioEl.duration > 0 && !S.queue[S.idx]?.isRadio) {
     const remaining = audioEl.duration - audioEl.currentTime;
     if (remaining > 0 && remaining <= 8.0) {
       let nextIdx = -1;
