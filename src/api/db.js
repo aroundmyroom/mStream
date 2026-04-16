@@ -351,6 +351,33 @@ export function setup(mstream) {
     res.json(songs);
   });
 
+  // ── home summary (stats strip + On This Day) ────────────────
+  mstream.get('/api/v1/db/home-summary', (req, res) => {
+    const now  = Date.now();
+    const d    = new Date(now);
+    // UTC midnight of today
+    const todayStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    // UTC midnight of Monday this week
+    const dow = d.getUTCDay(); // 0=Sun
+    const weekStart = todayStart - ((dow === 0 ? 6 : dow - 1)) * 86400000;
+    // On This Day: same calendar day across past 10 years
+    const month = d.getUTCMonth(), day = d.getUTCDate();
+    let otdFrom = Infinity, otdTo = -Infinity;
+    for (let y = d.getUTCFullYear() - 1; y >= d.getUTCFullYear() - 10; y--) {
+      const from = Date.UTC(y, month, day);
+      const to   = from + 86400000;
+      if (from < otdFrom) otdFrom = from;
+      if (to   > otdTo)   otdTo   = to;
+    }
+    const summary = db.getHomeSummary(req.user.username, req.user.vpaths, todayStart, weekStart, otdFrom, otdTo);
+    // Enrich onThisDay with renderMetadataObj shape
+    summary.onThisDay = summary.onThisDay.map(r => ({
+      filepath: path.join(r.vpath, r.filepath).replace(/\\/g, '/'),
+      metadata: { title: r.title || null, artist: r.artist || null, album: r.album || null, 'album-art': r.aaFile || null }
+    }));
+    res.json(summary);
+  });
+
   // ── log a play (always runs — independent of scrobbling) ────
   mstream.post('/api/v1/db/stats/log-play', async (req, res) => {
     const schema = Joi.object({ filePath: Joi.string().required() });

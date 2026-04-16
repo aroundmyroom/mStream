@@ -248,3 +248,5 @@ export function getRadioStatsInRange(userId, from, to) { return backend.getRadio
 export function insertPodcastPlayEvent(e) { return backend.insertPodcastPlayEvent(e); }
 export function updatePodcastPlayEvent(id, userId, fields) { return backend.updatePodcastPlayEvent(id, userId, fields); }
 export function getPodcastStatsInRange(userId, from, to) { return backend.getPodcastStatsInRange(userId, from, to); }
+export function getHomeSummary(userId, vpaths, todayStart, weekStart, otdFrom, otdTo) { return backend.getHomeSummary(userId, vpaths, todayStart, weekStart, otdFrom, otdTo); }
+

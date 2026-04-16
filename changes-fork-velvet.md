@@ -2,10 +2,16 @@
 
 ## v6.10.1-velvet — May 2026
 
-### new: Home screen
-- New "Home" view replaces the old Shortcuts view as the default landing screen.
-- Shows a time-aware greeting ("Good morning/afternoon/evening, [name]") and two song strips: Recently Played and Most Played.
-- Clicking any song queues and plays it immediately.
+### new: Home screen — full 6-section implementation
+- New "Home" view replaces Shortcuts as the default landing screen.
+- **Section 1 — Hero greeting + stats strip**: time-aware greeting ("Good morning/afternoon/evening, [name]") with today's song count, this-week count, and listening streak (highlighted when > 1 day).
+- **Section 2 — Recently Added**: songs most recently added to the library ("NEW" badge), powered by existing `api/v1/db/recent/added`.
+- **Section 3 — Continue Listening**: recently played songs deduplicated by album, so you see unique albums/artists to resume.
+- **Section 4 — On This Day**: songs played on this same calendar day in past years, powered by new `GET /api/v1/db/home-summary` endpoint querying `play_events`.
+- **Section 5 — Mood Quick-Picks**: splits most-played into "Nostalgia" (songs from >10 years ago) and "Current Favourites" (recent). Falls back to a plain Most Played shelf when the split is too thin.
+- Sections that have no data are silently hidden — always a clean view.
+- New `GET /api/v1/db/home-summary` endpoint: returns `todayCount`, `weekCount`, `streak`, `onThisDay[]`. New `getHomeSummary()` DB helper in `sqlite-backend.js`.
+- 9 new i18n keys (`player.home.stat*`, `player.home.shelf*`, `player.home.mood*`, `player.home.badgeNew`) added to all 12 locale files; Dutch translations natural.
 
 ### refactor: rename "Home" nav → "Shortcuts"
 - The existing home screen (radio stations, podcasts, playlists, recently/most played, artist similarity shelves) is now labelled "Shortcuts" in the nav and title — freeing up the "Home" slot for the new home screen above.

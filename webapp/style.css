@@ -2059,6 +2059,12 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .home-greeting{padding:6px 0 28px;}
 .home-greeting-text{font-size:1.45rem;font-weight:700;color:var(--t1);line-height:1.2;}
 .home-empty{color:var(--t2);font-size:.875rem;padding:16px 0;}
+.home-stats-strip{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;}
+.home-stat{font-size:.8rem;color:var(--t2);}
+.home-stat strong{color:var(--t1);font-weight:700;}
+.home-stat-sep{color:var(--t3);font-size:.75rem;}
+.home-stat-streak strong{color:var(--primary);}
+.home-shelf-badge{font-size:.58rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase;background:var(--primary);color:#fff;border-radius:3px;padding:1px 5px;line-height:1.6;flex-shrink:0;}
 .home-shelf{margin-bottom:32px;min-width:0;}
 .home-shelf-title{font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--t2);}
 .home-shelf-header{display:flex;align-items:center;gap:8px;margin-bottom:10px;}

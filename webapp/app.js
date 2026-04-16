@@ -6676,11 +6676,13 @@ async function viewHome() {
     ...(abEx.excludeFilepathPrefixes.length ? { excludeFilepathPrefixes: abEx.excludeFilepathPrefixes } : {}),
   };
 
-  let recentlyPlayed = [], mostPlayed = [];
+  let recentlyPlayed = [], mostPlayed = [], recentlyAdded = [], summary = {};
   try {
-    [recentlyPlayed, mostPlayed] = await Promise.all([
+    [recentlyPlayed, mostPlayed, recentlyAdded, summary] = await Promise.all([
       api('POST', 'api/v1/db/stats/recently-played', base, sig).catch(() => []),
       api('POST', 'api/v1/db/stats/most-played',     base, sig).catch(() => []),
+      api('POST', 'api/v1/db/recent/added',          { ...base, limit: _limit }, sig).catch(() => []),
+      api('GET',  'api/v1/db/home-summary',          undefined, sig).catch(() => ({})),
     ]);
   } catch(e) { if (e.name === 'AbortError') return; }
 
@@ -6688,16 +6690,27 @@ async function viewHome() {
 
   recentlyPlayed = recentlyPlayed.map(norm);
   mostPlayed     = mostPlayed.map(s => { const n = norm(s); n._playCount = s.metadata?.['play-count']; return n; });
+  recentlyAdded  = recentlyAdded.map(norm);
+  const onThisDay = (summary.onThisDay || []).map(r => norm(r));
 
-  // Time-aware greeting
+  // ── 1. Hero greeting + stats strip ──────────────────────────
   const hr = new Date().getHours();
   const greetKey = hr < 12 ? 'player.home.greetingMorning'
                  : hr < 18 ? 'player.home.greetingAfternoon'
                  :            'player.home.greetingEvening';
+
+  const statsItems = [];
+  if (summary.todayCount > 0) statsItems.push(`<span class="home-stat"><strong>${summary.todayCount}</strong> ${t('player.home.statToday')}</span>`);
+  if (summary.weekCount  > 0) statsItems.push(`<span class="home-stat"><strong>${summary.weekCount}</strong> ${t('player.home.statWeek')}</span>`);
+  if (summary.streak     > 1) statsItems.push(`<span class="home-stat home-stat-streak"><strong>${summary.streak}</strong> ${t('player.home.statStreak')}</span>`);
+  const statsHtml = statsItems.length ? `<div class="home-stats-strip">${statsItems.join('<span class="home-stat-sep">·</span>')}</div>` : '';
+
   const greetHtml = `<div class="home-greeting">
     <div class="home-greeting-text">${t(greetKey, { name: esc(S.username || '') })}</div>
+    ${statsHtml}
   </div>`;
 
+  // ── card / strip helpers ─────────────────────────────────────
   function songCard(s, showCount) {
     const url = artUrl(s['album-art'], 's');
     const artInner = url
@@ -6715,30 +6728,76 @@ async function viewHome() {
     </div>`;
   }
 
-  function strip(title, cards) {
+  function strip(title, cards, badge) {
+    const badgeHtml = badge ? `<span class="home-shelf-badge">${esc(badge)}</span>` : '';
     return `<div class="home-shelf">
-      <div class="home-shelf-header">
-        <span class="home-shelf-title">${title}</span>
-      </div>
+      <div class="home-shelf-header">${badgeHtml}<span class="home-shelf-title">${title}</span></div>
       <div class="home-row">${cards}</div>
     </div>`;
   }
 
-  const recentHtml = recentlyPlayed.length
-    ? strip(t('player.home.shelfRecent'), recentlyPlayed.map(s => songCard(s, false)).join(''))
+  // ── 2. Recently Added ────────────────────────────────────────
+  const recentAddedHtml = recentlyAdded.length
+    ? strip(t('player.home.shelfRecentAdded'), recentlyAdded.map(s => songCard(s, false)).join(''), t('player.home.badgeNew'))
     : '';
-  const mostHtml = mostPlayed.length
+
+  // ── 3. Continue Listening (last played, deduplicated by album) ──
+  // Take recently played, deduplicate by album, show top _limit entries
+  const _seenAlbums = new Set();
+  const continueItems = recentlyPlayed.filter(s => {
+    const key = (s.artist || '') + '|' + (s.album || s.filepath.split('/').slice(0,-1).join('/'));
+    if (_seenAlbums.has(key)) return false;
+    _seenAlbums.add(key); return true;
+  }).slice(0, _limit);
+  const continueHtml = continueItems.length
+    ? strip(t('player.home.shelfContinue'), continueItems.map(s => songCard(s, false)).join(''))
+    : '';
+
+  // ── 4. On This Day ───────────────────────────────────────────
+  const otdHtml = onThisDay.length
+    ? strip(t('player.home.shelfOnThisDay'), onThisDay.map(s => songCard(s, false)).join(''))
+    : '';
+
+  // ── 5. Mood Quick-Picks ──────────────────────────────────────
+  // Derive from most-played: group by decade as proxy for era/nostalgia
+  const _moodMap = { nostalgia: [], current: [] };
+  for (const s of mostPlayed) {
+    const yr = parseInt(s.year, 10);
+    if (yr > 0 && yr < new Date().getFullYear() - 10) _moodMap.nostalgia.push(s);
+    else _moodMap.current.push(s);
+  }
+  const moodShelves = [];
+  if (_moodMap.nostalgia.length >= 3) {
+    moodShelves.push(strip(t('player.home.moodNostalgia'), _moodMap.nostalgia.slice(0, _limit).map(s=>songCard(s,false)).join('')));
+  }
+  if (_moodMap.current.length >= 3) {
+    moodShelves.push(strip(t('player.home.moodCurrent'), _moodMap.current.slice(0, _limit).map(s=>songCard(s,false)).join('')));
+  }
+  // fallback: most-played shelf when mood split isn't possible
+  const mostPlayedFallback = !moodShelves.length && mostPlayed.length
     ? strip(t('player.home.shelfMost'), mostPlayed.map(s => songCard(s, true)).join(''))
     : '';
-  const emptyHtml = (!recentlyPlayed.length && !mostPlayed.length)
-    ? `<p class="home-empty">${t('player.home.emptyHint')}</p>` : '';
 
-  setBody(`<div class="home-view">${greetHtml}${recentHtml}${mostHtml}${emptyHtml}</div>`);
+  // ── compile sections, skip empty ────────────────────────────
+  const sections = [
+    greetHtml,
+    recentAddedHtml,
+    continueHtml,
+    otdHtml,
+    ...moodShelves,
+    mostPlayedFallback,
+    (!recentlyPlayed.length && !recentlyAdded.length && !mostPlayed.length)
+      ? `<p class="home-empty">${t('player.home.emptyHint')}</p>` : '',
+  ].filter(Boolean).join('');
+
+  setBody(`<div class="home-view">${sections}</div>`);
   const body = document.getElementById('content-body');
-  const _allSongs = recentlyPlayed.concat(mostPlayed);
+
+  const _allSongs = [...recentlyPlayed, ...mostPlayed, ...recentlyAdded, ...onThisDay, ...continueItems];
   body.querySelectorAll('.home-song').forEach(card => {
     card.addEventListener('click', () => {
-      const s = _allSongs.find(x => x.filepath === card.dataset.fp);
+      const fp = card.dataset.fp;
+      const s = _allSongs.find(x => x.filepath === fp);
       if (s) { _setPlaySource('home', 'Home'); Player.queueAndPlay(s); }
     });
   });
