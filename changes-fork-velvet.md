@@ -1,5 +1,23 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.10.1-velvet — May 2026
+
+### refactor: rename "Home" nav → "Shortcuts"
+- The existing home screen (radio stations, podcasts, playlists, recently/most played, artist similarity shelves) is now labelled "Shortcuts" in the nav and title — freeing up the "Home" slot for a forthcoming feature-rich home screen.
+- `data-view`, i18n keys, view guards, and play-source labels all updated: `home` → `shortcuts`, `player.home.*` → `player.shortcuts.*`.
+- All 12 locale files updated. Dutch: "Snelkoppelingen".
+
+### fix: fpcalc binary — architecture + checksum hardening (post v6.10.0)
+- Removed committed x64 fpcalc binary from git; added `bin/fpcalc/` to `.gitignore` (mirrors ffmpeg/yt-dlp pattern).
+- Added SHA256 integrity check in `fpcalc-bootstrap.js` — download rejected if checksum mismatches.
+- ARM64 Linux: no static binary available from upstream; bootstrap now falls back to system `fpcalc` in PATH instead of downloading a 404 URL.
+- macOS: switched from `macos-x86_64` (Rosetta) to the official `macos-universal` fat binary (Intel + Apple Silicon native).
+
+### fix: AcoustID admin panel — fpcalc availability gating
+- `/api/v1/acoustid/status` now returns `fpcalcAvailable` boolean.
+- Admin panel shows a red warning banner and disables the Start button when fpcalc is not available on the current machine.
+- New i18n key `admin.acoustid.warnNoFpcalc` added to all 12 locale files.
+
 ## v6.10.0-velvet — April 2026 — Deep Tag Dive
 
 ### new: AcoustID audio fingerprinting (from v6.9.3)

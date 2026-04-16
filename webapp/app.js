@@ -541,7 +541,7 @@ function _navCancel() {
   _navAbort = new AbortController();
   return _navAbort.signal;
 }
-// Home-view AbortController — aborted each time viewHome() re-runs so that
+// Shortcuts-view AbortController — aborted each time viewShortcuts() re-runs so that
 // accumulated body capture listeners from repeated visibility-change refreshes
 // don't cause even-number-of-toggles cancellation in customize mode.
 let _homeAC = null;
@@ -6656,10 +6656,10 @@ async function viewPlayed() {
   } catch(e) { setBody(`<div class="empty-state">${t('player.search.failed', { error: esc(e.message) })}</div>`); }
 }
 
-// ── HOME ──────────────────────────────────────────────────────
+// ── SHORTCUTS ────────────────────────────────────────────────
 
-async function viewHome() {
-  setTitle(t('player.title.home')); setBack(null); setNavActive('home'); S.view = 'home';
+async function viewShortcuts() {
+  setTitle(t('player.title.shortcuts')); setBack(null); setNavActive('shortcuts'); S.view = 'shortcuts';
   // Abort any previous home-view body listeners to prevent accumulation
   _homeAC?.abort();
   _homeAC = (typeof AbortController !== 'undefined') ? new AbortController() : null;
@@ -6686,7 +6686,7 @@ async function viewHome() {
     ]);
   } catch(e) { if (e.name === 'AbortError') return; }
 
-  if (S.view !== 'home') return;
+  if (S.view !== 'shortcuts') return;
 
   recentlyPlayed = recentlyPlayed.map(norm);
   mostPlayed     = mostPlayed.map(s => { const n = norm(s); n._playCount = s.metadata?.['play-count']; return n; });
@@ -6715,7 +6715,7 @@ async function viewHome() {
     }));
     becauseShelves = becauseData.filter(Boolean);
   }
-  if (S.view !== 'home') return;
+  if (S.view !== 'shortcuts') return;
 
   // ── helpers ─────────────────────────────────────────────────
 
@@ -6792,7 +6792,7 @@ async function viewHome() {
     if (!cards) return '';
     return `<div class="home-shelf" data-shelf="${id}" draggable="true">
       <div class="home-shelf-header">
-        <span class="home-grip" title="${t('player.home.gripTitle')}">${_GRIP_ICO}</span>
+        <span class="home-grip" title="${t('player.shortcuts.gripTitle')}">${_GRIP_ICO}</span>
         <span class="home-shelf-title">${title}</span>
       </div>
       <div class="home-row">${cards}</div>
@@ -6816,28 +6816,28 @@ async function viewHome() {
   const radioHtml    = radioStations.map(s =>
     artCard(s.img ? artUrl(s.img, 's') : null, s.name, s.genre ? s.genre.split(',')[0].trim() : '', `data-rsid="${esc(String(s.id))}" data-hid="rs:${esc(String(s.id))}"`)
   ).join('');
-  const radioShelf   = shelf('radio', t('player.home.shelfRadio'), radioHtml || null);
+  const radioShelf   = shelf('radio', t('player.shortcuts.shelfRadio'), radioHtml || null);
 
   // 2. Podcasts
   const podcastHtml  = podcastFeeds.map(f =>
     artCard(f.img ? artUrl(f.img, 's') : null, f.title || f.url, '', `data-pfid="${esc(String(f.id))}" data-hid="pf:${esc(String(f.id))}"`)
   ).join('');
-  const podcastShelf = shelf('podcasts', t('player.home.shelfPodcasts'), podcastHtml || null);
+  const podcastShelf = shelf('podcasts', t('player.shortcuts.shelfPodcasts'), podcastHtml || null);
 
   // 3. Playlists & Folders
   const vpathHtml    = S.vpaths.map(v    => folderCard(v,       `data-icid="${esc('vp:' + v)}" data-hid="ic:vp:${esc(v)}"`)   ).join('');
   const playlistHtml = S.playlists.map(p => folderCard(p.name,  `data-icid="${esc('pl:' + p.name)}" data-hid="ic:pl:${esc(p.name)}"`)  ).join('');
-  const playlistShelf = shelf('playlists', t('player.home.shelfPlaylists'), (vpathHtml + playlistHtml) || null);
+  const playlistShelf = shelf('playlists', t('player.shortcuts.shelfPlaylists'), (vpathHtml + playlistHtml) || null);
 
   // 4 & 5. Song shelves
-  const recentShelf = shelf('recent', t('player.home.shelfRecent'), recentlyPlayed.map(s => songCard(s, false)).join('') || null);
-  const mostShelf   = shelf('most',   t('player.home.shelfMost'),   mostPlayed.map(s => songCard(s, true)).join('')  || null);
+  const recentShelf = shelf('recent', t('player.shortcuts.shelfRecent'), recentlyPlayed.map(s => songCard(s, false)).join('') || null);
+  const mostShelf   = shelf('most',   t('player.shortcuts.shelfMost'),   mostPlayed.map(s => songCard(s, true)).join('')  || null);
 
   // 6. "Because you listened to …" shelves
   const becauseShelfEntries = becauseShelves.map(({ artist, songs }) => {
     const key   = `bec:${artist}`;
     const cards = songs.map(s => songCard(s, false)).join('');
-    return [key, shelf(key, t('player.home.becauseYouListened', { artist: esc(artist) }), cards)];
+    return [key, shelf(key, t('player.shortcuts.becauseYouListened', { artist: esc(artist) }), cards)];
   });
   const becauseSongsList = becauseShelves.flatMap(b => b.songs);
 
@@ -6851,7 +6851,7 @@ async function viewHome() {
 
   // Toolbar with Customize button sits ABOVE all shelves and is not inside any
   // shelf element, so drag-to-reorder cannot move it.
-  const _toolbarHtml = `<div class="home-toolbar"><button class="home-customize-btn">${t('player.home.btnCustomize')}</button></div>`;
+  const _toolbarHtml = `<div class="home-toolbar"><button class="home-customize-btn">${t('player.shortcuts.btnCustomize')}</button></div>`;
   setBody(`<div class="home-view">${_toolbarHtml}${_orderedHtml}</div>`);
 
   const body = document.getElementById('content-body');
@@ -6874,7 +6874,7 @@ async function viewHome() {
     card.addEventListener('click', () => {
       const fp = card.dataset.fp;
       const s = recentlyPlayed.concat(mostPlayed).concat(becauseSongsList).find(x => x.filepath === fp);
-      if (s) { _setPlaySource('home', 'Home'); Player.queueAndPlay(s); }
+      if (s) { _setPlaySource('shortcuts', 'Shortcuts'); Player.queueAndPlay(s); }
     });
   });
 
@@ -6967,7 +6967,7 @@ async function viewHome() {
       const view = body.querySelector('.home-view');
       const editing = !view.classList.contains('home-editing');
       view.classList.toggle('home-editing', editing);
-      _custBtn.textContent = editing ? t('player.home.btnDone') : t('player.home.btnCustomize');
+      _custBtn.textContent = editing ? t('player.shortcuts.btnDone') : t('player.shortcuts.btnCustomize');
       _custBtn.classList.toggle('active', editing);
       _applyVisibility();
     });
@@ -12785,8 +12785,7 @@ function showApp() {
   _initQueueListeners();
   loadPlaylists();
   loadSmartPlaylists();
-  viewHome();
-  refreshQueueUI();
+  viewShortcuts();
   restoreQueue(/*silent=*/true);
   // Boot overlay dismiss — wait for audio seek (waveform position restored) or fall back.
   // Radio items are not preloaded on restore (no seek position) so skip the seeked wait.
@@ -12945,7 +12944,7 @@ function showApp() {
     // ── Home view refresh ─────────────────────────────────────────────────────
     // Re-fetch home shelves (recently played, most played, etc.) if the home
     // view is currently open so data from other devices shows up immediately.
-    if (S.view === 'home') viewHome();
+    if (S.view === 'shortcuts') viewShortcuts();
   });
   // Fetch ping to get transcode server info + vpath metadata
   api('GET', 'api/v1/ping').then(d => {
@@ -13032,7 +13031,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const v = btn.dataset.view;
     if (v !== 'podcasts') S.audioContentReturn = null; // clear Audio Content context on any other nav
-    if (v === 'home')        viewHome();
+    if (v === 'shortcuts')   viewShortcuts();
     else if (v === 'recent')      viewRecent();
     else if (v === 'artists') viewArtists();
     else if (v === 'album-library') viewAlbumLibrary();
