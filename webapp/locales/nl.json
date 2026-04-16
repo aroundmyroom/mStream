@@ -1637,6 +1637,7 @@
   "admin.acoustid.toastSaved": "AcoustID-instellingen opgeslagen",
   "admin.acoustid.toastFailed": "Opslaan van AcoustID-instellingen mislukt",
   "admin.acoustid.warnNoKey": "Geen API-sleutel ingesteld — herkenning is uitgeschakeld totdat een geldige sleutel is ingevoerd.",
+  "admin.acoustid.warnNoFpcalc": "fpcalc (Chromaprint) is niet geïnstalleerd of kon niet worden gedownload. Op ARM64 Linux: apt install libchromaprint-tools (of apk add chromaprint). AcoustID-herkenning is niet beschikbaar totdat fpcalc beschikbaar is.",
   "admin.acoustid.progressTitle": "Voortgang herkenning",
   "admin.acoustid.statsFingerprinted": "Verwerkt",
   "admin.acoustid.statsFound": "Gevonden",

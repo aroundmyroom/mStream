@@ -42,6 +42,7 @@ let _worker   = null;
 let _running  = false;
 let _stopping = false;
 let _lastStats = null;
+let _fpcalcReady = null; // null = not yet checked, true/false after ensureFpcalc()
 
 function _workerData() {
   const apiKey  = config.program.acoustid?.apiKey?.trim() || '';
@@ -122,6 +123,9 @@ function _spawnWorker() {
 
 export function setup(mstream) {
 
+  // Pre-check fpcalc availability at startup so status can report it immediately
+  ensureFpcalc().then(ready => { _fpcalcReady = ready; }).catch(() => { _fpcalcReady = false; });
+
   // Guard — all endpoints are admin-only
   mstream.all('/api/v1/acoustid/{*path}', (req, res, next) => {
     if (req.user?.admin !== true) return res.status(403).json({ error: 'Admin only' });
@@ -141,6 +145,7 @@ export function setup(mstream) {
     res.json({
       enabled,
       hasKey,
+      fpcalcAvailable: _fpcalcReady !== false, // true until proven otherwise
       running:  _running,
       stopping: _stopping,
       stats: {
@@ -171,8 +176,13 @@ export function setup(mstream) {
 
     // Ensure fpcalc binary is available (non-blocking check/download)
     const fpcalcReady = await ensureFpcalc();
+    _fpcalcReady = fpcalcReady;
     if (!fpcalcReady) {
-      return res.status(500).json({ error: 'fpcalc binary is not available. Check server logs.' });
+      return res.status(500).json({
+        error: 'fpcalc (Chromaprint) is not installed or could not be downloaded. ' +
+               'On ARM64 Linux: apt install libchromaprint-tools (or apk add chromaprint). ' +
+               'See server logs for details.',
+      });
     }
 
     _spawnWorker();

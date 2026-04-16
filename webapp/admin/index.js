@@ -4247,6 +4247,7 @@ const acoustidView = Vue.component('acoustid-view', {
       apiKey:   '',
       hasKey:   false,
       pending:  false,
+      fpcalcAvailable: true,
       // worker status
       running:  false,
       stopping: false,
@@ -4272,7 +4273,7 @@ const acoustidView = Vue.component('acoustid-view', {
       return '#888';
     },
     canStart() {
-      return this.enabled && this.hasKey && !this.running && !this.stopping;
+      return this.enabled && this.hasKey && this.fpcalcAvailable && !this.running && !this.stopping;
     },
     canStop() {
       return this.running && !this.stopping;
@@ -4289,6 +4290,9 @@ const acoustidView = Vue.component('acoustid-view', {
               <span class="card-title">{{ t('admin.acoustid.title') }}</span>
               <p style="margin-bottom:0.5rem;">{{ t('admin.acoustid.desc1') }}</p>
               <p style="margin-bottom:0.5rem; font-size:0.85rem; color:#999;">{{ t('admin.acoustid.secretHint') }}</p>
+              <div v-if="!fpcalcAvailable" style="background:#3a2a00;border-left:3px solid #e57373;padding:8px 12px;border-radius:4px;margin-bottom:1rem;font-size:0.85rem;color:#ef9a9a;">
+                ⚠ {{ t('admin.acoustid.warnNoFpcalc') }}
+              </div>
               <div v-if="!hasKey" style="background:#3a2a00;border-left:3px solid #f0a500;padding:8px 12px;border-radius:4px;margin-bottom:1rem;font-size:0.85rem;">
                 ⚠ {{ t('admin.acoustid.warnNoKey') }}
               </div>
@@ -4392,8 +4396,9 @@ const acoustidView = Vue.component('acoustid-view', {
     async loadStatus() {
       try {
         const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/acoustid/status` });
-        this.running  = !!res.data.running;
-        this.stopping = !!res.data.stopping;
+        this.running          = !!res.data.running;
+        this.stopping         = !!res.data.stopping;
+        this.fpcalcAvailable  = res.data.fpcalcAvailable !== false;
         if (res.data.stats) this.stats = res.data.stats;
       } catch(_e) {}
     },

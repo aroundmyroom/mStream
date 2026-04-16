@@ -1637,6 +1637,7 @@
   "admin.acoustid.toastSaved": "AcoustID settings saved",
   "admin.acoustid.toastFailed": "Failed to save AcoustID settings",
   "admin.acoustid.warnNoKey": "No API key configured — fingerprinting is disabled until a valid key is entered.",
+  "admin.acoustid.warnNoFpcalc": "fpcalc (Chromaprint) is not installed or could not be downloaded. On ARM64 Linux: apt install libchromaprint-tools (or apk add chromaprint). AcoustID fingerprinting is unavailable until fpcalc is available.",
   "admin.acoustid.progressTitle": "Fingerprinting Progress",
   "admin.acoustid.statsFingerprinted": "Processed",
   "admin.acoustid.statsFound": "Matched",
