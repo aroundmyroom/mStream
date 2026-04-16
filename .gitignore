@@ -25,6 +25,9 @@ save/sync-cdn/*
 bin/ffmpeg/*
 !bin/ffmpeg/README.md
 
+bin/fpcalc/*
+!bin/fpcalc/README.md
+
 bin/yt-dlp/*
 !bin/yt-dlp/README.md
 
