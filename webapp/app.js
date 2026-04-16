@@ -544,6 +544,8 @@ function _navCancel() {
 // Shortcuts-view AbortController — aborted each time viewShortcuts() re-runs so that
 // accumulated body capture listeners from repeated visibility-change refreshes
 // don't cause even-number-of-toggles cancellation in customize mode.
+let _shortcutsAC = null;
+// Home-view AbortController — aborted each time viewHome() re-runs.
 let _homeAC = null;
 // Queue drag-and-drop state — module-scoped so _initQueueListeners (one-time) can close over it.
 let _qDragSrc  = null;
@@ -6656,13 +6658,99 @@ async function viewPlayed() {
   } catch(e) { setBody(`<div class="empty-state">${t('player.search.failed', { error: esc(e.message) })}</div>`); }
 }
 
+// ── HOME ─────────────────────────────────────────────────────
+
+async function viewHome() {
+  setTitle(t('player.title.home')); setBack(null); setNavActive('home'); S.view = 'home';
+  _homeAC?.abort();
+  _homeAC = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  setBody('<div class="loading-state"></div>');
+
+  const sig = _navCancel();
+  const abEx = _audioBookExclusions();
+  const _cw    = (document.getElementById('content-body')?.clientWidth || 800) - 32;
+  const _limit = Math.max(6, Math.floor((_cw + 10) / 130));
+  const base = {
+    limit: _limit,
+    ...(abEx.ignoreVPaths.length            ? { ignoreVPaths:            abEx.ignoreVPaths }            : {}),
+    ...(abEx.excludeFilepathPrefixes.length ? { excludeFilepathPrefixes: abEx.excludeFilepathPrefixes } : {}),
+  };
+
+  let recentlyPlayed = [], mostPlayed = [];
+  try {
+    [recentlyPlayed, mostPlayed] = await Promise.all([
+      api('POST', 'api/v1/db/stats/recently-played', base, sig).catch(() => []),
+      api('POST', 'api/v1/db/stats/most-played',     base, sig).catch(() => []),
+    ]);
+  } catch(e) { if (e.name === 'AbortError') return; }
+
+  if (S.view !== 'home') return;
+
+  recentlyPlayed = recentlyPlayed.map(norm);
+  mostPlayed     = mostPlayed.map(s => { const n = norm(s); n._playCount = s.metadata?.['play-count']; return n; });
+
+  // Time-aware greeting
+  const hr = new Date().getHours();
+  const greetKey = hr < 12 ? 'player.home.greetingMorning'
+                 : hr < 18 ? 'player.home.greetingAfternoon'
+                 :            'player.home.greetingEvening';
+  const greetHtml = `<div class="home-greeting">
+    <div class="home-greeting-text">${t(greetKey, { name: esc(S.username || '') })}</div>
+  </div>`;
+
+  function songCard(s, showCount) {
+    const url = artUrl(s['album-art'], 's');
+    const artInner = url
+      ? `<img src="${url}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`
+      : noArtHtml();
+    const sub = showCount && s._playCount
+      ? `${esc(s.artist || '')}${s.artist ? ' · ' : ''}${s._playCount}×`
+      : esc(s.artist || '');
+    return `<div class="hc home-song" data-fp="${esc(s.filepath)}">
+      <div class="hc-art">${artInner}</div>
+      <div class="hc-info">
+        <div class="hc-title">${esc(s.title || s.filepath.split('/').pop())}</div>
+        ${sub ? `<div class="hc-sub">${sub}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function strip(title, cards) {
+    return `<div class="home-shelf">
+      <div class="home-shelf-header">
+        <span class="home-shelf-title">${title}</span>
+      </div>
+      <div class="home-row">${cards}</div>
+    </div>`;
+  }
+
+  const recentHtml = recentlyPlayed.length
+    ? strip(t('player.home.shelfRecent'), recentlyPlayed.map(s => songCard(s, false)).join(''))
+    : '';
+  const mostHtml = mostPlayed.length
+    ? strip(t('player.home.shelfMost'), mostPlayed.map(s => songCard(s, true)).join(''))
+    : '';
+  const emptyHtml = (!recentlyPlayed.length && !mostPlayed.length)
+    ? `<p class="home-empty">${t('player.home.emptyHint')}</p>` : '';
+
+  setBody(`<div class="home-view">${greetHtml}${recentHtml}${mostHtml}${emptyHtml}</div>`);
+  const body = document.getElementById('content-body');
+  const _allSongs = recentlyPlayed.concat(mostPlayed);
+  body.querySelectorAll('.home-song').forEach(card => {
+    card.addEventListener('click', () => {
+      const s = _allSongs.find(x => x.filepath === card.dataset.fp);
+      if (s) { _setPlaySource('home', 'Home'); Player.queueAndPlay(s); }
+    });
+  });
+}
+
 // ── SHORTCUTS ────────────────────────────────────────────────
 
 async function viewShortcuts() {
   setTitle(t('player.title.shortcuts')); setBack(null); setNavActive('shortcuts'); S.view = 'shortcuts';
   // Abort any previous home-view body listeners to prevent accumulation
-  _homeAC?.abort();
-  _homeAC = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  _shortcutsAC?.abort();
+  _shortcutsAC = (typeof AbortController !== 'undefined') ? new AbortController() : null;
   setBody('<div class="loading-state"></div>');
 
   const sig = _navCancel();
@@ -6974,7 +7062,7 @@ async function viewShortcuts() {
   }
 
   // In edit mode, intercept card clicks to toggle visibility instead of playing
-  const _homeACOpts = _homeAC ? { capture: true, signal: _homeAC.signal } : { capture: true };
+  const _homeACOpts = _shortcutsAC ? { capture: true, signal: _shortcutsAC.signal } : { capture: true };
   body.addEventListener('click', e => {
     const view = body.querySelector('.home-view');
     if (!view || !view.classList.contains('home-editing')) return;
@@ -12785,7 +12873,7 @@ function showApp() {
   _initQueueListeners();
   loadPlaylists();
   loadSmartPlaylists();
-  viewShortcuts();
+  viewHome();
   restoreQueue(/*silent=*/true);
   // Boot overlay dismiss — wait for audio seek (waveform position restored) or fall back.
   // Radio items are not preloaded on restore (no seek position) so skip the seeked wait.
@@ -12944,6 +13032,7 @@ function showApp() {
     // ── Home view refresh ─────────────────────────────────────────────────────
     // Re-fetch home shelves (recently played, most played, etc.) if the home
     // view is currently open so data from other devices shows up immediately.
+    if (S.view === 'home')      viewHome();
     if (S.view === 'shortcuts') viewShortcuts();
   });
   // Fetch ping to get transcode server info + vpath metadata
@@ -13031,7 +13120,8 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const v = btn.dataset.view;
     if (v !== 'podcasts') S.audioContentReturn = null; // clear Audio Content context on any other nav
-    if (v === 'shortcuts')   viewShortcuts();
+    if (v === 'home')         viewHome();
+    else if (v === 'shortcuts')   viewShortcuts();
     else if (v === 'recent')      viewRecent();
     else if (v === 'artists') viewArtists();
     else if (v === 'album-library') viewAlbumLibrary();

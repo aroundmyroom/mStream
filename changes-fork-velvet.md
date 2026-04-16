@@ -2,8 +2,14 @@
 
 ## v6.10.1-velvet — May 2026
 
+### new: Home screen
+- New "Home" view replaces the old Shortcuts view as the default landing screen.
+- Shows a time-aware greeting ("Good morning/afternoon/evening, [name]") and two song strips: Recently Played and Most Played.
+- Clicking any song queues and plays it immediately.
+
 ### refactor: rename "Home" nav → "Shortcuts"
-- The existing home screen (radio stations, podcasts, playlists, recently/most played, artist similarity shelves) is now labelled "Shortcuts" in the nav and title — freeing up the "Home" slot for a forthcoming feature-rich home screen.
+- The existing home screen (radio stations, podcasts, playlists, recently/most played, artist similarity shelves) is now labelled "Shortcuts" in the nav and title — freeing up the "Home" slot for the new home screen above.
+- Shortcuts nav button icon changed from house → 2×2 grid icon.
 - `data-view`, i18n keys, view guards, and play-source labels all updated: `home` → `shortcuts`, `player.home.*` → `player.shortcuts.*`.
 - All 12 locale files updated. Dutch: "Snelkoppelingen".
 
