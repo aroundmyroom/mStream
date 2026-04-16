@@ -21,6 +21,7 @@ import https from 'node:https';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import winston from 'winston';
@@ -39,25 +40,39 @@ export function fpcalcBin() {
   return path.join(BUNDLED_FPCALC_DIR, `fpcalc${binaryExt}`);
 }
 
-// ── Platform → download URL ──────────────────────────────────────────────────
+// ── Platform → download URL + expected SHA256 ────────────────────────────────
+//
+// SHA256 checksums are hardcoded because Chromaprint releases are pinned at
+// v1.5.1 — the archives never change.
+//
+// Linux ARM64: Chromaprint does not publish a pre-built ARM64 Linux binary.
+// On ARM64 Linux the bootstrap falls back to the system `fpcalc` in PATH
+// (install via: apt install libchromaprint-tools  /or/  apk add chromaprint).
+
+const KNOWN_CHECKSUMS = {
+  'chromaprint-fpcalc-1.5.1-linux-x86_64.tar.gz':   '4d7433a7f778e5946d7225230681cbcd634e153316ecac87c538c33ac32387a5',
+  'chromaprint-fpcalc-1.5.1-macos-universal.tar.gz': 'd4d8faff4b5f7c558d9be053da47804f9501eaa6c2f87906a9f040f38d61c860',
+  'chromaprint-fpcalc-1.5.1-windows-x86_64.zip':     '36b478e16aa69f757f376645db0d436073a42c0097b6bb2677109e7835b59bbc',
+};
 
 function releaseInfo() {
   const { platform, arch } = process;
   const base = `https://github.com/acoustid/chromaprint/releases/download/v${FPCALC_VERSION}`;
 
   if (platform === 'linux' && arch === 'x64') {
-    return { url: `${base}/chromaprint-fpcalc-${FPCALC_VERSION}-linux-x86_64.tar.gz`, ext: 'tar.gz' };
-  }
-  if (platform === 'linux' && arch === 'arm64') {
-    return { url: `${base}/chromaprint-fpcalc-${FPCALC_VERSION}-linux-aarch64.tar.gz`, ext: 'tar.gz' };
+    const asset = `chromaprint-fpcalc-${FPCALC_VERSION}-linux-x86_64.tar.gz`;
+    return { url: `${base}/${asset}`, asset, ext: 'tar.gz' };
   }
   if (platform === 'darwin') {
-    // No official arm64 build for macOS from Chromaprint — use x86_64 (runs via Rosetta on M1/M2)
-    return { url: `${base}/chromaprint-fpcalc-${FPCALC_VERSION}-macos-x86_64.tar.gz`, ext: 'tar.gz' };
+    // Universal build covers both Intel x64 and Apple Silicon arm64
+    const asset = `chromaprint-fpcalc-${FPCALC_VERSION}-macos-universal.tar.gz`;
+    return { url: `${base}/${asset}`, asset, ext: 'tar.gz' };
   }
   if (platform === 'win32' && arch === 'x64') {
-    return { url: `${base}/chromaprint-fpcalc-${FPCALC_VERSION}-windows-x86_64.zip`, ext: 'zip' };
+    const asset = `chromaprint-fpcalc-${FPCALC_VERSION}-windows-x86_64.zip`;
+    return { url: `${base}/${asset}`, asset, ext: 'zip' };
   }
+  // Linux arm64 and other platforms: no official pre-built binary
   return null;
 }
 
@@ -152,14 +167,60 @@ function getFpcalcVersion(binPath) {
   });
 }
 
+// ── Checksum verification ────────────────────────────────────────────────────
+
+function computeFileChecksum(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', d => hash.update(d));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
+}
+
+// ── System fpcalc fallback ───────────────────────────────────────────────────
+
+// Check if fpcalc is available in the system PATH (e.g. installed via apt/apk).
+// Returns the path string if found and functional, else null.
+async function findSystemFpcalc() {
+  return new Promise(resolve => {
+    const which = spawn(process.platform === 'win32' ? 'where' : 'which',
+      ['fpcalc'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    which.stdout.on('data', d => { out += d; });
+    which.on('close', async code => {
+      if (code !== 0) return resolve(null);
+      const sysPath = out.trim().split('\n')[0].trim();
+      if (!sysPath) return resolve(null);
+      const v = await getFpcalcVersion(sysPath);
+      resolve(v ? sysPath : null);
+    });
+    which.on('error', () => resolve(null));
+  });
+}
+
 // ── Core download + install ──────────────────────────────────────────────────
 
 async function downloadAndInstall() {
   const info = releaseInfo();
   if (!info) {
+    // No pre-built binary for this platform (e.g. Linux arm64).
+    // Fall back to system fpcalc (apt install libchromaprint-tools / apk add chromaprint).
+    const sysPath = await findSystemFpcalc();
+    if (sysPath) {
+      const v = await getFpcalcVersion(sysPath);
+      winston.info(`[fpcalc-bootstrap] Using system fpcalc: ${sysPath} (${v})`);
+      // Symlink or copy into our bin dir so fpcalcBin() path stays consistent
+      const binPath = fpcalcBin();
+      await fsp.mkdir(BUNDLED_FPCALC_DIR, { recursive: true });
+      await fsp.symlink(sysPath, binPath).catch(() => {});
+      return true;
+    }
     winston.warn(
-      `[fpcalc-bootstrap] No static build for ${process.platform}/${process.arch}. ` +
-      `Place fpcalc in ${BUNDLED_FPCALC_DIR} manually.`
+      `[fpcalc-bootstrap] No pre-built fpcalc for ${process.platform}/${process.arch} and none found in PATH. ` +
+      `Install chromaprint (apt install libchromaprint-tools / apk add chromaprint) or ` +
+      `place fpcalc in ${BUNDLED_FPCALC_DIR} manually. AcoustID fingerprinting will be disabled.`
     );
     return false;
   }
@@ -172,6 +233,18 @@ async function downloadAndInstall() {
 
   try {
     await downloadToFile(info.url, archivePath);
+
+    // Checksum verification
+    const expected = KNOWN_CHECKSUMS[info.asset];
+    if (expected) {
+      const actual = await computeFileChecksum(archivePath);
+      if (actual !== expected) {
+        await fsp.unlink(archivePath).catch(() => {});
+        winston.error(`[fpcalc-bootstrap] Checksum mismatch for ${info.asset}! expected ${expected}, got ${actual}`);
+        return false;
+      }
+      winston.info('[fpcalc-bootstrap] Checksum verified');
+    }
 
     if (info.ext === 'tar.gz') {
       await extractTarGz(archivePath, BUNDLED_FPCALC_DIR);
@@ -193,11 +266,10 @@ async function downloadAndInstall() {
       throw new Error('fpcalc did not respond to -version after installation');
     }
 
-    winston.info(`[fpcalc-bootstrap] fpcalc installed: ${version}`);
+    winston.info(`[fpcalc-bootstrap] fpcalc ready: ${version}`);
     return true;
   } catch (err) {
     winston.error(`[fpcalc-bootstrap] Download/install failed: ${err.message}`);
-    // Clean up partial downloads
     fsp.unlink(archivePath).catch(() => {});
     return false;
   }
@@ -238,6 +310,18 @@ export async function ensureFpcalc() {
       winston.warn(`[fpcalc-bootstrap] fpcalc exists but is not functional — re-downloading`);
     } catch (_e) {
       // File doesn't exist — download it
+    }
+
+    // For platforms with no pre-built binary, check system PATH first
+    if (!releaseInfo()) {
+      const sysPath = await findSystemFpcalc();
+      if (sysPath) {
+        const v = await getFpcalcVersion(sysPath);
+        winston.info(`[fpcalc-bootstrap] Using system fpcalc: ${sysPath} (${v})`);
+        await fsp.mkdir(BUNDLED_FPCALC_DIR, { recursive: true });
+        await fsp.symlink(sysPath, fpcalcBin()).catch(() => {});
+        return true;
+      }
     }
 
     return downloadAndInstall();
