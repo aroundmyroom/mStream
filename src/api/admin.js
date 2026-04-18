@@ -781,6 +781,22 @@ export function setup(mstream) {
     res.json({});
   });
 
+  mstream.post("/api/v1/admin/users/allow-server-remote", async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const schema = Joi.object({ username: Joi.string().required(), allow: Joi.boolean().required() });
+    joiValidate(schema, req.body);
+    await admin.editAllowServerRemote(req.body.username, req.body.allow);
+    res.json({});
+  });
+
+  mstream.post("/api/v1/admin/users/allow-mpv-cast", async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const schema = Joi.object({ username: Joi.string().required(), allow: Joi.boolean().required() });
+    joiValidate(schema, req.body);
+    await admin.editAllowMpvCast(req.body.username, req.body.allow);
+    res.json({});
+  });
+
   mstream.get("/api/v1/admin/config", (req, res) => {
     res.json({
       address: config.program.address,
@@ -1363,6 +1379,7 @@ export function setup(mstream) {
     res.json({
       enabled: sa.enabled || false,
       mpvBin:  sa.mpvBin  || 'mpv',
+      autoUnmute: sa.autoUnmute !== false,
       running: serverPlaybackApi.isRunning(),
     });
   });
@@ -1372,17 +1389,20 @@ export function setup(mstream) {
     const schema = Joi.object({
       enabled: Joi.boolean().optional(),
       mpvBin:  Joi.string().optional(),
+      autoUnmute: Joi.boolean().optional(),
     }).min(1);
     joiValidate(schema, req.body);
 
     if (!config.program.serverAudio) config.program.serverAudio = {};
     if (req.body.enabled !== undefined) config.program.serverAudio.enabled = req.body.enabled;
     if (req.body.mpvBin  !== undefined) config.program.serverAudio.mpvBin  = req.body.mpvBin;
+    if (req.body.autoUnmute !== undefined) config.program.serverAudio.autoUnmute = req.body.autoUnmute;
 
     const loadConfig = await admin.loadFile(config.configFile);
     if (!loadConfig.serverAudio) loadConfig.serverAudio = {};
     if (req.body.enabled !== undefined) loadConfig.serverAudio.enabled = req.body.enabled;
     if (req.body.mpvBin  !== undefined) loadConfig.serverAudio.mpvBin  = req.body.mpvBin;
+    if (req.body.autoUnmute !== undefined) loadConfig.serverAudio.autoUnmute = req.body.autoUnmute;
     await admin.saveFile(loadConfig, config.configFile);
 
     if (req.body.enabled === true)  serverPlaybackApi.bootMpv();

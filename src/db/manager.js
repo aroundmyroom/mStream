@@ -48,6 +48,7 @@ export function removeStaleFiles(vpath, scanId) { return backend.removeStaleFile
 export function removeFilesByVpath(vpath) { return backend.removeFilesByVpath(vpath); }
 export function removeFilesByPrefix(vpath, prefix) { return backend.removeFilesByPrefix(vpath, prefix); }
 export function countFilesByVpath(vpath) { return backend.countFilesByVpath(vpath); }
+export function recordCompletedScan(vpath, scanId, scanStartTs, finishedAtSec) { return backend.recordCompletedScan(vpath, scanId, scanStartTs, finishedAtSec); }
 export function getStats() { return backend.getStats(); }
 export function getLastScannedMs() { return backend.getLastScannedMs(); }
 export function rebuildFolderIndex() { backend.rebuildFolderIndex(); }
@@ -84,6 +85,7 @@ export function updateFileArt(filepath, vpath, aaFile, scanId, artSource) { retu
 export function countArtUsage(aaFile) { return backend.countArtUsage(aaFile); }
 export function updateFileCue(filepath, vpath, cuepoints) { return backend.updateFileCue(filepath, vpath, cuepoints); }
 export function updateFileDuration(filepath, vpath, duration) { return backend.updateFileDuration(filepath, vpath, duration); }
+export function updateFileTechMeta(filepath, vpath, bitrate, sampleRate, channels) { return backend.updateFileTechMeta(filepath, vpath, bitrate, sampleRate, channels); }
 export function getFileDuration(filepath) { return backend.getFileDuration(filepath); }
 export function updateFileTags(filepath, vpath, tags) { return backend.updateFileTags(filepath, vpath, tags); }
 export function getFileWithMetadata(filepath, vpath, username) { return backend.getFileWithMetadata(filepath, vpath, username); }

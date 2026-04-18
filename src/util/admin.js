@@ -392,6 +392,22 @@ export async function editAllowUpload(username, val) {
   config.program.users[username]['allow-upload'] = val;
 }
 
+export async function editAllowServerRemote(username, val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.users || !loadConfig.users[username]) { throw new Error(`User '${username}' not found`); }
+  loadConfig.users[username]['allow-server-remote'] = val;
+  await saveFile(loadConfig, config.configFile);
+  config.program.users[username]['allow-server-remote'] = val;
+}
+
+export async function editAllowMpvCast(username, val) {
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.users || !loadConfig.users[username]) { throw new Error(`User '${username}' not found`); }
+  loadConfig.users[username]['allow-mpv-cast'] = val;
+  await saveFile(loadConfig, config.configFile);
+  config.program.users[username]['allow-mpv-cast'] = val;
+}
+
 export async function editScanErrorRetention(hours) {
   const loadConfig = await loadFile(config.configFile);
   if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }

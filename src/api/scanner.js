@@ -49,8 +49,10 @@ export function setup(mstream) {
     if (dbFileInfo.cuepoints === null || dbFileInfo.cuepoints === undefined) { flags._needsCue = true; }
     // signal duration-only update if duration was never stored (NULL)
     if (dbFileInfo.duration === null || dbFileInfo.duration === undefined) { flags._needsDuration = true; }
+    // signal tech-meta update if bitrate was never stored (NULL)
+    if (dbFileInfo.bitrate === null || dbFileInfo.bitrate === undefined) { flags._needsBitrate = true; }
 
-    if (flags._needsArt || flags._needsCue || flags._needsDuration) {
+    if (flags._needsArt || flags._needsCue || flags._needsDuration || flags._needsBitrate) {
       return res.json({ ...flags, filepath: dbFileInfo.filepath, vpath: dbFileInfo.vpath });
     }
 
@@ -121,8 +123,9 @@ export function setup(mstream) {
         }
         if (dbFileInfo.cuepoints === null || dbFileInfo.cuepoints === undefined) { flags._needsCue = true; }
         if (dbFileInfo.duration === null || dbFileInfo.duration === undefined) { flags._needsDuration = true; }
+        if (dbFileInfo.bitrate === null || dbFileInfo.bitrate === undefined) { flags._needsBitrate = true; }
 
-        if (flags._needsArt || flags._needsCue || flags._needsDuration) {
+        if (flags._needsArt || flags._needsCue || flags._needsDuration || flags._needsBitrate) {
           // Needs work — update scanId now so it survives finish-scan pruning
           db.updateFileScanId(dbFileInfo, scanId);
           results[item.filepath] = { ...flags, filepath: dbFileInfo.filepath, vpath: dbFileInfo.vpath };
@@ -160,6 +163,14 @@ export function setup(mstream) {
     res.json({});
   });
 
+  mstream.post('/api/v1/scanner/update-tech-meta', (req, res) => {
+    const changes = db.updateFileTechMeta(req.body.filepath, req.body.vpath, req.body.bitrate ?? null, req.body.sample_rate ?? null, req.body.channels ?? null);
+    if (changes === 0) {
+      import('winston').then(w => w.default.warn(`[tech-meta] 0 rows updated — fp="${req.body.filepath}" vp="${req.body.vpath}" bitrate=${req.body.bitrate}`));
+    }
+    res.json({});
+  });
+
   // Scan error audit: called by the scanner child process to record an error.
   // The guid (md5 of filepath|errorType) ensures deduplication: the same problem
   // on the same file is counted (count++) rather than creating duplicate rows.
@@ -187,6 +198,7 @@ export function setup(mstream) {
   });
 
   mstream.post('/api/v1/scanner/finish-scan', (req, res) => {
+    const scanFinishedAt = Math.floor(Date.now() / 1000);
     scanProgress.finish(req.body.scanId);
     // Delete server-side waveform cache files for any tracks being pruned
     try {
@@ -219,6 +231,8 @@ export function setup(mstream) {
     if (req.body.scanStartTs) {
       try { db.clearResolvedErrors(req.body.vpath, req.body.scanStartTs); } catch (_e) { /* non-critical */ }
     }
+    // Persist a true scan completion timestamp (separate from file ts values).
+    try { db.recordCompletedScan(req.body.vpath, req.body.scanId, req.body.scanStartTs, scanFinishedAt); } catch (_e) { /* non-critical */ }
     db.saveFilesDB();
     // Commit any open scan transaction so the finished state is durable
     // before we return the response.

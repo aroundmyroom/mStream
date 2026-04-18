@@ -20,6 +20,7 @@ import fs from 'fs';
 import os from 'os';
 import winston from 'winston';
 import * as config from '../state/config.js';
+import * as db from '../db/manager.js';
 
 // ── Socket path ────────────────────────────────────────────────────────────
 const sockPath = path.join(os.tmpdir(), `mpv-mstream-${process.pid}.sock`);
@@ -32,10 +33,153 @@ let reqId          = 1;      // monotonic request_id counter
 const pending      = new Map(); // request_id → { resolve, reject, timer }
 let connectRetries = 0;
 
+const SERVER_AUDIO_CTRL_CANDIDATES = ['Master', 'Speaker', 'PCM', 'Headphone'];
+
 // ── Queue mirror ──────────────────────────────────────────────────────────
 // Each entry: { relPath, title, artist, album, albumArt }
 let serverQueue  = [];
 let currentIndex = -1;
+
+function runCmd(bin, args, timeout = 5000) {
+  try {
+    const res = child_process.spawnSync(bin, args, {
+      encoding: 'utf8',
+      timeout,
+      windowsHide: true,
+    });
+    return {
+      ok: !res.error && res.status === 0,
+      status: res.status,
+      stdout: res.stdout || '',
+      stderr: res.stderr || '',
+      error: res.error ? String(res.error.message || res.error) : null,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: null,
+      stdout: '',
+      stderr: '',
+      error: String(err?.message || err),
+    };
+  }
+}
+
+function parseMixerState(output) {
+  const text = String(output || '');
+  const muteMatches = Array.from(text.matchAll(/\[(on|off)\]/g)).map(m => m[1]);
+  const volumeMatches = Array.from(text.matchAll(/\[(\d{1,3})%\]/g)).map(m => Number(m[1]));
+  const muted = muteMatches.length > 0 && muteMatches.every(v => v === 'off');
+  return {
+    muted,
+    hasOn: muteMatches.includes('on'),
+    hasOff: muteMatches.includes('off'),
+    volumes: volumeMatches,
+  };
+}
+
+function getLinuxAudioHealth() {
+  const mpvBin = (config.program.serverAudio && config.program.serverAudio.mpvBin) || 'mpv';
+  const mpvVer = runCmd(mpvBin, ['--version']);
+  const amixerVer = runCmd('amixer', ['--version']);
+  const aplayVer = runCmd('aplay', ['--version']);
+  const controlsRes = amixerVer.ok ? runCmd('amixer', ['scontrols']) : { ok: false, stdout: '' };
+
+  const controls = [];
+  if (controlsRes.ok) {
+    const matches = String(controlsRes.stdout || '').match(/'([^']+)'/g) || [];
+    for (const m of matches) {
+      const name = m.slice(1, -1);
+      if (!controls.includes(name)) controls.push(name);
+    }
+  }
+
+  const inspected = [];
+  const targets = controls.length ? SERVER_AUDIO_CTRL_CANDIDATES.filter(c => controls.includes(c)) : SERVER_AUDIO_CTRL_CANDIDATES;
+  for (const ctl of targets) {
+    const r = runCmd('amixer', ['get', ctl]);
+    if (!r.ok) continue;
+    const parsed = parseMixerState(r.stdout);
+    inspected.push({
+      name: ctl,
+      muted: parsed.muted,
+      volumes: parsed.volumes,
+      hasOn: parsed.hasOn,
+      hasOff: parsed.hasOff,
+    });
+  }
+
+  const cardsRes = aplayVer.ok ? runCmd('aplay', ['-l']) : { ok: false, stdout: '' };
+  const cardLines = cardsRes.ok
+    ? String(cardsRes.stdout || '').split('\n').filter(l => /^card\s+\d+/i.test(l.trim())).slice(0, 6)
+    : [];
+
+  const mutedControls = inspected.filter(i => i.muted).map(i => i.name);
+  const issues = [];
+  if (!mpvVer.ok) issues.push('mpv-not-found');
+  if (!amixerVer.ok) issues.push('amixer-not-found');
+  if (amixerVer.ok && inspected.length === 0) issues.push('no-mixer-controls');
+  if (mutedControls.length > 0) issues.push('muted-controls');
+
+  return {
+    platform: process.platform,
+    mpv: {
+      found: mpvVer.ok,
+      path: mpvBin,
+      version: (() => {
+        if (!mpvVer.ok) return null;
+        const m = String(mpvVer.stdout || '').match(/mpv\s+(\S+)/i);
+        return m ? m[1] : 'unknown';
+      })(),
+      error: mpvVer.ok ? null : (mpvVer.error || mpvVer.stderr || 'Not found'),
+    },
+    alsa: {
+      amixerFound: amixerVer.ok,
+      aplayFound: aplayVer.ok,
+      controls,
+      inspected,
+      mutedControls,
+      cards: cardLines,
+    },
+    healthy: issues.length === 0,
+    issues,
+  };
+}
+
+function applyLinuxAudioFix() {
+  const health = getLinuxAudioHealth();
+  if (!health.alsa.amixerFound) {
+    return { changed: false, attempted: [], health };
+  }
+
+  const controls = health.alsa.inspected.length
+    ? health.alsa.inspected.map(c => c.name)
+    : SERVER_AUDIO_CTRL_CANDIDATES;
+  const attempted = [];
+  for (const ctl of controls) {
+    const r1 = runCmd('amixer', ['set', ctl, '90%', 'unmute']);
+    const r2 = r1.ok ? { ok: true } : runCmd('amixer', ['sset', ctl, '90%', 'unmute']);
+    attempted.push({ name: ctl, ok: !!(r1.ok || r2.ok) });
+  }
+
+  return {
+    changed: attempted.some(a => a.ok),
+    attempted,
+    health: getLinuxAudioHealth(),
+  };
+}
+
+function bestEffortPrepareLinuxAudio() {
+  if (process.platform !== 'linux') return;
+  const autoUnmute = config.program.serverAudio?.autoUnmute !== false;
+  if (!autoUnmute) return;
+  try {
+    const result = applyLinuxAudioFix();
+    if (result.changed) winston.info('[server-audio] Applied ALSA unmute/volume fix before mpv start');
+  } catch (err) {
+    winston.warn(`[server-audio] Audio auto-fix failed: ${err?.message || err}`);
+  }
+}
 
 // ── mpv boot / kill ────────────────────────────────────────────────────────
 export function bootMpv() {
@@ -45,6 +189,8 @@ export function bootMpv() {
 
   // Clean up any stale socket from a previous run
   try { fs.unlinkSync(sockPath); } catch (_) {}
+
+  bestEffortPrepareLinuxAudio();
 
   winston.info(`[server-audio] Starting mpv: ${mpvBin}`);
 
@@ -247,12 +393,33 @@ export async function addToQueue(relPath, meta = {}) {
   const abs = resolveAbsPath(relPath);
   if (!abs) throw new Error('File not found: ' + relPath);
 
+  // Enrich with DB tech metadata if not already provided
+  let bitrate = meta.bitrate || null;
+  let sampleRate = meta['sample-rate'] || null;
+  let channels = meta.channels || null;
+  if (!bitrate && !sampleRate) {
+    try {
+      const pathInfo = relPath.split('/');
+      const vpath = pathInfo[0];
+      const filepath = pathInfo.slice(1).join('/');
+      const row = db.findFileByPath(filepath, vpath);
+      if (row) {
+        bitrate    = row.bitrate     || null;
+        sampleRate = row.sample_rate || null;
+        channels   = row.channels   || null;
+      }
+    } catch (_e) { /* non-fatal */ }
+  }
+
   const entry = {
     relPath,
-    title:    meta.title    || path.basename(relPath, path.extname(relPath)),
-    artist:   meta.artist   || '',
-    album:    meta.album    || '',
-    albumArt: meta.albumArt || '',
+    title:         meta.title    || path.basename(relPath, path.extname(relPath)),
+    artist:        meta.artist   || '',
+    album:         meta.album    || '',
+    albumArt:      meta.albumArt || '',
+    bitrate,
+    'sample-rate': sampleRate,
+    channels,
   };
   serverQueue.push(entry);
 
@@ -372,6 +539,16 @@ export function setup(mstream) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // POST /api/v1/server-playback/set-pause  { paused: true|false }
+  mstream.post('/api/v1/server-playback/set-pause', async (req, res) => {
+    const { paused } = req.body;
+    try {
+      if (isRunning() && ipcSock && !ipcSock.destroyed)
+        await ipcCommand(['set_property', 'pause', paused === true]);
+      res.json({});
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // POST /api/v1/server-playback/seek  { position }
   mstream.post('/api/v1/server-playback/seek', async (req, res) => {
     const { position } = req.body;
@@ -408,6 +585,76 @@ export function setup(mstream) {
       const m = (stdout || '').match(/mpv\s+(\S+)/i);
       res.json({ found: true, version: m ? m[1] : 'unknown', path: mpvBin });
     });
+  });
+
+  // GET /api/v1/server-playback/audio-health — Linux speaker output diagnostics
+  mstream.get('/api/v1/server-playback/audio-health', (req, res) => {
+    try {
+      if (process.platform !== 'linux') {
+        return res.json({
+          platform: process.platform,
+          healthy: true,
+          issues: [],
+          note: 'Audio health checks are currently Linux-only.',
+        });
+      }
+      return res.json(getLinuxAudioHealth());
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/v1/server-playback/audio-health/fix — best-effort unmute + volume set
+  mstream.post('/api/v1/server-playback/audio-health/fix', (req, res) => {
+    try {
+      if (req.user?.admin !== true) {
+        return res.status(403).json({ error: 'Admin only' });
+      }
+      if (process.platform !== 'linux') {
+        return res.status(400).json({ error: 'Audio fix is Linux-only.' });
+      }
+      return res.json(applyLinuxAudioFix());
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/v1/server-playback/test-tone — play a stereo test tone through mpv
+  mstream.post('/api/v1/server-playback/test-tone', async (req, res) => {
+    try {
+      if (!isRunning() || !ipcSock || ipcSock.destroyed) {
+        return res.status(409).json({ ok: false, error: 'mpv is not running. Start Server Audio first.' });
+      }
+
+      // Use our bundled ffmpeg to generate a real audio file with a left/right test tone.
+      // This is more reliable than lavfi:// URIs via mpv IPC.
+      const { ffmpegBin } = await import('../util/ffmpeg-bootstrap.js');
+      const fBin = await ffmpegBin();
+      const tmpFile = path.join(os.tmpdir(), `mstream-test-tone-${Date.now()}.mp3`);
+
+      // Generate 3s: 440 Hz on left channel, 880 Hz on right channel, then centre beep
+      const ffResult = child_process.spawnSync(fBin, [
+        '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+        '-f', 'lavfi', '-i', 'sine=frequency=880:duration=3',
+        '-filter_complex', '[0:a][1:a]amerge=inputs=2,volume=0.8',
+        '-ac', '2', '-ar', '44100', '-q:a', '4',
+        '-y', tmpFile,
+      ], { timeout: 10000 });
+
+      if (ffResult.status !== 0 || !fs.existsSync(tmpFile)) {
+        const err = String(ffResult.stderr || ffResult.stdout || 'ffmpeg failed').slice(0, 200);
+        return res.status(500).json({ ok: false, error: 'Could not generate test tone: ' + err });
+      }
+
+      await ipcCommand(['loadfile', tmpFile, 'replace']);
+
+      // Clean up temp file after playback completes (3s + buffer)
+      setTimeout(() => { try { fs.unlinkSync(tmpFile); } catch (_) {} }, 6000);
+
+      return res.json({ ok: true });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: e.message });
+    }
   });
 }
 

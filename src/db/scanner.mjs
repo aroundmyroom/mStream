@@ -87,6 +87,9 @@ async function insertEntries(song) {
     "genre": song.genre ? String(song.genre) : null,
     "cuepoints": song.cuepoints || null,
     "duration": song._duration ?? null,
+    "bitrate":     song._bitrate     ?? null,
+    "sample_rate": song._sampleRate  ?? null,
+    "channels":    song._channels    ?? null,
     "artist_id": _makeArtistId(song.artist ? String(song.artist) : null),
     "album_id": _makeAlbumId(song.artist ? String(song.artist) : null, song.album ? String(song.album) : null)
   };
@@ -329,6 +332,41 @@ async function processFileResult(absPath, relPath, modTime, data) {
         await reportError(absPath, 'duration', `Duration update failed: ${_durErr.message}`, _durErr.stack);
       }
     }
+
+    if (data._needsBitrate) {
+      try {
+        let bitrate = null, sampleRate = null, channels = null;
+        try {
+          // Use duration:true so FLAC/WAV files return accurate bitrate and duration
+          const parsed = await parseFile(absPath, { skipCovers: true, duration: true });
+          const fmt = parsed.format || {};
+          if (fmt.bitrate != null && isFinite(fmt.bitrate) && fmt.bitrate > 0) {
+            bitrate = Math.round(fmt.bitrate / 1000);
+          }
+          sampleRate = fmt.sampleRate || null;
+          channels   = fmt.numberOfChannels || null;
+          // Fallback: calculate bitrate from filesize / duration for lossless files
+          // where music-metadata does not embed a bitrate value (e.g. some FLAC, WAV)
+          if (bitrate == null && fmt.duration > 0) {
+            try {
+              const { size } = fs.statSync(absPath);
+              bitrate = Math.round(size * 8 / fmt.duration / 1000);
+            } catch (_) { /* ignore stat errors */ }
+          }
+        } catch (_e) {
+          await reportError(absPath, 'bitrate', `Tech-meta parse failed: ${_e.message}`, _e.stack);
+        }
+        await ax({
+          method: 'POST',
+          url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-tech-meta`,
+          headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+          responseType: 'json',
+          data: { filepath: data.filepath, vpath: loadJson.vpath, bitrate, sample_rate: sampleRate, channels }
+        });
+      } catch (_techErr) {
+        await reportError(absPath, 'bitrate', `Tech-meta update failed: ${_techErr.message}`, _techErr.stack);
+      }
+    }
     await confirmOk(absPath);
   }
 }
@@ -504,6 +542,11 @@ async function parseMyFile(thisSong, modified) {
   songInfo._duration = (fmtInfo.duration != null && isFinite(fmtInfo.duration))
     ? Math.round(fmtInfo.duration * 1000) / 1000
     : null;
+  // audio technical metadata — bitrate (stored as kbps integer), sample rate (Hz), channels
+  songInfo._bitrate    = (fmtInfo.bitrate != null && isFinite(fmtInfo.bitrate) && fmtInfo.bitrate > 0)
+    ? Math.round(fmtInfo.bitrate / 1000) : null;
+  songInfo._sampleRate = fmtInfo.sampleRate || null;
+  songInfo._channels   = fmtInfo.numberOfChannels || null;
 
   // ── Folder-name fallback for missing tags ─────────────────────────────────
   // When a file has no embedded artist/album/title tags the parent folder name

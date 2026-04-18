@@ -791,6 +791,30 @@
             <path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>
           </svg>
         </button>
+        <button id="mpv-cast-btn" class="ctrl-btn ctrl-sm hidden" title="Cast to server speaker" data-i18n="player.ctrl.castToMpv" data-i18n-attr="title">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="7" width="20" height="14" rx="2"/>
+            <path d="M7 7V5a5 5 0 0 1 10 0v2"/>
+            <circle cx="12" cy="14" r="2" fill="currentColor" stroke="none"/>
+          </svg>
+        </button>
+        <button id="crossfade-light" class="ctrl-btn ctrl-sm crossfade-light crossfade-inactive" title="Crossfade Duration" data-i18n="player.autodj.crossfadeLabel" data-i18n-attr="title" aria-pressed="false">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M3 7.5h4.2l4.3 4.5L7.2 16.5H3"/>
+            <path d="M21 7.5h-4.2l-4.3 4.5 4.3 4.5H21"/>
+            <path d="M9.2 7.5L14.8 16.5" opacity="0.85"/>
+            <path d="M14.8 7.5L9.2 16.5" opacity="0.65"/>
+          </svg>
+        </button>
+        <button id="gapless-light" class="ctrl-btn ctrl-sm gapless-light gapless-inactive" title="Gapless playback — click to toggle" data-i18n="player.ctrl.gaplessToggle" data-i18n-attr="title" aria-pressed="false">
+          <svg width="22" height="22" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+            <circle class="gapless-ring" cx="100" cy="100" r="82" stroke="currentColor" stroke-width="13" stroke-dasharray="4 8"/>
+            <path d="M28 100 Q42 55 55 100 Q68 145 82 100 Q95 55 108 100 Q122 145 135 100 Q148 55 165 100" stroke="currentColor" stroke-width="20" stroke-linecap="round" fill="none"/>
+            <path d="M25 108 Q40 70 52 108 Q68 150 80 108 Q95 65 110 108 Q125 150 138 108 Q155 70 172 108" stroke="currentColor" stroke-width="10" stroke-linecap="round" fill="none" opacity="0.72"/>
+            <path d="M38 165 L50 175 L38 185" stroke="currentColor" stroke-width="7" stroke-linejoin="round" fill="none"/>
+            <path d="M150 165 L162 175 L150 185" stroke="currentColor" stroke-width="7" stroke-linejoin="round" fill="none"/>
+          </svg>
+        </button>
         <span id="sleep-light" class="sleep-light hidden" title="Sleep timer active" data-i18n="player.ctrl.sleep" data-i18n-attr="title">💤 <span id="sleep-countdown"></span></span>
         <button id="radio-rec-btn" class="ctrl-btn ctrl-sm radio-rec-btn hidden" title="Record this stream" data-i18n="player.ctrl.recordStream" data-i18n-attr="title"><svg class="rec-icon" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><circle cx="16" cy="16" r="14" fill="none" stroke="currentColor" stroke-width="2.5"/><circle cx="16" cy="16" r="8" fill="currentColor"/></svg></button>
         <span id="radio-rec-elapsed" class="radio-rec-elapsed hidden"></span>
@@ -814,6 +838,16 @@
           </svg>
           <span id="queue-count" class="q-count"></span>
         </button>
+        <div id="crossfade-pop" class="crossfade-pop hidden" role="dialog" aria-modal="false">
+          <div class="crossfade-pop-head">
+            <span data-i18n="player.autodj.crossfadeLabel">Crossfade Duration</span>
+            <button id="crossfade-pop-close" class="crossfade-pop-close" type="button" data-i18n="player.modal.close">Close</button>
+          </div>
+          <div class="crossfade-pop-row">
+            <input type="range" id="xf-slider-mini" class="xf-slider" min="0" max="12" step="1" value="0">
+            <span id="xf-val-mini" class="xf-val">Off</span>
+          </div>
+        </div>
       </div>
     </div>
 

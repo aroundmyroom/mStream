@@ -126,6 +126,16 @@ export function init(dbDirectory) {
     CREATE INDEX IF NOT EXISTS idx_se_vpath    ON scan_errors(vpath);
     CREATE INDEX IF NOT EXISTS idx_se_fixed_at ON scan_errors(fixed_at);
 
+    CREATE TABLE IF NOT EXISTS scan_runs (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      scan_id     TEXT,
+      vpath       TEXT NOT NULL,
+      started_at  INTEGER,
+      finished_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_scan_runs_finished_at ON scan_runs(finished_at);
+    CREATE INDEX IF NOT EXISTS idx_scan_runs_vpath ON scan_runs(vpath);
+
     CREATE TABLE IF NOT EXISTS user_settings (
       username TEXT NOT NULL PRIMARY KEY,
       prefs    TEXT NOT NULL DEFAULT '{}',
@@ -314,6 +324,10 @@ export function init(dbDirectory) {
   try { db.exec('ALTER TABLE files ADD COLUMN tag_status TEXT'); }            catch (_e) {}
   // Migration: Tag Workshop Phase 3 — per-physical-album grouping
   try { db.exec('ALTER TABLE files ADD COLUMN mb_album_dir TEXT'); }          catch (_e) {}
+  // Migration: audio technical metadata — bitrate (kbps), sample_rate (Hz), channels
+  try { db.exec('ALTER TABLE files ADD COLUMN bitrate INTEGER'); }             catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN sample_rate INTEGER'); }         catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN channels INTEGER'); }            catch (_e) {}
   // Backfill mb_album_dir for all existing enriched rows (idempotent)
   try {
     const _bfDir = db.prepare(
@@ -441,15 +455,18 @@ export function init(dbDirectory) {
     countArtUsage:  db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE aaFile = ?'),
     updateCue:      db.prepare('UPDATE files SET cuepoints = ? WHERE filepath = ? AND vpath = ?'),
     updateDuration: db.prepare('UPDATE files SET duration = ? WHERE filepath = ? AND vpath = ?'),
+    updateTechMeta: db.prepare('UPDATE files SET bitrate = ?, sample_rate = ?, channels = ? WHERE filepath = ? AND vpath = ?'),
     liveArt:        db.prepare('SELECT DISTINCT aaFile FROM files WHERE aaFile IS NOT NULL'),
     liveHashes:     db.prepare('SELECT DISTINCT hash FROM files WHERE hash IS NOT NULL'),
     staleHashes:    db.prepare('SELECT hash FROM files WHERE vpath = ? AND sID != ? AND hash IS NOT NULL'),
     removeStale:    db.prepare('DELETE FROM files WHERE vpath = ? AND sID != ?'),
     removeByPath:   db.prepare('DELETE FROM files WHERE filepath = ? AND vpath = ?'),
+    insertScanRun:  db.prepare('INSERT INTO scan_runs (scan_id, vpath, started_at, finished_at) VALUES (?, ?, ?, ?)'),
+    getLastScanRun: db.prepare('SELECT MAX(finished_at) AS ts FROM scan_runs'),
     insertFileTs:   db.prepare('SELECT ts FROM files WHERE hash = ? AND ts IS NOT NULL LIMIT 1'),
     insertFileRow:  db.prepare(
-      'INSERT INTO files (title, artist, year, album, filepath, format, track, trackOf, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration, artist_id, album_id, cover_file) ' +
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+      'INSERT INTO files (title, artist, year, album, filepath, format, track, trackOf, disk, modified, hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration, artist_id, album_id, cover_file, bitrate, sample_rate, channels) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     // FTS5 write statements — used in insert / remove / tag-update paths
     ftsInsert:  db.prepare('INSERT INTO fts_files(rowid, title, artist, album, filepath) VALUES (?, ?, ?, ?, ?)'),
     ftsDel:     db.prepare("INSERT INTO fts_files(fts_files, rowid, title, artist, album, filepath) VALUES ('delete', ?, ?, ?, ?, ?)"),
@@ -793,6 +810,11 @@ export function updateFileDuration(filepath, vpath, duration) {
   _s.updateDuration.run(duration, filepath, vpath);
 }
 
+export function updateFileTechMeta(filepath, vpath, bitrate, sampleRate, channels) {
+  const r = _s.updateTechMeta.run(bitrate ?? null, sampleRate ?? null, channels ?? null, filepath, vpath);
+  return r.changes;
+}
+
 export function getFileDuration(filepath) {
   const row = db.prepare('SELECT duration FROM files WHERE filepath = ? LIMIT 1').get(filepath);
   return row?.duration ?? null;
@@ -834,12 +856,20 @@ export function updateFileTags(filepath, vpath, tags) {
 }
 
 export function insertFile(fileData) {
+  const normalizeEpochSec = (value) => {
+    if (value === null || value === undefined) return null;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    // Accept both second and millisecond epoch inputs.
+    return n >= 1e12 ? Math.floor(n / 1000) : Math.floor(n);
+  };
+
   // If this hash already exists under a different vpath, inherit that ts so the
   // file doesn't appear as "newly added" just because a new vpath was created.
-  let ts = fileData.ts ?? null;
+  let ts = normalizeEpochSec(fileData.ts);
   if (fileData.hash) {
     const existing = _s.insertFileTs.get(fileData.hash);
-    if (existing) { ts = existing.ts; }
+    if (existing) { ts = normalizeEpochSec(existing.ts); }
   }
   const result = _s.insertFileRow.run(
     fileData.title ?? null, fileData.artist ?? null, fileData.year ?? null, fileData.album ?? null,
@@ -848,7 +878,8 @@ export function insertFile(fileData) {
     ts, fileData.sID ?? null, fileData.replaygainTrackDb ?? null, fileData.genre ?? null, fileData.cuepoints ?? null,
     fileData.art_source ?? null, fileData.duration ?? null,
     fileData.artist_id ?? _makeArtistId(fileData.artist), fileData.album_id ?? _makeAlbumId(fileData.artist, fileData.album),
-    fileData.cover_file ?? null
+    fileData.cover_file ?? null,
+    fileData.bitrate ?? null, fileData.sample_rate ?? null, fileData.channels ?? null
   );
   const rowId = Number(result.lastInsertRowid);
   _s.ftsInsert.run(rowId, fileData.title ?? null, fileData.artist ?? null, fileData.album ?? null, fileData.filepath);
@@ -910,12 +941,36 @@ export function countFilesByVpath(vpath) {
   return row.cnt;
 }
 
+export function recordCompletedScan(vpath, scanId, scanStartTs, finishedAtSec) {
+  const toSec = (value) => {
+    if (value === null || value === undefined) return null;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return n >= 1e12 ? Math.floor(n / 1000) : Math.floor(n);
+  };
+  _s.insertScanRun.run(scanId || null, vpath, toSec(scanStartTs), toSec(finishedAtSec) || Math.floor(Date.now() / 1000));
+}
+
 export function getLastScannedMs() {
-  const row = db.prepare('SELECT MAX(ts) AS ts FROM files').get();
-  return row?.ts ? row.ts * 1000 : null;
+  const toEpochMs = (value) => {
+    if (value === null || value === undefined) return null;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return n >= 1e12 ? Math.floor(n) : Math.floor(n * 1000);
+  };
+
+  const row = _s.getLastScanRun.get();
+  return toEpochMs(row?.ts);
 }
 
 export function getStats() {
+  const toEpochMs = (value) => {
+    if (value === null || value === undefined) return null;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return n >= 1e12 ? Math.floor(n) : Math.floor(n * 1000);
+  };
+
   const totalFiles      = db.prepare('SELECT COUNT(*) AS cnt FROM files').get().cnt;
   const totalArtists    = db.prepare("SELECT COUNT(DISTINCT artist) AS cnt FROM files WHERE artist IS NOT NULL AND artist != ''").get().cnt;
   const totalAlbums     = db.prepare("SELECT COUNT(DISTINCT album) AS cnt FROM files WHERE album IS NOT NULL AND album != ''").get().cnt;
@@ -929,10 +984,10 @@ export function getStats() {
   const cueUnchecked    = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE cuepoints IS NULL').get().cnt;
 
   const yearRow         = db.prepare('SELECT MIN(year) AS oldest, MAX(year) AS newest FROM files WHERE year >= 1900 AND year <= 2030').get();
-  const newestTsRow     = db.prepare('SELECT MAX(ts) AS ts FROM files').get();
+  const newestTsRow     = _s.getLastScanRun.get();
   const nowSec    = Math.floor(Date.now() / 1000);
-  const last7Days  = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE ts >= ?').get(nowSec - 7  * 86400).cnt;
-  const last30Days = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE ts >= ?').get(nowSec - 30 * 86400).cnt;
+  const last7Days  = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE (CASE WHEN ts >= 1000000000000 THEN CAST(ts / 1000 AS INTEGER) ELSE ts END) >= ?").get(nowSec - 7  * 86400).cnt;
+  const last30Days = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE (CASE WHEN ts >= 1000000000000 THEN CAST(ts / 1000 AS INTEGER) ELSE ts END) >= ?").get(nowSec - 30 * 86400).cnt;
 
   const formats = db.prepare(
     'SELECT LOWER(TRIM(format)) AS format, COUNT(*) AS cnt FROM files WHERE format IS NOT NULL AND TRIM(format) != \'\' GROUP BY LOWER(TRIM(format)) ORDER BY cnt DESC'
@@ -972,7 +1027,7 @@ export function getStats() {
     cueUnchecked,
     oldestYear:  yearRow.oldest  || null,
     newestYear:  yearRow.newest  || null,
-    lastScannedTs: newestTsRow.ts ? newestTsRow.ts * 1000 : null,
+    lastScannedTs: toEpochMs(newestTsRow.ts),
     addedLast7Days:  last7Days,
     addedLast30Days: last30Days,
     formats,

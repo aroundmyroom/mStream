@@ -128,6 +128,9 @@ const ADMINDATA = (() => {
       if (!Object.prototype.hasOwnProperty.call(u, 'allow-upload')) u['allow-upload'] = true;
       if (!Object.prototype.hasOwnProperty.call(u, 'allow-radio-recording')) u['allow-radio-recording'] = false;
       if (!Object.prototype.hasOwnProperty.call(u, 'allow-youtube-download')) u['allow-youtube-download'] = false;
+      // MPV permissions: server-remote default true (matches historical open access), mpv-cast default false
+      if (!Object.prototype.hasOwnProperty.call(u, 'allow-server-remote')) u['allow-server-remote'] = true;
+      if (!Object.prototype.hasOwnProperty.call(u, 'allow-mpv-cast')) u['allow-mpv-cast'] = false;
       // Use Vue.set so each user object enters Vue's reactive system.
       // Plain assignment (module.users[key] = u) bypasses reactivity — subsequent
       // Vue.set() calls on the child object would never trigger template updates.
@@ -1862,6 +1865,22 @@ const usersView = Vue.component('users-view', {
                       @click="toggleUpload(k, v)">
                       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" style="vertical-align:-.15em;margin-right:3px"><path d="m3.75 2.75h8.5m-8.5 6.5 4-3.5 4 3.5m-4 5v-8.5"/></svg>Upload&nbsp;<span style="opacity:.6;font-size:.68rem;">{{v['allow-upload'] === false ? 'off' : 'ON'}}</span>
                     </button>
+                    <template v-if="mpvConfigured">
+                      <button type="button" class="btn-small btn-flat"
+                        :title="v['allow-server-remote'] ? 'Click to revoke /server-remote access' : 'Click to allow /server-remote access'"
+                        :style="v['allow-server-remote'] ? 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);font-weight:600;' : 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);font-weight:600;'"
+                        style="text-align:left;width:100%;"
+                        @click="toggleServerRemote(k, v)">
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" style="vertical-align:-.15em;margin-right:3px"><rect x="2" y="3" width="12" height="8" rx="1.5"/><path d="M5.5 13.5h5M8 11.5v2"/></svg>Remote&nbsp;<span style="opacity:.6;font-size:.68rem;">{{v['allow-server-remote'] ? 'ON' : 'off'}}</span>
+                      </button>
+                      <button type="button" class="btn-small btn-flat"
+                        :title="v['allow-mpv-cast'] ? 'Click to revoke MPV cast button access' : 'Click to allow MPV cast button in player'"
+                        :style="v['allow-mpv-cast'] ? 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);font-weight:600;' : 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);font-weight:600;'"
+                        style="text-align:left;width:100%;"
+                        @click="toggleMpvCastPerm(k, v)">
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" style="vertical-align:-.15em;margin-right:3px"><path d="M2 10.5a8 8 0 0 1 12 0M4.5 12.5a5 5 0 0 1 7 0M8 14.5v.01"/></svg>Cast&nbsp;<span style="opacity:.6;font-size:.68rem;">{{v['allow-mpv-cast'] ? 'ON' : 'off'}}</span>
+                      </button>
+                    </template>
                   </div>
                 </td>
                 <td>
@@ -1882,6 +1901,12 @@ const usersView = Vue.component('users-view', {
     mounted: function () {
     },
     beforeDestroy: function() {
+    },
+    computed: {
+      mpvConfigured() {
+        // Buttons only appear when server-audio is configured (even if currently stopped)
+        return ADMINDATA.serverAudioParams.enabled === true;
+      }
     },
     methods: {
       changeVPaths: function(username) {
@@ -2010,6 +2035,26 @@ const usersView = Vue.component('users-view', {
           });
           Vue.set(ADMINDATA.users[username], 'allow-upload', newVal);
           iziToast.success({ title: newVal ? 'Upload enabled' : 'Upload disabled', position: 'topCenter', timeout: 3000 });
+        } catch (err) {
+          iziToast.error({ title: 'Failed to update', position: 'topCenter', timeout: 3500 });
+        }
+      },
+      toggleServerRemote: async function (username, user) {
+        const newVal = !user['allow-server-remote'];
+        try {
+          await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/users/allow-server-remote`, data: { username, allow: newVal } });
+          Vue.set(ADMINDATA.users[username], 'allow-server-remote', newVal);
+          iziToast.success({ title: newVal ? 'Server Remote access granted' : 'Server Remote access revoked', position: 'topCenter', timeout: 3000 });
+        } catch (err) {
+          iziToast.error({ title: 'Failed to update', position: 'topCenter', timeout: 3500 });
+        }
+      },
+      toggleMpvCastPerm: async function (username, user) {
+        const newVal = !user['allow-mpv-cast'];
+        try {
+          await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/users/allow-mpv-cast`, data: { username, allow: newVal } });
+          Vue.set(ADMINDATA.users[username], 'allow-mpv-cast', newVal);
+          iziToast.success({ title: newVal ? 'MPV Cast button enabled' : 'MPV Cast button disabled', position: 'topCenter', timeout: 3000 });
         } catch (err) {
           iziToast.error({ title: 'Failed to update', position: 'topCenter', timeout: 3500 });
         }
@@ -2433,6 +2478,10 @@ const dbView = Vue.component('db-view', {
                       <div class="sc-num" style="color:var(--primary)">{{formatDuration(dbStats.totalDurationSec)}}</div>
                       <div class="sc-label">{{ t('admin.db.statTotalDuration') }}</div>
                     </div>
+                    <div class="stat-chip" v-if="dbStats.lastScannedTs">
+                      <div class="sc-num" style="font-size:.82rem;color:var(--t1)">{{formatDate(dbStats.lastScannedTs)}}</div>
+                      <div class="sc-label">{{ t('admin.db.statLastScan') }}</div>
+                    </div>
                   </div>
 
                   <div class="stat-section-row">
@@ -2478,9 +2527,6 @@ const dbView = Vue.component('db-view', {
                     </div>
                   </div>
 
-                  <div v-if="dbStats.lastScannedTs" style="font-size:.8rem;color:var(--t2);margin-top:.75rem">
-                    Last file added: {{new Date(dbStats.lastScannedTs).toLocaleString()}}
-                  </div>
                 </div>
                 <div v-else-if="dbStats" style="color:var(--t2);font-size:.88rem;margin-top:.75rem">
                   {{(dbStats.fileCount||0).toLocaleString()}} files indexed &mdash; restart the server to see full statistics.
@@ -2606,6 +2652,10 @@ const dbView = Vue.component('db-view', {
       if (d > 0) return `${d}d ${h}h ${m}m`;
       if (h > 0) return `${h}h ${m}m`;
       return `${m}m`;
+    },
+    formatDate: function(ms) {
+      if (!ms) return '\u2014';
+      return new Date(ms).toLocaleString();
     },
     formatElapsed: function(sec) {
       if (!sec || sec <= 0) return '0s';
@@ -3156,6 +3206,24 @@ const serverAudioView = Vue.component('server-audio-view', {
       mpvPath: '',
       detecting: false,
       detectResult: null,
+      healthLoading: false,
+      healthFixing: false,
+      audioHealth: null,
+      actionBusy: {
+        detect: false,
+        start: false,
+        stop: false,
+        check: false,
+        fix: false,
+        guided: false,
+        tone: false,
+      },
+      lastAction: {
+        ok: null,
+        message: '',
+        at: 0,
+      },
+      guidedSteps: [],
     };
   },
   template: `
@@ -3176,30 +3244,110 @@ const serverAudioView = Vue.component('server-audio-view', {
                 <table>
                   <tbody>
                     <tr>
-                      <td><b>{{t('admin.serverAudio.labelStatus')}}</b>&nbsp;
-                        <span v-if="params.enabled">
-                          <span v-if="params.running" style="color:var(--green)">{{t('admin.serverAudio.statusRunning')}}</span>
-                          <span v-else style="color:var(--orange,#f97316)">{{t('admin.serverAudio.statusEnabled')}}</span>
-                        </span>
-                        <span v-else style="color:var(--t3)">{{t('admin.serverAudio.statusDisabled')}}</span>
+                      <td>
+                        <b>{{t('admin.serverAudio.labelStatus')}}</b>
+                        <span v-if="params.running" style="display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;background:var(--green);color:#fff;font-size:.82rem;font-weight:600">{{t('admin.serverAudio.statusRunning')}}</span>
+                        <span v-else-if="params.enabled" style="display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;background:var(--orange,#f97316);color:#fff;font-size:.82rem;font-weight:600">{{t('admin.serverAudio.statusEnabled')}}</span>
+                        <span v-else style="display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;background:var(--t3,#888);color:#fff;font-size:.82rem;font-weight:600">{{t('admin.serverAudio.statusDisabled')}}</span>
+                        <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.serverAudio.helpStatus')}}</div>
                       </td>
-                      <td><a v-on:click="toggleEnabled()" class="btn-sm btn-sm-edit">{{params.enabled ? t('admin.serverAudio.btnDisable') : t('admin.serverAudio.btnEnable')}}</a></td>
+                      <td>
+                        <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
+                          <span style="position:relative;display:inline-block;width:44px;height:24px">
+                            <input type="checkbox" :checked="params.enabled" @change="toggleEnabled()" style="opacity:0;width:0;height:0;position:absolute">
+                            <span :style="{ position:'absolute', inset:0, borderRadius:'12px', background: params.enabled ? 'var(--primary,#6366f1)' : 'var(--t3,#888)', transition:'background 0.2s', cursor:'pointer' }"></span>
+                            <span :style="{ position:'absolute', top:'3px', left: params.enabled ? '23px' : '3px', width:'18px', height:'18px', borderRadius:'50%', background:'#fff', transition:'left 0.2s', pointerEvents:'none' }"></span>
+                          </span>
+                          <span style="font-size:.85rem;color:var(--t2)">{{params.enabled ? t('admin.serverAudio.btnDisable') : t('admin.serverAudio.btnEnable')}}</span>
+                        </label>
+                      </td>
                     </tr>
                     <tr>
-                      <td><b>{{t('admin.serverAudio.labelMpvEnabled')}}</b> {{params.enabled ? t('admin.common.yes') || 'Yes' : t('admin.common.no') || 'No'}}</td>
-                      <td></td>
+                      <td>
+                        <b>{{t('admin.serverAudio.labelAutoUnmute')}}</b>
+                        <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.serverAudio.helpAutoUnmute')}}</div>
+                      </td>
+                      <td>
+                        <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
+                          <span style="position:relative;display:inline-block;width:44px;height:24px">
+                            <input type="checkbox" :checked="params.autoUnmute !== false" @change="toggleAutoUnmute()" style="opacity:0;width:0;height:0;position:absolute">
+                            <span :style="{ position:'absolute', inset:0, borderRadius:'12px', background: params.autoUnmute !== false ? 'var(--primary,#6366f1)' : 'var(--t3,#888)', transition:'background 0.2s', cursor:'pointer' }"></span>
+                            <span :style="{ position:'absolute', top:'3px', left: params.autoUnmute !== false ? '23px' : '3px', width:'18px', height:'18px', borderRadius:'50%', background:'#fff', transition:'left 0.2s', pointerEvents:'none' }"></span>
+                          </span>
+                          <span style="font-size:.85rem;color:var(--t2)">{{params.autoUnmute !== false ? t('admin.common.on') : t('admin.common.off')}}</span>
+                        </label>
+                      </td>
                     </tr>
                     <tr>
-                      <td><b>{{t('admin.serverAudio.labelMpvPath')}}</b> <code>{{params.mpvBin || 'mpv'}}</code></td>
+                      <td>
+                        <b>{{t('admin.serverAudio.labelMpvPath')}}</b> <code>{{params.mpvBin || 'mpv'}}</code>
+                        <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.serverAudio.helpMpvPath')}}</div>
+                      </td>
                       <td>
                         <a v-on:click="changeMpvBin()" class="btn-sm btn-sm-edit">{{t('admin.common.edit')}}</a>
                       </td>
                     </tr>
                     <tr>
-                      <td colspan="2" style="padding-top:10px;padding-bottom:4px">
-                        <a v-on:click="detectMpv()" class="btn-sm" style="margin-right:6px">{{t('admin.serverAudio.btnDetectMpv')}}</a>
-                        <a v-on:click="startMpv()"  class="btn-sm" style="margin-right:6px">{{t('admin.serverAudio.btnStart')}}</a>
-                        <a v-on:click="stopMpv()"   class="btn-sm">{{t('admin.serverAudio.btnStop')}}</a>
+                      <td>
+                        <b>{{t('admin.serverAudio.btnDetectMpv')}}</b>
+                        <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.serverAudio.explainDetectMpv')}}</div>
+                      </td>
+                      <td><a v-on:click="detectMpv()" class="btn-sm" :title="t('admin.serverAudio.tipDetectMpv')" :style="{ opacity: actionBusy.detect ? 0.6 : 1, pointerEvents: actionBusy.detect ? 'none' : 'auto' }">{{actionBusy.detect ? t('admin.serverAudio.btnDetectMpvBusy') : t('admin.serverAudio.btnDetectMpv')}}</a></td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <b>{{t('admin.serverAudio.btnStart')}}</b>
+                        <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.serverAudio.explainStartMpv')}}</div>
+                      </td>
+                      <td><a v-on:click="startMpv()" class="btn-sm" :title="t('admin.serverAudio.tipStartMpv')" :style="{ opacity: actionBusy.start ? 0.6 : 1, pointerEvents: actionBusy.start ? 'none' : 'auto' }">{{actionBusy.start ? t('admin.serverAudio.btnStartBusy') : t('admin.serverAudio.btnStart')}}</a></td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <b>{{t('admin.serverAudio.btnStop')}}</b>
+                        <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.serverAudio.explainStopMpv')}}</div>
+                      </td>
+                      <td><a v-on:click="stopMpv()" class="btn-sm" :title="t('admin.serverAudio.tipStopMpv')" :style="{ opacity: actionBusy.stop ? 0.6 : 1, pointerEvents: actionBusy.stop ? 'none' : 'auto' }">{{actionBusy.stop ? t('admin.serverAudio.btnStopBusy') : t('admin.serverAudio.btnStop')}}</a></td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <b>{{t('admin.serverAudio.btnAudioCheck')}}</b>
+                        <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.serverAudio.explainAudioCheck')}}</div>
+                      </td>
+                      <td><a v-on:click="runAudioCheck()" class="btn-sm" :title="t('admin.serverAudio.tipAudioCheck')" :style="{ opacity: actionBusy.check ? 0.6 : 1, pointerEvents: actionBusy.check ? 'none' : 'auto' }">{{actionBusy.check ? t('admin.serverAudio.btnAudioCheckBusy') : t('admin.serverAudio.btnAudioCheck')}}</a></td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <b>{{t('admin.serverAudio.btnAudioFix')}}</b>
+                        <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.serverAudio.explainAudioFix')}}</div>
+                      </td>
+                      <td><a v-on:click="applyAudioFix()" class="btn-sm" :title="t('admin.serverAudio.tipAudioFix')" :style="{ opacity: actionBusy.fix ? 0.6 : 1, pointerEvents: actionBusy.fix ? 'none' : 'auto' }">{{actionBusy.fix ? t('admin.serverAudio.btnAudioFixBusy') : t('admin.serverAudio.btnAudioFix')}}</a></td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <b>{{t('admin.serverAudio.btnGuidedTest')}}</b>
+                        <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.serverAudio.explainGuidedTest')}}</div>
+                      </td>
+                      <td><a v-on:click="runGuidedSoundTest()" class="btn-sm" :title="t('admin.serverAudio.tipGuidedTest')" :style="{ opacity: actionBusy.guided ? 0.6 : 1, pointerEvents: actionBusy.guided ? 'none' : 'auto' }">{{actionBusy.guided ? t('admin.serverAudio.btnGuidedTestBusy') : t('admin.serverAudio.btnGuidedTest')}}</a></td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <b>{{t('admin.serverAudio.btnTestTone')}}</b>
+                        <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.serverAudio.explainTestTone')}}</div>
+                      </td>
+                      <td><a v-on:click="playTestTone()" class="btn-sm" :title="t('admin.serverAudio.tipTestTone')" :style="{ opacity: actionBusy.tone ? 0.6 : 1, pointerEvents: actionBusy.tone ? 'none' : 'auto' }">{{actionBusy.tone ? t('admin.serverAudio.btnTestToneBusy') : t('admin.serverAudio.btnTestTone')}}</a></td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <b>{{t('admin.serverAudio.btnOpenRemote')}}</b>
+                        <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.serverAudio.explainOpenRemote')}}</div>
+                      </td>
+                      <td><a href="/server-remote" target="_blank" class="btn-sm btn-sm-edit" :title="t('admin.serverAudio.tipOpenRemote')">{{t('admin.serverAudio.btnOpenRemote')}}</a></td>
+                    </tr>
+                    <tr v-if="lastAction.message">
+                      <td colspan="2" style="padding:6px 0 0">
+                        <div style="padding:8px 10px;border-radius:6px;border:1px solid var(--border);font-size:.84rem;line-height:1.4" :style="{ color: lastAction.ok === false ? 'var(--red)' : 'var(--green)' }">
+                          <b>{{t('admin.serverAudio.lastAction')}}:</b> {{lastAction.message}}
+                        </div>
                       </td>
                     </tr>
                     <tr v-if="detectResult !== null">
@@ -3212,9 +3360,36 @@ const serverAudioView = Vue.component('server-audio-view', {
                         </span>
                       </td>
                     </tr>
-                    <tr>
-                      <td colspan="2" style="padding-top:12px">
-                        <a href="/server-remote" target="_blank" class="btn-sm btn-sm-edit">{{t('admin.serverAudio.btnOpenRemote')}}</a>
+                    <tr v-if="audioHealth !== null">
+                      <td colspan="2" style="font-size:.86rem;color:var(--t2);line-height:1.6;padding-top:10px">
+                        <div><b style="color:var(--t1)">{{t('admin.serverAudio.healthTitle')}}</b>:
+                          <span :style="{ color: audioHealth.healthy ? 'var(--green)' : 'var(--orange,#f97316)' }">
+                            {{audioHealth.healthy ? t('admin.serverAudio.healthOk') : t('admin.serverAudio.healthNeedsFix')}}
+                          </span>
+                        </div>
+                        <div v-if="audioHealth.mpv && !audioHealth.mpv.found" style="color:var(--red)">
+                          {{t('admin.serverAudio.healthMpvMissing', { path: audioHealth.mpv.path || (params.mpvBin || 'mpv') })}}
+                        </div>
+                        <div v-if="audioHealth.issues && audioHealth.issues.includes('amixer-not-found')" style="color:var(--red)">
+                          {{t('admin.serverAudio.healthAmixerMissing')}}
+                        </div>
+                        <div v-if="audioHealth.alsa && audioHealth.alsa.mutedControls && audioHealth.alsa.mutedControls.length" style="color:var(--orange,#f97316)">
+                          {{t('admin.serverAudio.healthMutedControls', { controls: audioHealth.alsa.mutedControls.join(', ') })}}
+                        </div>
+                        <div v-if="audioHealth.alsa && audioHealth.alsa.cards && audioHealth.alsa.cards.length">
+                          <span style="color:var(--t1)">{{t('admin.serverAudio.healthCards')}}</span>
+                          <div v-for="line in audioHealth.alsa.cards" :key="line">{{line}}</div>
+                        </div>
+                        <div style="margin-top:6px">{{t('admin.serverAudio.healthHint')}}</div>
+                      </td>
+                    </tr>
+                    <tr v-if="guidedSteps.length">
+                      <td colspan="2" style="font-size:.86rem;color:var(--t2);line-height:1.55;padding-top:10px">
+                        <div style="color:var(--t1);font-weight:600;margin-bottom:4px">{{t('admin.serverAudio.guidedReportTitle')}}</div>
+                        <div v-for="(step, idx) in guidedSteps" :key="idx" style="display:flex;gap:8px;align-items:flex-start;padding:2px 0">
+                          <span :style="{ color: step.ok ? 'var(--green)' : (step.warn ? 'var(--orange,#f97316)' : 'var(--red)') }">{{step.ok ? 'OK' : (step.warn ? 'WARN' : 'FAIL')}}</span>
+                          <span><b style="color:var(--t1)">{{step.title}}:</b> {{step.detail}}</span>
+                        </div>
                       </td>
                     </tr>
                   </tbody>
@@ -3237,6 +3412,24 @@ const serverAudioView = Vue.component('server-audio-view', {
       </div>
     </div>`,
   methods: {
+    setLastAction(ok, message) {
+      this.lastAction.ok = ok;
+      this.lastAction.message = message;
+      this.lastAction.at = Date.now();
+    },
+    pushGuidedStep(title, detail, mode = 'ok') {
+      this.guidedSteps.push({
+        title,
+        detail,
+        ok: mode === 'ok',
+        warn: mode === 'warn',
+      });
+    },
+    async saveServerAudioPatch(patch) {
+      await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/server-audio`, data: patch });
+      Object.keys(patch).forEach(k => Vue.set(ADMINDATA.serverAudioParams, k, patch[k]));
+      await ADMINDATA.getServerAudioParams();
+    },
     toggleEnabled() {
       const next = !this.params.enabled;
       adminConfirm(
@@ -3244,11 +3437,18 @@ const serverAudioView = Vue.component('server-audio-view', {
         next ? this.t('admin.serverAudio.confirmEnableMsg') : this.t('admin.serverAudio.confirmDisableMsg'),
         next ? this.t('admin.common.enable') : this.t('admin.common.disable'),
         async () => {
-          await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/server-audio`, data: { enabled: next } });
-          Vue.set(ADMINDATA.serverAudioParams, 'enabled', next);
+          await this.saveServerAudioPatch({ enabled: next });
           if (!next) Vue.set(ADMINDATA.serverAudioParams, 'running', false);
-          await ADMINDATA.getServerAudioParams();
         }
+      );
+    },
+    toggleAutoUnmute() {
+      const next = this.params.autoUnmute === false;
+      adminConfirm(
+        `<b>${next ? this.t('admin.serverAudio.confirmAutoUnmuteEnableTitle') : this.t('admin.serverAudio.confirmAutoUnmuteDisableTitle')}</b>`,
+        next ? this.t('admin.serverAudio.confirmAutoUnmuteEnableMsg') : this.t('admin.serverAudio.confirmAutoUnmuteDisableMsg'),
+        next ? this.t('admin.common.enable') : this.t('admin.common.disable'),
+        async () => { await this.saveServerAudioPatch({ autoUnmute: next }); }
       );
     },
     changeMpvBin() {
@@ -3256,21 +3456,157 @@ const serverAudioView = Vue.component('server-audio-view', {
       modVM.openModal();
     },
     async detectMpv() {
+      if (this.actionBusy.detect) return;
+      this.actionBusy.detect = true;
       this.detecting = true; this.detectResult = null;
       try {
         const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/server-playback/detect` });
         this.detectResult = res.data;
-      } catch (_) { this.detectResult = { found: false, path: this.params.mpvBin || 'mpv' }; }
+        this.setLastAction(!!res.data?.found, res.data?.found
+          ? this.t('admin.serverAudio.actionDetectOk', { version: res.data.version || 'unknown' })
+          : this.t('admin.serverAudio.actionDetectFail', { path: res.data?.path || (this.params.mpvBin || 'mpv') }));
+      } catch (_) {
+        this.detectResult = { found: false, path: this.params.mpvBin || 'mpv' };
+        this.setLastAction(false, this.t('admin.serverAudio.actionDetectFail', { path: this.params.mpvBin || 'mpv' }));
+      }
       this.detecting = false;
+      this.actionBusy.detect = false;
+      return this.detectResult;
     },
     async startMpv() {
-      await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/server-audio/start` });
-      await ADMINDATA.getServerAudioParams();
+      if (this.actionBusy.start) return;
+      this.actionBusy.start = true;
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/server-audio/start` });
+        await ADMINDATA.getServerAudioParams();
+        await this.runAudioCheck();
+        this.setLastAction(true, this.t('admin.serverAudio.actionStartOk'));
+      } catch (_e) {
+        this.setLastAction(false, this.t('admin.serverAudio.actionStartFail'));
+      } finally {
+        this.actionBusy.start = false;
+      }
     },
     async stopMpv() {
-      await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/server-audio/stop` });
-      Vue.set(ADMINDATA.serverAudioParams, 'running', false);
+      if (this.actionBusy.stop) return;
+      this.actionBusy.stop = true;
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/server-audio/stop` });
+        Vue.set(ADMINDATA.serverAudioParams, 'running', false);
+        this.setLastAction(true, this.t('admin.serverAudio.actionStopOk'));
+      } catch (_e) {
+        this.setLastAction(false, this.t('admin.serverAudio.actionStopFail'));
+      } finally {
+        this.actionBusy.stop = false;
+      }
     },
+    async runAudioCheck() {
+      if (this.actionBusy.check) return;
+      this.actionBusy.check = true;
+      this.healthLoading = true;
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/server-playback/audio-health` });
+        this.audioHealth = res.data;
+        this.setLastAction(res.data?.healthy !== false,
+          res.data?.healthy ? this.t('admin.serverAudio.actionCheckOk') : this.t('admin.serverAudio.actionCheckWarn'));
+      } catch (_e) {
+        this.audioHealth = null;
+        this.setLastAction(false, this.t('admin.serverAudio.actionCheckFail'));
+      } finally {
+        this.healthLoading = false;
+        this.actionBusy.check = false;
+      }
+      return this.audioHealth;
+    },
+    async applyAudioFix() {
+      if (this.actionBusy.fix) return;
+      this.actionBusy.fix = true;
+      this.healthFixing = true;
+      try {
+        const res = await API.axios({ method: 'POST', url: `${API.url()}/api/v1/server-playback/audio-health/fix` });
+        this.audioHealth = res.data?.health || null;
+        this.setLastAction(true, this.t('admin.serverAudio.actionFixOk'));
+      } catch (_e) {
+        this.setLastAction(false, this.t('admin.serverAudio.actionFixFail'));
+      } finally {
+        this.healthFixing = false;
+        this.actionBusy.fix = false;
+      }
+    },
+    async runGuidedSoundTest() {
+      if (this.actionBusy.guided) return;
+      this.actionBusy.guided = true;
+      this.guidedSteps = [];
+      try {
+        const det = await this.detectMpv();
+        if (!det || !det.found) {
+          this.pushGuidedStep(this.t('admin.serverAudio.stepDetectMpv'), this.t('admin.serverAudio.stepDetectMpvFail', { path: (det && det.path) || (this.params.mpvBin || 'mpv') }), 'fail');
+          this.setLastAction(false, this.t('admin.serverAudio.guidedFinishedFail'));
+          return;
+        }
+        this.pushGuidedStep(this.t('admin.serverAudio.stepDetectMpv'), this.t('admin.serverAudio.stepDetectMpvOk', { version: det.version || 'unknown' }), 'ok');
+
+        let health = await this.runAudioCheck();
+        if (!health) {
+          this.pushGuidedStep(this.t('admin.serverAudio.stepAudioCheck'), this.t('admin.serverAudio.stepAudioCheckFail'), 'fail');
+          this.setLastAction(false, this.t('admin.serverAudio.guidedFinishedFail'));
+          return;
+        }
+
+        if (health.issues && health.issues.includes('amixer-not-found')) {
+          this.pushGuidedStep(this.t('admin.serverAudio.stepAudioCheck'), this.t('admin.serverAudio.stepNeedAlsaUtils'), 'fail');
+          this.setLastAction(false, this.t('admin.serverAudio.guidedFinishedFail'));
+          return;
+        }
+
+        if (health.alsa && health.alsa.mutedControls && health.alsa.mutedControls.length > 0) {
+          this.pushGuidedStep(this.t('admin.serverAudio.stepAudioCheck'), this.t('admin.serverAudio.stepMutedFound', { controls: health.alsa.mutedControls.join(', ') }), 'warn');
+          await this.applyAudioFix();
+          health = await this.runAudioCheck();
+          if (health && health.alsa && health.alsa.mutedControls && health.alsa.mutedControls.length === 0) {
+            this.pushGuidedStep(this.t('admin.serverAudio.stepApplyFix'), this.t('admin.serverAudio.stepApplyFixOk'), 'ok');
+          } else {
+            this.pushGuidedStep(this.t('admin.serverAudio.stepApplyFix'), this.t('admin.serverAudio.stepApplyFixWarn'), 'warn');
+          }
+        } else {
+          this.pushGuidedStep(this.t('admin.serverAudio.stepAudioCheck'), this.t('admin.serverAudio.stepAudioCheckOk'), 'ok');
+        }
+
+        if (!this.params.running) {
+          await this.startMpv();
+          await ADMINDATA.getServerAudioParams();
+        }
+        if (this.params.running) {
+          this.pushGuidedStep(this.t('admin.serverAudio.stepStartMpv'), this.t('admin.serverAudio.stepStartMpvOk'), 'ok');
+        } else {
+          this.pushGuidedStep(this.t('admin.serverAudio.stepStartMpv'), this.t('admin.serverAudio.stepStartMpvFail'), 'fail');
+        }
+
+        this.pushGuidedStep(this.t('admin.serverAudio.stepOpenRemote'), this.t('admin.serverAudio.stepOpenRemoteHint'), 'ok');
+        this.setLastAction(true, this.t('admin.serverAudio.guidedFinishedOk'));
+      } catch (_e) {
+        this.pushGuidedStep(this.t('admin.serverAudio.stepUnexpected'), this.t('admin.serverAudio.stepUnexpectedDetail'), 'fail');
+        this.setLastAction(false, this.t('admin.serverAudio.guidedFinishedFail'));
+      } finally {
+        this.actionBusy.guided = false;
+      }
+    },
+    async playTestTone() {
+      if (this.actionBusy.tone) return;
+      this.actionBusy.tone = true;
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/server-playback/test-tone` });
+        this.setLastAction(true, this.t('admin.serverAudio.actionTestToneOk'));
+      } catch (e) {
+        const msg = e?.response?.data?.error || e.message;
+        this.setLastAction(false, this.t('admin.serverAudio.actionTestToneFail') + ': ' + msg);
+      } finally {
+        this.actionBusy.tone = false;
+      }
+    },
+  },
+  mounted() {
+    this.runAudioCheck();
   }
 });
 

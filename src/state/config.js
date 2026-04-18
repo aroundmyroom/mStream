@@ -80,6 +80,7 @@ const federationOptions = Joi.object({
 const serverAudioOptions = Joi.object({
   enabled: Joi.boolean().default(false),
   mpvBin:  Joi.string().default('mpv'),
+  autoUnmute: Joi.boolean().default(true),
 });
 
 const acoustidOptions = Joi.object({

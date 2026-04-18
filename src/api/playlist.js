@@ -61,6 +61,13 @@ export function setup(mstream) {
     // upload: disabled globally (noUpload) or per-user (allow-upload === false) — applies to all users including admin
     returnThis.allowUpload = config.program.noUpload !== true &&
       req.user['allow-upload'] !== false;
+
+    // Server Audio (MPV) permissions — only meaningful when MPV is configured & enabled
+    const mpvEnabled = !!(config.program.serverAudio && config.program.serverAudio.enabled);
+    // allow-server-remote: default true when MPV enabled (existing behaviour), default false when not
+    returnThis.allowServerRemote = mpvEnabled && req.user['allow-server-remote'] !== false;
+    // allow-mpv-cast: default false (opt-in per user)
+    returnThis.allowMpvCast = mpvEnabled && req.user['allow-mpv-cast'] === true;
     returnThis.version = _pkg.version;
     returnThis.defaultTheme = (config.program.ui || 'velvet').replace(/^velvet-/, '') || 'velvet';
 

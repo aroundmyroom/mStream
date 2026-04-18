@@ -48,6 +48,8 @@ const S = {
   allowId3Edit:   false,
   allowRadioRecording: false,   // per-user: can record radio streams
   allowYoutubeDownload: false,  // per-user: can download from YouTube
+  allowMpvCast: false,          // per-user: can use cast-to-server-speaker button
+  allowServerRemote: true,      // per-user: can access /server-remote
   recordingActive: false,       // is a recording currently in progress?
   recordingId: null,            // active recording id (from server)
   recordingElapsedSec: 0,       // elapsed seconds
@@ -78,6 +80,7 @@ const S = {
   feDir:    '',      // file explorer current path
   feDirStack: [],    // navigation history stack
   audioContentReturn: null, // set when viewFiles is launched from Audio Content
+  podcastFeedId: null,
   canUpload: true,   // false when server has noUpload=true
   supportedAudioFiles: {},  // populated from ping
   // Transcode
@@ -92,6 +95,9 @@ const S = {
   _jukePushInterval: null,
   // Playback
   crossfade: parseInt(localStorage.getItem('ms2_crossfade_' + _u) || '0'),
+  crossfadeRestore: localStorage.getItem('ms2_crossfade_restore_' + _u) == null
+    ? null
+    : parseInt(localStorage.getItem('ms2_crossfade_restore_' + _u) || '0', 10),
   sleepMins: 0,        // 0 = off; remaining minutes when active
   sleepEndsAt: 0,      // Date.now() ms timestamp when sleep fires
   // Playback quality
@@ -114,6 +120,9 @@ const S = {
   // Play source context — shown in "Now Playing" sub-label
   // { type: 'radio'|'podcast'|'playlist'|'smart-playlist', name: string } or null
   playSource: null,
+  // Server Audio (mpv) cast state
+  serverAudioRunning: false,  // true when mpv is up and enabled
+  castingToMpv: false,        // true when current playback is routed to mpv
 };
 
 let audioEl = document.getElementById('audio');
@@ -242,6 +251,9 @@ function artUrl(f, size) {
   const sz = size || 's';
   return `/album-art/${encodeURIComponent(f)}?compress=${sz}&token=${S.token}`;
 }
+// Global boot flag — set to true when boot sequence completes
+let _bootComplete = false;
+
 // Returns an img tag if art exists, otherwise the animated waveform placeholder
 function artOrPlaceholder(f, size, extraClass) {
   const u = artUrl(f, size);
@@ -586,6 +598,9 @@ function norm(s) {
     rating:     m.rating   || null,
     hash:       m.hash     || null,
     filepath:   s.filepath,
+    bitrate:       m.bitrate        || null,
+    'sample-rate': m['sample-rate'] || null,
+    channels:      m.channels      || null,
   };
 }
 
@@ -730,6 +745,7 @@ const Player = {
     const _cueSeek = _pendingCueSeek;
     _pendingCueSeek = null;
     audioEl.src = mediaUrl(s.filepath);
+    audioEl.muted = S.castingToMpv; // keep muted if casting to server speaker
     audioEl.load();
     VIZ.initAudio();   // ensure AudioContext + analysers exist BEFORE play fires
     if (_cueSeek != null && _cueSeek > 0) {
@@ -741,6 +757,10 @@ const Player = {
       }, { once: true });
     } else {
       audioEl.play().catch(() => {});
+    }
+    // If casting to server speaker, mirror this song to MPV
+    if (S.castingToMpv && !s.isRadio) {
+      _mpvLoadSong(s.filepath).catch(() => {});
     }
     if (!s.isRadio) {
       loadCuePoints(s.filepath);
@@ -880,11 +900,13 @@ const Player = {
         }
       }
       audioEl.play().catch(() => {});
+      if (S.castingToMpv) api('POST', 'api/v1/server-playback/set-pause', { paused: false }).catch(() => {});
     } else {
       if (_wrappedEventId) {
         api('POST', 'api/v1/wrapped/pause', { eventId: _wrappedEventId }).catch(() => {});
       }
       audioEl.pause();
+      if (S.castingToMpv) api('POST', 'api/v1/server-playback/set-pause', { paused: true }).catch(() => {});
     }
   },
   next() {
@@ -944,6 +966,16 @@ const Player = {
     const albumEl = document.getElementById('player-album');
     albumEl.textContent = albumYear;
     albumEl.classList.toggle('hidden', !albumYear);
+    // If tech info is missing, fetch it async and update queue panel when ready
+    if (!s.isRadio && !s.isPodcast && s.bitrate == null && s.filepath) {
+      api('POST', 'api/v1/db/metadata', { filepath: s.filepath }).then(meta => {
+        if (S.queue[S.idx] !== s) return; // song changed, ignore
+        if (meta.bitrate != null)        { s.bitrate        = meta.bitrate; }
+        if (meta['sample-rate'] != null) { s['sample-rate'] = meta['sample-rate']; }
+        if (meta.channels != null)       { s.channels       = meta.channels; }
+        if (s.bitrate != null) { refreshQueueUI(); persistQueue(); }
+      }).catch(() => {});
+    }
     requestAnimationFrame(() => requestAnimationFrame(() => {
       ['player-title','player-artist','player-album'].forEach(id => {
         const el = document.getElementById(id);
@@ -1356,6 +1388,99 @@ function setAutoDJ(on, skipAutoStart) {
   }
 }
 
+function _syncGaplessButton() {
+  const btn = document.getElementById('gapless-light');
+  if (btn) {
+    btn.classList.toggle('gapless-inactive', !S.gapless);
+    btn.setAttribute('aria-pressed', S.gapless ? 'true' : 'false');
+  }
+  const cb = document.getElementById('gapless-enable');
+  if (cb) cb.checked = !!S.gapless;
+}
+
+function _setCrossfadeRestore(v) {
+  const next = v == null ? null : Math.max(0, Math.min(12, parseInt(v, 10) || 0));
+  S.crossfadeRestore = next;
+  if (next == null) localStorage.removeItem(_uKey('crossfade_restore'));
+  else localStorage.setItem(_uKey('crossfade_restore'), String(next));
+}
+
+function setGapless(on, opts = {}) {
+  const showToast = opts.toast === true;
+  const next = !!on;
+  if (next === S.gapless) {
+    _syncGaplessButton();
+    return;
+  }
+
+  if (next) {
+    _setCrossfadeRestore(S.crossfade);
+    if (S.crossfade !== 0) {
+      S.crossfade = 0;
+      localStorage.setItem(_uKey('crossfade'), '0');
+      _syncCrossfadeButton();
+    }
+  } else {
+    const restore = S.crossfadeRestore == null ? 0 : S.crossfadeRestore;
+    S.crossfade = restore;
+    localStorage.setItem(_uKey('crossfade'), String(restore));
+    _syncCrossfadeButton();
+    _setCrossfadeRestore(null);
+  }
+
+  S.gapless = next;
+  if (S.gapless) localStorage.setItem(_uKey('gapless'), '1');
+  else localStorage.removeItem(_uKey('gapless'));
+  _syncGaplessButton();
+  _syncGaplessWaveformNote();
+  _syncPrefs();
+  if (showToast) toast(t(S.gapless ? 'player.toast.gaplessOn' : 'player.toast.gaplessOff'));
+}
+
+function _crossfadeLabel(v) {
+  return v === 0 ? t('player.autodj.crossfadeOff') : v + 's';
+}
+
+function _syncCrossfadeButton() {
+  const btn = document.getElementById('crossfade-light');
+  if (btn) {
+    btn.classList.toggle('crossfade-inactive', S.crossfade === 0);
+    btn.setAttribute('aria-pressed', S.crossfade > 0 ? 'true' : 'false');
+  }
+  const xfSlider = document.getElementById('xf-slider');
+  const xfVal = document.getElementById('xf-val');
+  if (xfSlider) xfSlider.value = String(S.crossfade);
+  if (xfVal) xfVal.textContent = _crossfadeLabel(S.crossfade);
+
+  const xfSliderDj = document.getElementById('xf-slider-dj');
+  const xfValDj = document.getElementById('xf-val-dj');
+  if (xfSliderDj) xfSliderDj.value = String(S.crossfade);
+  if (xfValDj) xfValDj.textContent = _crossfadeLabel(S.crossfade);
+
+  const mini = document.getElementById('xf-slider-mini');
+  const miniVal = document.getElementById('xf-val-mini');
+  if (mini) mini.value = String(S.crossfade);
+  if (miniVal) miniVal.textContent = _crossfadeLabel(S.crossfade);
+}
+
+function setCrossfade(v) {
+  const next = Math.max(0, Math.min(12, parseInt(v, 10) || 0));
+
+  if (next > 0 && S.gapless) {
+    S.gapless = false;
+    localStorage.removeItem(_uKey('gapless'));
+    _setCrossfadeRestore(null);
+    _syncGaplessButton();
+  }
+
+  S.crossfade = next;
+  localStorage.setItem(_uKey('crossfade'), String(next));
+
+  _syncCrossfadeButton();
+  _syncPrefs();
+  _syncQueueLabel();
+}
+
 // ── ON-DEMAND ART FETCH ───────────────────────────────────────────────────────
 // For songs that have no album-art (not yet scanned), request extraction from
 // the server and patch the art immediately in both the songs array and the DOM.
@@ -1414,8 +1539,9 @@ function refreshQueueUI() {
           ${artOrPlaceholder(cur['album-art'], 'm', 'no-art-sm')}
         </div>
         <div class="qp-np-info">
-          <div class="qp-np-title">${esc(cur.title || cur.filepath?.split('/').pop() || '—')}</div>
+          <div class="qp-np-title">${esc(cur.title || cur.filepath?.split('/').pop() || '\u2014')}</div>
           <div class="qp-np-artist">${esc(cur.artist || '')}</div>
+          ${(() => { const parts=[]; const ext=(cur.filepath||'').split('.').pop().toUpperCase(); if(ext) parts.push(ext); if(cur.bitrate) parts.push(cur.bitrate+' kbps'); if(cur['sample-rate']) parts.push((cur['sample-rate']/1000).toFixed(1).replace('.0','')+' kHz'); if(cur.channels) parts.push(cur.channels===2?'Stereo':cur.channels===1?'Mono':cur.channels+'ch'); const s=parts.join(' \u00b7 '); return s?`<div class="qp-np-tech">${esc(s)}</div>`:''; })()}
           ${cur.rating ? `<div class="qp-np-stars" style="margin-top:3px">${starsHtml(cur.rating)}</div>` : ''}
         </div>
       </div>`;
@@ -6711,9 +6837,14 @@ async function viewHome() {
   if (summary.weekCount  > 0) statsItems.push(`<span class="home-stat"><strong>${summary.weekCount}</strong> ${t('player.home.statWeek')}</span>`);
   if (summary.streak     > 1) statsItems.push(`<span class="home-stat home-stat-streak"><strong>${summary.streak}</strong> ${t('player.home.statStreak')}</span>`);
   const statsHtml = statsItems.length ? `<div class="home-stats-strip">${statsItems.join('<span class="home-stat-sep">·</span>')}</div>` : '';
+  const homeDisplayName = (() => {
+    const name = String(S.username || '').trim();
+    if (!name) return '';
+    return name.charAt(0).toLocaleUpperCase() + name.slice(1);
+  })();
 
   const greetHtml = `<div class="home-greeting">
-    <div class="home-greeting-text">${t(greetKey, { name: esc(S.username || '') })}</div>
+    <div class="home-greeting-text">${t(greetKey, { name: esc(homeDisplayName) })}</div>
     ${statsHtml}
   </div>`;
 
@@ -7563,15 +7694,7 @@ ${_webAnimSupported ? `
   const xfSliderDj = document.getElementById('xf-slider-dj');
   const xfValDj    = document.getElementById('xf-val-dj');
   xfSliderDj.addEventListener('input', () => {
-    const v = parseInt(xfSliderDj.value);
-    xfValDj.textContent = v === 0 ? t('player.autodj.crossfadeOff') : v + 's';
-    S.crossfade = v;
-    localStorage.setItem(_uKey('crossfade'), v);
-    const ps = document.getElementById('xf-slider');
-    const pv = document.getElementById('xf-val');
-    if (ps) { ps.value = v; pv.textContent = v === 0 ? t('player.autodj.crossfadeOff') : v + 's'; }
-    _syncPrefs();
-    _syncQueueLabel();
+    setCrossfade(xfSliderDj.value);
   });
   if (_webAnimSupported) {
     document.getElementById('dj-dice-toggle').addEventListener('change', e => {
@@ -10833,6 +10956,7 @@ function _renderPodcastFeedsView() {
 }
 
 async function viewPodcastEpisodes(feed) {
+  S.podcastFeedId = feed.id;
   setTitle(feed.title || t('player.podcast.episodesTitle'));
   setBack(() => viewPodcastFeeds());
   setNavActive('podcast-feeds');
@@ -11169,15 +11293,7 @@ function viewPlayback() {
   const xfSlider = document.getElementById('xf-slider');
   const xfVal    = document.getElementById('xf-val');
   xfSlider.addEventListener('input', () => {
-    const v = parseInt(xfSlider.value);
-    xfVal.textContent = v === 0 ? t('player.autodj.crossfadeOff') : v + 's';
-    S.crossfade = v;
-    localStorage.setItem(_uKey('crossfade'), v);
-    const dj = document.getElementById('xf-slider-dj');
-    const djv = document.getElementById('xf-val-dj');
-    if (dj) { dj.value = v; djv.textContent = v === 0 ? t('player.autodj.crossfadeOff') : v + 's'; }
-    _syncPrefs();
-    _syncQueueLabel();
+    setCrossfade(xfSlider.value);
   });
 
   // Sleep presets
@@ -11202,10 +11318,7 @@ function viewPlayback() {
 
   // Gapless toggle
   document.getElementById('gapless-enable').addEventListener('change', e => {
-    S.gapless = e.target.checked;
-    S.gapless ? localStorage.setItem(_uKey('gapless'), '1') : localStorage.removeItem(_uKey('gapless'));
-    _syncPrefs();
-    toast(t(S.gapless ? 'player.toast.gaplessOn' : 'player.toast.gaplessOff'));
+    setGapless(e.target.checked, { toast: true });
   });
 
   // Auto-resume toggle
@@ -11354,6 +11467,90 @@ function _sleepFadeOut() {
       _updateSleepLight();
     }
   }, stepMs);
+}
+
+// ── SERVER AUDIO (MPV) CAST ───────────────────────────────────
+function _updateCastBtn() {
+  const btn = document.getElementById('mpv-cast-btn');
+  if (!btn) return;
+  if (S.serverAudioRunning && S.allowMpvCast) {
+    btn.classList.remove('hidden');
+  } else {
+    btn.classList.add('hidden');
+    if (S.castingToMpv) _deactivateCast(false);
+  }
+  btn.classList.toggle('mpv-cast-active', S.castingToMpv);
+  btn.title = t(S.castingToMpv ? 'player.ctrl.castToBrowser' : 'player.ctrl.castToMpv');
+}
+
+async function _refreshServerAudioState() {
+  try {
+    const d = await api('GET', 'api/v1/admin/server-audio');
+    S.serverAudioRunning = !!(d && d.enabled && d.running);
+  } catch (_) {
+    S.serverAudioRunning = false;
+  }
+  _updateCastBtn();
+}
+
+// Immediately mute/load one song into MPV and (optionally) seek
+let _mpvLoadingSong = false;
+async function _mpvLoadSong(filepath, seekTo = 0) {
+  _mpvLoadingSong = true;
+  await api('POST', 'api/v1/server-playback/queue/clear');
+  await api('POST', 'api/v1/server-playback/queue/add', { filepath });
+  if (seekTo > 1) {
+    setTimeout(() => {
+      _mpvLoadingSong = false;
+      api('POST', 'api/v1/server-playback/seek', { position: Math.floor(seekTo) }).catch(() => {});
+    }, 2500);
+  } else {
+    setTimeout(() => { _mpvLoadingSong = false; }, 2500);
+  }
+}
+
+function _deactivateCast(clearMpv = true) {
+  S.castingToMpv = false;
+  audioEl.muted = false;
+  if (_xfadeEl) _xfadeEl.muted = false;
+  if (clearMpv) api('POST', 'api/v1/server-playback/queue/clear').catch(() => {});
+  _updateCastBtn();
+}
+
+async function toggleMpvCast() {
+  if (S.castingToMpv) {
+    _deactivateCast(true);
+    toast(t('player.toast.castingToBrowser'));
+    return;
+  }
+  const s = S.queue[S.idx];
+  if (!s || s.isRadio) {
+    toast(t('player.toast.castQueueEmpty'));
+    return;
+  }
+  try {
+    // Mute browser immediately so there's no audio overlap
+    audioEl.muted = true;
+    if (_xfadeEl) _xfadeEl.muted = true;
+    S.castingToMpv = true;
+    _updateCastBtn();
+    // Load current song into MPV, seek to current position
+    await _mpvLoadSong(s.filepath, audioEl.currentTime);
+    // If browser is currently paused, pause MPV too
+    if (audioEl.paused) {
+      setTimeout(() => {
+        api('POST', 'api/v1/server-playback/set-pause', { paused: true }).catch(() => {});
+      }, 2600);
+    }
+    toast(t('player.toast.castingToMpv'));
+  } catch (err) {
+    // Revert
+    audioEl.muted = false;
+    if (_xfadeEl) _xfadeEl.muted = false;
+    S.castingToMpv = false;
+    _updateCastBtn();
+    toast(t('player.toast.castFailed'));
+  }
 }
 
 // ── RADIO RECORDING ───────────────────────────────────────────
@@ -11689,7 +11886,11 @@ async function _fetchWaveform(filepath) {
   _drawWaveform();  // clear canvas while loading
 
   const wfStatus = document.getElementById('wf-status');
-  if (wfStatus) { wfStatus.textContent = 'Generating waveform…'; wfStatus.classList.add('visible'); }
+  if (wfStatus) {
+    wfStatus.dataset.loading = '1';
+    wfStatus.textContent = 'Generating waveform…';
+    wfStatus.classList.add('visible');
+  }
 
   try {
     const d = await api('GET', `api/v1/db/waveform?filepath=${encodeURIComponent(filepath)}`);
@@ -11701,7 +11902,8 @@ async function _fetchWaveform(filepath) {
       if (!audioEl.paused) _startWaveformRaf();
     }
   } catch(_e) { /* waveform unavailable — silent fail */ } finally {
-    if (wfStatus) { wfStatus.textContent = ''; wfStatus.classList.remove('visible'); }
+    if (wfStatus) { wfStatus.dataset.loading = '0'; }
+    _syncGaplessWaveformNote();
   }
 }
 
@@ -11822,6 +12024,7 @@ function _updateWaveformProgress() {
 
 // ── WAVEFORM RAF LOOP — drives smooth real-time split during playback ─────────
 let _waveformRaf = null;
+let _wfStatusClearTimer = null;
 function _startWaveformRaf() {
   if (_waveformRaf) return;
   (function loop() {
@@ -11832,6 +12035,37 @@ function _startWaveformRaf() {
 function _stopWaveformRaf() {
   if (_waveformRaf) { cancelAnimationFrame(_waveformRaf); _waveformRaf = null; }
   _drawWaveform(); // final redraw at resting position
+}
+
+function _syncGaplessWaveformNote() {
+  const wfStatus = document.getElementById('wf-status');
+  if (!wfStatus) return;
+  if (wfStatus.dataset.loading === '1') return;
+  const cur = S.queue[S.idx];
+  const hasFiniteDuration = !!audioEl.duration && Number.isFinite(audioEl.duration);
+  const inTransitionWindow = hasFiniteDuration
+    && !cur?.isRadio
+    && (audioEl.currentTime <= 10 || (audioEl.duration - audioEl.currentTime) <= 10);
+  if (S.gapless && inTransitionWindow) {
+    if (_wfStatusClearTimer) {
+      clearTimeout(_wfStatusClearTimer);
+      _wfStatusClearTimer = null;
+    }
+    wfStatus.textContent = t('player.player.gaplessCrossfadeOff');
+    wfStatus.classList.add('visible');
+  } else {
+    // Soft fade-out: drop opacity first, clear text after transition ends.
+    if (wfStatus.classList.contains('visible')) {
+      wfStatus.classList.remove('visible');
+      if (_wfStatusClearTimer) clearTimeout(_wfStatusClearTimer);
+      _wfStatusClearTimer = setTimeout(() => {
+        if (!wfStatus.classList.contains('visible') && wfStatus.dataset.loading !== '1') {
+          wfStatus.textContent = '';
+        }
+        _wfStatusClearTimer = null;
+      }, 700);
+    }
+  }
 }
 
 // ── DYNAMIC ALBUM-ART COLOUR THEMING ─────────────────────────
@@ -12023,6 +12257,7 @@ function _getOrCreateXfadeEl() {
   if (_xfadeEl) return _xfadeEl;
   _xfadeEl = document.createElement('audio');
   _xfadeEl.volume = 0;
+  _xfadeEl.muted  = S.castingToMpv; // stay silent in browser when casting
   _xfadeEl.style.display = 'none';
   document.body.appendChild(_xfadeEl);
   _xfadeWired = false;
@@ -12515,6 +12750,7 @@ function _doXfadeHandoff(nextIdx) {
   // Promote the new element
   audioEl = newEl;
   audioEl.volume = vol;
+  audioEl.muted  = S.castingToMpv; // keep castmute state consistent after element swap
 
   // Re-attach all permanent listeners to the new element
   _attachAudioListeners(audioEl);
@@ -12550,6 +12786,10 @@ function _doXfadeHandoff(nextIdx) {
   highlightRow();
   refreshQueueUI();
   loadCuePoints(s.filepath);
+  // Mirror track switch to MPV when casting to server speaker
+  if (S.castingToMpv && !s.isRadio) {
+    _mpvLoadSong(s.filepath).catch(() => {});
+  }
   clearTimeout(scrobbleTimer);
   (function(){ const el = document.getElementById('np-scrobble-status'); if (el) { el.textContent = ''; el.className = 'np-scrobble-status'; } })();
   if (!s.isRadio && !s.isPodcast) {
@@ -12691,6 +12931,7 @@ function _collectPrefs() {
     vol:               localStorage.getItem('ms2_vol_'            + u),
     balance:           localStorage.getItem('ms2_balance_'        + u),
     crossfade:         localStorage.getItem('ms2_crossfade_'      + u),
+    crossfade_restore: localStorage.getItem('ms2_crossfade_restore_' + u),
     gapless:           localStorage.getItem('ms2_gapless_'        + u),
     rg:                localStorage.getItem('ms2_rg_'             + u),
     eq:                localStorage.getItem('ms2_eq_'             + u),
@@ -12780,6 +13021,10 @@ function _applyServerSettings(data) {
     if (balEl) balEl.value = Math.round(bv * 100);
   }
   if (prefs.crossfade     != null) { ls('ms2_crossfade_' + u, prefs.crossfade); S.crossfade = parseInt(prefs.crossfade || '0'); }
+  if (prefs.crossfade_restore != null) {
+    ls('ms2_crossfade_restore_' + u, prefs.crossfade_restore);
+    S.crossfadeRestore = prefs.crossfade_restore === '' ? null : parseInt(prefs.crossfade_restore || '0', 10);
+  }
   if (prefs.gapless       != null) { ls('ms2_gapless_' + u, prefs.gapless); S.gapless = prefs.gapless === '1'; }
   if (prefs.rg            != null) { ls('ms2_rg_' + u, prefs.rg); S.rgEnabled = prefs.rg === '1'; }
   if (prefs.eq            != null) ls('ms2_eq_' + u, prefs.eq);
@@ -12847,6 +13092,9 @@ function _applyServerSettings(data) {
       }
     }
   }
+  _syncCrossfadeButton();
+  _syncGaplessButton();
+  _syncGaplessWaveformNote();
   _applyNavVisibility();
   // Queue: the DB is the source of truth — always restore from it on load.
   // This ensures any browser/device always picks up whatever was last playing.
@@ -13023,6 +13271,7 @@ function showApp() {
       _bootEl.classList.add('hidden');
       if (_bootOnDismiss) { _bootOnDismiss(); _bootOnDismiss = null; }
     }, 600);
+    _bootComplete = true;
   }
   if (_bootEl) _bootEl.classList.remove('hidden');
   _bootMsg('Loading your library…');
@@ -13047,6 +13296,7 @@ function showApp() {
   _updateListenSection();
   // Mark queue btn active (panel is visible by default)
   document.getElementById('queue-btn').classList.add('active');
+  _syncGaplessWaveformNote();
   _initQueueListeners();
   loadPlaylists();
   loadSmartPlaylists();
@@ -13253,12 +13503,18 @@ function showApp() {
     S.allowYoutubeDownload = d.allowYoutubeDownload === true;
     const ytBtn = document.getElementById('youtube-nav-btn');
     if (ytBtn) ytBtn.classList.toggle('hidden', !S.allowYoutubeDownload);
+    // Per-user MPV permissions
+    S.allowMpvCast = d.allowMpvCast === true;
+    S.allowServerRemote = d.allowServerRemote !== false;
     if (d.version) {
       const brand = document.querySelector('.sidebar-brand');
       if (brand) brand.title = `mStream Velvet v${d.version}`;
     }
     _updateListenSection();
   }).catch(() => { S.transInfo = { serverEnabled: false }; });
+
+  // Check if Server Audio (mpv) is enabled and running — show cast button if so
+  _refreshServerAudioState();
 
   // Register Media Session action handlers (OS lock-screen controls)
   if ('mediaSession' in navigator) {
@@ -13276,6 +13532,142 @@ function showApp() {
 function showLogin() {
   document.getElementById('login-screen').style.display = '';
   document.getElementById('app').classList.add('hidden');
+}
+
+async function _rerenderCurrentViewForLanguageChange() {
+  const v = S.view;
+  if (!v) return;
+
+  if (v.startsWith('playlist:')) {
+    await openPlaylist(v.slice('playlist:'.length));
+    return;
+  }
+
+  if (v.startsWith('smart-playlist:')) {
+    const id = parseInt(v.slice('smart-playlist:'.length), 10);
+    if (!Number.isNaN(id)) {
+      await _runSavedSmartPlaylist(id);
+    }
+    return;
+  }
+
+  switch (v) {
+    case 'home':
+      await viewHome();
+      return;
+    case 'shortcuts':
+      await viewShortcuts();
+      return;
+    case 'recent':
+      await viewRecent();
+      return;
+    case 'artists':
+      await viewArtists();
+      return;
+    case 'album-library':
+      await viewAlbumLibrary();
+      return;
+    case 'search':
+      viewSearch();
+      return;
+    case 'rated':
+      await viewRated();
+      return;
+    case 'most-played':
+      await viewMostPlayed();
+      return;
+    case 'played':
+      await viewPlayed();
+      return;
+    case 'files':
+      await viewFiles(S.feDir || '', false);
+      return;
+    case 'autodj':
+      await viewAutoDJ();
+      return;
+    case 'genres':
+      await viewGenres();
+      return;
+    case 'decades':
+      await viewDecades();
+      return;
+    case 'transcode':
+      viewTranscode();
+      return;
+    case 'jukebox':
+      viewJukebox();
+      return;
+    case 'apps':
+      viewApps();
+      return;
+    case 'shared-links':
+      await viewSharedLinks();
+      return;
+    case 'playback':
+      viewPlayback();
+      return;
+    case 'play-history':
+      await viewPlayHistory();
+      return;
+    case 'lastfm':
+      await viewLastFM();
+      return;
+    case 'listenbrainz':
+      await viewListenBrainz();
+      return;
+    case 'discogs':
+      await viewDiscogs();
+      return;
+    case 'subsonic':
+      await viewSubsonic();
+      return;
+    case 'radio':
+      await viewRadio();
+      return;
+    case 'podcasts':
+      await viewPodcasts();
+      return;
+    case 'podcast-feeds':
+      await viewPodcastFeeds();
+      return;
+    case 'podcast-episodes': {
+      let feed = _podcastFeeds.find(f => f.id === S.podcastFeedId);
+      if (!feed) {
+        try { _podcastFeeds = await api('GET', 'api/v1/podcast/feeds'); } catch (_) {}
+        feed = _podcastFeeds.find(f => f.id === S.podcastFeedId);
+      }
+      if (feed) {
+        await viewPodcastEpisodes(feed);
+      } else {
+        await viewPodcastFeeds();
+      }
+      return;
+    }
+    case 'youtube':
+      viewYoutube();
+      return;
+    case 'wrapped':
+      await viewWrapped();
+      return;
+    case 'smart-playlists':
+      await viewSmartPlaylists();
+      return;
+    default:
+      return;
+  }
+}
+
+if (window.I18N?.onChange) {
+  I18N.onChange(() => {
+    // Only re-render if the app is already shown (past login screen)
+    if (document.getElementById('login-screen').style.display === 'none') {
+      void _rerenderCurrentViewForLanguageChange().finally(() => {
+        _syncCrossfadeButton();
+        _syncGaplessButton();
+        _syncGaplessWaveformNote();
+      });
+    }
+  });
 }
 
 // ── EVENTS ────────────────────────────────────────────────────
@@ -13333,6 +13725,68 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 document.getElementById('dj-light').addEventListener('click', () => {
   if (S.view === 'autodj') { S.backFn?.(); } else { viewAutoDJ(); }
 });
+
+// Cast to server speaker (mpv) toggle
+document.getElementById('mpv-cast-btn').addEventListener('click', () => toggleMpvCast());
+
+function _closeCrossfadePopover() {
+  const pop = document.getElementById('crossfade-pop');
+  if (!pop) return;
+  pop.classList.add('hidden');
+}
+
+function _openCrossfadePopover() {
+  const pop = document.getElementById('crossfade-pop');
+  const btn = document.getElementById('crossfade-light');
+  if (!pop || !btn) return;
+  _syncCrossfadeButton();
+  pop.classList.remove('hidden');
+
+  const br = btn.getBoundingClientRect();
+  const pw = pop.offsetWidth || 240;
+  const ph = pop.offsetHeight || 92;
+  const margin = 8;
+  const left = Math.max(margin, Math.min(window.innerWidth - pw - margin, br.left + (br.width / 2) - (pw / 2)));
+  let top = br.top - ph - 10;
+  if (top < margin) top = br.bottom + 10;
+  pop.style.left = Math.round(left) + 'px';
+  pop.style.top = Math.round(top) + 'px';
+}
+
+// Crossfade light in player bar — click to open / close quick slider modal
+document.getElementById('crossfade-light').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const pop = document.getElementById('crossfade-pop');
+  if (!pop || pop.classList.contains('hidden')) _openCrossfadePopover();
+  else _closeCrossfadePopover();
+});
+
+document.getElementById('crossfade-pop-close').addEventListener('click', _closeCrossfadePopover);
+document.getElementById('xf-slider-mini').addEventListener('input', (e) => {
+  setCrossfade(e.target.value);
+});
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#crossfade-pop') || e.target.closest('#crossfade-light')) return;
+  _closeCrossfadePopover();
+});
+
+window.addEventListener('resize', () => {
+  const pop = document.getElementById('crossfade-pop');
+  if (pop && !pop.classList.contains('hidden')) _openCrossfadePopover();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') _closeCrossfadePopover();
+});
+
+// Gapless light in player bar — click to toggle gapless playback
+document.getElementById('gapless-light').addEventListener('click', () => {
+  setGapless(!S.gapless, { toast: true });
+});
+
+_syncCrossfadeButton();
+_syncGaplessButton();
 
 // Back button
 document.getElementById('back-btn').addEventListener('click', () => S.backFn?.());
@@ -14154,9 +14608,13 @@ function _onAudioTimeupdateUI() {
     document.getElementById('time-total').textContent = elapsedFmt;
     document.getElementById('np-time-cur').textContent   = '0:00';
     document.getElementById('np-time-total').textContent = elapsedFmt;
+    _syncGaplessWaveformNote();
     return;
   }
-  if (!audioEl.duration || audioEl.duration === Infinity) return;
+  if (!audioEl.duration || audioEl.duration === Infinity) {
+    _syncGaplessWaveformNote();
+    return;
+  }
   // Media Session position state — throttled to 1 Hz
   if ('mediaSession' in navigator) {
     const _tNow = Date.now();
@@ -14227,6 +14685,7 @@ function _onAudioTimeupdateUI() {
   // Waveform scrubber: update shaded fill to reflect playback position
   _updateWaveformProgress();
   _updateSleepLight();
+  _syncGaplessWaveformNote();
 }
 
 function _attachAudioListeners(el) {
@@ -14256,10 +14715,19 @@ function _detachAudioListeners(el) {
 
 // Sync queue position to DB on user-initiated seek (debounced 1s)
 let _seekSyncTimer = null;
+let _mpvSeekTimer = null;
 function _onAudioSeeked() {
   persistQueue(); // update localStorage immediately
   clearTimeout(_seekSyncTimer);
   _seekSyncTimer = setTimeout(() => _syncQueueToDb(), 1000);
+  // Mirror seek to MPV when casting to server speaker (debounced 400ms to avoid
+  // double-firing on initial load seeks)
+  if (S.castingToMpv && !_mpvLoadingSong) {
+    clearTimeout(_mpvSeekTimer);
+    _mpvSeekTimer = setTimeout(() => {
+      api('POST', 'api/v1/server-playback/seek', { position: Math.floor(audioEl.currentTime) }).catch(() => {});
+    }, 400);
+  }
 }
 
 // Periodic position-only DB sync every 60 s during playback — keeps the

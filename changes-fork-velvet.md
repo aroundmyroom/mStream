@@ -1,6 +1,45 @@
 # mStream Velvet Fork — Combined Change Log
 
-## v6.10.1-velvet — May 2026
+## v6.11.0-velvet — April 2026 — Cast to Speaker · Audio Format Display · Server Remote Redesign
+
+### new: cast to server speaker (MPV Cast)
+- New Cast button in the player bar routes playback to the server's speaker via mpv — browser audio is muted, mpv mirrors every track change at the same position.
+- `castingToMpv` state, `toggleMpvCast()`, `_mpvLoadSong()`, `_deactivateCast()`, `_refreshServerAudioState()` in `webapp/app.js`.
+- `allowMpvCast` per-user opt-in permission flag; admin toggles it per user in Admin → Users.
+- New i18n keys: `player.ctrl.castToMpv/castToBrowser`, `player.toast.casting*`, all 12 locales.
+
+### new: audio format info in queue panel (bitrate · kHz · stereo)
+- Queue panel now-playing card shows e.g. "FLAC · 1027 kbps · 44.1 kHz · Stereo" for the current track.
+- Three new DB columns: `bitrate` (kbps), `sample_rate` (Hz), `channels` — migration auto-runs on first start.
+- Scanner `_needsBitrate` flag populates these on every new or re-scanned file.
+- All `renderMetadataObj` API responses include `bitrate`, `sample-rate`, `channels`.
+- Async fallback in `updateBar()`: if tech-meta missing in queue, fetches from `/api/v1/db/metadata` and refreshes the panel.
+
+### fix: scanner — FLAC/WAV bitrate now correctly extracted
+- Scanner's `_needsBitrate` path used `parseFile` without `duration: true`; lossless formats returned null bitrate.
+- Fix: use `{ skipCovers: true, duration: true }` + filesize/duration fallback calculation for files where music-metadata still returns null.
+
+### new: server remote page — complete redesign
+- Fully rebuilt mobile-optimised remote at `/server-remote`: now-playing bar with art + tech info, transport controls, queue/browse/search tabs, Auto-DJ toggle.
+- Dark/light theme, responsive down to 390 px (iPhone SE).
+
+### new: home screen — full implementation
+- Home view: hero greeting + stats strip, Continue Listening, Recently Added, On This Day, Mood Quick-Picks (Nostalgia / Current Favourites).
+- New `GET /api/v1/db/home-summary` endpoint + `getHomeSummary()` DB helper.
+- Former "Home" nav renamed to **Shortcuts** (2×2 grid icon).
+- 9 new `player.home.*` and `player.shortcuts.*` i18n keys.
+
+### fix: server audio — backend ALSA checks/fix + clearer admin controls
+- Server Audio now includes Linux audio health diagnostics (`/api/v1/server-playback/audio-health`) so admins can verify mpv detection, ALSA tooling (`amixer`/`aplay`), muted mixer controls, and visible sound cards from the admin UI.
+- Added admin-only backend repair action (`POST /api/v1/server-playback/audio-health/fix`) that performs a best-effort unmute + volume set for common ALSA controls (`Master`, `Speaker`, `PCM`, `Headphone`).
+- Added `serverAudio.autoUnmute` config option (default `true`): when enabled, mStream applies the ALSA prep step automatically before starting mpv.
+- Reworked the Admin → Server Audio card so each control is explained (autostart, auto-unmute, detect/start/stop/sound check/fix/open remote), reducing ambiguity around the previous unlabeled workflow.
+- Added explicit per-click action feedback in Admin → Server Audio (busy labels + last-action status), plus a one-click guided test that runs detect/check/fix/start and prints a pass/warn/fail report.
+
+### fix: player i18n — active dynamic views now re-render on language switch
+- Fixed a player-side i18n gap where only static `data-i18n` markup refreshed after changing language. Dynamic screens rendered from `webapp/app.js` kept stale text until you navigated away and back.
+- Added a central current-view re-render path on `I18N.onChange(...)`, covering top-level player views plus stateful screens such as Auto-DJ, Playback, File Explorer, Search, saved playlists, smart-playlist results, and podcast episode lists.
+- Result: switching language while a dynamic player screen is open now updates that screen immediately, instead of leaving mixed-language UI behind.
 
 ### fix: gapless playback — blup/click and silent-track race restored to v6.7.0 behaviour
 - Gapless `_doXfadeHandoff` was changed in v6.7.5 (crossfade volume-spike fix) to stop hard-setting the incoming gain node to 1.0 on element swap. That fix was correct for crossfade (a `setValueCurveAtTime` is still running mid-swap), but it regressed gapless: the incoming `_nextElGain` was left at the end of a 20ms micro-ramp instead of a clean 1.0, causing audible "blups" on every track transition. Also covered the rare race where the 80ms warmup timer fired after `ended` (gain stuck at 0 → next track silent).

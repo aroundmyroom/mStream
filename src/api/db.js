@@ -27,7 +27,10 @@ function renderMetadataObj(row) {
       "last-played": row.lastPlayed ? row.lastPlayed : null,
       "genre": row.genre || null,
       "replaygain-track-db": row.replaygainTrackDb != null ? row.replaygainTrackDb : null,
-      "duration": row.duration != null ? row.duration : null
+      "duration": row.duration != null ? row.duration : null,
+      "bitrate": row.bitrate != null ? row.bitrate : null,
+      "sample-rate": row.sample_rate != null ? row.sample_rate : null,
+      "channels": row.channels != null ? row.channels : null
     }
   };
 }

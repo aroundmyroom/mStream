@@ -21,6 +21,12 @@
 
 Phase 1 (i18n.js engine + admin sidebar + language pickers with real flag-button UI + locale JSON validation on activation) and Phase 3 (full player frontend — app.js + index.html) are complete, including enabled-language filtering in admin and cross-tab language sync (shipped in v6.8.4 and v6.8.5-velvet).
 
+Recent follow-up shipped in v6.10.1-velvet: open player views rendered dynamically in `webapp/app.js` now re-render on language switch instead of keeping stale text until the user navigates away and back.
+
+Recent follow-up shipped in v6.10.1-velvet: Admin → Server Audio now includes explicit control explanations, Linux ALSA sound checks, and a backend unmute fix path (with optional auto-unmute on mpv start).
+
+Recent follow-up shipped in v6.10.1-velvet: Admin → Server Audio actions now show live click feedback and include a guided end-to-end test report to validate speaker output setup.
+
 **Phase 2 — admin template strings (medium effort)**
 
 - [ ] Replace remaining hardcoded English strings in `wrappedAdminView`, `foldersView`, `usersView`, `settingsView`, and `backupView` with `{{ t('admin.*') }}` calls.
