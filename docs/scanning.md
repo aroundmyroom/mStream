@@ -144,6 +144,9 @@ mStream supports two database backends:
 | `art_source` | TEXT | How art was obtained: `embedded`, `directory`, `discogs` |
 | `replaygainTrackDb` | REAL | ReplayGain track gain in dB |
 | `duration` | REAL | Track length in seconds |
+| `bitrate` | INTEGER | Audio bitrate in kbps — see [Audio Format Metadata](#audio-format-metadata) below |
+| `sample_rate` | INTEGER | Sample rate in Hz (e.g. `44100`, `48000`, `96000`) |
+| `channels` | INTEGER | Number of audio channels (1 = mono, 2 = stereo, etc.) |
 | `cuepoints` | TEXT | JSON array of embedded cue sheet markers |
 | `artist_id` | TEXT | 16-char hex MD5 of `artist.toLowerCase().trim()` — stable artist ID for Subsonic API |
 | `album_id` | TEXT | 16-char hex MD5 of `"artist|||album"` (both lowercased) — stable album ID for Subsonic API |
@@ -154,3 +157,46 @@ mStream supports two database backends:
 `artist_id` and `album_id` are computed at scan time and backfilled on startup for any records that predate their introduction.
 
 The engine can be changed in Admin → DB.  A rescan is required after switching engines.
+
+---
+
+## Audio Format Metadata
+
+`bitrate`, `sample_rate`, and `channels` are extracted during the scan and stored in the `files` table. They power the **audio format display** shown in the queue panel (e.g. `FLAC · 1027 kbps · 44.1 kHz · Stereo`).
+
+### Extraction logic
+
+The scanner uses [music-metadata](https://github.com/Borewit/music-metadata) with **`{ skipCovers: true, duration: true }`** to parse each file.
+
+- **`duration: true`** is required to obtain accurate bitrates for lossless formats (FLAC, WAV, AIFF). Without it, music-metadata returns `null` for bitrate on these formats because the bitrate is not stored in their file headers — it must be computed from file size and duration.
+- For MP3, AAC, Opus, and other lossy formats the bitrate is stored in the stream headers and is returned even without `duration: true`.
+
+### Fallback for lossless files
+
+If `music-metadata` still returns a null bitrate after parsing with `duration: true` (e.g. very short files, unusual encoders), the scanner computes an estimate:
+
+```
+bitrate ≈ (file size in bytes × 8) / (duration in seconds × 1000)  [kbps]
+```
+
+This uses `fs.statSync()` on the file and the `duration` already present in the parsed metadata.
+
+### When tech-meta is extracted
+
+Tech-meta (`bitrate`, `sample_rate`, `channels`) is extracted in two situations:
+
+1. **New file** — extracted as part of the full parse on first insertion.
+2. **Existing file with null tech-meta** — if a file is already in the DB but has no bitrate (e.g. inserted before this feature was added, v6.11.0-velvet), the scanner detects the missing columns (`_needsBitrate` flag) and runs a targeted re-parse of just that file without re-inserting the full row.
+
+To populate tech-meta for all existing files, trigger a full rescan from Admin → Scan All. Files that already have bitrate set are skipped; only files with `bitrate IS NULL` are re-parsed.
+
+### Displayed in the UI
+
+The format strip is shown in the **queue panel** next to the now-playing track:
+
+```
+FLAC · 1 027 kbps · 44.1 kHz · Stereo
+MP3 · 320 kbps · 44.1 kHz · Stereo
+```
+
+The values come from the `metadata` object returned by `GET /api/v1/db/metadata` (`bitrate`, `sample-rate`, `channels` fields).
