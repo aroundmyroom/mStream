@@ -1,5 +1,13 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.11.1-velvet — April 2026 — Queue clear persistence fix
+
+### fix: queue clear not persisted across page reload
+- Pressing the trash (clear queue) button showed an empty queue on screen but a page refresh restored all songs.
+- **Clear button** now flushes the empty queue to the DB immediately (no debounce) instead of waiting 2 seconds — prevents F5 from racing the flush.
+- **`restoreQueue()`**: handles an empty stored queue explicitly — sets `S.queue = []; S.idx = -1` and calls `refreshQueueUI()` instead of silently bailing out, so an empty localStorage entry actually clears the in-memory queue.
+- **`_applyServerSettings()`**: only writes a non-empty DB queue to localStorage on boot; empty-queue ownership stays with `persistQueue()` which writes to localStorage immediately on every structural change.
+
 ## v6.11.0-velvet — April 2026 — Cast to Speaker · Audio Format Display · Server Remote Redesign
 
 ### new: cast to server speaker (MPV Cast)

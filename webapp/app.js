@@ -472,7 +472,13 @@ function restoreQueue(silent = false) {
     if (!raw) return;
     data = JSON.parse(raw);
   } catch(_) { return; }
-  if (!Array.isArray(data.queue) || !data.queue.length) return;
+  if (!Array.isArray(data.queue)) return;
+  // Empty queue stored in DB/localStorage — clear state and stop (don't resurrect old songs)
+  if (!data.queue.length) {
+    S.queue = []; S.idx = -1;
+    refreshQueueUI();
+    return;
+  }
 
   // Restore core state — this must always succeed
   S.queue = data.queue;
@@ -13113,10 +13119,9 @@ function _applyServerSettings(data) {
     }
   } else if (data?.queue && Array.isArray(data.queue.queue) && data.queue.queue.length && queueKey) {
     // Always persist server queue to localStorage so restoreQueue() (called by
-    // showApp on boot, or by the visibilitychange handler when server is newer)
-    // always has fresh data.  Never call restoreQueue() directly from here —
-    // the boot path calls it after checkSession returns; the visibility-change
-    // handler calls it only after a savedAt comparison.
+    // showApp on boot) always has fresh data. Only write when non-empty — empty
+    // queue in DB is handled by restoreQueue() reading the empty localStorage
+    // entry that persistQueue() wrote at time of clearing.
     try { localStorage.setItem(queueKey, JSON.stringify(data.queue)); } catch(_) {}
   }
 }
@@ -13443,11 +13448,11 @@ function showApp() {
       // localStorage — otherwise the comparison below would always be equal.
       const _qk = _queueKey();
       let _localSavedAt = 0;
-      if (_qk && settings?.queue?.queue?.length && audioEl.paused) {
+      if (_qk && audioEl.paused) {
         try { const _r = localStorage.getItem(_qk); if (_r) _localSavedAt = JSON.parse(_r)?.savedAt || 0; } catch (_) {}
       }
       if (settings?.prefs) _applyServerSettings(settings);
-      if (audioEl.paused && settings?.queue?.queue?.length) {
+      if (audioEl.paused && settings?.queue && Array.isArray(settings.queue.queue)) {
         const srv = settings.queue;
         if ((srv.savedAt || 0) > _localSavedAt) {
           if (_qk) localStorage.setItem(_qk, JSON.stringify(srv));
@@ -13950,7 +13955,12 @@ document.getElementById('qp-clear-btn').addEventListener('click', () => {
   refreshQueueUI();
   toast(t('player.toast.queueCleared'));
   persistQueue();
-  _syncQueueToDb();
+  // Flush immediately (no debounce) so the DB reflects the empty queue before
+  // the user can refresh the page — prevents stale songs from being restored.
+  clearTimeout(_syncQueueTimer);
+  api('POST', 'api/v1/user/settings', { queue: {
+    queue: [], idx: -1, time: 0, playing: false, savedAt: Date.now(),
+  }}).catch(() => {});
 });
 
 // Logout
