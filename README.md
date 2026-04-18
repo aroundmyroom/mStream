@@ -2,7 +2,7 @@
 
 > **A heavily extended fork of [mStream](https://github.com/IrosTheBeggar/mStream) by [aroundmyroom](https://github.com/aroundmyroom).**
 
-**Current version: [6.9.0-velvet](releases/v6.9.0-velvet.md)** — April 2026
+**Current version: [6.11.1-velvet](releases/v6.11.1-velvet.md)** — April 2026
 
 [![Discord](https://img.shields.io/badge/Discord-mStream%20Velvet-5865F2?logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/KfsTCYrTkS)
 
@@ -63,6 +63,13 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 | Album art services | Discogs only | ✅ Discogs + Deezer + iTunes; each service independently toggled in admin |
 | Metadata fallback | ❌ | ✅ Untagged files get artist/album derived from folder name; admin one-shot backfill for existing entries |
 | Exclude folder | ❌ | ✅ Mark any sub-folder as "Excluded from index" — never scanned; existing entries purged on next scan |
+| Audio format display | ❌ | ✅ Bitrate · sample rate · channel count shown in queue panel for every track |
+| Home screen | ❌ | ✅ Personalised dashboard: Continue Listening, On This Day, Mood Quick-Picks, Most Played |
+| Cast to server speaker | ❌ | ✅ Route playback to the server's own speakers via mpv with per-user permission |
+| Tag Workshop | ❌ | ✅ MusicBrainz-powered batch tag editor: match albums, review track data, bulk-accept casing fixes |
+| AcoustID fingerprinting | ❌ | ✅ Background acoustic fingerprinting to identify untagged files via AcoustID / MusicBrainz |
+| Backup | ❌ | ✅ One-click DB + config backup download from the admin panel |
+| Scan history | ❌ | ✅ `scan_runs` table with per-scan stats; Last Scanned timestamp shown in admin |
 
 ---
 
@@ -193,6 +200,30 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 - Scrobble fires 30 s after track start (`listen_type: "single"`)
 - **Instant "Listening Now" ping** — fires immediately on track start so the current track appears on the LB dashboard in real time
 - Runs alongside Last.fm — both can be active simultaneously; the scrobble status badge shows combined state
+
+### Home Screen
+
+- **Personalised dashboard** shown on login — replaces the blank start screen
+- **Continue Listening** — resume the album or playlist you were last playing
+- **On This Day** — tracks you played on this calendar date in previous years
+- **Mood Quick-Picks** — one-click Auto-DJ presets (Energetic, Chill, Random)
+- **Most Played** shelf — your all-time top songs surfaced at a glance
+- **Drag-to-reorder shelves** — Customize mode lets each user arrange cards in any order or hide individual cards; layout persisted to DB
+
+### Tag Workshop
+
+- **MusicBrainz batch tag editor** — match entire albums against the MusicBrainz database; review per-track artist, title, date, track number suggestions before accepting
+- **Enrich mode** — background job cycles through untagged or poorly-tagged files with AcoustID fingerprint matching; errors and skipped tracks managed separately
+- **Bulk casing fix** — accept consistent title-case / sentence-case corrections across all matched tracks in one click
+- **Shelve / unshelve** — defer ambiguous albums without losing progress
+- Admin-controlled: requires `allowId3Edit` to be enabled
+
+### AcoustID Fingerprinting
+
+- Background acoustic fingerprinting service using `fpcalc` (Chromaprint) bundled in `bin/fpcalc/`
+- Identifies untagged or mis-tagged files by their acoustic fingerprint via the AcoustID + MusicBrainz lookup APIs
+- **Admin → AcoustID** — start / stop the fingerprinting job; live progress shown (queued / done / errors)
+- Results fed directly into Tag Workshop for review before any tags are written
 
 ---
 

@@ -24,6 +24,7 @@
 - Admin UI lives in `webapp/admin/` — always use that for admin-related changes
 - When creating a new release, bump the version in `package.json` first
 - **When bumping the version**, always update the Docker version pin in **both** `README.md` (the `docker pull` example near the bottom of the Installing section) and `docs/docker.md` (the pull example in that file) to the new tag — e.g. `ghcr.io/aroundmyroom/mstream-velvet:vX.Y.Z-velvet`
+- **When bumping the version**, ALSO update the **Current version line** in `README.md` line ~5: `**Current version: [X.Y.Z-velvet](releases/vX.Y.Z-velvet.md)** — Month YYYY` — this is separate from the Docker pin and is often forgotten
 - **Before writing any release notes or changelog entry**, always read the most recent 3–5 release files in `releases/` (sorted by version) to understand what has already been shipped — this prevents re-announcing features that were in a prior release and ensures nothing new gets missed.
 - When implementing a new feature, always cross-check `releases/` + `changes-fork-velvet.md` to confirm it is not already documented. If a feature exists in code but has no release note, add it to the current patch entry.
 - `sqlite3` CLI is not installed on this system; SQLite is accessed via the Node.js built-in `node:sqlite` module (`DatabaseSync`) — Node v24.14.0
@@ -93,7 +94,7 @@ Every new user-visible string MUST use i18n keys — never hardcode text in temp
 Every release follows this exact sequence — do not skip steps:
 
 1. **Bump version** in `package.json` — format `X.Y.Z-velvet`
-2. **Update `README.md`** — version badge link and Docker pin (`ghcr.io/aroundmyroom/mstream-velvet:vX.Y.Z-velvet`)
+2. **Update `README.md`** — two places: (a) **Current version line** near line 5: `**Current version: [X.Y.Z-velvet](releases/vX.Y.Z-velvet.md)** — Month YYYY` AND (b) Docker pin in the Installing section (`ghcr.io/aroundmyroom/mstream-velvet:vX.Y.Z-velvet`)
 3. **Write release notes** — create `releases/vX.Y.Z-velvet.md`
 4. **Update `changes-fork-velvet.md`** — add a versioned entry above the previous one
 5. **Update `docs/API.md`** index if any new endpoint was added

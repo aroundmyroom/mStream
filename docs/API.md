@@ -243,6 +243,104 @@ If you want your tokens to work between reboots you can set the `secret` flag wh
 
 [/scanner/update-cue](API/scanner_update-cue.md) — write cue point data for a file (internal scanner only) *(GitHub Copilot, 2026-03-02)*
 
+`POST /api/v1/scanner/update-tech-meta` — write `bitrate`, `sample_rate`, `channels` for a file (internal scanner only) *(v6.11.0-velvet)*
+
+`POST /api/v1/scanner/update-duration` — write `duration` for a file (internal scanner only)
+
+## Home Screen *(v6.11.0-velvet)*
+
+`GET /api/v1/db/home-summary` — returns personalised home-screen shelves for the authenticated user: `recentlyPlayed`, `onThisDay`, `mostPlayed`. Auth required.
+
+## Server Playback (Cast to Server Speaker) *(v6.11.0-velvet)*
+
+All endpoints require authentication. The mpv process is managed server-side; the browser mutes its own audio while casting.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/server-playback/status` | Current playback state: `{ playing, filepath, position, duration, volume, looping }` |
+| `POST` | `/api/v1/server-playback/set-pause` | Body: `{ pause: bool }`. Start or pause playback |
+| `POST` | `/api/v1/server-playback/seek` | Body: `{ position }` — seek to seconds |
+| `POST` | `/api/v1/server-playback/volume` | Body: `{ volume }` (0–130) |
+| `POST` | `/api/v1/server-playback/next` | Skip to next track in server queue |
+| `POST` | `/api/v1/server-playback/previous` | Go to previous track |
+| `POST` | `/api/v1/server-playback/loop` | Toggle loop mode |
+| `POST` | `/api/v1/server-playback/queue/add` | Body: `{ filepath }` — append a song to the server queue |
+| `POST` | `/api/v1/server-playback/queue/remove` | Body: `{ index }` — remove song at index |
+| `POST` | `/api/v1/server-playback/queue/clear` | Clear the server queue |
+| `POST` | `/api/v1/server-playback/queue/play-index` | Body: `{ index }` — jump to index |
+| `GET` | `/api/v1/server-playback/detect` | Detect mpv binary; returns `{ found, path }` |
+| `POST` | `/api/v1/server-playback/pause` | Alias for set-pause (legacy remote) |
+| `GET` | `/api/v1/server-playback/audio-health` | ALSA/audio health check; returns `{ ok, details[] }` |
+| `POST` | `/api/v1/server-playback/audio-health/fix` | Attempt auto-fix (unmute ALSA master) |
+| `POST` | `/api/v1/server-playback/test-tone` | Play a 1 kHz test tone for 2 s to verify audio output |
+
+Admin endpoint:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/admin/server-audio` | Get Server Audio config (mpv path, enabled flag) |
+| `POST` | `/api/v1/admin/server-audio` | Save Server Audio config. Body: `{ mpvPath, enabled }` |
+| `POST` | `/api/v1/admin/server-audio/start` | Start mpv process |
+| `POST` | `/api/v1/admin/server-audio/stop` | Stop mpv process |
+
+Per-user permission: `allowMpvCast` — toggled via `POST /api/v1/admin/users/allow-mpv-cast`.
+
+See [docs/server-audio.md](server-audio.md) for full setup guide.
+
+## AcoustID Fingerprinting *(v6.9.0-velvet)*
+
+All endpoints require admin.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/acoustid/start` | Start background fingerprinting job |
+| `GET` | `/api/v1/acoustid/status` | Job progress: `{ running, queued, done, errors }` |
+| `POST` | `/api/v1/acoustid/stop` | Stop the fingerprinting job |
+| `GET` | `/api/v1/admin/acoustid/config` | Get AcoustID API key config |
+
+See [docs/acoustid.md](acoustid.md) for full guide.
+
+## Tag Workshop *(v6.9.0-velvet)*
+
+MusicBrainz-powered batch tag editor. Requires `allowId3Edit`.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/tagworkshop/status` | Overall job state and current album being processed |
+| `GET` | `/api/v1/tagworkshop/albums` | List all unreviewed candidate albums |
+| `GET` | `/api/v1/tagworkshop/album/:mb_release_id` | Full per-track suggestion data for one album |
+| `POST` | `/api/v1/tagworkshop/accept` | Accept all suggested tags for an album |
+| `POST` | `/api/v1/tagworkshop/accept-track` | Accept tags for a single track |
+| `POST` | `/api/v1/tagworkshop/skip` | Skip (dismiss) an album without writing tags |
+| `POST` | `/api/v1/tagworkshop/shelve` | Shelve an album for later review |
+| `GET` | `/api/v1/tagworkshop/shelved` | List shelved albums |
+| `POST` | `/api/v1/tagworkshop/unshelve` | Move a shelved album back to the review queue |
+| `POST` | `/api/v1/tagworkshop/bulk-accept-casing` | Accept all queued casing-fix suggestions in one call |
+| `POST` | `/api/v1/tagworkshop/enrich/start` | Start the background AcoustID enrichment job |
+| `POST` | `/api/v1/tagworkshop/enrich/stop` | Stop the enrichment job |
+| `GET` | `/api/v1/tagworkshop/enrich/errors` | List files that failed fingerprint lookup |
+| `POST` | `/api/v1/tagworkshop/enrich/retry-errors` | Re-queue failed files for another lookup attempt |
+
+## Backup *(admin)*
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/admin/backup` | Create a new backup archive (DB + config). Returns `{ filename }` |
+| `GET` | `/api/v1/admin/backups` | List available backup files |
+| `GET` | `/api/v1/admin/backup/download/:filename` | Download a specific backup archive |
+
+See [docs/backup.md](backup.md) for retention and restore guidance.
+
+## Lyrics *(v6.9.0-velvet)*
+
+`GET /api/v1/lyrics?fp=<filepath>` — fetch lyrics for a file. Checks embedded tags first, then queries the configured lyrics provider. Returns `{ lyrics, source }`.
+
+Admin config: `GET/POST /api/v1/admin/lyrics/config` — enable toggle and provider API key.
+
+## Subsonic Scrobble Settings
+
+`GET/POST /api/v1/subsonic/scrobble-settings` — per-user toggle to enable/disable scrobble forwarding when using a Subsonic client. Body: `{ enabled: bool }`.
+
 ## Pages
 
 These endpoints server various parts of the webapp
