@@ -1349,10 +1349,30 @@ export function setup(mstream) {
     }));
   });
 
+  // Sanitise AI-generated playlist names:
+  //   "Path: Eine Kleine Disco Band - (Love In) A Turkish Bath to Relaxed_instant"
+  //   → "Eine Kleine Disco Band - (Love In) A Turkish Bath to Relaxed"
+  // Rules (applied in order):
+  //   1. Strip leading "Path: " (case-insensitive) — AudioMuse-AI prefix
+  //   2. Strip trailing underscore AI suffixes: _instant / _queue / _session
+  //   3. Collapse multiple spaces, trim
+  //   4. Truncate to 120 chars
+  function sanitizePlaylistName(raw) {
+    let n = String(raw).trim();
+    n = n.replace(/^path:\s*/i, '');
+    n = n.replace(/_(instant|queue|session)$/i, '');
+    n = n.replace(/\s{2,}/g, ' ').trim();
+    if (n.length > 120) n = n.slice(0, 120).replace(/\s+\S*$/, '').trim();
+    return n || raw; // fall back to original if we somehow emptied it
+  }
+
   // ── createPlaylist ────────────────────────────────────────────────────────────
   router('createPlaylist', (req, res) => {
-    const name = req.query.name || req.body?.name;
-    if (!name) return sendResponse(req, res, makeError(ERRORS.MISSING_PARAM.code, 'name required'));
+    const rawName = req.query.name || req.body?.name;
+    if (!rawName) return sendResponse(req, res, makeError(ERRORS.MISSING_PARAM.code, 'name required'));
+    // Sanitise AI-generated names: strip common prefixes/suffixes that tools like
+    // AudioMuse-AI append (e.g. "Path: Foo Bar_instant" → "Foo Bar").
+    const name = sanitizePlaylistName(rawName);
 
     const songIds = [].concat(req.query.songId || req.body?.songId || []).flat().filter(Boolean);
 
@@ -1376,8 +1396,9 @@ export function setup(mstream) {
 
   // ── updatePlaylist ────────────────────────────────────────────────────────────
   router('updatePlaylist', (req, res) => {
-    const playlistId = req.query.playlistId || req.body?.playlistId;
-    if (!playlistId) return sendResponse(req, res, makeError(ERRORS.MISSING_PARAM.code, 'playlistId required'));
+    const rawPlaylistId = req.query.playlistId || req.body?.playlistId;
+    if (!rawPlaylistId) return sendResponse(req, res, makeError(ERRORS.MISSING_PARAM.code, 'playlistId required'));
+    const playlistId = sanitizePlaylistName(rawPlaylistId);
 
     const toAdd    = [].concat(req.query.songIdToAdd    || req.body?.songIdToAdd    || []).flat().filter(Boolean);
     const toRemove = [].concat(req.query.songIndexToRemove || req.body?.songIndexToRemove || []).flat().map(Number).filter(n => !isNaN(n));

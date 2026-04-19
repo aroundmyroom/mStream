@@ -160,6 +160,12 @@ Audit completed 2026-03-26. Strategy: **Option A — separate `mobile.css`** loa
 
 > Full design document: [`docs/audio-analysis.md`](docs/audio-analysis.md)
 
+**AudioMuse-AI sidecar — investigate before building native analysis:**
+- [ ] **Subsonic compatibility test** — AudioMuse-AI (AGPL-3.0, Python+Docker) supports Navidrome via OpenSubsonic. Try pointing it at mStream's `/rest` endpoint (`NAVIDROME_URL`, `NAVIDROME_USER`, `NAVIDROME_PASSWORD`) to stream audio for analysis and push generated playlists back. mStream's `createPlaylist`/`updatePlaylist`/`stream` etc. are likely sufficient — verify which calls it makes and whether any are missing.
+- [ ] **If Subsonic bridge works**: use AudioMuse-AI as the sonic intelligence engine (clustering, text search, song paths, similar-song playlists) without building any native analysis — mStream just becomes the player + library, AudioMuse-AI adds AI on top.
+- [ ] **If Subsonic bridge fails**: note which missing endpoints blocked it, fix those in `src/api/subsonic.js`, retry.
+- [ ] **Phase 2 option (deeper integration)**: add an mStream admin toggle for an AudioMuse-AI REST URL; Auto-DJ calls AudioMuse-AI's similarity API for the next track in "Acoustic" mode instead of Last.fm. Real-time sonic similarity rather than batch playlist generation.
+
 **Phase 1 — Backend:**
 - [ ] `audio_features` table (SQLite)
 - [ ] `src/db/audio-analyzer.mjs` — FFmpeg PCM pipe → Essentia WASM → DB write

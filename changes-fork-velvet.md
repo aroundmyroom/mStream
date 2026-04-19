@@ -1,5 +1,57 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.11.2-velvet — April 2026 — Performance & Bug-Fix Bundle
+
+### feat: queue remaining time + per-track estimated start times
+- **Up Next counter** now shows the total remaining playback duration when Auto-DJ is off, e.g. `(12 · 47:32)`. With Auto-DJ enabled the count stays plain (the queue is infinite and constantly shifting, so a total would be misleading).
+- **Queue row tooltips**: when Auto-DJ is off, hovering any upcoming track shows an estimated "starts in ~X:XX" offset (cumulative from current playback position), displayed via the custom `#tip-box` tooltip. Offsets shift correctly from the actual remaining time on the current track.
+
+### feat: context menu — Go to Artist / Go to Album
+- Two new context menu items appear for regular music tracks: **Go to Artist** (navigates to the artist's album list) and **Go to Album** (opens the album song list). Hidden for radio and podcast items, and suppressed when the song has no artist/album tag.
+
+### feat: playlist total duration
+- Playlist views now show an `N songs · Xh Xm XX` metadata line above the song list.
+
+### feat: smart playlist sidebar tooltip
+- Each smart playlist in the sidebar now has a tooltip summarising its filters (genres, year range, rating, played status, play count, starred, artist, sort order, limit).
+
+### fix: paused state not preserved across browser refresh or logout/login
+- When the user paused playback and then refreshed the page (or logged out and back in), mStream would auto-resume instead of staying paused.
+- **Root cause (three layers)**:
+  1. `_onAudioPause()` never called `persistQueue()`, so localStorage could be stale with `playing: true` within the 5-second timer window.
+  2. `Player.toggle()` pause path didn't write to DB immediately.
+  3. Crucially: the `savedAt` guard added in the first fix attempt was *counter-productive* — it actually **protected** old stale `playing: true` localStorage data from being corrected, because `localStorage.savedAt` (flushed every 5 s) is always newer than `DB.savedAt` (flushed every 15 s). So old `playing: true` localStorage entries survived forever.
+- **Fix 1 — `_onAudioPause()`**: calls `persistQueue()` immediately so localStorage gets `playing: false` within milliseconds of any pause.
+- **Fix 2 — `Player.toggle()` pause path**: writes `playing: false` directly to DB without debounce for immediate cross-device sync.
+- **Fix 3 — `_applyServerSettings()` prefer-false rule** (replaces the broken savedAt guard): always writes DB queue to localStorage (so cross-device resume still works), but if localStorage already has `playing: false`, that explicit pause signal is preserved regardless of what the DB says. The DB's stale `playing: true` can never promote a paused state to playing. Cross-device resume on a fresh device still works because a missing localStorage entry means the DB is trusted fully.
+- **Fix 4 — visibilitychange handler**: removed the direct `localStorage.setItem` override from the queue-sync block (was writing raw DB queue, bypassing the prefer-false rule). `_applyServerSettings()` already handles the merge; the handler now just calls `restoreQueue()` when appropriate.
+
+### fix: album songs missing duration in queue
+- Songs added to the queue from the Album Library (via album browse) had `duration: null` — the `_albSongObj()` builder was not copying the `duration` field from the track row. Result: no time display, no estimated-start tooltip, and the Up Next remaining-time total was wrong.
+
+### fix: album library sort — series cards now respect sort order
+- The album library sort was applied to standalone albums only; album series cards were always rendered A–Z regardless of the selected sort.
+- The sort `<select>` dropdown has been replaced by a cycle button (**A–Z → Z–A → ↓ Year → ↑ Year**) that sorts the unified list of series and standalone albums together.
+
+### fix: WAV/AIFF queue panel — audio format info not shown
+- Two bugs prevented WAV and AIFF songs added from the Album Library from showing bitrate/kHz/channel info in the queue NP card:
+  1. The async metadata fetch in `updateBar()` was gated on `s['sample-rate'] == null`, but WAV rows were arriving with the field absent (not `null`) — changed to `== null` with no-falsy check.
+  2. The `/api/v1/db/metadata` response nests data under `metadata`; the code was reading the top-level object directly. Fixed with `meta?.metadata || meta` fallback.
+
+### fix: page slowdown with 100+ songs in queue (art fetch storm)
+- On boot, `restoreQueue()` is called twice (once from `_applyServerSettings`, once from the main boot sequence). Each call triggered `refreshQueueUI()` → `_fetchMissingArt()`, firing one GET `/api/v1/files/art` request per artless song. With 100 queued songs this meant 200 concurrent API calls, exhausting the browser's connection pool and stalling the page.
+- Fixed by adding a `_artFetchInFlight` Set: if a fetch for a given filepath is already in progress, subsequent calls are skipped until the first resolves.
+
+### perf: refreshQueueUI — single O(n) pass for remaining time + start offsets
+- The Up Next remaining time was computed with `slice + reduce` (allocating a sub-array) and the per-track start offsets were computed in a separate `for` loop — two O(n) passes on every `refreshQueueUI()` call (called 20+ times). Merged into one single loop with no array allocation.
+
+### perf: home view — streak calculation no longer blocks the event loop
+- `getHomeSummary()` computed the listening streak by running up to 365 separate SQLite queries (one per calendar day). For a user with a 100-day streak this blocked the Node.js event loop for the duration of 100 sequential DB calls before responding.
+- Replaced with a single `SELECT DISTINCT CAST(started_at / 86400000 AS INTEGER)` query; streak is counted in JS from the returned buckets. The endpoint goes from O(streak) DB hits to always 1.
+
+### perf: home view — recently-added fetch limit reduced
+- The Home view was fetching up to 300 recently-added songs (`_limit × 20`) to build `_limit` album groups (~12 cards). Only the first `_limit` groups are ever displayed. Limit reduced to `_limit × 6` (max 90 songs) — same visual result, ~70% less data per request.
+
 ## v6.11.1-velvet — April 2026 — Queue clear persistence fix
 
 ### fix: queue clear not persisted across page reload

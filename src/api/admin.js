@@ -1303,6 +1303,12 @@ export function setup(mstream) {
       if (req.body.track  !== undefined) tags.track  = req.body.track  ? Number(req.body.track) || null : null;
       if (req.body.disk   !== undefined) tags.disk   = req.body.disk   ? Number(req.body.disk)  || null : null;
       db.updateFileTags(pathInfo.relativePath, pathInfo.vpath, tags);
+      // Sync modified timestamp so the scanner doesn't flag this as stale on next pass
+      // and re-insert the file with a fresh ts (which would flood Recently Added).
+      try {
+        const newMtime = fs.statSync(absPath).mtime.getTime();
+        db.updateFileModified(pathInfo.relativePath, pathInfo.vpath, newMtime);
+      } catch (_) {}
 
       res.json({ ok: true });
     } catch (e) {

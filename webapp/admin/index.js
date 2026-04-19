@@ -1843,42 +1843,52 @@ const usersView = Vue.component('users-view', {
                   <span v-else style="background:var(--raised);color:var(--t2);font-size:.75rem;padding:.15rem .45rem;border-radius:4px;">{{ t('admin.users.roleUser') }}</span>
                 </td>
                 <td>
-                  <div style="display:flex;flex-direction:column;gap:.3rem;">
+                  <div style="display:flex;flex-direction:column;gap:.3rem;min-width:110px;">
                     <button type="button" class="btn-small btn-flat"
                       :title="v['allow-radio-recording'] ? 'Click to disable radio recording' : 'Click to enable radio recording'"
-                      :style="v['allow-radio-recording'] ? 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);font-weight:600;' : 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);font-weight:600;'"
-                      style="text-align:left;width:100%;"
+                      :style="v['allow-radio-recording'] ? 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);' : 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);'"
+                      style="display:flex;align-items:center;width:100%;gap:0;font-weight:600;"
                       @click="toggleRadioRecording(k, v)">
-                      &#9679;&nbsp;Record&nbsp;<span style="opacity:.6;font-size:.68rem;">{{v['allow-radio-recording'] ? 'ON' : 'off'}}</span>
+                      <span style="display:inline-block;width:18px;text-align:center;flex-shrink:0;">&#9679;</span>
+                      <span style="flex:1;text-align:left;">Record</span>
+                      <span style="font-size:.68rem;opacity:.6;font-weight:400;margin-left:4px;">{{v['allow-radio-recording'] ? 'ON' : 'off'}}</span>
                     </button>
                     <button type="button" class="btn-small btn-flat"
                       :title="v['allow-youtube-download'] ? 'Click to disable YouTube download' : 'Click to enable YouTube download'"
-                      :style="v['allow-youtube-download'] ? 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);font-weight:600;' : 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);font-weight:600;'"
-                      style="text-align:left;width:100%;"
+                      :style="v['allow-youtube-download'] ? 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);' : 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);'"
+                      style="display:flex;align-items:center;width:100%;gap:0;font-weight:600;"
                       @click="toggleYoutubeDownload(k, v)">
-                      &#9654;&nbsp;YouTube&nbsp;<span style="opacity:.6;font-size:.68rem;">{{v['allow-youtube-download'] ? 'ON' : 'off'}}</span>
+                      <span style="display:inline-block;width:18px;text-align:center;flex-shrink:0;">&#9654;</span>
+                      <span style="flex:1;text-align:left;">YouTube</span>
+                      <span style="font-size:.68rem;opacity:.6;font-weight:400;margin-left:4px;">{{v['allow-youtube-download'] ? 'ON' : 'off'}}</span>
                     </button>
                     <button type="button" class="btn-small btn-flat"
                       :title="v['allow-upload'] !== false ? 'Click to disable file upload' : 'Click to enable file upload'"
-                      :style="v['allow-upload'] === false ? 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);font-weight:600;' : 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);font-weight:600;'"
-                      style="text-align:left;width:100%;"
+                      :style="v['allow-upload'] === false ? 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);' : 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);'"
+                      style="display:flex;align-items:center;width:100%;gap:0;font-weight:600;"
                       @click="toggleUpload(k, v)">
-                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" style="vertical-align:-.15em;margin-right:3px"><path d="m3.75 2.75h8.5m-8.5 6.5 4-3.5 4 3.5m-4 5v-8.5"/></svg>Upload&nbsp;<span style="opacity:.6;font-size:.68rem;">{{v['allow-upload'] === false ? 'off' : 'ON'}}</span>
+                      <span style="display:inline-block;width:18px;text-align:center;flex-shrink:0;"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="m3.75 2.75h8.5m-8.5 6.5 4-3.5 4 3.5m-4 5v-8.5"/></svg></span>
+                      <span style="flex:1;text-align:left;">Upload</span>
+                      <span style="font-size:.68rem;opacity:.6;font-weight:400;margin-left:4px;">{{v['allow-upload'] === false ? 'off' : 'ON'}}</span>
                     </button>
                     <template v-if="mpvConfigured">
                       <button type="button" class="btn-small btn-flat"
                         :title="v['allow-server-remote'] ? 'Click to revoke /server-remote access' : 'Click to allow /server-remote access'"
-                        :style="v['allow-server-remote'] ? 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);font-weight:600;' : 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);font-weight:600;'"
-                        style="text-align:left;width:100%;"
+                        :style="v['allow-server-remote'] ? 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);' : 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);'"
+                        style="display:flex;align-items:center;width:100%;gap:0;font-weight:600;"
                         @click="toggleServerRemote(k, v)">
-                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" style="vertical-align:-.15em;margin-right:3px"><rect x="2" y="3" width="12" height="8" rx="1.5"/><path d="M5.5 13.5h5M8 11.5v2"/></svg>Remote&nbsp;<span style="opacity:.6;font-size:.68rem;">{{v['allow-server-remote'] ? 'ON' : 'off'}}</span>
+                        <span style="display:inline-block;width:18px;text-align:center;flex-shrink:0;"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><rect x="2" y="3" width="12" height="8" rx="1.5"/><path d="M5.5 13.5h5M8 11.5v2"/></svg></span>
+                        <span style="flex:1;text-align:left;">Remote</span>
+                        <span style="font-size:.68rem;opacity:.6;font-weight:400;margin-left:4px;">{{v['allow-server-remote'] ? 'ON' : 'off'}}</span>
                       </button>
                       <button type="button" class="btn-small btn-flat"
                         :title="v['allow-mpv-cast'] ? 'Click to revoke MPV cast button access' : 'Click to allow MPV cast button in player'"
-                        :style="v['allow-mpv-cast'] ? 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);font-weight:600;' : 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);font-weight:600;'"
-                        style="text-align:left;width:100%;"
+                        :style="v['allow-mpv-cast'] ? 'background:rgba(40,167,69,.12);color:#28a745;border-color:rgba(40,167,69,.35);' : 'background:rgba(220,50,50,.12);color:#e05555;border-color:rgba(220,50,50,.35);'"
+                        style="display:flex;align-items:center;width:100%;gap:0;font-weight:600;"
                         @click="toggleMpvCastPerm(k, v)">
-                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" style="vertical-align:-.15em;margin-right:3px"><path d="M2 10.5a8 8 0 0 1 12 0M4.5 12.5a5 5 0 0 1 7 0M8 14.5v.01"/></svg>Cast&nbsp;<span style="opacity:.6;font-size:.68rem;">{{v['allow-mpv-cast'] ? 'ON' : 'off'}}</span>
+                        <span style="display:inline-block;width:18px;text-align:center;flex-shrink:0;"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M2 10.5a8 8 0 0 1 12 0M4.5 12.5a5 5 0 0 1 7 0M8 14.5v.01"/></svg></span>
+                        <span style="flex:1;text-align:left;">Cast</span>
+                        <span style="font-size:.68rem;opacity:.6;font-weight:400;margin-left:4px;">{{v['allow-mpv-cast'] ? 'ON' : 'off'}}</span>
                       </button>
                     </template>
                   </div>
@@ -4588,6 +4598,8 @@ const acoustidView = Vue.component('acoustid-view', {
       running:  false,
       stopping: false,
       stats: { total: 0, found: 0, not_found: 0, errors: 0, pending: 0, queued: 0 },
+      startedAt: null,
+      rateWindow: [], // [{processed, at}] rolling 10-min window for rate calc
       _pollTimer: null,
     };
   },
@@ -4597,6 +4609,45 @@ const acoustidView = Vue.component('acoustid-view', {
       const t = this.stats.total || 0;
       if (!t) return 0;
       return Math.round((this.fingerprinted / t) * 100);
+    },
+    elapsedLabel() {
+      if (!this.startedAt || !this.running) return null;
+      const s = Math.floor((Date.now() - this.startedAt) / 1000);
+      const m = Math.floor(s / 60) % 60, h = Math.floor(s / 3600) % 24, d = Math.floor(s / 86400);
+      if (d > 0) return d + 'd ' + h + 'h ' + m + 'm';
+      if (h > 0) return h + 'h ' + m + 'm';
+      return m + 'm';
+    },
+    actualRatePerSec() {
+      if (!this.running || this.rateWindow.length < 2) return null;
+      const oldest = this.rateWindow[0];
+      const newest = this.rateWindow[this.rateWindow.length - 1];
+      const elapsed = (newest.at - oldest.at) / 1000;
+      if (elapsed < 60) return null;
+      const processed = newest.processed - oldest.processed;
+      if (processed <= 0) return null;
+      return processed / elapsed;
+    },
+    rateStatus() {
+      if (!this.running) return null;
+      if (this.rateWindow.length < 2) return 'measuring';
+      const oldest = this.rateWindow[0];
+      const newest = this.rateWindow[this.rateWindow.length - 1];
+      const elapsed = (newest.at - oldest.at) / 1000;
+      if (elapsed < 60) return 'measuring';
+      const processed = newest.processed - oldest.processed;
+      if (processed <= 0) return 'stalled';
+      return 'ok';
+    },
+    etaLabel() {
+      const rate = this.actualRatePerSec;
+      if (!rate) return null;
+      const remaining = (this.stats.queued || 0) + (this.stats.pending || 0);
+      if (remaining <= 0) return null;
+      const sec = remaining / rate;
+      if (sec < 3600) return Math.ceil(sec / 60) + 'm';
+      if (sec < 86400) return (sec / 3600).toFixed(1) + 'h';
+      return (sec / 86400).toFixed(1) + 'd';
     },
     statusLabel() {
       if (this.stopping) return this.t('admin.acoustid.statusStopping');
@@ -4696,7 +4747,14 @@ const acoustidView = Vue.component('acoustid-view', {
                   </tr>
                 </tbody>
               </table>
-              <p style="margin-top:0.75rem;font-size:0.78rem;color:#888;">{{ t('admin.acoustid.rateNote') }}</p>
+              <div v-if="running" style="margin-top:0.75rem;font-size:0.8rem;color:#aaa;">
+                <span v-if="elapsedLabel">{{ t('admin.acoustid.elapsedLabel') }}: <b>{{ elapsedLabel }}</b></span>
+                <span v-if="rateStatus === 'ok'"> &bull; {{ t('admin.acoustid.liveRate') }}: <b>~{{ actualRatePerSec.toFixed(2) }}/s</b></span>
+                <span v-if="rateStatus === 'ok' && etaLabel"> &bull; {{ t('admin.acoustid.eta') }}: <b>~{{ etaLabel }}</b></span>
+                <span v-if="rateStatus === 'measuring'" style="color:#888;"> &bull; {{ t('admin.acoustid.rateCalcWait') }}</span>
+                <span v-if="rateStatus === 'stalled'" style="color:#e57373;"> &bull; {{ t('admin.acoustid.rateStalled') }}</span>
+              </div>
+              <p style="margin-top:0.5rem;font-size:0.78rem;color:#666;">{{ t('admin.acoustid.rateNote') }}</p>
             </div>
             <div class="card-action" style="display:flex;gap:0.5rem;">
               <button class="btn" v-on:click="startScan()" :disabled="!canStart">
@@ -4732,10 +4790,20 @@ const acoustidView = Vue.component('acoustid-view', {
     async loadStatus() {
       try {
         const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/acoustid/status` });
-        this.running          = !!res.data.running;
-        this.stopping         = !!res.data.stopping;
-        this.fpcalcAvailable  = res.data.fpcalcAvailable !== false;
+        this.running         = !!res.data.running;
+        this.stopping        = !!res.data.stopping;
+        this.startedAt       = res.data.startedAt || null;
+        this.fpcalcAvailable = res.data.fpcalcAvailable !== false;
         if (res.data.stats) this.stats = res.data.stats;
+        if (this.running) {
+          const now = Date.now();
+          this.rateWindow.push({ processed: this.fingerprinted, at: now });
+          // Keep only last 10 minutes of samples (120 polls at 5s each)
+          const cutoff = now - 10 * 60 * 1000;
+          while (this.rateWindow.length > 1 && this.rateWindow[0].at < cutoff) this.rateWindow.shift();
+        } else {
+          this.rateWindow = [];
+        }
       } catch(_e) {}
     },
     async save() {

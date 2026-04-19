@@ -604,6 +604,7 @@ function norm(s) {
     rating:     m.rating   || null,
     hash:       m.hash     || null,
     filepath:   s.filepath,
+    duration:      m.duration      || null,
     bitrate:       m.bitrate        || null,
     'sample-rate': m['sample-rate'] || null,
     channels:      m.channels      || null,
@@ -912,6 +913,18 @@ const Player = {
         api('POST', 'api/v1/wrapped/pause', { eventId: _wrappedEventId }).catch(() => {});
       }
       audioEl.pause();
+      // Flush pause state to DB immediately (no debounce) so that a page
+      // refresh or another device/tab picks up playing:false without delay.
+      clearTimeout(_syncQueueTimer);
+      _syncQueueTimer = null;
+      if (S.token && S.username) {
+        api('POST', 'api/v1/user/settings', { queue: {
+          queue: S.queue, idx: S.idx,
+          time: audioEl.currentTime || 0,
+          playing: false,
+          savedAt: Date.now(),
+        }}).catch(() => {});
+      }
       if (S.castingToMpv) api('POST', 'api/v1/server-playback/set-pause', { paused: true }).catch(() => {});
     }
   },
@@ -973,13 +986,14 @@ const Player = {
     albumEl.textContent = albumYear;
     albumEl.classList.toggle('hidden', !albumYear);
     // If tech info is missing, fetch it async and update queue panel when ready
-    if (!s.isRadio && !s.isPodcast && s.bitrate == null && s.filepath) {
+    if (!s.isRadio && !s.isPodcast && s.bitrate == null && s['sample-rate'] == null && s.filepath) {
       api('POST', 'api/v1/db/metadata', { filepath: s.filepath }).then(meta => {
         if (S.queue[S.idx] !== s) return; // song changed, ignore
-        if (meta.bitrate != null)        { s.bitrate        = meta.bitrate; }
-        if (meta['sample-rate'] != null) { s['sample-rate'] = meta['sample-rate']; }
-        if (meta.channels != null)       { s.channels       = meta.channels; }
-        if (s.bitrate != null) { refreshQueueUI(); persistQueue(); }
+        const m = meta?.metadata || meta; // response is { filepath, metadata:{...} }
+        if (m?.bitrate != null)          { s.bitrate        = m.bitrate; }
+        if (m?.['sample-rate'] != null)  { s['sample-rate'] = m['sample-rate']; }
+        if (m?.channels != null)         { s.channels       = m.channels; }
+        if (s.bitrate != null || s['sample-rate'] != null) { refreshQueueUI(); persistQueue(); }
       }).catch(() => {});
     }
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -1317,6 +1331,7 @@ async function autoDJPrefetch() {
     // Only push if nothing was added while we were waiting (autoDJFetch race guard)
     if (S.queue.length <= S.idx + 1) {
       _pruneQueue();
+      song._dj = true;
       S.queue.push(song);
       _wfPrefetchEnqueue(song.filepath);
       refreshQueueUI();      // update queue panel FIRST so it's visible before strip appears
@@ -1355,6 +1370,7 @@ async function autoDJFetch() {
     } while (_djSongBlocked(song) && attempts < 10);
     _djPushArtistHistory(song.artist);
     _pruneQueue();
+    song._dj = true;
     S.queue.push(song);
     _wfPrefetchEnqueue(song.filepath);
     refreshQueueUI();      // update queue panel FIRST so it's visible before strip appears
@@ -1494,12 +1510,19 @@ function setCrossfade(v) {
 // container — DOM element that holds the rendered rows (.q-art or .row-art divs)
 // selector  — CSS selector for the art container within each row
 // rowAttr   — data attribute on each row that holds the index into songs[]
+// Track in-flight art requests to prevent duplicate concurrent fetches when
+// refreshQueueUI() is called multiple times before the first batch returns.
+const _artFetchInFlight = new Set();
+
 function _fetchMissingArt(songs, container, selector, rowAttr) {
   if (!songs || !container) return;
   songs.forEach((s, i) => {
     if (s['album-art'] || s.isRadio || s.isPodcast || !s.filepath) return;
+    if (_artFetchInFlight.has(s.filepath)) return; // already fetching — skip duplicate
+    _artFetchInFlight.add(s.filepath);
     api('GET', `api/v1/files/art?fp=${encodeURIComponent(s.filepath)}`)
       .then(d => {
+        _artFetchInFlight.delete(s.filepath);
         if (!d || !d.aaFile) return;
         s['album-art'] = d.aaFile;
         // Patch every matching row in this container
@@ -1515,7 +1538,7 @@ function _fetchMissingArt(songs, container, selector, rowAttr) {
           if (npArt) npArt.innerHTML = `<img src="${artUrl(d.aaFile,'m')}" alt="" loading="lazy">`;
         }
       })
-      .catch(() => {});
+      .catch(() => { _artFetchInFlight.delete(s.filepath); });
   });
 }
 
@@ -1532,9 +1555,27 @@ function refreshQueueUI() {
     badge.classList.add('show');
   } else { badge.classList.remove('show'); }
 
-  // "Up Next" count (songs after current)
+  // "Up Next" count (songs after current).
+  // Also pre-compute cumulative start offsets (Auto-DJ off only) in the SAME
+  // single pass — avoids the previous separate slice+reduce + for-loop (2×O(n)).
   const upNext = S.idx >= 0 ? Math.max(0, S.queue.length - S.idx - 1) : S.queue.length;
-  cnt.textContent = upNext ? `(${upNext})` : '';
+  const _startOffsets = [];
+  let _remainSecs = 0;
+  if (!S.autoDJ && S.idx >= 0) {
+    let _acc = Math.max(0, (S.queue[S.idx]?.duration || 0) - (audioEl?.currentTime || 0));
+    for (let _i = S.idx + 1; _i < S.queue.length; _i++) {
+      const _dur = S.queue[_i]?.duration || 0;
+      _startOffsets[_i] = _acc;
+      _acc += _dur;
+      _remainSecs += _dur;
+    }
+  }
+  if (!S.autoDJ && upNext > 0) {
+    const remainStr = _remainSecs > 5 ? ' · ' + fmt(_remainSecs) : '';
+    cnt.textContent = `(${upNext}${remainStr})`;
+  } else {
+    cnt.textContent = upNext ? `(${upNext})` : '';
+  }
 
   // Now Playing card
   const cur = S.queue[S.idx];
@@ -1575,8 +1616,9 @@ function refreshQueueUI() {
     const sep = (s._discLabel && s._discLabel !== prevLabel)
       ? `<div class="q-disc-sep" draggable="true" data-disc-label="${esc(s._discLabel)}" title="${t('player.ctrl.queueDragDisc')}"><span>${esc(s._discLabel)}</span></div>`
       : '';
+    const estStart = (!isActive && _startOffsets[i] > 0) ? ` title="~${fmt(_startOffsets[i])}"` : '';
     return sep + `
-      <div class="q-item${isActive ? ' q-active' : ''}" data-qi="${i}" draggable="true">
+      <div class="q-item${isActive ? ' q-active' : ''}${s._dj ? ' q-dj' : ''}" data-qi="${i}" draggable="true"${estStart}>
         <div class="q-drag-handle" title="${t('player.ctrl.queueDragHandle')}">
           <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" opacity=".7">
             <circle cx="3" cy="2.5" r="1.2"/><circle cx="7" cy="2.5" r="1.2"/>
@@ -1593,8 +1635,9 @@ function refreshQueueUI() {
         </div>
         <div class="q-info">
           <div class="q-title">${esc(s.title || s.filepath?.split('/').pop() || '?')}</div>
-          <div class="q-artist">${esc(s.artist || '')}</div>
+          <div class="q-artist">${esc(s.artist || '')}${s._dj ? '<span class="q-dj-tag">Auto&#8202;DJ</span>' : ''}</div>
         </div>
+        ${s.duration ? `<div class="q-dur">${fmt(s.duration)}</div>` : ''}
         <button class="q-remove" data-qi="${i}" title="${t('player.ctrl.queueRemove')}">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
@@ -2045,8 +2088,12 @@ function showCtxMenu(x, y) {
   });
   menu.querySelector('.ctx-delete-rec').classList.toggle('hidden', !canDelete);
   menu.querySelector('.ctx-delete-rec-divider').classList.toggle('hidden', !canDelete);
+  // Show go-to-artist/album only for regular music tracks (not radio, podcast, etc.)
+  const isNavSong = song && !song.isRadio && !song.isPodcast && !song.isYoutube;
+  menu.querySelector('.ctx-go-artist').classList.toggle('hidden', !isNavSong || !song.artist);
+  menu.querySelector('.ctx-go-album').classList.toggle('hidden', !isNavSong || !song.album);
   // Keep within viewport
-  const mw = 180, mh = canDelete ? 230 : 200;
+  const mw = 180, mh = canDelete ? 260 : (isNavSong ? 230 : 200);
   const left = Math.min(x, window.innerWidth  - mw - 8);
   const top  = Math.min(y, window.innerHeight - mh - 8);
   menu.style.left = left + 'px';
@@ -5081,9 +5128,12 @@ async function openPlaylist(name) {
     const songs = d.map(item => ({ ...norm(item), _plid: item.id }));
     S.curSongs = songs;
     if (!songs.length) { setBody('<div class="empty-state">This playlist is empty</div>'); return; }
+    const totalDurSec = songs.reduce((sum, s) => sum + (s.duration || 0), 0);
+    const plMeta = `${songs.length} ${songs.length === 1 ? 'song' : 'songs'}${totalDurSec > 5 ? ' · ' + fmt(totalDurSec) : ''}`;
     const body = document.getElementById('content-body');
     body.innerHTML = `
-      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;">
+        <span class="pl-meta-line">${esc(plMeta)}</span>
         <button id="pl-save-cur-btn" class="btn-sm">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
           Save current queue into "${esc(name)}"
@@ -5542,6 +5592,7 @@ function _albSongObj(track, album, discLabel, discIndex) {
     track       : track.number  || null,
     disk        : discIndex     || null,
     'album-art' : track.aaFile  || null,
+    duration    : track.duration || null,
     hash        : null,
     rating      : null,
     genre       : null,
@@ -5587,6 +5638,13 @@ async function viewAlbumLibrary() {
     const seriesSorted     = [...series].sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }));
     const standaloneSorted = [...standaloneAlb].sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }));
 
+    // Compute a representative year for each series (max year of its albums)
+    const _seriesYear = new Map();
+    series.forEach(s => {
+      const yrs = (_albLib.bySeriesId[s.id] || []).map(a => parseInt(a.year) || 0);
+      _seriesYear.set(s.id, yrs.length ? Math.max(...yrs) : 0);
+    });
+
     // Collect distinct albumsOnly source vpaths present in the data (only show pills for 2+)
     const sourcesInData = [...new Set([
       ...albums.map(a => a.sourceVpath),
@@ -5595,6 +5653,12 @@ async function viewAlbumLibrary() {
     const showSourcePills = sourcesInData.length >= 2;
     const activeSources = new Set(sourcesInData);
 
+    // View preferences — sort order and density — persisted in localStorage
+    const _sortKey    = 'ms2_alb_sort_'    + S.username;
+    const _densityKey = 'ms2_alb_density_' + S.username;
+    let curSort    = localStorage.getItem(_sortKey)    || 'name';
+    let curDensity = localStorage.getItem(_densityKey) || 'comfy';
+
     const body = document.getElementById('content-body');
     body.innerHTML = `
       <div class="fe-filter-row">
@@ -5602,6 +5666,11 @@ async function viewAlbumLibrary() {
         <input id="allib-filter" class="fe-filter-input" type="text" placeholder="${t('player.albums.searchAlbumsOrSeriesPlaceholder')}" autocomplete="off">
         <span id="allib-count" class="fe-match-count"></span>
         <button id="allib-clear" class="fe-filter-clear hidden" title="${t('player.ctrl.clearFilter')}">✕</button>
+        <div class="allib-view-controls">
+          <button id="allib-sort" class="allib-density-btn allib-sort-btn" title="${t('player.albums.sortTitle')}"></button>
+          <button class="allib-density-btn" data-density="comfy" title="${t('player.albums.densityComfy')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="6" height="6" rx="1"/><rect x="8" y="0" width="6" height="6" rx="1"/><rect x="0" y="8" width="6" height="6" rx="1"/><rect x="8" y="8" width="6" height="6" rx="1"/></svg></button>
+          <button class="allib-density-btn" data-density="compact" title="${t('player.albums.densityCompact')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="4" height="4" rx=".5"/><rect x="5" y="0" width="4" height="4" rx=".5"/><rect x="10" y="0" width="4" height="4" rx=".5"/><rect x="0" y="5" width="4" height="4" rx=".5"/><rect x="5" y="5" width="4" height="4" rx=".5"/><rect x="10" y="5" width="4" height="4" rx=".5"/><rect x="0" y="10" width="4" height="4" rx=".5"/><rect x="5" y="10" width="4" height="4" rx=".5"/><rect x="10" y="10" width="4" height="4" rx=".5"/></svg></button>
+        </div>
       </div>
       ${showSourcePills ? `<div class="search-vpath-pills" id="allib-source-pills">${sourcesInData.map(v => `<button class="dj-vpath-pill on" data-alb-source="${esc(v)}">${esc(v)}</button>`).join('')}</div>` : ''}
       <div id="allib-grid" class="album-grid"></div>`;
@@ -5647,21 +5716,37 @@ async function viewAlbumLibrary() {
     }
 
     function render(filter) {
+      // Apply density class to grid
+      grid.className = 'album-grid' + (curDensity === 'compact' ? ' album-grid--compact' : '');
+      // Build unified list of all items (series + standalone) so sorting affects everything
+      const allItems = [
+        ...series.map(s => ({ type: 'ser', item: s, name: s.displayName, year: _seriesYear.get(s.id) || 0 })),
+        ...standaloneAlb.map(a => ({ type: 'alb', item: a, name: a.displayName, year: parseInt(a.year) || 0 })),
+      ];
+      if (curSort === 'year-desc') {
+        allItems.sort((a, b) => b.year - a.year || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      } else if (curSort === 'year-asc') {
+        allItems.sort((a, b) => a.year - b.year || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      } else if (curSort === 'name-desc') {
+        allItems.sort((a, b) => b.name.localeCompare(a.name, undefined, { sensitivity: 'base' }));
+      } else {
+        allItems.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      }
       const lc = (filter || '').toLowerCase().trim();
       let html = '';
       let count = 0;
 
-      for (const s of seriesSorted) {
-        if (showSourcePills && !activeSources.has(s.sourceVpath)) continue;
-        if (lc && !s.displayName.toLowerCase().includes(lc)) continue;
-        html += seriesCard(s);
-        count++;
-      }
-      for (const a of standaloneSorted) {
-        if (showSourcePills && !activeSources.has(a.sourceVpath)) continue;
-        if (lc && !a.displayName.toLowerCase().includes(lc) && !(a.artist||'').toLowerCase().includes(lc)) continue;
-        html += albumCard(a);
-        count++;
+      for (const { type, item } of allItems) {
+        if (showSourcePills && !activeSources.has(item.sourceVpath)) continue;
+        if (type === 'ser') {
+          if (lc && !item.displayName.toLowerCase().includes(lc)) continue;
+          html += seriesCard(item);
+          count++;
+        } else {
+          if (lc && !item.displayName.toLowerCase().includes(lc) && !(item.artist || '').toLowerCase().includes(lc)) continue;
+          html += albumCard(item);
+          count++;
+        }
       }
       grid.innerHTML = html || '<div class="empty-state">No albums found</div>';
       countEl.textContent = lc ? `${count} result${count !== 1 ? 's' : ''}` : '';
@@ -5678,6 +5763,31 @@ async function viewAlbumLibrary() {
       filterInput.value = '';
       filterClear.classList.add('hidden');
       render('');
+    });
+
+    // Sort cycle button
+    const _sortCycle = ['name', 'name-desc', 'year-desc', 'year-asc'];
+    const _sortLabels = { 'name': 'A–Z', 'name-desc': 'Z–A', 'year-desc': '↓ Year', 'year-asc': '↑ Year' };
+    const sortBtn = body.querySelector('#allib-sort');
+    function _updateSortBtn() { sortBtn.textContent = _sortLabels[curSort] || 'A–Z'; }
+    _updateSortBtn();
+    sortBtn.addEventListener('click', () => {
+      const idx = _sortCycle.indexOf(curSort);
+      curSort = _sortCycle[(idx + 1) % _sortCycle.length];
+      localStorage.setItem(_sortKey, curSort);
+      _updateSortBtn();
+      render(filterInput.value);
+    });
+
+    // Density toggle buttons
+    body.querySelectorAll('.allib-density-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.density === curDensity);
+      btn.addEventListener('click', () => {
+        curDensity = btn.dataset.density;
+        localStorage.setItem(_densityKey, curDensity);
+        body.querySelectorAll('.allib-density-btn').forEach(b => b.classList.toggle('active', b === btn));
+        render(filterInput.value);
+      });
     });
 
     // Source filter pills (only present when 2+ albumsOnly vpaths exist)
@@ -6653,10 +6763,13 @@ async function doSearch(q) {
     }, signal);
     // A newer search has already taken over — discard this stale response.
     if (gen !== _searchGen) return;
+    // Collect which section types have results so we can build the tab bar.
+    const _tabs = [];
     let html = '';
 
     if (d.folders?.length) {
-      html += `<div class="search-section"><h3>${t('player.search.sectionFolders', { count: d.folders.length })}</h3><div class="artist-list">${
+      _tabs.push({ key: 'folders', label: t('player.search.tabFolders'), count: d.folders.length });
+      html += `<div class="search-section" data-section="folders"><h3>${t('player.search.sectionFolders', { count: d.folders.length })}</h3><div class="artist-list">${
         d.folders.map(f => `<div class="artist-row" data-browse-path="${esc(f.browse_path)}">
           <div class="artist-av">📁</div>
           <div class="artist-name">${esc(f.folder_name)}</div>
@@ -6664,7 +6777,8 @@ async function doSearch(q) {
       }</div></div>`;
     }
     if (d.artists?.length) {
-      html += `<div class="search-section"><h3>${t('player.search.sectionArtists', { count: d.artists.length })}</h3><div class="artist-list">${
+      _tabs.push({ key: 'artists', label: t('player.search.tabArtists'), count: d.artists.length });
+      html += `<div class="search-section" data-section="artists"><h3>${t('player.search.sectionArtists', { count: d.artists.length })}</h3><div class="artist-list">${
         d.artists.map(a => `<div class="artist-row" data-artist-disp="${esc(a.name)}" data-artist-variants="${esc(JSON.stringify(a.variants))}">
           <div class="artist-av">${esc(a.name.charAt(0)).toUpperCase()}</div>
           <div class="artist-name">${esc(a.name)}</div>
@@ -6672,7 +6786,8 @@ async function doSearch(q) {
       }</div></div>`;
     }
     if (d.albums?.length) {
-      html += `<div class="search-section"><h3>${t('player.search.sectionAlbums', { count: d.albums.length })}</h3><div class="artist-list">${
+      _tabs.push({ key: 'albums', label: t('player.search.tabAlbums'), count: d.albums.length });
+      html += `<div class="search-section" data-section="albums"><h3>${t('player.search.sectionAlbums', { count: d.albums.length })}</h3><div class="artist-list">${
         d.albums.map(a => {
           const au = artUrl(a.album_art_file, 's');
           return `<div class="artist-row" data-album="${esc(a.name)}">
@@ -6710,15 +6825,35 @@ async function doSearch(q) {
     const displaySongs = allSongs.slice(0, 50);
     const overflow = allSongs.length - displaySongs.length;
     if (displaySongs.length) {
+      _tabs.push({ key: 'tracks', label: t('player.search.tabTracks'), count: allSongs.length });
       const overflowNote = overflow > 0
-        ? `<div class="search-overflow-note">Showing 50 of ${allSongs.length} — refine your search to see more</div>`
+        ? `<div class="search-overflow-note">${t('player.search.overflow', { total: allSongs.length })}</div>`
         : '';
       // Text-only rows for search: no album-art <img> tags.
       // On CleverTouch, each img triggers a network fetch + decode + layout
       // reflow. 50 images saturates the CPU and stalls music playback.
-      html += `<div class="search-section"><h3>Songs (${allSongs.length})</h3><div class="song-list">${renderSearchRows(displaySongs)}</div>${overflowNote}</div>`;
+      html += `<div class="search-section" data-section="tracks"><h3>${t('player.search.sectionSongs', { count: allSongs.length })}</h3><div class="song-list">${renderSearchRows(displaySongs)}</div>${overflowNote}</div>`;
     }
     if (!html) html = `<div class="empty-state">${t('player.search.noResults', { query: esc(q) })}</div>`;
+
+    // Tab bar — only shown when at least 2 section types have results.
+    // Kept in S.searchTab so switching back from a drill-down preserves the selection.
+    if (_tabs.length > 1) {
+      // If the previously active tab has no results in this search, fall back to all.
+      if (S.searchTab && S.searchTab !== 'all' && !_tabs.find(tb => tb.key === S.searchTab)) {
+        S.searchTab = 'all';
+      }
+      const activeTab = S.searchTab || 'all';
+      const tabsHtml = `<div class="search-tabs">`
+        + `<button class="search-tab${activeTab === 'all' ? ' active' : ''}" data-tab="all">${t('player.search.tabAll')}</button>`
+        + [..._tabs].sort((a, b) => (a.key === 'tracks' ? -1 : b.key === 'tracks' ? 1 : 0))
+          .map(tb => `<button class="search-tab${activeTab === tb.key ? ' active' : ''}" data-tab="${tb.key}">${tb.label} (${tb.count})</button>`).join('')
+        + `</div>`;
+      html = tabsHtml + html;
+    } else {
+      // Single section or no results — clear any stored tab so it doesn't bleed into the next search.
+      S.searchTab = 'all';
+    }
 
     // Pause VU/spectrum RAF loop while we do the heavy innerHTML write.
     // On CleverTouch the 60 fps canvas loop competes with DOM parsing and
@@ -6726,7 +6861,18 @@ async function doSearch(q) {
     const wasPlaying = !audioEl.paused;
     if (wasPlaying) VU_NEEDLE.stop();
     res.innerHTML = html;
+    // Apply active tab filter via data attribute (CSS hides non-matching sections).
+    res.dataset.tab = S.searchTab || 'all';
     if (wasPlaying) VU_NEEDLE.start();
+
+    // Tab switcher click handler.
+    res.querySelectorAll('.search-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        S.searchTab = btn.dataset.tab;
+        res.dataset.tab = S.searchTab;
+        res.querySelectorAll('.search-tab').forEach(b => b.classList.toggle('active', b === btn));
+      });
+    });
 
     res.querySelectorAll('.artist-row[data-artist-disp]').forEach(r => {
       let vars; try { vars = JSON.parse(r.dataset.artistVariants); } catch { vars = [r.dataset.artistDisp]; }
@@ -6813,7 +6959,7 @@ async function viewHome() {
     [recentlyPlayed, mostPlayed, recentlyAdded, summary] = await Promise.all([
       api('POST', 'api/v1/db/stats/recently-played', base, sig).catch(() => []),
       api('POST', 'api/v1/db/stats/most-played',     base, sig).catch(() => []),
-      api('POST', 'api/v1/db/recent/added',          { ...base, limit: _limit }, sig).catch(() => []),
+      api('POST', 'api/v1/db/recent/added',          { ...base, limit: Math.min(_limit * 6, 90) }, sig).catch(() => []),
       api('GET',  'api/v1/db/home-summary',          undefined, sig).catch(() => ({})),
     ]);
   } catch(e) { if (e.name === 'AbortError') return; }
@@ -6823,6 +6969,27 @@ async function viewHome() {
   recentlyPlayed = recentlyPlayed.map(norm);
   mostPlayed     = mostPlayed.map(s => { const n = norm(s); n._playCount = s.metadata?.['play-count']; return n; });
   recentlyAdded  = recentlyAdded.map(norm);
+
+  // Group recentlyAdded by album — raw array is already sorted by ts DESC so
+  // first occurrence of each album key = most recently added album.
+  // Key is the folder path, so compilation albums (different artist per track)
+  // still collapse into a single card instead of one card per track.
+  const _raGroupMap = new Map();
+  const _raGroups = [];
+  for (const s of recentlyAdded) {
+    const folder = (s.filepath || '').split('/').slice(0, -1).join('/');
+    const key = folder;
+    if (!_raGroupMap.has(key)) {
+      const grp = { album: s.album || folder.split('/').pop() || '—', artist: s.artist || null, art: s['album-art'] || null, _artFp: s['album-art'] ? null : s.filepath, songs: [], _artists: new Set() };
+      _raGroupMap.set(key, grp);
+      _raGroups.push(grp);
+    }
+    const _g = _raGroupMap.get(key);
+    _g.songs.push(s);
+    if (s.artist) _g._artists.add(s.artist);
+    if (!_g.art && s['album-art']) { _g.art = s['album-art']; _g._artFp = null; }
+  }
+  const _recentAlbumGroups = _raGroups.slice(0, _limit);
 
   // Temporal sections from home-summary
   const _temporalSections = (summary.sections || []).map(sec => ({
@@ -6872,6 +7039,22 @@ async function viewHome() {
     </div>`;
   }
 
+  function albumCard(group, idx) {
+    const url = artUrl(group.art, 's');
+    const artInner = url
+      ? `<img src="${url}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`
+      : noArtHtml();
+    const fp0 = group._artFp || group.songs[0]?.filepath || '';
+    const countBadge = group.songs.length > 1 ? `<span class="hc-count-badge">${group.songs.length}</span>` : '';
+    return `<div class="hc home-album" data-group-idx="${idx}" data-fp="${esc(fp0)}">
+      <div class="hc-art">${artInner}${countBadge}</div>
+      <div class="hc-info">
+        <div class="hc-title">${esc(group.album)}</div>
+        ${group._artists?.size > 1 ? `<div class="hc-sub">${t('player.home.variousArtists')}</div>` : group.artist ? `<div class="hc-sub">${esc(group.artist)}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
   function strip(title, cards, badge) {
     const badgeHtml = badge ? `<span class="home-shelf-badge">${esc(badge)}</span>` : '';
     return `<div class="home-shelf">
@@ -6881,8 +7064,8 @@ async function viewHome() {
   }
 
   // ── 2. Recently Added ────────────────────────────────────────
-  const recentAddedHtml = recentlyAdded.length
-    ? strip(t('player.home.shelfRecentAdded'), recentlyAdded.map(s => songCard(s, false)).join(''), t('player.home.badgeNew'))
+  const recentAddedHtml = _recentAlbumGroups.length
+    ? strip(t('player.home.shelfRecentAdded'), _recentAlbumGroups.map((g, i) => albumCard(g, i)).join(''), t('player.home.badgeNew'))
     : '';
 
   // ── 3. Continue Listening (last played, deduplicated by album) ──
@@ -6956,6 +7139,17 @@ async function viewHome() {
     });
   });
 
+  body.querySelectorAll('.home-album').forEach(card => {
+    card.addEventListener('click', () => {
+      const g = _recentAlbumGroups[parseInt(card.dataset.groupIdx, 10)];
+      if (!g) return;
+      const sorted = [...g.songs].sort((a, b) => (a.track || 999) - (b.track || 999));
+      setTitle(g.album || t('player.home.recentlyAdded'));
+      setBack(viewHome);
+      showSongs(sorted, null, g.album || null);
+    });
+  });
+
   // On-demand art fetch for cards that have no cached aaFile
   const _homeView = body.querySelector('.home-view');
   const _seenFp = new Set();
@@ -6969,11 +7163,11 @@ async function viewHome() {
         // update every song object sharing this filepath
         for (const x of _allSongs) { if (x.filepath === _fp) x['album-art'] = d.aaFile; }
         // patch every matching card — use dataset.fp (auto-unescapes HTML entities)
-        _homeView?.querySelectorAll('.home-song').forEach(card => {
+        _homeView?.querySelectorAll('.home-song, .home-album').forEach(card => {
           if (card.dataset.fp !== _fp) return;
           const artDiv = card.querySelector('.hc-art');
           if (artDiv && !artDiv.querySelector('img')) {
-            artDiv.innerHTML = `<img src="${artUrl(d.aaFile, 's')}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`;
+            artDiv.insertAdjacentHTML('afterbegin', `<img src="${artUrl(d.aaFile, 's')}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`);
           }
         });
       })
@@ -7359,7 +7553,10 @@ function renderFileExplorer(d) {
       return false;
     });
   }
-  const canDelete = canDeleteFp(curPath + '/') || canDeleteFp(curPath);
+  // canDeleteFp expects paths without a leading slash (same format as song.filepath).
+  // d.path from the API always has a leading slash, so strip it before checking.
+  const _curNorm = curPath.replace(/^\//, '').replace(/\/$/, '');
+  const canDelete = canDeleteFp(_curNorm + '/') || canDeleteFp(_curNorm);
 
   const dirs = (d.directories || []).map(dir => `
     <div class="fe-dir" data-dir="${esc(curPath + dir.name)}">
@@ -8289,6 +8486,24 @@ async function loadSmartPlaylists() {
   _renderSmartPlaylistNav();
 }
 
+function _splSummaryText(p) {
+  const f = p.filters || {};
+  const parts = [];
+  if (f.artistSearch)                    parts.push(f.artistSearch);
+  if (f.genres?.length)                  parts.push(f.genres.slice(0, 2).join(', ') + (f.genres.length > 2 ? '…' : ''));
+  if (f.yearFrom && f.yearTo)            parts.push(`${f.yearFrom}–${f.yearTo}`);
+  else if (f.yearFrom)                   parts.push(`${f.yearFrom}+`);
+  else if (f.yearTo)                     parts.push(`≤${f.yearTo}`);
+  if (f.minRating > 0)                   parts.push(`★${f.minRating / 2}+`);
+  if (f.playedStatus === 'played')       parts.push('played');
+  else if (f.playedStatus === 'unplayed') parts.push('unplayed');
+  if (f.minPlayCount > 0)               parts.push(`≥${f.minPlayCount} plays`);
+  if (f.starred)                         parts.push('starred');
+  const sortLabel = { random: 'shuffle', newest: 'newest', oldest: 'oldest', 'most-played': 'most played', 'least-played': 'least played', 'top-rated': 'top rated', 'recently-played': 'recent' }[p.sort] || p.sort;
+  const summary = parts.join(' · ');
+  return `${summary ? summary + ' · ' : ''}${p.limit_n || p.limit || 100} songs · ${sortLabel}`;
+}
+
 function _renderSmartPlaylistNav() {
   const nav = document.getElementById('smart-playlist-nav');
   if (!nav) return;
@@ -8296,7 +8511,7 @@ function _renderSmartPlaylistNav() {
   if (!list.length) { nav.innerHTML = '<div class="pl-empty-hint">No smart playlists yet</div>'; return; }
   nav.innerHTML = list.map(p => `
     <div class="pl-row" data-splid="${p.id}">
-      <button class="pl-row-btn" data-splid="${p.id}">
+      <button class="pl-row-btn" data-splid="${p.id}" title="${esc(_splSummaryText(p))}">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22,3 2,3 10,12.46 10,19 14,21 14,12.46"/></svg>
         ${p.filters?.freshPicks ? `<svg class="pl-fresh-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" title="${t('player.ctrl.freshPicks')}"><polyline points="17,1 21,5 17,9"/><path d="M3,11V9a4,4,0,0,1,4-4h14"/><polyline points="7,23 3,19 7,15"/><path d="M21,13v2a4,4,0,0,1-4,4H3"/></svg>` : ''}
         ${esc(p.name)}
@@ -13118,11 +13333,26 @@ function _applyServerSettings(data) {
       }
     }
   } else if (data?.queue && Array.isArray(data.queue.queue) && data.queue.queue.length && queueKey) {
-    // Always persist server queue to localStorage so restoreQueue() (called by
-    // showApp on boot) always has fresh data. Only write when non-empty — empty
-    // queue in DB is handled by restoreQueue() reading the empty localStorage
-    // entry that persistQueue() wrote at time of clearing.
-    try { localStorage.setItem(queueKey, JSON.stringify(data.queue)); } catch(_) {}
+    // Write DB queue to localStorage so restoreQueue() always has fresh data.
+    // Only write when non-empty — empty queue is handled by restoreQueue() reading
+    // the empty entry that persistQueue() wrote at time of clearing.
+    //
+    // Prefer-false rule: if localStorage already has playing:false, that explicit
+    // "this device paused" signal wins over whatever the DB says. The DB may still
+    // carry playing:true if (a) it was written during playback and the pause hasn't
+    // been flushed yet, or (b) old pre-fix localStorage wrote playing:true without
+    // ever recording a pause. In those cases we must NOT auto-resume.
+    // Cross-device resume still works: if localStorage has no entry (new device),
+    // lq is null and we trust the DB's playing field as-is.
+    const _toWrite = { ...data.queue };
+    try {
+      const _blr = localStorage.getItem(queueKey);
+      if (_blr) {
+        const _lq = JSON.parse(_blr);
+        if (_lq?.playing === false) _toWrite.playing = false;
+      }
+    } catch(_) {}
+    try { localStorage.setItem(queueKey, JSON.stringify(_toWrite)); } catch(_) {}
   }
 }
 
@@ -13455,17 +13685,30 @@ function showApp() {
       if (audioEl.paused && settings?.queue && Array.isArray(settings.queue.queue)) {
         const srv = settings.queue;
         if ((srv.savedAt || 0) > _localSavedAt) {
-          if (_qk) localStorage.setItem(_qk, JSON.stringify(srv));
+          // _applyServerSettings() above already merged the queue into localStorage
+          // with the prefer-false playing-state rule. Just trigger the restore.
           restoreQueue(true);
         }
       }
     } catch (_) {}
 
-    // ── Home view refresh ─────────────────────────────────────────────────────
-    // Re-fetch home shelves (recently played, most played, etc.) if the home
-    // view is currently open so data from other devices shows up immediately.
-    if (S.view === 'home')      viewHome();
-    if (S.view === 'shortcuts') viewShortcuts();
+    // ── Permission flags re-sync ──────────────────────────────────────────────
+    // Re-fetch /api/v1/ping so that per-user permissions changed in the admin
+    // panel (Cast, YouTube, Record, Upload, Remote) take effect in this tab
+    // without requiring a page refresh.
+    try {
+      const pd = await api('GET', 'api/v1/ping');
+      if (pd.allowUpload         != null) S.canUpload           = pd.allowUpload === true;
+      if (pd.allowRadioRecording != null) { S.allowRadioRecording  = pd.allowRadioRecording  === true; _updateRecordBtn(); }
+      if (pd.allowYoutubeDownload!= null) {
+        S.allowYoutubeDownload = pd.allowYoutubeDownload === true;
+        const ytBtn = document.getElementById('youtube-nav-btn');
+        if (ytBtn) ytBtn.classList.toggle('hidden', !S.allowYoutubeDownload);
+        _updateListenSection();
+      }
+      if (pd.allowMpvCast        != null) { S.allowMpvCast         = pd.allowMpvCast         === true; _updateCastBtn(); }
+      if (pd.allowServerRemote   != null)   S.allowServerRemote   = pd.allowServerRemote   !== false;
+    } catch (_) {}
   });
   // Fetch ping to get transcode server info + vpath metadata
   api('GET', 'api/v1/ping').then(d => {
@@ -14104,6 +14347,8 @@ document.getElementById('ctx-menu').querySelectorAll('.ctx-item').forEach(btn =>
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
     }
     if (action === 'rate')        { showRatePanel(0, 0, song); document.getElementById('rate-panel').style.left = '50%'; document.getElementById('rate-panel').style.top = '40%'; }
+    if (action === 'go-artist')   { if (song.artist) viewArtistAlbums(song.artist, [song.artist], () => viewArtists()); }
+    if (action === 'go-album')    { if (song.album)  viewAlbumSongs(song.album, song.artist || null, null, { skipAOFilter: true }); }
     if (action === 'delete-recording') {
       const fname = song.filepath.split('/').pop();
       showConfirmModal(
@@ -14440,7 +14685,7 @@ const _TabFav = (() => {
 
 // ── AUDIO EVENT HANDLERS (named so they can be moved to a swapped element) ──
 function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); _startWaveformRaf(); document.body.classList.add('audio-playing'); _TabFav.play(); _startPositionSync(); if (S.queue[S.idx]?.isRadio) { _radioPlayStart = Date.now(); if (_radioNowPlayingStation) _pollRadioNowPlaying(_radioNowPlayingStation); } if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'playing'; } catch(_e) {} }
-function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  _stopWaveformRaf(); document.body.classList.remove('audio-playing'); _TabFav.pause(); _stopPositionSync(); if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'paused';  } catch(_e) {} }
+function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  _stopWaveformRaf(); document.body.classList.remove('audio-playing'); _TabFav.pause(); _stopPositionSync(); if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'paused';  } catch(_e) {} persistQueue(); /* flush playing:false to localStorage immediately — don't wait for 5s timer */ }
 function _onAudioEnded() {
   // Radio stream ended unexpectedly — try to reconnect on the same link
   const _curSong = S.queue[S.idx];

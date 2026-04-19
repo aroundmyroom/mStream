@@ -213,6 +213,7 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .pl-row:hover .pl-row-del,.pl-row:hover .pl-row-edit{opacity:1;}
 .pl-row:hover .pl-row-share{opacity:1;}
 .pl-row-del:hover{color:var(--red);}
+.pl-meta-line{font-size:12px;color:var(--t3);flex-shrink:0;}
 .pl-row-edit:hover{color:var(--primary);}
 .pl-row-share:hover{color:var(--accent);}
 .pl-fresh-icon{flex-shrink:0;opacity:.6;color:var(--primary);}
@@ -551,6 +552,18 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .album-meta{padding:11px 12px 13px;}
 .album-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--t1);}
 .album-year{font-size:12px;color:var(--t2);margin-top:3px;}
+/* Compact density — more albums per row, tighter metadata */
+.album-grid--compact{grid-template-columns:repeat(auto-fill,minmax(115px,1fr));gap:12px;}
+.album-grid--compact .album-meta{padding:7px 8px 8px;}
+.album-grid--compact .album-name{font-size:11px;}
+.album-grid--compact .album-year{font-size:10px;margin-top:2px;}
+/* Album library toolbar — sort + density toggles */
+.allib-view-controls{display:flex;align-items:center;gap:5px;flex-shrink:0;margin-left:4px;}
+.allib-sort-btn{font-size:12px;font-weight:600;letter-spacing:.01em;padding:0 10px;width:auto;min-width:62px;white-space:nowrap;border:1px solid var(--border) !important;color:var(--t2);transition:border-color .15s,color .15s;}
+.allib-sort-btn:hover{border-color:var(--primary) !important;color:var(--t1);}
+.allib-density-btn{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid transparent;color:var(--t3);cursor:pointer;background:none;transition:background .14s,color .14s;}
+.allib-density-btn:hover{color:var(--t1);}
+.allib-density-btn.active{background:rgba(139,92,246,.15);color:var(--primary);border-color:rgba(139,92,246,.35);}
 
 /* ── ARTIST LIST ───────────────────────────────────────────── */
 .artist-list{display:flex;flex-direction:column;gap:1px;}
@@ -588,6 +601,15 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .search-vpath-pills{display:flex;flex-wrap:wrap;gap:6px;padding:4px 2px 16px;}
 .search-input{flex:1;background:none;border:none;outline:none;font-size:15px;color:var(--t1);}
 .search-input::placeholder{color:var(--t3);}
+.search-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;}
+.search-tab{padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:none;background:var(--surface2);color:var(--t2);transition:background .15s,color .15s;}
+.search-tab.active{background:var(--accent);color:#fff;}
+.search-tab:hover:not(.active){background:var(--hover);}
+/* Tab section filtering — only the matching section is shown */
+#search-results[data-tab="tracks"]  .search-section:not([data-section="tracks"]) {display:none;}
+#search-results[data-tab="artists"] .search-section:not([data-section="artists"]){display:none;}
+#search-results[data-tab="albums"]  .search-section:not([data-section="albums"]) {display:none;}
+#search-results[data-tab="folders"] .search-section:not([data-section="folders"]){display:none;}
 .search-section{margin-bottom:24px;}
 .search-section h3{font-size:11px;font-weight:700;letter-spacing:.8px;color:var(--t3);text-transform:uppercase;margin-bottom:10px;}
 .search-overflow-note{font-size:12px;color:var(--t3);text-align:center;padding:10px 0 4px;}
@@ -752,6 +774,9 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .q-info{flex:1;min-width:0;}
 .q-title{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .q-artist{font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.q-dj-tag{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;background:rgba(139,92,246,.18);color:#8b5cf6;border-radius:3px;padding:1px 4px;margin-left:5px;vertical-align:middle;flex-shrink:0;}
+
+.q-dur{font-size:11px;color:var(--t3);font-variant-numeric:tabular-nums;flex-shrink:0;margin-left:6px;margin-right:4px;white-space:nowrap;}
 .q-drag-handle{width:14px;display:flex;align-items:center;justify-content:center;color:var(--t3);opacity:0;cursor:grab;flex-shrink:0;transition:opacity .14s;touch-action:none;}
 .q-item:hover .q-drag-handle{opacity:0.55;}
 .q-item.q-dragging{opacity:.35;pointer-events:none;}
@@ -2117,6 +2142,7 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .hc-art{width:100%;aspect-ratio:1;flex-shrink:0;background:var(--surface);display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--t2);position:relative;}
 .hc-art img{width:100%;height:100%;object-fit:cover;display:block;}
 .hc-art>svg{display:block;width:100%;height:auto;}
+.hc-count-badge{position:absolute;bottom:5px;right:5px;background:rgba(0,0,0,.65);color:#fff;font-size:.6rem;font-weight:700;border-radius:3px;padding:1px 5px;line-height:1.5;pointer-events:none;}
 .artist-home-ph{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0));}
 .artist-home-ph-head{width:28%;aspect-ratio:1;border-radius:50%;background:color-mix(in srgb, var(--t2) 55%, transparent);}
 .artist-home-ph-body{width:52%;height:24%;border-radius:999px 999px 12px 12px;background:color-mix(in srgb, var(--t2) 45%, transparent);}

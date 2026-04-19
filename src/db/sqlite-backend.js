@@ -855,6 +855,10 @@ export function updateFileTags(filepath, vpath, tags) {
   }
 }
 
+export function updateFileModified(filepath, vpath, modifiedMs) {
+  db.prepare('UPDATE files SET modified = ? WHERE filepath = ? AND vpath = ?').run(modifiedMs, filepath, vpath);
+}
+
 export function insertFile(fileData) {
   const normalizeEpochSec = (value) => {
     if (value === null || value === undefined) return null;
@@ -3344,16 +3348,27 @@ export function getHomeSummary(userId, vpaths, todayStart, weekStart, timeWindow
     'SELECT COUNT(*) AS c FROM play_events WHERE user_id=? AND started_at>=?'
   ).get(userId, weekStart).c;
 
-  // listening streak: consecutive calendar days (UTC midnight boundaries) with at least 1 play
+  // listening streak: consecutive calendar days (UTC midnight boundaries) with at least 1 play.
+  // Single query fetches all distinct day-buckets descending — avoids up to 365 individual queries.
   const DAY_MS = 86400000;
   let streak = 0;
-  for (let i = 0; i < 365; i++) {
-    const r = db.prepare(
-      'SELECT 1 AS found FROM play_events WHERE user_id=? AND started_at>=? AND started_at<? LIMIT 1'
-    ).get(userId, todayStart - i * DAY_MS, todayStart - (i - 1) * DAY_MS);
-    if (r) streak++;
-    else if (i === 0) { /* today may have no plays yet — don't break streak */ }
-    else break;
+  {
+    const dayBuckets = db.prepare(
+      'SELECT DISTINCT CAST(started_at / 86400000 AS INTEGER) AS b FROM play_events WHERE user_id=? ORDER BY b DESC LIMIT 366'
+    ).all(userId).map(r => r.b);
+    const todayBucket = Math.floor(todayStart / DAY_MS);
+    if (dayBuckets.length > 0) {
+      const mostRecent = dayBuckets[0];
+      // Only count a streak if the most recent play day is today or yesterday
+      // (today may have no plays yet — still counts yesterday's streak as active)
+      if (mostRecent === todayBucket || mostRecent === todayBucket - 1) {
+        let expected = mostRecent;
+        for (const b of dayBuckets) {
+          if (b === expected) { streak++; expected--; }
+          else break;
+        }
+      }
+    }
   }
 
   // How many days of play history do we have?

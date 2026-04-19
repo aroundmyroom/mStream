@@ -257,6 +257,11 @@ export function setup(mstream) {
       try {
         db.updateFileTags(t.filepath, t.vpath, finalTags);
         db.markTrackAccepted(t.filepath, t.vpath);
+        // Sync modified timestamp so the scanner doesn't flag this as stale
+        // and re-insert with a fresh ts (which floods Recently Added).
+        if (!diskErr && absPath) {
+          try { db.updateFileModified(t.filepath, t.vpath, (await fs.stat(absPath)).mtime.getTime()); } catch (_) {}
+        }
       } catch (dbErr) {
         winston.error(`[tagworkshop] DB update failed ${t.filepath}: ${dbErr.message}`);
       }
@@ -300,6 +305,9 @@ export function setup(mstream) {
     try {
       db.updateFileTags(t.filepath, t.vpath, finalTags);
       db.markTrackAccepted(t.filepath, t.vpath);
+      if (!diskErr && absPath) {
+        try { db.updateFileModified(t.filepath, t.vpath, (await fs.stat(absPath)).mtime.getTime()); } catch (_) {}
+      }
     } catch (dbErr) {
       winston.error(`[tagworkshop] DB update failed ${t.filepath}: ${dbErr.message}`);
     }
@@ -363,6 +371,9 @@ export function setup(mstream) {
       try {
         db.updateFileTags(t.filepath, t.vpath, finalTags);
         db.markTrackAccepted(t.filepath, t.vpath);
+        if (!diskErr && absPath) {
+          try { db.updateFileModified(t.filepath, t.vpath, (await fs.stat(absPath)).mtime.getTime()); } catch (_) {}
+        }
       } catch (_) {}
     }
 

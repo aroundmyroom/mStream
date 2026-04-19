@@ -38,10 +38,11 @@ async function _saveAutostart(value) {
 
 // ── Worker state ──────────────────────────────────────────────────────────────
 
-let _worker   = null;
-let _running  = false;
-let _stopping = false;
+let _worker    = null;
+let _running   = false;
+let _stopping  = false;
 let _lastStats = null;
+let _startedAt = null; // ms epoch when current run started
 let _fpcalcReady = null; // null = not yet checked, true/false after ensureFpcalc()
 
 function _workerData() {
@@ -64,8 +65,9 @@ function _spawnWorker() {
 
   const data = _workerData();
   _worker  = new Worker(_workerPath, { workerData: data });
-  _running  = true;
-  _stopping = false;
+  _running   = true;
+  _stopping  = false;
+  _startedAt = Date.now();
 
   _worker.on('message', msg => {
     if (!msg) return;
@@ -73,16 +75,18 @@ function _spawnWorker() {
       if (msg.stats) _lastStats = msg.stats;
     }
     if (msg.type === 'stopped') {
-      _running  = false;
-      _stopping = false;
-      _worker   = null;
+      _running   = false;
+      _stopping  = false;
+      _startedAt = null;
+      _worker    = null;
       winston.info('[acoustid] Worker stopped cleanly');
     }
     if (msg.type === 'error') {
       winston.error(`[acoustid] Worker error: ${msg.message}`);
-      _running  = false;
-      _stopping = false;
-      _worker   = null;
+      _running   = false;
+      _stopping  = false;
+      _startedAt = null;
+      _worker    = null;
       // Restart after transient error (e.g. DB locked) unless user stopped it
       if (config.program.acoustid?.autostart === true) {
         winston.info('[acoustid] Restarting worker in 10s after error...');
@@ -93,9 +97,10 @@ function _spawnWorker() {
 
   _worker.on('error', err => {
     winston.error(`[acoustid] Worker thread error: ${err.message}`);
-    _running  = false;
-    _stopping = false;
-    _worker   = null;
+    _running   = false;
+    _stopping  = false;
+    _startedAt = null;
+    _worker    = null;
     if (config.program.acoustid?.autostart === true) {
       winston.info('[acoustid] Restarting worker in 10s after thread error...');
       setTimeout(() => { if (!_running) _spawnWorker(); }, 10_000);
@@ -106,9 +111,10 @@ function _spawnWorker() {
     if (code !== 0) {
       winston.warn(`[acoustid] Worker exited with code ${code}`);
     }
-    _running  = false;
-    _stopping = false;
-    _worker   = null;
+    _running   = false;
+    _stopping  = false;
+    _startedAt = null;
+    _worker    = null;
     // Only auto-restart on unexpected (non-zero) exits, not clean completion
     if (code !== 0 && config.program.acoustid?.autostart === true) {
       winston.info('[acoustid] Restarting worker in 10s after unexpected exit...');
@@ -146,8 +152,9 @@ export function setup(mstream) {
       enabled,
       hasKey,
       fpcalcAvailable: _fpcalcReady !== false, // true until proven otherwise
-      running:  _running,
-      stopping: _stopping,
+      running:   _running,
+      stopping:  _stopping,
+      startedAt: _startedAt,
       stats: {
         total:     stats.total     || 0,
         found:     stats.found     || 0,

@@ -88,6 +88,7 @@ export function updateFileDuration(filepath, vpath, duration) { return backend.u
 export function updateFileTechMeta(filepath, vpath, bitrate, sampleRate, channels) { return backend.updateFileTechMeta(filepath, vpath, bitrate, sampleRate, channels); }
 export function getFileDuration(filepath) { return backend.getFileDuration(filepath); }
 export function updateFileTags(filepath, vpath, tags) { return backend.updateFileTags(filepath, vpath, tags); }
+export function updateFileModified(filepath, vpath, modifiedMs) { return backend.updateFileModified(filepath, vpath, modifiedMs); }
 export function getFileWithMetadata(filepath, vpath, username) { return backend.getFileWithMetadata(filepath, vpath, username); }
 export function getArtists(vpaths, ignoreVPaths, excludeFilepathPrefixes) { return backend.getArtists(vpaths, ignoreVPaths, excludeFilepathPrefixes); }
 export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes) { return backend.getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPrefixes, includeFilepathPrefixes); }
