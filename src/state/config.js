@@ -89,6 +89,12 @@ const acoustidOptions = Joi.object({
   autostart: Joi.boolean().default(false),
 });
 
+const dlnaOptions = Joi.object({
+  enabled: Joi.boolean().default(false),
+  port:    Joi.number().integer().min(1024).max(65535).default(10293),
+  name:    Joi.string().allow('').max(64).default('mStream Velvet'),
+});
+
 const schema = Joi.object({
   address: Joi.string().ip({ cidr: 'forbidden' }).default('::'),
   port: Joi.number().default(3000),
@@ -145,6 +151,7 @@ const schema = Joi.object({
   federation: federationOptions.default(federationOptions.validate({}).value),
   serverAudio: serverAudioOptions.default(serverAudioOptions.validate({}).value),
   acoustid: acoustidOptions.default(acoustidOptions.validate({}).value),
+  dlna: dlnaOptions.default(dlnaOptions.validate({}).value),
   ui: Joi.string().valid('velvet', 'velvet-dark', 'velvet-light').default('velvet'),
   instanceId: Joi.string().optional(),
 });

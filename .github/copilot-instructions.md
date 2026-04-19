@@ -25,6 +25,7 @@
 - When creating a new release, bump the version in `package.json` first
 - **When bumping the version**, always update the Docker version pin in **both** `README.md` (the `docker pull` example near the bottom of the Installing section) and `docs/docker.md` (the pull example in that file) to the new tag — e.g. `ghcr.io/aroundmyroom/mstream-velvet:vX.Y.Z-velvet`
 - **When bumping the version**, ALSO update the **Current version line** in `README.md` line ~5: `**Current version: [X.Y.Z-velvet](releases/vX.Y.Z-velvet.md)** — Month YYYY` — this is separate from the Docker pin and is often forgotten
+- **MANDATORY README VERIFICATION after every version bump**: run `grep -n "velvet:v\|Current version" README.md docs/docker.md` and confirm ALL three lines show the NEW version before committing. If any line still shows the old version, fix it immediately. This step must NEVER be skipped.
 - **Before writing any release notes or changelog entry**, always read the most recent 3–5 release files in `releases/` (sorted by version) to understand what has already been shipped — this prevents re-announcing features that were in a prior release and ensures nothing new gets missed.
 - When implementing a new feature, always cross-check `releases/` + `changes-fork-velvet.md` to confirm it is not already documented. If a feature exists in code but has no release note, add it to the current patch entry.
 - `sqlite3` CLI is not installed on this system; SQLite is accessed via the Node.js built-in `node:sqlite` module (`DatabaseSync`) — Node v24.14.0

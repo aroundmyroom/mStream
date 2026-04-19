@@ -2,7 +2,7 @@
 
 > **A heavily extended fork of [mStream](https://github.com/IrosTheBeggar/mStream) by [aroundmyroom](https://github.com/aroundmyroom).**
 
-**Current version: [6.11.2-velvet](releases/v6.11.2-velvet.md)** — April 2026
+**Current version: [6.12.0-velvet](releases/v6.12.0-velvet.md)** — April 2026
 
 [![Discord](https://img.shields.io/badge/Discord-mStream%20Velvet-5865F2?logo=discord&logoColor=white&style=for-the-badge)](https://discord.gg/KfsTCYrTkS)
 
@@ -70,6 +70,7 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 | AcoustID fingerprinting | ❌ | ✅ Background acoustic fingerprinting to identify untagged files via AcoustID / MusicBrainz |
 | Backup | ❌ | ✅ One-click DB + config backup download from the admin panel |
 | Scan history | ❌ | ✅ `scan_runs` table with per-scan stats; Last Scanned timestamp shown in admin |
+| DLNA / UPnP | ❌ | ✅ Built-in MediaServer — folder-tree browse via albumsOnly sources; SSDP auto-discovery; VLC, BubbleUPnP, smart TVs, AV receivers |
 
 ---
 
@@ -130,6 +131,17 @@ mStream Velvet is a personal music streaming server with a dramatically expanded
 - Any browser that can reach the server becomes a **remote control** at `/server-remote` — no app needed
 - Remote includes: Now Playing bar with seek, transport controls, volume (0–130 incl. software boost), Queue tab, Auto-DJ tab (Random + Similar Artists), Browse tab
 - **Admin → Config → Server Audio** — enable toggle, mpv binary path, Detect button, Start/Stop, Open Remote link
+
+### DLNA / UPnP Media Server
+
+- **Built-in MediaServer** — exposes your music library on the local network so smart TVs, AV receivers, and DLNA/UPnP clients can discover and play without any special app or mStream login
+- Browse hierarchy mirrors the real **folder tree** of your `albumsOnly` vpaths — the same set of albums visible in the Album Library, never random junk folders
+- **SSDP auto-discovery** — devices find the server automatically (no IP typing needed on the TV)
+- Streams in the **original file format** (FLAC, MP3, Opus, …) — no transcoding required
+- **Album art** served from the mStream art cache
+- Configurable server name, HTTP port, enable/disable toggle — all live without a process restart
+- Disabled by default; enable in **Admin → DLNA / UPnP**
+- Security note: the DLNA port is unauthenticated — use on trusted LANs only, never port-forward to the internet
 
 ### Subsonic API
 
@@ -293,7 +305,7 @@ Open **http://localhost:3000** — on a fresh install with no users the admin pa
 Or pin to a specific release:
 
 ```shell
-docker pull ghcr.io/aroundmyroom/mstream-velvet:v6.11.2-velvet
+docker pull ghcr.io/aroundmyroom/mstream-velvet:v6.12.0-velvet
 ```
 
 **Build from source** (optional):

@@ -65,7 +65,7 @@ export function invalidateCache() {
   _sourcesCache = null;
 }
 
-async function resolveAlbumsSources() {
+export async function resolveAlbumsSources() {
   if (_sourcesCache) return _sourcesCache;
 
   const folders = config.program?.folders || {};

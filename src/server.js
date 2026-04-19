@@ -45,6 +45,7 @@ import * as wrappedApi from './api/wrapped.js';
 import * as serverPlaybackApi from './api/server-playback.js';
 import * as acoustidApi from './api/acoustid.js';
 import * as tagWorkshopApi from './api/tagworkshop.js';
+import * as dlnaApi from './api/dlna.js';
 import WebError from './util/web-error.js';
 import { sanitizeFilename } from './util/validation.js';
 import { ensureFfmpeg } from './util/ffmpeg-bootstrap.js';
@@ -216,6 +217,7 @@ export async function serveIt(configFile) {
   serverPlaybackApi.setup(mstream);
   acoustidApi.setup(mstream);
   tagWorkshopApi.setup(mstream);
+  dlnaApi.setup(mstream);
   // Kick off ffmpeg auto-download early so it's ready for radio-recorder,
   // discogs cover-art and ytdl use — non-blocking, safe to ignore errors here.
   ensureFfmpeg().catch(e => winston.warn('[ffmpeg-bootstrap] startup prefetch failed: ' + e.message));

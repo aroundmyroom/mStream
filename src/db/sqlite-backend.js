@@ -1188,7 +1188,7 @@ export function getFilesForAlbumsBrowse(sources) {
     if (s.prefix) params.push(s.prefix.replace(/\/$/, '') + '/%');
   }
   return db.prepare(
-    `SELECT filepath, title, artist, track, disk, year, duration, aaFile, vpath, cuepoints, cover_file
+    `SELECT filepath, title, artist, album, track, disk, year, duration, aaFile, vpath, cuepoints, cover_file
      FROM files WHERE ${clauses.join(' OR ')}`
   ).all(...params);
 }

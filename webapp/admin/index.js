@@ -41,6 +41,9 @@ const ADMINDATA = (() => {
   // server audio (mpv)
   module.serverAudioParams = {};
   module.serverAudioParamsUpdated = { ts: 0 };
+  // dlna
+  module.dlnaParams = {};
+  module.dlnaParamsUpdated = { ts: 0 };
   // shared playlists
   module.sharedPlaylists = [];
   module.sharedPlaylistUpdated = { ts: 0 };
@@ -192,6 +195,14 @@ const ADMINDATA = (() => {
     module.serverAudioParamsUpdated.ts = Date.now();
   }
 
+  module.getDlnaParams = async () => {
+    try {
+      const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/dlna/config` });
+      Object.keys(res.data).forEach(key => { module.dlnaParams[key] = res.data[key]; });
+    } catch (_e) {}
+    module.dlnaParamsUpdated.ts = Date.now();
+  }
+
   module.getFederationParams = async () => {
     try {
       const res = await API.axios({
@@ -244,6 +255,7 @@ const ADMINDATA = (() => {
 // Load in data
 ADMINDATA.getTranscodeParams();
 ADMINDATA.getServerAudioParams();
+ADMINDATA.getDlnaParams();
 ADMINDATA.getFolders();
 ADMINDATA.getUsers();
 ADMINDATA.getDbParams();
@@ -6102,6 +6114,104 @@ const artistsAdminView = Vue.component('artists-admin-view', {
   `
 });
 
+const dlnaView = Vue.component('dlna-view', {
+  data() {
+    return {
+      params:    ADMINDATA.dlnaParams,
+      paramsTS:  ADMINDATA.dlnaParamsUpdated,
+      busy:      false,
+      lastOk:    null,
+      lastMsg:   '',
+    };
+  },
+  methods: {
+    async save(patch) {
+      this.busy = true;
+      try {
+        const res = await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/dlna/config`, data: patch });
+        Object.assign(this.params, patch, { running: res.data.running });
+        await ADMINDATA.getDlnaParams();
+        this.lastOk = true;
+        this.lastMsg = this.t('admin.dlna.saved');
+      } catch (e) {
+        this.lastOk = false;
+        this.lastMsg = e?.response?.data?.error || this.t('admin.dlna.saveFailed');
+      }
+      this.busy = false;
+    },
+    toggleEnabled() { this.save({ enabled: !this.params.enabled }); },
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card" style="margin-bottom:10px">
+            <div class="card-content">
+              <span class="card-title">{{t('admin.dlna.title')}}</span>
+              <p style="color:var(--t2);font-size:.92rem;margin-bottom:18px">{{t('admin.dlna.desc')}}</p>
+              <div v-if="paramsTS.ts === 0" style="padding:16px 0;display:flex;justify-content:center">
+                <svg class="spinner" width="48px" height="48px" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
+              </div>
+              <div v-else>
+                <table>
+                  <tbody>
+                    <tr>
+                      <td>
+                        <b>{{t('admin.dlna.labelStatus')}}</b>
+                        <span v-if="params.running" style="display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;background:var(--green);color:#fff;font-size:.82rem;font-weight:600">{{t('admin.dlna.statusRunning')}}</span>
+                        <span v-else-if="params.enabled" style="display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;background:var(--orange,#f97316);color:#fff;font-size:.82rem;font-weight:600">{{t('admin.dlna.statusEnabled')}}</span>
+                        <span v-else style="display:inline-block;margin-left:8px;padding:2px 10px;border-radius:12px;background:var(--t3,#888);color:#fff;font-size:.82rem;font-weight:600">{{t('admin.dlna.statusDisabled')}}</span>
+                        <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.dlna.helpStatus')}}</div>
+                      </td>
+                      <td>
+                        <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
+                          <span style="position:relative;display:inline-block;width:44px;height:24px">
+                            <input type="checkbox" :checked="params.enabled" @change="toggleEnabled()" style="opacity:0;width:0;height:0;position:absolute" :disabled="busy">
+                            <span :style="{ position:'absolute', inset:0, borderRadius:'12px', background: params.enabled ? 'var(--primary,#6366f1)' : 'var(--t3,#888)', transition:'background 0.2s', cursor:'pointer', opacity: busy ? 0.5 : 1 }"></span>
+                            <span :style="{ position:'absolute', top:'3px', left: params.enabled ? '23px' : '3px', width:'18px', height:'18px', borderRadius:'50%', background:'#fff', transition:'left 0.2s', pointerEvents:'none' }"></span>
+                          </span>
+                          <span style="font-size:.85rem;color:var(--t2)">{{params.enabled ? t('admin.dlna.btnDisable') : t('admin.dlna.btnEnable')}}</span>
+                        </label>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <b>{{t('admin.dlna.labelPort')}}</b>
+                        <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.dlna.helpPort')}}</div>
+                      </td>
+                      <td>
+                        <input type="number" min="1024" max="65535" :value="params.port || 10293"
+                          @change="save({ port: parseInt($event.target.value, 10) })"
+                          style="width:100px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--t1)" :disabled="busy">
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <b>{{t('admin.dlna.labelName')}}</b>
+                        <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.dlna.helpName')}}</div>
+                      </td>
+                      <td>
+                        <input type="text" :value="params.name || 'mStream'"
+                          @change="save({ name: $event.target.value })"
+                          style="width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--t1)" :disabled="busy">
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p v-if="lastMsg" :style="{ marginTop:'12px', color: lastOk ? 'var(--green)' : 'var(--red,#f87171)', fontSize:'.88rem' }">{{lastMsg}}</p>
+                <div style="margin-top:20px;padding:14px 16px;background:var(--surface2);border-radius:8px;border-left:3px solid var(--orange,#f97316)">
+                  <b style="font-size:.88rem">{{t('admin.dlna.warningTitle')}}</b>
+                  <p style="font-size:.85rem;color:var(--t2);margin:6px 0 0">{{t('admin.dlna.warningBody')}}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `
+});
+
 const vm = new Vue({
   el: '#content',
   components: {
@@ -6113,6 +6223,7 @@ const vm = new Vue({
     'info-view': infoView,
     'transcode-view': transcodeView,
     'server-audio-view': serverAudioView,
+    'dlna-view': dlnaView,
     'federation-view': federationView,
     'logs-view': logsView,
     'rpn-view': rpnView,

@@ -1,5 +1,22 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.12.0-velvet — April 2026 — "Going Back to My Roots"
+
+### feat: DLNA / UPnP Media Server
+- Added a built-in DLNA/UPnP MediaServer (DMS-1.50) that advertises the music library on the local network so smart TVs, AV receivers, and any UPnP/DLNA client can browse and play directly.
+- Disabled by default; enabled per-admin in the admin panel under **DLNA / UPnP**.
+- Runs a dedicated plain-HTTP server (default port 10293) so DLNA devices don't need HTTPS or mStream authentication.
+- Browse hierarchy: **real folder tree** — Root → albumsOnly source containers (Albums, Disco, …) → subdirectories (any depth) → songs. Mirrors the actual filesystem of `albumsOnly` vpaths, just like a classic NAS DLNA server (Twonky/Serviio/miniDLNA). Only albums visible in the Album Library are exposed; random non-album folders never appear.
+- Songs sorted by track number, then filepath. 5-minute in-memory cache per source for fast browsing.
+- Device auto-discovery via SSDP multicast (no manual IP entry required on the device).
+- Responds to `Browse` (BrowseDirectChildren + BrowseMetadata, full pagination), `GetSystemUpdateID`, `GetSearchCapabilities`, `GetSortCapabilities` ContentDirectory SOAP actions; SUBSCRIBE/UNSUBSCRIBE stub accepted.
+- Server name (`mStream Velvet` default) and port are configurable from the admin UI; changes take effect live without a restart.
+- Security note displayed in admin UI: DLNA port is unauthenticated — must only be used on trusted LANs.
+- Confirmed working: VLC Desktop, Samsung Smart TV, LG Smart TV, BubbleUPnP (Android), Kodi.
+- Dependency: `node-ssdp` v4.0.1 (MIT licence) — SSDP advertisement layer only.
+
+---
+
 ## v6.11.2-velvet — April 2026 — Performance & Bug-Fix Bundle
 
 ### feat: queue remaining time + per-track estimated start times

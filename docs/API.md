@@ -287,6 +287,19 @@ Per-user permission: `allowMpvCast` — toggled via `POST /api/v1/admin/users/al
 
 See [docs/server-audio.md](server-audio.md) for full setup guide.
 
+## DLNA / UPnP Media Server
+
+All endpoints require admin.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/admin/dlna/config` | Get DLNA config: `{ enabled, port, name, running }` |
+| `POST` | `/api/v1/admin/dlna/config` | Update config. Body: any of `{ enabled, port, name }`. Starts/stops live. |
+
+The DLNA HTTP server itself (device description + SOAP Browse + media files) runs on a separate plain-HTTP port (default 10293) with no authentication.
+
+See [docs/dlna.md](dlna.md) for full setup guide and security notes.
+
 ## AcoustID Fingerprinting *(v6.9.0-velvet)*
 
 All endpoints require admin.
