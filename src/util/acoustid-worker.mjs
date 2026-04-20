@@ -107,7 +107,9 @@ const _getStats = db.prepare(`
 function runFpcalc(absolutePath) {
   return new Promise((resolve, reject) => {
     // -json: JSON output  -length 120: only first 120 s needed (saves time on long tracks)
-    const proc = spawn(fpcalcBin, ['-json', '-length', '120', absolutePath], {
+    // Run fpcalc at idle I/O class (ionice -c 3) + nice 19 so disk fingerprinting
+    // never competes with the audio stream being served to the browser.
+    const proc = spawn('ionice', ['-c', '3', 'nice', '-n', '19', fpcalcBin, '-json', '-length', '120', absolutePath], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';

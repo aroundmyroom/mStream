@@ -297,12 +297,41 @@ DLNA object IDs are opaque base64url strings:
 
 ---
 
+## VLANs and network segmentation
+
+DLNA/UPnP relies on **IP multicast** for discovery, which does **not cross VLAN boundaries** by default.
+If your server and your playback devices (TV, phone running VLC, AV receiver) are on different VLANs,
+you will hit two problems:
+
+1. **Discovery fails silently** — the `ssdp:alive` multicast (`239.255.255.250:1900`) is sent on the
+   server's VLAN and never arrives on the client's VLAN.  The device sees no mStream in its source list.
+2. **Browse or playback fails** — even if you manually point a client at the server IP, media streams
+   on port 10293 must be reachable from the client's VLAN.
+
+### Solutions
+
+| Option | How |
+|--------|-----|
+| **Put server and clients on the same VLAN** | Simplest fix — no special network config required |
+| **Inter-VLAN routing** | Enable routing between VLANs on your router/firewall and add a firewall rule allowing TCP 10293 and UDP 1900 from the client VLAN to the server VLAN |
+| **IGMP proxy / multicast routing** | Configure your router to proxy SSDP multicast between VLANs (supported by pfSense, OPNsense, UniFi) — allows discovery without full inter-VLAN routing |
+| **Manual server entry** | Some clients (VLC: *Media → Open Network Stream*; BubbleUPnP: *Add renderer by IP*) let you enter `http://<server-ip>:10293/dlna/description.xml` directly, bypassing discovery |
+
+### UniFi / pfSense / OPNsense
+
+Enable **IGMP snooping** and add a multicast firewall rule to forward `239.255.255.250/32` between
+the relevant VLANs.  On OPNsense install the `igmpproxy` package and configure both VLANs as
+upstream/downstream interfaces.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
-| TV doesn't find the server | SSDP port 1900 UDP blocked | Open UDP 1900 in firewall; or manually enter the server IP on the TV |
+| TV doesn't find the server | SSDP port 1900 UDP blocked, or different VLAN | Open UDP 1900 in firewall; check VLAN routing (see above); or manually enter the server IP on the TV |
 | Server found but no folders | DLNA port TCP blocked | Open port 10293 in firewall |
-| Folders show but songs don't play | Media port blocked or wrong IP | Check firewall; verify LAN IP auto-detected correctly in server logs |
+| Folders show but songs don't play | Media port blocked, wrong IP, or VLAN routing missing | Check firewall; verify LAN IP auto-detected correctly in server logs; check VLAN routes |
+| Client on different VLAN, discovery works but stream fails | Multicast proxied but unicast TCP blocked | Allow TCP 10293 from client VLAN to server VLAN in firewall |
 | Only 1 album folder shown | `albumsOnly` not configured | Set `albumsOnly: true` on the desired vpaths in Admin → Directory Flags |
 | Art doesn't show | Art cache not populated | Run a full scan with Discogs/embedded art enabled |

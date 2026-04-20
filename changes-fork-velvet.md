@@ -1,19 +1,59 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.12.1-velvet — April 2026 — DLNA Polish & Background Fix
+
+### fix: DLNA browse — albumsOnly containers returned 0 items
+- `resolveAlbumsSources()` returns prefix with trailing slash (e.g. `"Disco/"`). Browse handler was appending another `/` → `"Disco//"` → SQL LIKE never matched. Fixed in both the `src_` node handler and the `dir_` source-finder.
+
+### fix: DLNA auto-start unreliable on rapid restart
+- Port 10293 remained in TIME_WAIT after rapid `systemctl restart`. Start threw EADDRINUSE, DLNA stayed stopped despite `enabled: true` in config. Added automatic 5-second retry so the second attempt always wins once the OS releases the port.
+
+### fix: fpcalc (AcoustID) caused audio stream stalls and pauses
+- `fpcalc` ran at default I/O priority, competing with the audio stream for disk bandwidth.
+- Fixed: `fpcalc` now spawned via `ionice -c 3 nice -n 19` (idle I/O class + lowest CPU priority). OS preempts fpcalc whenever any other process, including the audio stream, needs disk. `ionice -p <pid>` confirms `idle`; `ps` shows `N` flag.
+
+### feat: DLNA notifies devices after every library rescan
+- `bumpSystemUpdateID()` now called automatically at end of every scan via `scanner.js`. GENA-subscribed clients (TVs, Kodi, BubbleUPnP) receive an event and refresh their catalogue automatically.
+
+### perf: Home view — progressive shelf loading (no more blank-screen wait)
+- Home view was waiting for all 4 APIs with `Promise.all` before rendering anything (~300 ms+ blank on slow connections). Each shelf now fills independently as its API call resolves: greeting is instant; mood/continue/recent/temporal shelves appear as data arrives.
+
+### fix: DLNA docs — VLANs section added
+- `docs/dlna.md` now documents SSDP multicast being Layer-2 scoped, why discovery fails across VLANs, and four solutions: same VLAN, inter-VLAN routing, IGMP proxy, manual entry. UniFi/pfSense/OPNsense guidance included.
+
+### minor: queue Auto-DJ badge — visual refinement
+- Badge moved to fixed-width slot (`.q-dj-slot`) to prevent title column shifting. Border added, background slightly more transparent.
+
+### minor: Subsonic getLicense — random quip in email field
+- `getLicense` response rotates through 10 humorous messages in the `email` field. No compatibility impact.
+
+---
+
 ## v6.12.0-velvet — April 2026 — "Going Back to My Roots"
 
-### feat: DLNA / UPnP Media Server
-- Added a built-in DLNA/UPnP MediaServer (DMS-1.50) that advertises the music library on the local network so smart TVs, AV receivers, and any UPnP/DLNA client can browse and play directly.
-- Disabled by default; enabled per-admin in the admin panel under **DLNA / UPnP**.
-- Runs a dedicated plain-HTTP server (default port 10293) so DLNA devices don't need HTTPS or mStream authentication.
-- Browse hierarchy: **real folder tree** — Root → albumsOnly source containers (Albums, Disco, …) → subdirectories (any depth) → songs. Mirrors the actual filesystem of `albumsOnly` vpaths, just like a classic NAS DLNA server (Twonky/Serviio/miniDLNA). Only albums visible in the Album Library are exposed; random non-album folders never appear.
-- Songs sorted by track number, then filepath. 5-minute in-memory cache per source for fast browsing.
-- Device auto-discovery via SSDP multicast (no manual IP entry required on the device).
-- Responds to `Browse` (BrowseDirectChildren + BrowseMetadata, full pagination), `GetSystemUpdateID`, `GetSearchCapabilities`, `GetSortCapabilities` ContentDirectory SOAP actions; SUBSCRIBE/UNSUBSCRIBE stub accepted.
-- Server name (`mStream Velvet` default) and port are configurable from the admin UI; changes take effect live without a restart.
-- Security note displayed in admin UI: DLNA port is unauthenticated — must only be used on trusted LANs.
+### feat: DLNA / UPnP Media Server (full rewrite)
+- Complete ground-up rewrite of the DLNA/UPnP MediaServer (DMS-1.50) — replaces the former bare-minimum implementation.
+- Removed `node-ssdp` dependency; SSDP now uses raw UDP dgram multicast (no external library).
+- **Browse hierarchy** — per configured music vpath, exposes:
+  - **Folders** — real directory tree mirroring the filesystem (any depth)
+  - **Artists** — grouped by normalised artist_id hash; drill-down to Albums → Tracks
+  - **Albums** — flat list of all albums; drill-down to Tracks
+  - **Genres** — all genres → Artists → Albums → Tracks
+  - **All Tracks** — paginated flat track list
+  - **Recently Added** — 50 most-recently scanned tracks
+  - **Most Played** — 50 top-played tracks (requires Last.fm / play-count data)
+  - **By Year** — tracks grouped by year
+  - **Playlists** — all saved playlists exposed as DLNA containers
+- Full SOAP ContentDirectory 1.0: `Browse` (BrowseDirectChildren + BrowseMetadata, pagination), `Search`, `GetSystemUpdateID`, `GetSearchCapabilities`, `GetSortCapabilities`.
+- Real GENA eventing — clients that SUBSCRIBE to `ContentDirectory` receive `SystemUpdateID` notifications when the library is rescanned.
+- Real `ConnectionManager` service with bidirectional (source + sink) `ProtocolInfo`.
+- Samsung extensions: `X_GetFeatureList`, `BASICVIEW`, `X_SetBookmark`.
+- Time-seek middleware (`TimeSeekRange.dlna.org`) — transcodes via ffmpeg for seek-capable playback on Samsung/LG TVs.
+- Album-art endpoint: serves embedded cover art per track for renderers that request it.
+- `bumpSystemUpdateID()` called automatically after every library rescan.
+- Device name and port configurable from admin UI (no restart required).
+- Security note displayed in admin UI: DLNA port is unauthenticated — trusted LAN only.
 - Confirmed working: VLC Desktop, Samsung Smart TV, LG Smart TV, BubbleUPnP (Android), Kodi.
-- Dependency: `node-ssdp` v4.0.1 (MIT licence) — SSDP advertisement layer only.
 
 ---
 

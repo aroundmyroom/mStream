@@ -1172,9 +1172,16 @@ export function setup(mstream) {
     res.json({ running: isRunning() });
   });
 
-  // Auto-start on boot if previously enabled
+  // Auto-start on boot if previously enabled.
+  // Retry once after 5 s in case the port is still in TIME_WAIT from the
+  // previous process (happens on rapid service restart).
   if (config.program.dlna?.enabled) {
-    start().catch(e => winston.warn('[DLNA] auto-start failed: ' + e.message));
+    start().catch(e => {
+      winston.warn(`[DLNA] auto-start failed (${e.message}) — retrying in 5 s`);
+      setTimeout(() => {
+        start().catch(e2 => winston.error(`[DLNA] auto-start retry failed: ${e2.message}`));
+      }, 5000);
+    });
   }
 }
 

@@ -3,6 +3,7 @@ import fs from 'fs';
 import * as db from '../db/manager.js';
 import * as config from '../state/config.js';
 import * as scanProgress from '../state/scan-progress.js';
+import * as dlnaApi from './dlna.js';
 
 export function setup(mstream) {
   mstream.all('/api/v1/scanner/{*path}', (req, res, next) => {
@@ -241,6 +242,7 @@ export function setup(mstream) {
     // These are non-critical background operations — errors must not fail the scan.
     try { db.rebuildFolderIndex(); } catch (_e) { /* non-critical */ }
     db.rebuildArtistIndex(); // runs in worker_thread — non-blocking, fire-and-forget
+    try { dlnaApi.bumpSystemUpdateID(); } catch (_e) { /* non-critical — never fail the scan */ }
     res.json({});
   });
 

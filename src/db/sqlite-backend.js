@@ -39,6 +39,9 @@ let _dbPath = null;
 let _rebuildInFlight = false;
 const _s = {}; // cached prepared statements — populated in init(), reused on every call
 
+/** Expose raw DatabaseSync instance for modules (like DLNA) that need custom queries. */
+export function getDB() { return db; }
+
 export function init(dbDirectory) {
   mkdirSync(dbDirectory, { recursive: true });
   const dbPath = path.join(dbDirectory, 'mstream.sqlite');

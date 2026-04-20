@@ -453,9 +453,22 @@ export function setup(mstream) {
   });
 
   // ── getLicense ──────────────────────────────────────────────────────────────
+  const LICENSE_QUIPS = [
+    'Fully licensed. Our lawyers are on vacation.',
+    'Valid forever. We bribed the calendar.',
+    'Licensed until the heat death of the universe (or 2099, whichever comes first).',
+    'License: valid. Coffee supply: critically low.',
+    'Genuine mStream Velvet™ — not a Napster clone. Probably.',
+    'License confirmed. No DRM was harmed in the making of this response.',
+    'Your music, your server, your rules. Also: valid.',
+    'Open source. The license IS the source.',
+    'Licensed under the "it just works" clause.',
+    'Valid. The accountants are asleep — play something loud.',
+  ];
   router('getLicense', (req, res) => {
+    const quip = LICENSE_QUIPS[Math.floor(Math.random() * LICENSE_QUIPS.length)];
     sendResponse(req, res, makeResponse('ok', {
-      license: { valid: true, email: '', licenseExpires: '2099-12-31T00:00:00' }
+      license: { valid: true, email: quip, licenseExpires: '2099-12-31T00:00:00' }
     }));
   });
 

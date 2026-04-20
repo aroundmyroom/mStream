@@ -774,7 +774,8 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .q-info{flex:1;min-width:0;}
 .q-title{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .q-artist{font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.q-dj-tag{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;background:rgba(139,92,246,.18);color:#8b5cf6;border-radius:3px;padding:1px 4px;margin-left:5px;vertical-align:middle;flex-shrink:0;}
+.q-dj-slot{width:52px;flex-shrink:0;display:flex;align-items:center;justify-content:flex-end;}
+.q-dj-tag{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;background:rgba(139,92,246,.13);color:#8b5cf6;border:1px solid rgba(139,92,246,.35);border-radius:3px;padding:1px 5px;}
 
 .q-dur{font-size:11px;color:var(--t3);font-variant-numeric:tabular-nums;flex-shrink:0;margin-left:6px;margin-right:4px;white-space:nowrap;}
 .q-drag-handle{width:14px;display:flex;align-items:center;justify-content:center;color:var(--t3);opacity:0;cursor:grab;flex-shrink:0;transition:opacity .14s;touch-action:none;}

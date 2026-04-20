@@ -1635,8 +1635,9 @@ function refreshQueueUI() {
         </div>
         <div class="q-info">
           <div class="q-title">${esc(s.title || s.filepath?.split('/').pop() || '?')}</div>
-          <div class="q-artist">${esc(s.artist || '')}${s._dj ? '<span class="q-dj-tag">Auto&#8202;DJ</span>' : ''}</div>
+          <div class="q-artist">${esc(s.artist || '')}</div>
         </div>
+        <div class="q-dj-slot">${s._dj ? '<span class="q-dj-tag">Auto&#8202;DJ</span>' : ''}</div>
         ${s.duration ? `<div class="q-dur">${fmt(s.duration)}</div>` : ''}
         <button class="q-remove" data-qi="${i}" title="${t('player.ctrl.queueRemove')}">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -6942,7 +6943,6 @@ async function viewHome() {
   setTitle(t('player.title.home')); setBack(null); setNavActive('home'); S.view = 'home';
   _homeAC?.abort();
   _homeAC = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-  setBody('<div class="loading-state"></div>');
 
   const sig = _navCancel();
   const abEx = _audioBookExclusions();
@@ -6954,72 +6954,32 @@ async function viewHome() {
     ...(abEx.excludeFilepathPrefixes.length ? { excludeFilepathPrefixes: abEx.excludeFilepathPrefixes } : {}),
   };
 
-  let recentlyPlayed = [], mostPlayed = [], recentlyAdded = [], summary = {};
-  try {
-    [recentlyPlayed, mostPlayed, recentlyAdded, summary] = await Promise.all([
-      api('POST', 'api/v1/db/stats/recently-played', base, sig).catch(() => []),
-      api('POST', 'api/v1/db/stats/most-played',     base, sig).catch(() => []),
-      api('POST', 'api/v1/db/recent/added',          { ...base, limit: Math.min(_limit * 6, 90) }, sig).catch(() => []),
-      api('GET',  'api/v1/db/home-summary',          undefined, sig).catch(() => ({})),
-    ]);
-  } catch(e) { if (e.name === 'AbortError') return; }
-
-  if (S.view !== 'home') return;
-
-  recentlyPlayed = recentlyPlayed.map(norm);
-  mostPlayed     = mostPlayed.map(s => { const n = norm(s); n._playCount = s.metadata?.['play-count']; return n; });
-  recentlyAdded  = recentlyAdded.map(norm);
-
-  // Group recentlyAdded by album — raw array is already sorted by ts DESC so
-  // first occurrence of each album key = most recently added album.
-  // Key is the folder path, so compilation albums (different artist per track)
-  // still collapse into a single card instead of one card per track.
-  const _raGroupMap = new Map();
-  const _raGroups = [];
-  for (const s of recentlyAdded) {
-    const folder = (s.filepath || '').split('/').slice(0, -1).join('/');
-    const key = folder;
-    if (!_raGroupMap.has(key)) {
-      const grp = { album: s.album || folder.split('/').pop() || '—', artist: s.artist || null, art: s['album-art'] || null, _artFp: s['album-art'] ? null : s.filepath, songs: [], _artists: new Set() };
-      _raGroupMap.set(key, grp);
-      _raGroups.push(grp);
-    }
-    const _g = _raGroupMap.get(key);
-    _g.songs.push(s);
-    if (s.artist) _g._artists.add(s.artist);
-    if (!_g.art && s['album-art']) { _g.art = s['album-art']; _g._artFp = null; }
-  }
-  const _recentAlbumGroups = _raGroups.slice(0, _limit);
-
-  // Temporal sections from home-summary
-  const _temporalSections = (summary.sections || []).map(sec => ({
-    key: sec.key,
-    songs: (sec.songs || []).map(r => norm(r)),
-  })).filter(s => s.songs.length > 0);
-  // flat list of all temporal songs for click handler
-  const _allTemporal = _temporalSections.flatMap(s => s.songs);
-
-  // ── 1. Hero greeting + stats strip ──────────────────────────
+  // ── Render shell immediately (greeting needs no API) ─────────
   const hr = new Date().getHours();
   const greetKey = hr < 12 ? 'player.home.greetingMorning'
                  : hr < 18 ? 'player.home.greetingAfternoon'
                  :            'player.home.greetingEvening';
-
-  const statsItems = [];
-  if (summary.todayCount > 0) statsItems.push(`<span class="home-stat"><strong>${summary.todayCount}</strong> ${t('player.home.statToday')}</span>`);
-  if (summary.weekCount  > 0) statsItems.push(`<span class="home-stat"><strong>${summary.weekCount}</strong> ${t('player.home.statWeek')}</span>`);
-  if (summary.streak     > 1) statsItems.push(`<span class="home-stat home-stat-streak"><strong>${summary.streak}</strong> ${t('player.home.statStreak')}</span>`);
-  const statsHtml = statsItems.length ? `<div class="home-stats-strip">${statsItems.join('<span class="home-stat-sep">·</span>')}</div>` : '';
   const homeDisplayName = (() => {
     const name = String(S.username || '').trim();
     if (!name) return '';
     return name.charAt(0).toLocaleUpperCase() + name.slice(1);
   })();
 
-  const greetHtml = `<div class="home-greeting">
-    <div class="home-greeting-text">${t(greetKey, { name: esc(homeDisplayName) })}</div>
-    ${statsHtml}
-  </div>`;
+  setBody(`<div class="home-view">
+    <div id="home-greeting-slot"><div class="home-greeting">
+      <div class="home-greeting-text">${t(greetKey, { name: esc(homeDisplayName) })}</div>
+    </div></div>
+    <div id="home-recent-added-slot"></div>
+    <div id="home-continue-slot"></div>
+    <div id="home-temporal-slot"></div>
+    <div id="home-mood-slot"></div>
+  </div>`);
+
+  const body = document.getElementById('content-body');
+  const _allSongs = [];
+  let _recentAlbumGroups = [];
+
+  function _slot(id) { return body?.querySelector('#' + id); }
 
   // ── card / strip helpers ─────────────────────────────────────
   function songCard(s, showCount) {
@@ -7063,116 +7023,152 @@ async function viewHome() {
     </div>`;
   }
 
-  // ── 2. Recently Added ────────────────────────────────────────
-  const recentAddedHtml = _recentAlbumGroups.length
-    ? strip(t('player.home.shelfRecentAdded'), _recentAlbumGroups.map((g, i) => albumCard(g, i)).join(''), t('player.home.badgeNew'))
-    : '';
+  function _bindSongCards(container) {
+    container.querySelectorAll('.home-song').forEach(card => {
+      card.addEventListener('click', () => {
+        const fp = card.dataset.fp;
+        const s = _allSongs.find(x => x.filepath === fp);
+        if (s) { _setPlaySource('home', 'Home'); Player.queueAndPlay(s); }
+      });
+    });
+  }
 
-  // ── 3. Continue Listening (last played, deduplicated by album) ──
-  // Take recently played, deduplicate by album, show top _limit entries
-  const _seenAlbums = new Set();
-  const continueItems = recentlyPlayed.filter(s => {
-    const key = (s.artist || '') + '|' + (s.album || s.filepath.split('/').slice(0,-1).join('/'));
-    if (_seenAlbums.has(key)) return false;
-    _seenAlbums.add(key); return true;
-  }).slice(0, _limit);
-  const continueHtml = continueItems.length
-    ? strip(t('player.home.shelfContinue'), continueItems.map(s => songCard(s, false)).join(''))
-    : '';
+  function _bindAlbumCards(container) {
+    container.querySelectorAll('.home-album').forEach(card => {
+      card.addEventListener('click', () => {
+        const g = _recentAlbumGroups[parseInt(card.dataset.groupIdx, 10)];
+        if (!g) return;
+        const sorted = [...g.songs].sort((a, b) => (a.track || 999) - (b.track || 999));
+        setTitle(g.album || t('player.home.recentlyAdded'));
+        setBack(viewHome);
+        showSongs(sorted, null, g.album || null);
+      });
+    });
+  }
 
-  // ── 4. Temporal "On This Day" sections ───────────────────────
+  function _onDemandArt(songs) {
+    const _seen = new Set();
+    for (const s of songs) {
+      if (s['album-art'] || s.isRadio || !s.filepath || _seen.has(s.filepath)) continue;
+      _seen.add(s.filepath);
+      const fp = s.filepath;
+      api('GET', `api/v1/files/art?fp=${encodeURIComponent(fp)}`)
+        .then(d => {
+          if (!d?.aaFile) return;
+          for (const x of _allSongs) { if (x.filepath === fp) x['album-art'] = d.aaFile; }
+          body?.querySelectorAll('.home-song, .home-album').forEach(card => {
+            if (card.dataset.fp !== fp) return;
+            const artDiv = card.querySelector('.hc-art');
+            if (artDiv && !artDiv.querySelector('img')) {
+              artDiv.insertAdjacentHTML('afterbegin', `<img src="${artUrl(d.aaFile, 's')}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`);
+            }
+          });
+        })
+        .catch(() => {});
+    }
+  }
+
+  // ── Progressive fetches — fill each slot as it resolves ──────
+
+  // 1. Most-played (~44ms) → Mood shelves
+  api('POST', 'api/v1/db/stats/most-played', base, sig).catch(() => []).then(raw => {
+    if (S.view !== 'home') return;
+    const mostPlayed = (Array.isArray(raw) ? raw : []).map(s => { const n = norm(s); n._playCount = s.metadata?.['play-count']; return n; });
+    _allSongs.push(...mostPlayed);
+    const _moodMap = { nostalgia: [], current: [] };
+    const cutoff = new Date().getFullYear() - 10;
+    for (const s of mostPlayed) {
+      const yr = parseInt(s.year, 10);
+      if (yr > 0 && yr < cutoff) _moodMap.nostalgia.push(s);
+      else _moodMap.current.push(s);
+    }
+    const moodParts = [];
+    if (_moodMap.nostalgia.length >= 3) moodParts.push(strip(t('player.home.moodNostalgia'), _moodMap.nostalgia.slice(0, _limit).map(s=>songCard(s,false)).join('')));
+    if (_moodMap.current.length   >= 3) moodParts.push(strip(t('player.home.moodCurrent'),   _moodMap.current.slice(0, _limit).map(s=>songCard(s,false)).join('')));
+    const fallback = !moodParts.length && mostPlayed.length
+      ? strip(t('player.home.shelfMost'), mostPlayed.map(s => songCard(s, true)).join('')) : '';
+    const html = moodParts.join('') + fallback;
+    const slot = _slot('home-mood-slot');
+    if (slot && html) { slot.innerHTML = html; _bindSongCards(slot); _onDemandArt(mostPlayed); }
+  });
+
+  // 2. Recently-played (~275ms) → Continue Listening shelf
+  api('POST', 'api/v1/db/stats/recently-played', base, sig).catch(() => []).then(raw => {
+    if (S.view !== 'home') return;
+    const recentlyPlayed = (Array.isArray(raw) ? raw : []).map(norm);
+    _allSongs.push(...recentlyPlayed);
+    const _seenAlbums = new Set();
+    const continueItems = recentlyPlayed.filter(s => {
+      const key = (s.artist || '') + '|' + (s.album || s.filepath.split('/').slice(0,-1).join('/'));
+      if (_seenAlbums.has(key)) return false;
+      _seenAlbums.add(key); return true;
+    }).slice(0, _limit);
+    const html = continueItems.length
+      ? strip(t('player.home.shelfContinue'), continueItems.map(s => songCard(s, false)).join('')) : '';
+    const slot = _slot('home-continue-slot');
+    if (slot && html) { slot.innerHTML = html; _bindSongCards(slot); _onDemandArt(continueItems); }
+  });
+
+  // 3. Recently-added (~256ms) → Recently Added albums shelf
+  api('POST', 'api/v1/db/recent/added', { ...base, limit: Math.min(_limit * 6, 90) }, sig).catch(() => []).then(raw => {
+    if (S.view !== 'home') return;
+    const recentlyAdded = (Array.isArray(raw) ? raw : []).map(norm);
+    _allSongs.push(...recentlyAdded);
+    const _raGroupMap = new Map();
+    const _raGroups = [];
+    for (const s of recentlyAdded) {
+      const folder = (s.filepath || '').split('/').slice(0, -1).join('/');
+      if (!_raGroupMap.has(folder)) {
+        const grp = { album: s.album || folder.split('/').pop() || '—', artist: s.artist || null, art: s['album-art'] || null, _artFp: s['album-art'] ? null : s.filepath, songs: [], _artists: new Set() };
+        _raGroupMap.set(folder, grp); _raGroups.push(grp);
+      }
+      const _g = _raGroupMap.get(folder);
+      _g.songs.push(s); if (s.artist) _g._artists.add(s.artist);
+      if (!_g.art && s['album-art']) { _g.art = s['album-art']; _g._artFp = null; }
+    }
+    _recentAlbumGroups = _raGroups.slice(0, _limit);
+    const html = _recentAlbumGroups.length
+      ? strip(t('player.home.shelfRecentAdded'), _recentAlbumGroups.map((g, i) => albumCard(g, i)).join(''), t('player.home.badgeNew')) : '';
+    const slot = _slot('home-recent-added-slot');
+    if (slot && html) { slot.innerHTML = html; _bindAlbumCards(slot); _onDemandArt(recentlyAdded); }
+  });
+
+  // 4. Home-summary (~258ms) → stats strip + temporal sections
   const _sectionKeyLabels = {
     yesterday:        'player.home.shelfYesterday',
     lastWeekSameDay:  'player.home.shelfLastWeekSameDay',
     lastMonthSameDay: 'player.home.shelfLastMonthSameDay',
     lastYearSameDay:  'player.home.shelfLastYearSameDay',
   };
-  const temporalHtml = _temporalSections
-    .map(sec => {
+  api('GET', 'api/v1/db/home-summary', undefined, sig).catch(() => ({})).then(summary => {
+    if (S.view !== 'home') return;
+    // Patch stats strip into existing greeting
+    const statsItems = [];
+    if (summary.todayCount > 0) statsItems.push(`<span class="home-stat"><strong>${summary.todayCount}</strong> ${t('player.home.statToday')}</span>`);
+    if (summary.weekCount  > 0) statsItems.push(`<span class="home-stat"><strong>${summary.weekCount}</strong> ${t('player.home.statWeek')}</span>`);
+    if (summary.streak     > 1) statsItems.push(`<span class="home-stat home-stat-streak"><strong>${summary.streak}</strong> ${t('player.home.statStreak')}</span>`);
+    if (statsItems.length) {
+      const greetEl = _slot('home-greeting-slot')?.querySelector('.home-greeting');
+      if (greetEl && !greetEl.querySelector('.home-stats-strip')) {
+        const strip_el = document.createElement('div');
+        strip_el.className = 'home-stats-strip';
+        strip_el.innerHTML = statsItems.join('<span class="home-stat-sep">·</span>');
+        greetEl.appendChild(strip_el);
+      }
+    }
+    // Temporal "On This Day" sections
+    const temporalSections = (summary.sections || []).map(sec => ({
+      key: sec.key, songs: (sec.songs || []).map(r => norm(r)),
+    })).filter(s => s.songs.length > 0);
+    const allTemporal = temporalSections.flatMap(s => s.songs);
+    _allSongs.push(...allTemporal);
+    const temporalHtml = temporalSections.map(sec => {
       const lk = _sectionKeyLabels[sec.key];
       return lk ? strip(t(lk), sec.songs.map(s => songCard(s, false)).join('')) : '';
-    })
-    .filter(Boolean)
-    .join('');
-
-  // ── 5. Mood Quick-Picks ──────────────────────────────────────
-  // Derive from most-played: group by decade as proxy for era/nostalgia
-  const _moodMap = { nostalgia: [], current: [] };
-  for (const s of mostPlayed) {
-    const yr = parseInt(s.year, 10);
-    if (yr > 0 && yr < new Date().getFullYear() - 10) _moodMap.nostalgia.push(s);
-    else _moodMap.current.push(s);
-  }
-  const moodShelves = [];
-  if (_moodMap.nostalgia.length >= 3) {
-    moodShelves.push(strip(t('player.home.moodNostalgia'), _moodMap.nostalgia.slice(0, _limit).map(s=>songCard(s,false)).join('')));
-  }
-  if (_moodMap.current.length >= 3) {
-    moodShelves.push(strip(t('player.home.moodCurrent'), _moodMap.current.slice(0, _limit).map(s=>songCard(s,false)).join('')));
-  }
-  // fallback: most-played shelf when mood split isn't possible
-  const mostPlayedFallback = !moodShelves.length && mostPlayed.length
-    ? strip(t('player.home.shelfMost'), mostPlayed.map(s => songCard(s, true)).join(''))
-    : '';
-
-  // ── compile sections, skip empty ────────────────────────────
-  const sections = [
-    greetHtml,
-    recentAddedHtml,
-    continueHtml,
-    temporalHtml,
-    ...moodShelves,
-    mostPlayedFallback,
-    (!recentlyPlayed.length && !recentlyAdded.length && !mostPlayed.length)
-      ? `<p class="home-empty">${t('player.home.emptyHint')}</p>` : '',
-  ].filter(Boolean).join('');
-
-  setBody(`<div class="home-view">${sections}</div>`);
-  const body = document.getElementById('content-body');
-
-  const _allSongs = [...recentlyPlayed, ...mostPlayed, ...recentlyAdded, ..._allTemporal, ...continueItems];
-  body.querySelectorAll('.home-song').forEach(card => {
-    card.addEventListener('click', () => {
-      const fp = card.dataset.fp;
-      const s = _allSongs.find(x => x.filepath === fp);
-      if (s) { _setPlaySource('home', 'Home'); Player.queueAndPlay(s); }
-    });
+    }).filter(Boolean).join('');
+    const slot = _slot('home-temporal-slot');
+    if (slot && temporalHtml) { slot.innerHTML = temporalHtml; _bindSongCards(slot); _onDemandArt(allTemporal); }
   });
-
-  body.querySelectorAll('.home-album').forEach(card => {
-    card.addEventListener('click', () => {
-      const g = _recentAlbumGroups[parseInt(card.dataset.groupIdx, 10)];
-      if (!g) return;
-      const sorted = [...g.songs].sort((a, b) => (a.track || 999) - (b.track || 999));
-      setTitle(g.album || t('player.home.recentlyAdded'));
-      setBack(viewHome);
-      showSongs(sorted, null, g.album || null);
-    });
-  });
-
-  // On-demand art fetch for cards that have no cached aaFile
-  const _homeView = body.querySelector('.home-view');
-  const _seenFp = new Set();
-  for (const s of _allSongs) {
-    if (s['album-art'] || s.isRadio || !s.filepath || _seenFp.has(s.filepath)) continue;
-    _seenFp.add(s.filepath);
-    const _fp = s.filepath;
-    api('GET', `api/v1/files/art?fp=${encodeURIComponent(_fp)}`)
-      .then(d => {
-        if (!d?.aaFile) return;
-        // update every song object sharing this filepath
-        for (const x of _allSongs) { if (x.filepath === _fp) x['album-art'] = d.aaFile; }
-        // patch every matching card — use dataset.fp (auto-unescapes HTML entities)
-        _homeView?.querySelectorAll('.home-song, .home-album').forEach(card => {
-          if (card.dataset.fp !== _fp) return;
-          const artDiv = card.querySelector('.hc-art');
-          if (artDiv && !artDiv.querySelector('img')) {
-            artDiv.insertAdjacentHTML('afterbegin', `<img src="${artUrl(d.aaFile, 's')}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`);
-          }
-        });
-      })
-      .catch(() => {});
-  }
 }
 
 // ── SHORTCUTS ────────────────────────────────────────────────
@@ -14194,15 +14190,24 @@ document.getElementById('qp-shuffle-btn').addEventListener('click', () => {
   _syncQueueToDb();
 });
 document.getElementById('qp-clear-btn').addEventListener('click', () => {
-  S.queue = []; S.idx = -1;
+  // If a song is currently loaded/playing, keep it as the only queue item so
+  // the player bar stays correct and audio continues uninterrupted.
+  const current = S.idx >= 0 ? S.queue[S.idx] : null;
+  if (current && !audioEl.paused) {
+    S.queue = [current]; S.idx = 0;
+  } else if (current && audioEl.currentTime > 0) {
+    S.queue = [current]; S.idx = 0;
+  } else {
+    S.queue = []; S.idx = -1;
+  }
   refreshQueueUI();
   toast(t('player.toast.queueCleared'));
   persistQueue();
-  // Flush immediately (no debounce) so the DB reflects the empty queue before
+  // Flush immediately (no debounce) so the DB reflects the cleared queue before
   // the user can refresh the page — prevents stale songs from being restored.
   clearTimeout(_syncQueueTimer);
   api('POST', 'api/v1/user/settings', { queue: {
-    queue: [], idx: -1, time: 0, playing: false, savedAt: Date.now(),
+    queue: S.queue, idx: S.idx, time: audioEl?.currentTime || 0, playing: !audioEl.paused, savedAt: Date.now(),
   }}).catch(() => {});
 });
 
