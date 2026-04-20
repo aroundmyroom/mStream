@@ -1,59 +1,86 @@
 /**
- * DLNA / UPnP MediaServer for mStream Velvet
+ * DLNA / UPnP MediaServer for mStream Velvet — full feature implementation
  *
- * Architecture
- * ────────────
- * Runs a dedicated plain-HTTP Express server (default port 10293) alongside
- * the main mStream server.  Most DLNA clients (smart TVs, AV receivers) cannot
- * handle HTTPS or mStream's JWT auth, so a separate unprotected HTTP endpoint
- * is the standard approach.
+ * Protocol support
+ * ─────────────────
+ * ContentDirectory 1.0  — Browse, Search, GetSearchCapabilities,
+ *                          GetSortCapabilities, GetSystemUpdateID,
+ *                          X_GetFeatureList (Samsung BASICVIEW shortcut)
+ * ConnectionManager 1.0 — GetProtocolInfo, GetCurrentConnectionIDs,
+ *                          GetCurrentConnectionInfo
+ * GENA events           — real SUBSCRIBE/NOTIFY per service, per-subscriber
+ *                          seq numbers, expiry management
+ * SSDP                  — raw dgram (no npm dep), UPnP 1.1 BOOTID/CONFIGID,
+ *                          MX-delayed M-SEARCH responses, ssdp:byebye on stop
+ * TimeSeekRange         — ffmpeg-based seek for AV receivers (Sony, Marantz…)
+ * protocolInfo          — proper DLNA.ORG_PN / DLNA.ORG_OP / DLNA.ORG_FLAGS
  *
- * Feature is DISABLED by default.  Admin enables it via the admin panel.
- * When enabled, SSDP multicast advertises the server on the LAN so devices
- * can discover it automatically — no manual IP entry needed.
+ * Browse hierarchy
+ * ─────────────────
+ *   Root (0)
+ *   └── Music (music)
+ *       ├── [VPath] (lib-<b64>)
+ *       │   ├── Folders   (folders-<b64>)    — directory tree
+ *       │   ├── Artists   (artists-<b64>)    — artist → albums → tracks
+ *       │   ├── Albums    (albums-<b64>)     — flat album list → tracks
+ *       │   ├── Genres    (genres-<b64>)     — genre → artists → albums
+ *       │   └── All Tracks(tracks-<b64>)     — sortable flat track list
+ *       ├── Recently Added (recent)          — last 200 by ts
+ *       ├── Most Played    (mostplayed)       — by play_events count
+ *       ├── By Year        (years)            — year buckets
+ *       └── Playlists      (playlists)        — user playlists
  *
- * Browse hierarchy exposed to DLNA clients
- * ─────────────────────────────────────────
- *   Root (id=0)
- *   └── All Albums (id='albums')
- *       ├── <Album A> (id='alb_<base64>', container)
- *       │   └── Track 01 … N (item, id='itm_<base64>')
- *       └── …
- *
- * Security note
- * ─────────────
- * The DLNA port serves all music-type vpaths without authentication.
- * It must only be exposed on a trusted LAN — never port-forward it to the internet.
- * This is documented in the admin UI and in docs/dlna.md.
+ * Security
+ * ─────────
+ * The DLNA port (default 10293) serves media without authentication.
+ * Never expose it to the internet — LAN only. Documented in docs/dlna.md.
  */
 
-import os   from 'os';
-import path from 'path';
-import http from 'http';
-import express from 'express';
+import os     from 'os';
+import path   from 'path';
+import fs     from 'fs';
+import http   from 'http';
+import crypto from 'crypto';
+import { spawn } from 'child_process';
 import { createRequire } from 'module';
+import express from 'express';
 import winston from 'winston';
-import Joi from 'joi';
-
-import * as config from '../state/config.js';
-import * as db     from '../db/manager.js';
-import * as adminUtil from '../util/admin.js';
-import { joiValidate } from '../util/validation.js';
-import { resolveAlbumsSources } from './albums-browse.js';
+import Joi    from 'joi';
 
 const require = createRequire(import.meta.url);
 
-// ─── Module state ─────────────────────────────────────────────────────────────
+import * as config    from '../state/config.js';
+import * as db        from '../db/manager.js';
+import * as adminUtil from '../util/admin.js';
+import { joiValidate } from '../util/validation.js';
+import { ffmpegBin }            from '../util/ffmpeg-bootstrap.js';
+import { resolveAlbumsSources } from './albums-browse.js';
 
-/** @type {import('node-ssdp').Server|null} */
-let _ssdpServer = null;
+// ── Module state ──────────────────────────────────────────────────────────────
+
 /** @type {import('http').Server|null} */
-let _httpServer = null;
-let _running = false;
+let _httpServer  = null;
+let _running     = false;
+let _baseUrl     = '';           // e.g. 'http://192.168.1.10:10293'
+/** @type {import('node-ssdp').Server|null} */
+let _ssdpServer  = null;
 
-// ─── Utilities ────────────────────────────────────────────────────────────────
+// ── GENA subscriber registry ──────────────────────────────────────────────────
 
-/** First non-loopback IPv4 address, used in SSDP Location header */
+// keyed by SID string; value: { service, callbacks, expiresAt, seq }
+const _subscribers = new Map();
+const MAX_SUBSCRIBERS = 256;
+const GENA_DEFAULT_TIMEOUT = 1800; // seconds
+
+// SystemUpdateID — bumped after each scan complete; clients use it to
+// invalidate their browse caches. Wraps at 2^32.
+let _systemUpdateID = 1;
+
+const MAX_BROWSE_COUNT = 5000; // hard cap per Browse/Search response
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** First non-loopback IPv4 address */
 function getLanIp() {
   for (const ifaces of Object.values(os.networkInterfaces())) {
     for (const iface of ifaces) {
@@ -63,108 +90,219 @@ function getLanIp() {
   return '127.0.0.1';
 }
 
-// ─── Source file cache ───────────────────────────────────────────────────────
-// All files for each albumsOnly source are loaded once and cached for 5 minutes.
-// listChildren() filters from the in-memory array so any folder level can be
-// browsed without extra DB queries per request.
-
-const _sourceFilesCache = new Map();
-const SOURCE_FILES_CACHE_TTL = 5 * 60 * 1000;
-
-function getSourceFiles(source) {
-  const cached = _sourceFilesCache.get(source.vpathName);
-  if (cached && Date.now() - cached.ts < SOURCE_FILES_CACHE_TTL) return cached.files;
-  const files = db.getFilesForAlbumsBrowse([{ vpath: source.dbVpath, prefix: source.prefix }]);
-  _sourceFilesCache.set(source.vpathName, { files, ts: Date.now() });
-  return files;
+function dlnaUuid() {
+  return config.program.instanceId || 'mstream-velvet-default';
 }
 
-/**
- * List immediate children (subdirs + direct songs) under parentPrefix.
- * parentPrefix MUST end with '/'  (e.g. 'Albums/' or 'Albums/Top 700/')
- * Works entirely from the per-source in-memory cache — no extra DB queries.
- */
-function listChildren(source, parentPrefix) {
-  const allFiles = getSourceFiles(source);
-  const prefixLen = parentPrefix.length;
-  const dirsMap = new Map(); // dirName → { name, sampleFile }
-  const songs = [];
+// ── SSDP via node-ssdp ────────────────────────────────────────────────────────
 
-  for (const row of allFiles) {
-    const fp = String(row.filepath);
-    if (!fp.startsWith(parentPrefix)) continue;
-    const rel   = fp.slice(prefixLen);
-    const slash = rel.indexOf('/');
-    if (slash === -1) {
-      songs.push(row); // direct-child song
-    } else {
-      const dirName = rel.slice(0, slash);
-      if (!dirsMap.has(dirName)) dirsMap.set(dirName, { name: dirName, sampleFile: row });
-    }
-  }
-
-  const dirs = [...dirsMap.values()].sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
-  );
-  songs.sort((a, b) =>
-    ((a.track || 999) - (b.track || 999)) ||
-    String(a.filepath).localeCompare(String(b.filepath))
-  );
-  return { dirs, songs };
+function _startSsdp(port) {
+  if (_ssdpServer) return;
+  const { Server: SsdpServer } = require('node-ssdp');
+  const uuid = dlnaUuid();
+  _ssdpServer = new SsdpServer({
+    location:       { port, path: '/dlna/description.xml' },
+    udn:            `uuid:${uuid}`,
+    ssdpSig:        'mStream Velvet/1.0',
+    allowWildcards: true,
+  });
+  _ssdpServer.addUSN('upnp:rootdevice');
+  _ssdpServer.addUSN(`uuid:${uuid}`);
+  _ssdpServer.addUSN('urn:schemas-upnp-org:device:MediaServer:1');
+  _ssdpServer.addUSN('urn:schemas-upnp-org:service:ContentDirectory:1');
+  _ssdpServer.addUSN('urn:schemas-upnp-org:service:ConnectionManager:1');
+  return _ssdpServer.start();
 }
 
-/** XML-escape a string for inclusion in XML element content or attribute values */
+function _stopSsdp() {
+  if (!_ssdpServer) return;
+  const s = _ssdpServer;
+  _ssdpServer = null;
+  try { s.stop(); } catch (_) {}
+}
+
+// ── XML / SOAP helpers ────────────────────────────────────────────────────────
+
 function xmlEsc(s) {
   if (s == null) return '';
   return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 
-/** Map file extension to MIME type for DLNA protocolInfo */
-function ext2mime(fp) {
-  return ({
-    '.mp3':  'audio/mpeg',
-    '.flac': 'audio/flac',
-    '.ogg':  'audio/ogg',
-    '.opus': 'audio/opus',
-    '.m4a':  'audio/mp4',
-    '.m4b':  'audio/mp4',
-    '.aac':  'audio/aac',
-    '.wav':  'audio/wav',
-  })[path.extname(String(fp)).toLowerCase()] || 'audio/mpeg';
+function xmlUnescape(s) {
+  return String(s || '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
 }
 
-/** Format seconds as HH:MM:SS.mmm for DIDL <res duration="..."> */
-function durFmt(secs) {
-  if (!secs || secs <= 0) return '0:00:00.000';
-  const s = parseFloat(secs);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = (s % 60).toFixed(3).padStart(6, '0');
-  return `${h}:${String(m).padStart(2, '0')}:${sec}`;
+/** Extract <FieldName> value from SOAP XML body (namespace-agnostic) */
+function soapField(xml, field) {
+  const m = xml.match(new RegExp(`<(?:[^:>]+:)?${field}[^>]*>([\\s\\S]*?)<\\/(?:[^:>]+:)?${field}>`, 'i'));
+  return m ? xmlUnescape(m[1].trim()) : '';
 }
 
-// ─── Object-ID encoding ───────────────────────────────────────────────────────
-// All IDs are opaque base64url strings so special characters in album names and
-// file paths don't cause XML / URL issues.
+function soapEnvelope(serviceNs, actionName, innerXml) {
+  return `<?xml version="1.0" encoding="utf-8"?>\
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"\
+            s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">\
+  <s:Body>\
+    <u:${actionName}Response xmlns:u="${serviceNs}">\
+      ${innerXml}\
+    </u:${actionName}Response>\
+  </s:Body>\
+</s:Envelope>`;
+}
 
-/** Encode an albumsOnly source (vpathName) into a DLNA container objectId */
+function soapError(code, description) {
+  return `<?xml version="1.0" encoding="utf-8"?>\
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">\
+  <s:Body><s:Fault>\
+    <faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>\
+    <detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0">\
+      <errorCode>${code}</errorCode>\
+      <errorDescription>${xmlEsc(description)}</errorDescription>\
+    </UPnPError></detail>\
+  </s:Fault></s:Body>\
+</s:Envelope>`;
+}
+
+function sendXml(res, body, status = 200) {
+  res.status(status).set('Content-Type', 'text/xml; charset="utf-8"').send(body);
+}
+
+// ── MIME / protocolInfo ───────────────────────────────────────────────────────
+
+const DLNA_FLAGS = '01700000000000000000000000000000';
+
+const MIME_MAP = {
+  mp3:  { mime: 'audio/mpeg', dlnaProfile: 'MP3' },
+  flac: { mime: 'audio/flac', dlnaProfile: 'FLAC' },
+  wav:  { mime: 'audio/wav',  dlnaProfile: 'WAV' },
+  m4a:  { mime: 'audio/mp4',  dlnaProfile: 'AAC_ISO' },
+  m4b:  { mime: 'audio/mp4',  dlnaProfile: 'AAC_ISO' },
+  aac:  { mime: 'audio/aac',  dlnaProfile: null },
+  ogg:  { mime: 'audio/ogg',  dlnaProfile: null },
+  opus: { mime: 'audio/opus', dlnaProfile: null },
+  wma:  { mime: 'audio/x-ms-wma', dlnaProfile: 'WMABASE' },
+};
+
+function mimeInfo(filepath) {
+  const ext = path.extname(String(filepath || '')).replace(/^\./, '').toLowerCase();
+  return MIME_MAP[ext] || { mime: 'audio/mpeg', dlnaProfile: null };
+}
+
+function protocolInfo(filepath) {
+  const info = mimeInfo(filepath);
+  const parts = [`DLNA.ORG_OP=11`, `DLNA.ORG_CI=0`, `DLNA.ORG_FLAGS=${DLNA_FLAGS}`];
+  if (info.dlnaProfile) parts.unshift(`DLNA.ORG_PN=${info.dlnaProfile}`);
+  return `http-get:*:${info.mime}:${parts.join(';')}`;
+}
+
+// ── Duration formatting ───────────────────────────────────────────────────────
+// Use integer milliseconds to avoid float carry (e.g. 59.9996s → "60.000")
+
+function formatDuration(secs) {
+  if (!secs || secs <= 0) return undefined;
+  const totalMs = Math.round(secs * 1000);
+  const h = Math.floor(totalMs / 3600000);
+  const m = Math.floor((totalMs % 3600000) / 60000);
+  const s = (totalMs % 60000) / 1000;
+  return `${h}:${String(m).padStart(2, '0')}:${s.toFixed(3).padStart(6, '0')}`;
+}
+
+// ── DIDL-Lite builders ────────────────────────────────────────────────────────
+
+function didlWrapper(items) {
+  return `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"\
+  xmlns:dc="http://purl.org/dc/elements/1.1/"\
+  xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"\
+  xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">${items}</DIDL-Lite>`;
+}
+
+function artXml(aaFile) {
+  if (!aaFile) return '';
+  return `\n    <upnp:albumArtURI dlna:profileID="JPEG_TN">${xmlEsc(`${_baseUrl}/album-art/${encodeURIComponent(aaFile)}`)}</upnp:albumArtURI>`;
+}
+
+function containerXml(id, parentId, title, childCount, upnpClass = 'object.container', aaFile = null) {
+  return `  <container id="${xmlEsc(id)}" parentID="${xmlEsc(parentId)}" restricted="1" childCount="${childCount}">${artXml(aaFile)}\n    <dc:title>${xmlEsc(title)}</dc:title>\n    <upnp:class>${upnpClass}</upnp:class>\n  </container>`;
+}
+
+function trackItem(track, parentId) {
+  const fp  = String(track.filepath || '').split('/').map(encodeURIComponent).join('/');
+  const vp  = encodeURIComponent(track.vpath);
+  const mediaUrl = `${_baseUrl}/media/${vp}/${fp}`;
+  const dur = formatDuration(track.duration);
+  const durAttr = dur ? ` duration="${dur}"` : '';
+  const sizeAttr = track.filesize ? ` size="${track.filesize}"` : '';
+  const title = track.title || path.basename(String(track.filepath), path.extname(String(track.filepath)));
+  return `  <item id="${xmlEsc(trackId(track.vpath, track.filepath))}" parentID="${xmlEsc(parentId)}" restricted="1">
+    <dc:title>${xmlEsc(title)}</dc:title>
+    <dc:creator>${xmlEsc(track.artist || '')}</dc:creator>${artXml(track.aaFile)}
+    ${track.year ? `<dc:date>${track.year}-01-01</dc:date>\n    <upnp:originalYear>${track.year}</upnp:originalYear>` : ''}
+    <upnp:artist>${xmlEsc(track.artist || '')}</upnp:artist>
+    <upnp:album>${xmlEsc(track.album || '')}</upnp:album>
+    ${track.track ? `<upnp:originalTrackNumber>${track.track}</upnp:originalTrackNumber>` : ''}
+    ${track.genre ? `<upnp:genre>${xmlEsc(track.genre)}</upnp:genre>` : ''}
+    <upnp:class>object.item.audioItem.musicTrack</upnp:class>
+    <res protocolInfo="${xmlEsc(protocolInfo(track.filepath))}"${durAttr}${sizeAttr}>${xmlEsc(mediaUrl)}</res>
+  </item>`;
+}
+
+// ── Object ID encoding ────────────────────────────────────────────────────────
+
+function b64e(s) { return Buffer.from(String(s)).toString('base64url'); }
+function b64d(s) { try { return Buffer.from(String(s), 'base64url').toString(); } catch { return ''; } }
+
+function vpathId(vpath)          { return `lib-${b64e(vpath)}`; }
+function idToVpath(id)           { return b64d(id.replace(/^lib-/, '')); }
+
+function trackId(vpath, filepath){ return `track-${b64e(vpath + '\x00' + filepath)}`; }
+function trackIdDecode(id) {
+  const raw = b64d(id.replace(/^track-/, ''));
+  const i = raw.indexOf('\x00');
+  return i === -1 ? { vpath: '', filepath: raw } : { vpath: raw.slice(0, i), filepath: raw.slice(i + 1) };
+}
+
+function dirId(vpath, relPath)   { return `dir-${b64e(vpath + '\x00' + relPath)}`; }
+function dirIdDecode(id) {
+  const raw = b64d(id.replace(/^dir-/, ''));
+  const i = raw.indexOf('\x00');
+  return i === -1 ? { vpath: '', relPath: raw } : { vpath: raw.slice(0, i), relPath: raw.slice(i + 1) };
+}
+
+function genreId(vpath, genre)   { return `genre-${b64e(vpath + '\x00' + (genre ?? ''))}`;  }
+function genreIdDecode(id) {
+  const raw = b64d(id.replace(/^genre-/, ''));
+  const i = raw.indexOf('\x00');
+  return i === -1 ? { vpath: '', genre: raw } : { vpath: raw.slice(0, i), genre: raw.slice(i + 1) };
+}
+
+function playlistId(name, user)  { return `playlist-${b64e(name + '\x00' + user)}`; }
+function playlistIdDecode(id) {
+  const raw = b64d(id.replace(/^playlist-/, ''));
+  const i = raw.indexOf('\x00');
+  return i === -1 ? { name: raw, user: '' } : { name: raw.slice(0, i), user: raw.slice(i + 1) };
+}
+
+// ── AlbumsOnly source helpers ─────────────────────────────────────────────────
+// Loads all files for each albumsOnly source once, then filters in-memory.
+// Uses the same 5-min cache strategy as albums-browse.js.
+
+const _sourceFilesCache = new Map();
+const SOURCE_FILES_TTL  = 5 * 60 * 1000;
+
 function encSrc(vpathName) {
   return 'src_' + Buffer.from(String(vpathName)).toString('base64url');
 }
-/** Decode source objectId back to vpathName */
 function decSrc(id) {
   try { return Buffer.from(id.replace(/^src_/, ''), 'base64url').toString(); }
   catch { return null; }
 }
-/** Encode a directory path into a DLNA container objectId */
 function encDir(dbVpath, dirPath) {
   return 'dir_' + Buffer.from(String(dbVpath) + '\x00' + String(dirPath)).toString('base64url');
 }
-/** Decode directory objectId back to { dbVpath, dirPath } */
 function decDir(id) {
   try {
     const raw = Buffer.from(id.replace(/^dir_/, ''), 'base64url').toString();
@@ -172,420 +310,792 @@ function decDir(id) {
     return { dbVpath: raw.slice(0, sep), dirPath: raw.slice(sep + 1) };
   } catch { return { dbVpath: '', dirPath: '' }; }
 }
-/** Encode a vpath + filepath into a stable DLNA item objectId */
-function encItem(vpath, filepath) {
-  return 'itm_' + Buffer.from(String(vpath) + '\x00' + String(filepath)).toString('base64url');
+
+function getSourceFiles(source) {
+  const key    = source.dbVpath + '\x00' + (source.prefix || '');
+  const cached = _sourceFilesCache.get(key);
+  if (cached && Date.now() - cached.ts < SOURCE_FILES_TTL) return cached.files;
+  const files = db.getFilesForAlbumsBrowse([{ vpath: source.dbVpath, prefix: source.prefix }]);
+  _sourceFilesCache.set(key, { files, ts: Date.now() });
+  return files;
 }
 
-/** Extract the value of a named SOAP parameter from the request XML body */
-function soapParam(xml, name) {
-  const m = xml.match(new RegExp(`<${name}[^>]*>([^<]*)<\/${name}>`, 'i'));
-  return m ? m[1].trim() : '';
-}
-
-// ─── DIDL-Lite builders ───────────────────────────────────────────────────────
-
-const NS_DIDL = 'urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/';
-const NS_DC   = 'http://purl.org/dc/elements/1.1/';
-const NS_UPNP = 'urn:schemas-upnp-org:metadata-1-0/upnp/';
-
-function buildDIDL(items) {
-  return `<?xml version="1.0" encoding="UTF-8"?>` +
-    `<DIDL-Lite xmlns="${NS_DIDL}" xmlns:dc="${NS_DC}" xmlns:upnp="${NS_UPNP}">` +
-    items.join('') +
-    `</DIDL-Lite>`;
-}
-
-function containerXml({ id, parentId, childCount, title, artUri }) {
-  const art = artUri ? `<upnp:albumArtURI>${xmlEsc(artUri)}</upnp:albumArtURI>` : '';
-  return (
-    `<container id="${xmlEsc(id)}" parentID="${xmlEsc(parentId)}"` +
-    ` childCount="${childCount}" restricted="1" searchable="0">` +
-    `<dc:title>${xmlEsc(title)}</dc:title>` +
-    `<upnp:class>object.container.album.musicAlbum</upnp:class>` +
-    art +
-    `</container>`
-  );
-}
-
-function itemXml({ id, parentId, song, baseUrl }) {
-  const vp = encodeURIComponent(song.vpath);
-  const fp = String(song.filepath).split('/').map(encodeURIComponent).join('/');
-  const mediaUrl = `${baseUrl}/media/${vp}/${fp}`;
-  const mime = ext2mime(song.filepath);
-  const dur  = durFmt(song.duration);
-  const artUrl = song.aaFile ? `${baseUrl}/album-art/${encodeURIComponent(song.aaFile)}` : '';
-  const title  = song.title || path.basename(String(song.filepath), path.extname(String(song.filepath)));
-  return (
-    `<item id="${xmlEsc(id)}" parentID="${xmlEsc(parentId)}" restricted="1">` +
-    `<dc:title>${xmlEsc(title)}</dc:title>` +
-    `<dc:creator>${xmlEsc(song.artist || '')}</dc:creator>` +
-    `<upnp:class>object.item.audioItem.musicTrack</upnp:class>` +
-    `<upnp:artist>${xmlEsc(song.artist || '')}</upnp:artist>` +
-    `<upnp:album>${xmlEsc(song.album || '')}</upnp:album>` +
-    (song.year ?  `<upnp:date>${song.year}-01-01</upnp:date>` : '') +
-    (song.track ? `<upnp:originalTrackNumber>${song.track}</upnp:originalTrackNumber>` : '') +
-    (artUrl ?     `<upnp:albumArtURI>${xmlEsc(artUrl)}</upnp:albumArtURI>` : '') +
-    `<res protocolInfo="http-get:*:${mime}:*" duration="${dur}">${xmlEsc(mediaUrl)}</res>` +
-    `</item>`
-  );
-}
-
-// ─── SOAP envelope helpers ────────────────────────────────────────────────────
-
-const NS_S  = 'http://schemas.xmlsoap.org/soap/envelope/';
-const NS_CD = 'urn:schemas-upnp-org:service:ContentDirectory:1';
-
-function soapEnvelope(action, body) {
-  return (
-    `<?xml version="1.0" encoding="UTF-8"?>` +
-    `<s:Envelope xmlns:s="${NS_S}" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">` +
-    `<s:Body>` +
-    `<u:${action}Response xmlns:u="${NS_CD}">` +
-    body +
-    `</u:${action}Response>` +
-    `</s:Body></s:Envelope>`
-  );
-}
-
-function browseResponse(didl, returned, total) {
-  return soapEnvelope('Browse',
-    `<Result>${xmlEsc(didl)}</Result>` +
-    `<NumberReturned>${returned}</NumberReturned>` +
-    `<TotalMatches>${total}</TotalMatches>` +
-    `<UpdateID>1</UpdateID>`
-  );
-}
-
-function soapError(code, description) {
-  return (
-    `<?xml version="1.0" encoding="UTF-8"?>` +
-    `<s:Envelope xmlns:s="${NS_S}"><s:Body><s:Fault>` +
-    `<faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>` +
-    `<detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0">` +
-    `<errorCode>${code}</errorCode>` +
-    `<errorDescription>${xmlEsc(description)}</errorDescription>` +
-    `</UPnPError></detail>` +
-    `</s:Fault></s:Body></s:Envelope>`
-  );
-}
-
-// ─── Browse logic ─────────────────────────────────────────────────────────────
-
-async function handleBrowse(body, baseUrl) {
-  const objectId = soapParam(body, 'ObjectID');
-  const flag     = soapParam(body, 'BrowseFlag');
-  const start    = Math.max(0, parseInt(soapParam(body, 'StartingIndex') || '0', 10) || 0);
-  const reqCount = Math.max(0, parseInt(soapParam(body, 'RequestedCount') || '0', 10) || 0);
-  const sources  = await resolveAlbumsSources();
-
-  /** Slice array according to UPnP StartingIndex / RequestedCount (0 = all) */
-  function pg(arr) {
-    return reqCount > 0 ? arr.slice(start, start + reqCount) : arr.slice(start);
+function listChildren(source, parentPrefix) {
+  const files  = getSourceFiles(source);
+  const dirSet = new Set();
+  const songs  = [];
+  for (const row of files) {
+    if (parentPrefix && !row.filepath.startsWith(parentPrefix)) continue;
+    const rest  = row.filepath.slice(parentPrefix.length);
+    const slash = rest.indexOf('/');
+    if (slash === -1) songs.push(row);
+    else              dirSet.add(rest.slice(0, slash));
   }
+  const dirs = [...dirSet]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    .map(name => {
+      const pfx    = parentPrefix + name + '/';
+      const sample = files.find(f => f.filepath.startsWith(pfx) && f.aaFile);
+      return { name, sampleFile: sample };
+    });
+  return { dirs, songs };
+}
 
-  // ── id=0  Root ────────────────────────────────────────────────────────────
+// ── Sort / order helpers (used by handleSearch) ───────────────────────────────
+function buildOrderBy(sortTerms, defaultOrder) {
+  if (!sortTerms || !sortTerms.length) return defaultOrder;
+  const MAP = {
+    'dc:title':                 'f.title COLLATE NOCASE',
+    'dc:creator':               'f.artist COLLATE NOCASE',
+    'upnp:artist':              'f.artist COLLATE NOCASE',
+    'upnp:album':               'f.album COLLATE NOCASE',
+    'upnp:genre':               'f.genre COLLATE NOCASE',
+    'upnp:originalTrackNumber': 'f.track',
+    'dc:date':                  'f.year',
+    'upnp:originalYear':        'f.year',
+    'res@duration':             'f.duration',
+  };
+  const clauses = sortTerms.map(t => {
+    const col = MAP[t.prop];
+    if (!col) return null;
+    return `${col} ${t.dir === '-' ? 'DESC' : 'ASC'}`;
+  }).filter(Boolean);
+  return clauses.length ? clauses.join(', ') : defaultOrder;
+}
+
+function parseSortCriteria(s) {
+  if (!s || !s.trim()) return [];
+  return s.split(',').map(p => {
+    const clean = p.trim();
+    if (clean.startsWith('+')) return { prop: clean.slice(1), dir: '+' };
+    if (clean.startsWith('-')) return { prop: clean.slice(1), dir: '-' };
+    return { prop: clean, dir: '+' };
+  }).filter(t => t.prop);
+}
+// ── Search helpers ────────────────────────────────────────────────────────────
+const SEARCH_PROP_MAP = {
+  'dc:title':                 "COALESCE(f.title, '')",
+  'dc:creator':               "COALESCE(f.artist, '')",
+  'upnp:artist':              "COALESCE(f.artist, '')",
+  'upnp:album':               "COALESCE(f.album, '')",
+  'upnp:genre':               "COALESCE(f.genre, '')",
+  'upnp:originalTrackNumber': 'f.track',
+};
+
+function tokenizeSearch(input) {
+  const tokens = [];
+  const re = /"(?:[^"\\]|\\.)*"|!=|<=|>=|[()=!<>]|[\w:.]+/g;
+  for (const m of (input || '').matchAll(re)) tokens.push(m[0]);
+  return tokens;
+}
+
+class SearchParser {
+  constructor(tokens) { this.tokens = tokens; this.pos = 0; }
+  peek() { return this.tokens[this.pos]; }
+  next() { return this.tokens[this.pos++]; }
+  parse() { return this.tokens.length ? this.parseOr() : null; }
+  parseOr() {
+    let left = this.parseAnd();
+    while (this.peek()?.toLowerCase() === 'or') { this.next(); left = { op: 'or', left, right: this.parseAnd() }; }
+    return left;
+  }
+  parseAnd() {
+    let left = this.parseRelational();
+    while (this.peek()?.toLowerCase() === 'and') { this.next(); left = { op: 'and', left, right: this.parseRelational() }; }
+    return left;
+  }
+  parseRelational() {
+    if (this.peek() === '(') { this.next(); const n = this.parseOr(); if (this.peek() === ')') this.next(); return n; }
+    const property = this.next();
+    const relOp    = this.next();
+    let value = this.next() || '';
+    if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
+    return { op: 'rel', property, relOp: relOp?.toLowerCase(), value };
+  }
+}
+
+function searchNodeToSql(node, params) {
+  if (!node) return '1=1';
+  if (node.op === 'and') return `(${searchNodeToSql(node.left, params)} AND ${searchNodeToSql(node.right, params)})`;
+  if (node.op === 'or')  return `(${searchNodeToSql(node.left, params)} OR ${searchNodeToSql(node.right, params)})`;
+  if (node.op === 'rel') {
+    const { property, relOp, value } = node;
+    if (property === 'upnp:class') {
+      if (relOp === 'exists') return value === 'true' ? '1=1' : '1=0';
+      return (relOp === '=' || relOp === 'derivedfrom') ? (value.includes('audioItem') || value === '*' ? '1=1' : '1=0') : '1=1';
+    }
+    const col = SEARCH_PROP_MAP[property];
+    if (!col) return '1=1';
+    const esc = value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+    switch (relOp) {
+      case '=':            params.push(value);         return `${col} = ?`;
+      case '!=':           params.push(value);         return `${col} != ?`;
+      case 'contains':     params.push(`%${esc}%`);    return `${col} LIKE ? ESCAPE '\\'`;
+      case 'doesnotcontain': params.push(`%${esc}%`);  return `(${col} NOT LIKE ? ESCAPE '\\')`;
+      case 'startswith':   params.push(`${esc}%`);     return `${col} LIKE ? ESCAPE '\\'`;
+      case 'exists':       return value === 'true' ? `${col} IS NOT NULL` : `${col} IS NULL`;
+      default:             return '1=1';
+    }
+  }
+  return '1=1';
+}
+
+// ── Pagination helper ─────────────────────────────────────────────────────────
+function paginate(arr, start, count) {
+  return count > 0 ? arr.slice(start, start + count) : arr.slice(start);
+}
+
+// ── Browse response builder ───────────────────────────────────────────────────
+function sendBrowse(res, didl, returned, total) {
+  const xml = soapEnvelope(CDS_NS, 'Browse', `<Result>${xmlEsc(didlWrapper(didl))}</Result><NumberReturned>${returned}</NumberReturned><TotalMatches>${total}</TotalMatches><UpdateID>${_systemUpdateID}</UpdateID>`);
+  sendXml(res, xml);
+}
+
+const CDS_NS = 'urn:schemas-upnp-org:service:ContentDirectory:1';
+const CM_NS  = 'urn:schemas-upnp-org:service:ConnectionManager:1';
+
+// ── View layout ───────────────────────────────────────────────────────────────
+// Main browse handler — albumsOnly folder tree
+// Root -> albumsOnly sources -> directory tree -> songs (from resolveAlbumsSources)
+async function handleBrowse(body, res) {
+  const objectId   = soapField(body, 'ObjectID') || '0';
+  const browseFlag = soapField(body, 'BrowseFlag') || 'BrowseDirectChildren';
+  const startIdx   = Math.max(0, parseInt(soapField(body, 'StartingIndex') || '0', 10) || 0);
+  const rawCount   = Math.max(0, parseInt(soapField(body, 'RequestedCount') || '0', 10) || 0);
+  const sources    = await resolveAlbumsSources();
+
+  function pg(arr) { return rawCount > 0 ? arr.slice(startIdx, startIdx + rawCount) : arr.slice(startIdx); }
+
+  // ── Root ──────────────────────────────────────────────────────────────────
   if (objectId === '0') {
-    if (flag === 'BrowseMetadata') {
-      return browseResponse(buildDIDL([
-        containerXml({ id: '0', parentId: '-1', childCount: sources.length,
-          title: config.program.dlna?.name || 'mStream Velvet' }),
-      ]), 1, 1);
+    if (browseFlag === 'BrowseMetadata') {
+      return sendBrowse(res, containerXml('0', '-1', config.program.dlna?.name || 'mStream Velvet', sources.length), 1, 1);
     }
-    if (flag === 'BrowseDirectChildren') {
-      const all = sources.map(s =>
-        containerXml({ id: encSrc(s.vpathName), parentId: '0', childCount: -1, title: s.vpathName })
-      );
-      const page = pg(all);
-      return browseResponse(buildDIDL(page), page.length, all.length);
-    }
+    const all = sources.map(s =>
+      containerXml(encSrc(s.vpathName), '0', s.vpathName, -1)
+    );
+    const slice = pg(all);
+    return sendBrowse(res, slice.join(''), slice.length, all.length);
   }
 
-  // ── id='src_*'  Top-level albumsOnly source (e.g. "Albums", "Disco") ──────
+  // ── AlbumsOnly source (src_*) ─────────────────────────────────────────────
   if (objectId.startsWith('src_')) {
     const vpathName = decSrc(objectId);
-    const source = sources.find(s => s.vpathName === vpathName);
-    if (!source) return browseResponse(buildDIDL([]), 0, 0);
-
-    // Prefix always ends with '/'.  For root albumsOnly vpaths prefix is null → top of tree.
+    const source    = sources.find(s => s.vpathName === vpathName);
+    if (!source) return sendXml(res, soapError(701, 'No Such Object'), 500);
     const srcPrefix = source.prefix || '';
-
-    if (flag === 'BrowseMetadata') {
-      return browseResponse(buildDIDL([
-        containerXml({ id: objectId, parentId: '0', childCount: -1, title: vpathName }),
-      ]), 1, 1);
+    if (browseFlag === 'BrowseMetadata') {
+      return sendBrowse(res, containerXml(objectId, '0', vpathName, -1), 1, 1);
     }
-    if (flag === 'BrowseDirectChildren') {
-      const { dirs, songs } = listChildren(source, srcPrefix);
-      const all = [
-        ...dirs.map(d => containerXml({
-          id:         encDir(source.dbVpath, srcPrefix + d.name),
-          parentId:   objectId,
-          childCount: -1,
-          title:      d.name,
-          artUri:     d.sampleFile?.aaFile
-            ? `${baseUrl}/album-art/${encodeURIComponent(d.sampleFile.aaFile)}` : '',
-        })),
-        ...songs.map(song => itemXml({ id: encItem(song.vpath, song.filepath),
-          parentId: objectId, song, baseUrl })),
-      ];
-      const page = pg(all);
-      return browseResponse(buildDIDL(page), page.length, all.length);
-    }
+    const { dirs, songs } = listChildren(source, srcPrefix);
+    const all = [
+      ...dirs.map(d => containerXml(
+        encDir(source.dbVpath, srcPrefix + d.name), objectId, d.name, -1,
+        'object.container.storageFolder',
+        d.sampleFile?.aaFile ? d.sampleFile.aaFile : null
+      )),
+      ...songs.map(t => trackItem(t, objectId)),
+    ];
+    const slice = pg(all);
+    return sendBrowse(res, slice.join(''), slice.length, all.length);
   }
 
-  // ── id='dir_*'  Subdirectory within a source (any depth) ─────────────────
+  // ── Subdirectory (dir_*) ──────────────────────────────────────────────────
   if (objectId.startsWith('dir_')) {
     const { dbVpath, dirPath } = decDir(objectId);
-    if (!dbVpath || !dirPath) return browseResponse(buildDIDL([]), 0, 0);
-
-    // Find the originating source so we use the correct file cache
+    if (!dbVpath || !dirPath) return sendXml(res, soapError(701, 'No Such Object'), 500);
     const source = sources.find(s =>
       s.dbVpath === dbVpath && dirPath.startsWith(s.prefix || '')
     );
-    if (!source) return browseResponse(buildDIDL([]), 0, 0);
-
+    if (!source) return sendXml(res, soapError(701, 'No Such Object'), 500);
     const dirPrefix = dirPath + '/';
-
-    if (flag === 'BrowseMetadata') {
-      return browseResponse(buildDIDL([
-        containerXml({ id: objectId, parentId: '-1', childCount: -1,
-          title: path.basename(dirPath) }),
-      ]), 1, 1);
+    if (browseFlag === 'BrowseMetadata') {
+      return sendBrowse(res, containerXml(objectId, '-1', path.basename(dirPath), -1), 1, 1);
     }
-    if (flag === 'BrowseDirectChildren') {
-      const { dirs, songs } = listChildren(source, dirPrefix);
-      const all = [
-        ...dirs.map(d => containerXml({
-          id:         encDir(dbVpath, dirPrefix + d.name),
-          parentId:   objectId,
-          childCount: -1,
-          title:      d.name,
-          artUri:     d.sampleFile?.aaFile
-            ? `${baseUrl}/album-art/${encodeURIComponent(d.sampleFile.aaFile)}` : '',
-        })),
-        ...songs.map(song => itemXml({ id: encItem(song.vpath, song.filepath),
-          parentId: objectId, song, baseUrl })),
-      ];
-      const page = pg(all);
-      return browseResponse(buildDIDL(page), page.length, all.length);
-    }
+    const { dirs, songs } = listChildren(source, dirPrefix);
+    const all = [
+      ...dirs.map(d => containerXml(
+        encDir(dbVpath, dirPrefix + d.name), objectId, d.name, -1,
+        'object.container.storageFolder',
+        d.sampleFile?.aaFile ? d.sampleFile.aaFile : null
+      )),
+      ...songs.map(t => trackItem(t, objectId)),
+    ];
+    const slice = pg(all);
+    return sendBrowse(res, slice.join(''), slice.length, all.length);
   }
 
-  return browseResponse(buildDIDL([]), 0, 0);
+  // ── BrowseMetadata on a track (track-* ids from trackItem) ───────────────
+  if (objectId.startsWith('track-')) {
+    const { vpath, filepath } = trackIdDecode(objectId);
+    const row = db.getDB().prepare(
+      'SELECT title, artist, album, year, genre, filepath, vpath, aaFile, duration, track, disk, hash FROM files WHERE vpath=? AND filepath=? LIMIT 1'
+    ).get(vpath, filepath);
+    if (!row) return sendXml(res, soapError(701, 'No Such Object'), 500);
+    return sendBrowse(res, trackItem(row, '-1'), 1, 1);
+  }
+
+  return sendXml(res, soapError(701, 'No Such Object'), 500);
 }
 
-// ─── Device description XML ───────────────────────────────────────────────────
 
-function deviceXml(baseUrl) {
-  const uuid = xmlEsc(config.program.instanceId || 'mstream-default');
-  const name = xmlEsc(config.program.dlna?.name || 'mStream');
-  return [
-    `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<root xmlns="urn:schemas-upnp-org:device-1-0">`,
-    `  <specVersion><major>1</major><minor>0</minor></specVersion>`,
-    `  <URLBase>${xmlEsc(baseUrl)}</URLBase>`,
-    `  <device>`,
-    `    <deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>`,
-    `    <friendlyName>${name}</friendlyName>`,
-    `    <manufacturer>mStream Velvet</manufacturer>`,
-    `    <manufacturerURL>https://github.com/aroundmyroom/mStream</manufacturerURL>`,
-    `    <modelDescription>mStream Velvet Media Server</modelDescription>`,
-    `    <modelName>mStream Velvet</modelName>`,
-    `    <modelNumber>1</modelNumber>`,
-    `    <UDN>uuid:${uuid}</UDN>`,
-    `    <dlna:X_DLNADOC xmlns:dlna="urn:schemas-dlna-org:device-1-0">DMS-1.50</dlna:X_DLNADOC>`,
-    `    <serviceList>`,
-    `      <service>`,
-    `        <serviceType>urn:schemas-upnp-org:service:ContentDirectory:1</serviceType>`,
-    `        <serviceId>urn:upnp-org:serviceId:ContentDirectory</serviceId>`,
-    `        <SCPDURL>/dlna/cd.xml</SCPDURL>`,
-    `        <controlURL>/dlna/cd/control</controlURL>`,
-    `        <eventSubURL>/dlna/cd/events</eventSubURL>`,
-    `      </service>`,
-    `    </serviceList>`,
-    `  </device>`,
-    `</root>`,
-  ].join('\n');
+// ── Search handler ────────────────────────────────────────────────────────────
+function handleSearch(body, res) {
+  const containerId = soapField(body, 'ContainerID') || '0';
+  const criteria    = soapField(body, 'SearchCriteria');
+  const startIdx    = Math.max(0, parseInt(soapField(body, 'StartingIndex') || '0', 10) || 0);
+  const rawCount    = Math.max(0, parseInt(soapField(body, 'RequestedCount') || '0', 10) || 0);
+  const reqCount    = rawCount === 0 ? MAX_BROWSE_COUNT : Math.min(rawCount, MAX_BROWSE_COUNT);
+  const sortTerms   = parseSortCriteria(soapField(body, 'SortCriteria'));
+
+  // Limit search scope to a specific vpath if ID is a lib-xx container
+  const vpathFilter = [];
+  const vpathParams = [];
+  if (containerId !== '0' && containerId !== 'music') {
+    const m = containerId.match(/^lib-(.+)$/);
+    if (m) { vpathFilter.push('f.vpath = ?'); vpathParams.push(idToVpath(containerId)); }
+  }
+
+  const whereParams = [];
+  let whereClause = '1=1';
+  if (criteria && criteria.trim() !== '*') {
+    try {
+      const ast = new SearchParser(tokenizeSearch(criteria)).parse();
+      whereClause = searchNodeToSql(ast, whereParams);
+    } catch (_) { whereClause = '1=1'; }
+  }
+
+  const scopeClause = vpathFilter.length ? ' AND ' + vpathFilter.join(' AND ') : '';
+  const orderBy = buildOrderBy(sortTerms, 'f.title COLLATE NOCASE');
+  const limit    = reqCount > 0 ? reqCount : -1;
+
+  const raw = db.getDB();
+  const total = raw.prepare(`SELECT COUNT(*) AS n FROM files f WHERE ${whereClause}${scopeClause}`).get(...whereParams, ...vpathParams)?.n ?? 0;
+  const rows  = raw.prepare(`
+    SELECT f.title, f.artist, f.album, f.year, f.genre, f.filepath, f.vpath,
+           f.aaFile, f.duration, f.track, f.disk, f.hash
+    FROM files f WHERE ${whereClause}${scopeClause}
+    ORDER BY ${orderBy} LIMIT ? OFFSET ?
+  `).all(...whereParams, ...vpathParams, limit, startIdx);
+
+  const xml = soapEnvelope(CDS_NS, 'Search',
+    `<Result>${xmlEsc(didlWrapper(rows.map(t => trackItem(t, containerId)).join('')))}</Result>` +
+    `<NumberReturned>${rows.length}</NumberReturned>` +
+    `<TotalMatches>${total}</TotalMatches>` +
+    `<UpdateID>${_systemUpdateID}</UpdateID>`
+  );
+  sendXml(res, xml);
 }
 
-// ContentDirectory service descriptor — tells devices what actions we support
-const CD_SERVICE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+// ── GENA subscription management ─────────────────────────────────────────────
+
+function _genaCleanExpired() {
+  const now = Date.now();
+  for (const [sid, sub] of _subscribers) {
+    if (sub.expiry < now) _subscribers.delete(sid);
+  }
+}
+
+function _sendNotify(sub, seq, xml) {
+  return new Promise(resolve => {
+    try {
+      const u = new URL(sub.callback);
+      const body = Buffer.from(xml, 'utf8');
+      const req = http.request({
+        hostname: u.hostname,
+        port:     u.port || 80,
+        path:     u.pathname + u.search,
+        method:   'NOTIFY',
+        headers: {
+          'Content-Type':  'text/xml; charset="utf-8"',
+          'Content-Length': body.length,
+          'NT':            'upnp:event',
+          'NTS':           'upnp:propchange',
+          'SID':           sub.sid,
+          'SEQ':           seq,
+        },
+        timeout: 5000,
+      }, () => resolve());
+      req.on('error', () => resolve());
+      req.on('timeout', () => { req.destroy(); resolve(); });
+      req.write(body);
+      req.end();
+    } catch { resolve(); }
+  });
+}
+
+async function _notifySubscribers() {
+  _genaCleanExpired();
+  if (_subscribers.size === 0) return;
+  const xml =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">' +
+    '<e:property><SystemUpdateID>' + _systemUpdateID + '</SystemUpdateID></e:property>' +
+    '<e:property><ContainerUpdateIDs></ContainerUpdateIDs></e:property>' +
+    '</e:propertyset>';
+  for (const [, sub] of _subscribers) {
+    const seq = sub.seq++;
+    _sendNotify(sub, seq, xml).catch(() => {});
+  }
+}
+
+function _registerSubscriber(callback, timeoutSecs) {
+  _genaCleanExpired();
+  if (_subscribers.size >= MAX_SUBSCRIBERS) {
+    // Evict oldest
+    const oldest = [..._subscribers.entries()].sort((a, b) => a[1].expiry - b[1].expiry)[0];
+    if (oldest) _subscribers.delete(oldest[0]);
+  }
+  const sid    = 'uuid:' + crypto.randomUUID();
+  const expiry = Date.now() + timeoutSecs * 1000;
+  _subscribers.set(sid, { sid, callback, expiry, seq: 0 });
+  return sid;
+}
+
+function _renewSubscriber(sid, timeoutSecs) {
+  const sub = _subscribers.get(sid);
+  if (!sub) return false;
+  sub.expiry = Date.now() + timeoutSecs * 1000;
+  return true;
+}
+
+function _sendInitialEvent(sid) {
+  const sub = _subscribers.get(sid);
+  if (!sub) return;
+  const xml =
+    '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">' +
+    '<e:property><SystemUpdateID>' + _systemUpdateID + '</SystemUpdateID></e:property>' +
+    '<e:property><ContainerUpdateIDs></ContainerUpdateIDs></e:property>' +
+    '<e:property><SearchCapabilities>' + SEARCH_CAPS + '</SearchCapabilities></e:property>' +
+    '<e:property><SortCapabilities>' + SORT_CAPS + '</SortCapabilities></e:property>' +
+    '</e:propertyset>';
+  _sendNotify(sub, sub.seq++, xml).catch(() => {});
+}
+
+const SEARCH_CAPS =
+  'dc:title,dc:creator,upnp:artist,upnp:album,upnp:genre,upnp:class,upnp:originalTrackNumber';
+const SORT_CAPS =
+  '+dc:title,-dc:title,+dc:creator,-dc:creator,+upnp:artist,-upnp:artist,' +
+  '+upnp:album,-upnp:album,+upnp:genre,-upnp:genre,' +
+  '+upnp:originalTrackNumber,-upnp:originalTrackNumber,+dc:date,-dc:date';
+
+// ── Device description XML ────────────────────────────────────────────────────
+
+function deviceXml() {
+  const uuid = xmlEsc(config.program.instanceId || 'mstream-velvet');
+  const name = xmlEsc(config.program.dlna?.name || 'mStream Velvet');
+  const base = xmlEsc(_baseUrl);
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0"
+      xmlns:dlna="urn:schemas-dlna-org:device-1-0"
+      xmlns:sec="http://www.sec.co.kr/dlna">
+  <specVersion><major>1</major><minor>0</minor></specVersion>
+  <URLBase>${base}</URLBase>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>
+    <friendlyName>${name}</friendlyName>
+    <manufacturer>mStream Velvet</manufacturer>
+    <manufacturerURL>https://github.com/aroundmyroom/mStream</manufacturerURL>
+    <modelDescription>mStream Velvet Music Server</modelDescription>
+    <modelName>mStream Velvet</modelName>
+    <modelNumber>1</modelNumber>
+    <modelURL>https://github.com/aroundmyroom/mStream</modelURL>
+    <serialNumber>1</serialNumber>
+    <UDN>uuid:${uuid}</UDN>
+    <dlna:X_DLNADOC>DMS-1.50</dlna:X_DLNADOC>
+    <sec:X_ProductCap>smi,DCM10,getMediaInfo.sec,getCaptionInfo.sec</sec:X_ProductCap>
+    <presentationURL>${base}/</presentationURL>
+    <serviceList>
+      <service>
+        <serviceType>urn:schemas-upnp-org:service:ContentDirectory:1</serviceType>
+        <serviceId>urn:upnp-org:serviceId:ContentDirectory</serviceId>
+        <SCPDURL>/dlna/scpd/content-directory.xml</SCPDURL>
+        <controlURL>/dlna/control/content-directory</controlURL>
+        <eventSubURL>/dlna/events/content-directory</eventSubURL>
+      </service>
+      <service>
+        <serviceType>urn:schemas-upnp-org:service:ConnectionManager:1</serviceType>
+        <serviceId>urn:upnp-org:serviceId:ConnectionManager</serviceId>
+        <SCPDURL>/dlna/scpd/connection-manager.xml</SCPDURL>
+        <controlURL>/dlna/control/connection-manager</controlURL>
+        <eventSubURL>/dlna/events/connection-manager</eventSubURL>
+      </service>
+    </serviceList>
+  </device>
+</root>`;
+}
+
+// ── ContentDirectory SCPD ──────────────────────────────────────────────────────
+const CDS_SCPD = `<?xml version="1.0" encoding="UTF-8"?>
 <scpd xmlns="urn:schemas-upnp-org:service-1-0">
   <specVersion><major>1</major><minor>0</minor></specVersion>
   <actionList>
-    <action>
-      <name>Browse</name>
-      <argumentList>
-        <argument><name>ObjectID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_ObjectID</relatedStateVariable></argument>
-        <argument><name>BrowseFlag</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_BrowseFlag</relatedStateVariable></argument>
-        <argument><name>Filter</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Filter</relatedStateVariable></argument>
-        <argument><name>StartingIndex</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Index</relatedStateVariable></argument>
-        <argument><name>RequestedCount</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
-        <argument><name>SortCriteria</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_SortCriteria</relatedStateVariable></argument>
-        <argument><name>Result</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Result</relatedStateVariable></argument>
-        <argument><name>NumberReturned</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
-        <argument><name>TotalMatches</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
-        <argument><name>UpdateID</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_UpdateID</relatedStateVariable></argument>
-      </argumentList>
-    </action>
-    <action>
-      <name>GetSystemUpdateID</name>
-      <argumentList>
-        <argument><name>Id</name><direction>out</direction><relatedStateVariable>SystemUpdateID</relatedStateVariable></argument>
-      </argumentList>
-    </action>
-    <action>
-      <name>GetSearchCapabilities</name>
-      <argumentList>
-        <argument><name>SearchCaps</name><direction>out</direction><relatedStateVariable>SearchCapabilities</relatedStateVariable></argument>
-      </argumentList>
-    </action>
-    <action>
-      <name>GetSortCapabilities</name>
-      <argumentList>
-        <argument><name>SortCaps</name><direction>out</direction><relatedStateVariable>SortCapabilities</relatedStateVariable></argument>
-      </argumentList>
-    </action>
+    <action><name>Browse</name><argumentList>
+      <argument><name>ObjectID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_ObjectID</relatedStateVariable></argument>
+      <argument><name>BrowseFlag</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_BrowseFlag</relatedStateVariable></argument>
+      <argument><name>Filter</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Filter</relatedStateVariable></argument>
+      <argument><name>StartingIndex</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Index</relatedStateVariable></argument>
+      <argument><name>RequestedCount</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
+      <argument><name>SortCriteria</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_SortCriteria</relatedStateVariable></argument>
+      <argument><name>Result</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Result</relatedStateVariable></argument>
+      <argument><name>NumberReturned</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
+      <argument><name>TotalMatches</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
+      <argument><name>UpdateID</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_UpdateID</relatedStateVariable></argument>
+    </argumentList></action>
+    <action><name>Search</name><argumentList>
+      <argument><name>ContainerID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_ObjectID</relatedStateVariable></argument>
+      <argument><name>SearchCriteria</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_SearchCriteria</relatedStateVariable></argument>
+      <argument><name>Filter</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Filter</relatedStateVariable></argument>
+      <argument><name>StartingIndex</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Index</relatedStateVariable></argument>
+      <argument><name>RequestedCount</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
+      <argument><name>SortCriteria</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_SortCriteria</relatedStateVariable></argument>
+      <argument><name>Result</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Result</relatedStateVariable></argument>
+      <argument><name>NumberReturned</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
+      <argument><name>TotalMatches</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
+      <argument><name>UpdateID</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_UpdateID</relatedStateVariable></argument>
+    </argumentList></action>
+    <action><name>GetSystemUpdateID</name><argumentList>
+      <argument><name>Id</name><direction>out</direction><relatedStateVariable>SystemUpdateID</relatedStateVariable></argument>
+    </argumentList></action>
+    <action><name>GetSearchCapabilities</name><argumentList>
+      <argument><name>SearchCaps</name><direction>out</direction><relatedStateVariable>SearchCapabilities</relatedStateVariable></argument>
+    </argumentList></action>
+    <action><name>GetSortCapabilities</name><argumentList>
+      <argument><name>SortCaps</name><direction>out</direction><relatedStateVariable>SortCapabilities</relatedStateVariable></argument>
+    </argumentList></action>
+    <action><name>X_GetFeatureList</name><argumentList>
+      <argument><name>FeatureList</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Featurelist</relatedStateVariable></argument>
+    </argumentList></action>
   </actionList>
   <serviceStateTable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_ObjectID</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_Result</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_BrowseFlag</name><dataType>string</dataType>
-      <allowedValueList>
-        <allowedValue>BrowseMetadata</allowedValue>
-        <allowedValue>BrowseDirectChildren</allowedValue>
-      </allowedValueList>
+      <allowedValueList><allowedValue>BrowseMetadata</allowedValue><allowedValue>BrowseDirectChildren</allowedValue></allowedValueList>
     </stateVariable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_Filter</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_SortCriteria</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_Index</name><dataType>ui4</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_Count</name><dataType>ui4</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>A_ARG_TYPE_UpdateID</name><dataType>ui4</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>A_ARG_TYPE_SearchCriteria</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>A_ARG_TYPE_Featurelist</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="yes"><name>SystemUpdateID</name><dataType>ui4</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>SearchCapabilities</name><dataType>string</dataType></stateVariable>
     <stateVariable sendEvents="no"><name>SortCapabilities</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="yes"><name>ContainerUpdateIDs</name><dataType>string</dataType></stateVariable>
   </serviceStateTable>
 </scpd>`;
 
-// ─── DLNA Express app ─────────────────────────────────────────────────────────
+// ── ConnectionManager SCPD ────────────────────────────────────────────────────
+const CM_SCPD = `<?xml version="1.0" encoding="UTF-8"?>
+<scpd xmlns="urn:schemas-upnp-org:service-1-0">
+  <specVersion><major>1</major><minor>0</minor></specVersion>
+  <actionList>
+    <action><name>GetProtocolInfo</name><argumentList>
+      <argument><name>Source</name><direction>out</direction><relatedStateVariable>SourceProtocolInfo</relatedStateVariable></argument>
+      <argument><name>Sink</name><direction>out</direction><relatedStateVariable>SinkProtocolInfo</relatedStateVariable></argument>
+    </argumentList></action>
+    <action><name>GetCurrentConnectionIDs</name><argumentList>
+      <argument><name>ConnectionIDs</name><direction>out</direction><relatedStateVariable>CurrentConnectionIDs</relatedStateVariable></argument>
+    </argumentList></action>
+    <action><name>GetCurrentConnectionInfo</name><argumentList>
+      <argument><name>ConnectionID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_ConnectionID</relatedStateVariable></argument>
+      <argument><name>RcsID</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_RcsID</relatedStateVariable></argument>
+      <argument><name>AVTransportID</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_AVTransportID</relatedStateVariable></argument>
+      <argument><name>ProtocolInfo</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_ProtocolInfo</relatedStateVariable></argument>
+      <argument><name>PeerConnectionManager</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_ConnectionManager</relatedStateVariable></argument>
+      <argument><name>PeerConnectionID</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_ConnectionID</relatedStateVariable></argument>
+      <argument><name>Direction</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Direction</relatedStateVariable></argument>
+      <argument><name>Status</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_ConnectionStatus</relatedStateVariable></argument>
+    </argumentList></action>
+  </actionList>
+  <serviceStateTable>
+    <stateVariable sendEvents="yes"><name>SourceProtocolInfo</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="yes"><name>SinkProtocolInfo</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="yes"><name>CurrentConnectionIDs</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>A_ARG_TYPE_ConnectionStatus</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>A_ARG_TYPE_ConnectionManager</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>A_ARG_TYPE_Direction</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>A_ARG_TYPE_ProtocolInfo</name><dataType>string</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>A_ARG_TYPE_ConnectionID</name><dataType>i4</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>A_ARG_TYPE_RcsID</name><dataType>i4</dataType></stateVariable>
+    <stateVariable sendEvents="no"><name>A_ARG_TYPE_AVTransportID</name><dataType>i4</dataType></stateVariable>
+  </serviceStateTable>
+</scpd>`;
 
-function buildDlnaApp(baseUrl) {
+// ── Source protocolInfo list (for GetProtocolInfo) ────────────────────────────
+const SOURCE_PROTOCOL_INFO = [
+  'http-get:*:audio/mpeg:DLNA.ORG_PN=MP3;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=' + DLNA_FLAGS,
+  'http-get:*:audio/flac:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=' + DLNA_FLAGS,
+  'http-get:*:audio/mp4:DLNA.ORG_PN=AAC_ISO;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=' + DLNA_FLAGS,
+  'http-get:*:audio/ogg:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=' + DLNA_FLAGS,
+  'http-get:*:audio/opus:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=' + DLNA_FLAGS,
+  'http-get:*:audio/wav:DLNA.ORG_PN=LPCM;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=' + DLNA_FLAGS,
+  'http-get:*:audio/aac:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=' + DLNA_FLAGS,
+  'http-get:*:audio/x-flac:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=' + DLNA_FLAGS,
+  'http-get:*:audio/x-wav:DLNA.ORG_PN=LPCM;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=' + DLNA_FLAGS,
+].join(',');
+
+// ── Samsung X_GetFeatureList ────────────────────────────────────────────────────
+const SAMSUNG_FEATURE_LIST = `<?xml version="1.0" encoding="UTF-8"?>
+<Features xmlns="urn:schemas-upnp-org:av:avs"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="urn:schemas-upnp-org:av:avs http://www.upnp.org/schemas/av/avs.xsd">
+  <Feature name="samsung.com_BASICVIEW" version="1">
+    <container id="A" type="object.item.audioItem"/>
+  </Feature>
+</Features>`;
+
+// ── Time-seek middleware ───────────────────────────────────────────────────────
+// Intercepts TimeSeekRange.dlna.org header, transcodes via ffmpeg from the
+// requested position and streams back as audio/mpeg (MP3 CBR 192k).
+
+function parseNpt(nptStr) {
+  // Accepts forms: 30, 1:30, 1:30:00, 1:30:00.000
+  if (!nptStr) return NaN;
+  const parts = nptStr.trim().split(':').map(parseFloat);
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0] * 3600 + parts[1] * 60 + parts[2];
+}
+
+function timeSeekMiddleware(rootMap) {
+  // rootMap: { [vpathEncoded]: folderRoot }
+  return function (req, res, next) {
+    const tsHeader = req.headers['timeseekrange.dlna.org'];
+    if (!tsHeader) return next();
+
+    // Parse npt=START[-END]
+    const m = tsHeader.match(/npt=([0-9:.]+)(?:-([0-9:.]+))?/i);
+    if (!m) return next();
+    const startSec = parseNpt(m[1]);
+    if (isNaN(startSec) || startSec < 0) return next();
+
+    // Resolve the file path from URL
+    // URL: /media/:vpathEncoded/rest/of/path
+    const urlParts = req.path.slice(1).split('/'); // strip leading /
+    // req.path under the sub-app starts from /media/:vp/... but we mount with .use('/media')
+    // so req.path = '/:vpEncoded/rest/of/path'
+    const vpEncoded = decodeURIComponent(urlParts[0] || '');
+    const relPath   = urlParts.slice(1).map(decodeURIComponent).join(path.sep);
+    const root      = rootMap[vpEncoded] || rootMap[decodeURIComponent(vpEncoded)];
+    if (!root) return next();
+
+    const filePath = path.join(root, relPath);
+    // Security: must remain within root
+    if (!filePath.startsWith(root + path.sep) && filePath !== root) {
+      return res.status(403).end();
+    }
+
+    if (!fs.existsSync(filePath)) return next();
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('TransferMode.dlna.org', 'Streaming');
+    res.setHeader('ContentFeatures.dlna.org',
+      'DLNA.ORG_PN=MP3;DLNA.ORG_OP=01;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=' + DLNA_FLAGS);
+    res.setHeader('TimeSeekRange.dlna.org', `npt=${startSec}-`);
+    res.status(200);
+
+    const args = [
+      '-ss', String(startSec),
+      '-i',  filePath,
+      '-vn',
+      '-codec:a', 'libmp3lame',
+      '-b:a', '192k',
+      '-f', 'mp3',
+      'pipe:1',
+    ];
+    const ff = spawn(ffmpegBin(), args, { stdio: ['ignore', 'pipe', 'ignore'] });
+    ff.stdout.pipe(res);
+    ff.on('error', () => res.end());
+    req.on('close', () => ff.kill('SIGKILL'));
+  };
+}
+
+// ── Express app builder ────────────────────────────────────────────────────────
+
+function buildDlnaApp() {
   const app = express();
 
-  // Parse SOAP bodies (text/xml, application/xml, application/soap+xml)
+  // Body parser for SOAP (text/xml, application/xml, application/soap+xml)
   app.use(express.text({
     type: ['text/xml', 'application/xml', 'application/soap+xml'],
     limit: '512kb',
   }));
 
-  // UPnP device description — used by DLNA clients to discover service structure
+  // Add DLNA headers to all responses
+  app.use((req, res, next) => {
+    res.setHeader('Ext', '');
+    res.setHeader('Server', 'UPnP/1.0 DLNADOC/1.50 UPnP/1.0');
+    next();
+  });
+
+  // ── Device description ───────────────────────────────────────────────────
   app.get('/dlna/description.xml', (_req, res) => {
     res.set('Content-Type', 'text/xml; charset="utf-8"');
-    res.send(deviceXml(baseUrl));
+    res.send(deviceXml());
   });
 
-  // ContentDirectory service descriptor
-  app.get('/dlna/cd.xml', (_req, res) => {
+  // ── SCPDs ────────────────────────────────────────────────────────────────
+  app.get('/dlna/scpd/content-directory.xml', (_req, res) => {
     res.set('Content-Type', 'text/xml; charset="utf-8"');
-    res.send(CD_SERVICE_XML);
+    res.send(CDS_SCPD);
+  });
+  app.get('/dlna/scpd/connection-manager.xml', (_req, res) => {
+    res.set('Content-Type', 'text/xml; charset="utf-8"');
+    res.send(CM_SCPD);
   });
 
-  // SSDP event subscription stub — many DLNA clients send SUBSCRIBE before Browse
-  // We accept but don't track subscriptions (no real eventing needed for read-only Browse)
-  app.all('/dlna/cd/events', (req, res) => {
-    if (req.method === 'SUBSCRIBE') {
-      res.set('SID', `uuid:${config.program.instanceId || 'mstream'}-cd`);
-      res.set('TIMEOUT', 'Second-1800');
-      res.status(200).end();
-    } else if (req.method === 'UNSUBSCRIBE') {
+  // ── ContentDirectory SOAP control ────────────────────────────────────────
+  app.post('/dlna/control/content-directory', (req, res) => {
+    const body   = typeof req.body === 'string' ? req.body : '';
+    const action = (req.headers['soapaction'] || '').replace(/["']/g, '');
+    try {
+      if (action.endsWith('#Browse') || body.includes(':Browse ') || body.includes(':Browse>')) {
+        return handleBrowse(body, res);
+      }
+      if (action.endsWith('#Search') || body.includes(':Search ') || body.includes(':Search>')) {
+        return handleSearch(body, res);
+      }
+      if (action.endsWith('#GetSystemUpdateID') || body.includes('GetSystemUpdateID')) {
+        return sendXml(res, soapEnvelope(CDS_NS, 'GetSystemUpdateID', `<Id>${_systemUpdateID}</Id>`));
+      }
+      if (action.endsWith('#GetSearchCapabilities') || body.includes('GetSearchCapabilities')) {
+        return sendXml(res, soapEnvelope(CDS_NS, 'GetSearchCapabilities', `<SearchCaps>${xmlEsc(SEARCH_CAPS)}</SearchCaps>`));
+      }
+      if (action.endsWith('#GetSortCapabilities') || body.includes('GetSortCapabilities')) {
+        return sendXml(res, soapEnvelope(CDS_NS, 'GetSortCapabilities', `<SortCaps>${xmlEsc(SORT_CAPS)}</SortCaps>`));
+      }
+      if (action.endsWith('#X_GetFeatureList') || body.includes('X_GetFeatureList')) {
+        return sendXml(res, soapEnvelope(CDS_NS, 'X_GetFeatureList', `<FeatureList>${xmlEsc(SAMSUNG_FEATURE_LIST)}</FeatureList>`));
+      }
+      sendXml(res, soapError(401, 'Invalid Action'), 500);
+    } catch (err) {
+      winston.error('[DLNA] CDS SOAP error: ' + err.message);
+      sendXml(res, soapError(501, 'Action Failed'), 500);
+    }
+  });
+
+  // ── ConnectionManager SOAP control ───────────────────────────────────────
+  app.post('/dlna/control/connection-manager', (req, res) => {
+    const body   = typeof req.body === 'string' ? req.body : '';
+    const action = (req.headers['soapaction'] || '').replace(/["']/g, '');
+    try {
+      if (action.endsWith('#GetProtocolInfo') || body.includes('GetProtocolInfo')) {
+        return sendXml(res, soapEnvelope(CM_NS, 'GetProtocolInfo',
+          `<Source>${xmlEsc(SOURCE_PROTOCOL_INFO)}</Source><Sink></Sink>`));
+      }
+      if (action.endsWith('#GetCurrentConnectionIDs') || body.includes('GetCurrentConnectionIDs')) {
+        return sendXml(res, soapEnvelope(CM_NS, 'GetCurrentConnectionIDs', `<ConnectionIDs>0</ConnectionIDs>`));
+      }
+      if (action.endsWith('#GetCurrentConnectionInfo') || body.includes('GetCurrentConnectionInfo')) {
+        return sendXml(res, soapEnvelope(CM_NS, 'GetCurrentConnectionInfo',
+          `<RcsID>-1</RcsID><AVTransportID>-1</AVTransportID>` +
+          `<ProtocolInfo></ProtocolInfo><PeerConnectionManager></PeerConnectionManager>` +
+          `<PeerConnectionID>-1</PeerConnectionID><Direction>Output</Direction><Status>OK</Status>`));
+      }
+      sendXml(res, soapError(401, 'Invalid Action'), 500);
+    } catch (err) {
+      winston.error('[DLNA] CM SOAP error: ' + err.message);
+      sendXml(res, soapError(501, 'Action Failed'), 500);
+    }
+  });
+
+  // ── GENA event subscription — ContentDirectory ────────────────────────────
+  app.use('/dlna/events/content-directory', (req, res) => {
+    const method = req.method.toUpperCase();
+    if (method === 'SUBSCRIBE') {
+      const callbackRaw = req.headers['callback'] || req.headers['Callback'] || '';
+      const callbackUrl = callbackRaw.replace(/^<|>$/g, '').trim();
+      const nt          = req.headers['nt'] || req.headers['NT'] || '';
+      const timeoutHdr  = req.headers['timeout'] || req.headers['Timeout'] || `Second-${GENA_DEFAULT_TIMEOUT}`;
+      const secs        = parseInt(timeoutHdr.replace(/Second-/i, ''), 10) || GENA_DEFAULT_TIMEOUT;
+
+      // Renewal
+      const existingSid = req.headers['sid'] || req.headers['SID'] || '';
+      if (existingSid && !callbackUrl) {
+        if (!_renewSubscriber(existingSid, secs)) return res.status(412).end();
+        return res.set({ 'SID': existingSid, 'TIMEOUT': `Second-${secs}` }).status(200).end();
+      }
+
+      if (!callbackUrl || nt !== 'upnp:event') return res.status(400).end();
+      const sid = _registerSubscriber(callbackUrl, secs);
+      res.set({ 'SID': sid, 'TIMEOUT': `Second-${secs}` }).status(200).end();
+      // Send initial event asynchronously so SUBSCRIBE gets a fast 200 first
+      setImmediate(() => _sendInitialEvent(sid));
+    } else if (method === 'UNSUBSCRIBE') {
+      const sid = req.headers['sid'] || req.headers['SID'] || '';
+      if (sid) _subscribers.delete(sid);
       res.status(200).end();
     } else {
       res.status(405).end();
     }
   });
 
-  // ContentDirectory SOAP control endpoint
-  app.post('/dlna/cd/control', async (req, res) => {
-    const body   = typeof req.body === 'string' ? req.body : '';
-    const action = (req.headers['soapaction'] || '').replace(/["']/g, '');
-    let xml;
-
-    try {
-      if (action.endsWith('#Browse') || body.includes(':Browse')) {
-        xml = await handleBrowse(body, baseUrl);
-      } else if (action.endsWith('#GetSystemUpdateID') || body.includes('GetSystemUpdateID')) {
-        xml = soapEnvelope('GetSystemUpdateID', '<Id>1</Id>');
-      } else if (action.endsWith('#GetSearchCapabilities') || body.includes('GetSearchCapabilities')) {
-        xml = soapEnvelope('GetSearchCapabilities', '<SearchCaps></SearchCaps>');
-      } else if (action.endsWith('#GetSortCapabilities') || body.includes('GetSortCapabilities')) {
-        xml = soapEnvelope('GetSortCapabilities', '<SortCaps></SortCaps>');
-      } else {
-        xml = soapError(401, 'Invalid Action');
-      }
-    } catch (err) {
-      winston.error('[DLNA] SOAP handler error: ' + err.message);
-      xml = soapError(501, 'Action Failed');
+  // No-op GENA for ConnectionManager (required by spec, no real events)
+  app.use('/dlna/events/connection-manager', (req, res) => {
+    if (req.method === 'SUBSCRIBE') {
+      const sid = 'uuid:' + crypto.randomUUID();
+      res.set({ 'SID': sid, 'TIMEOUT': 'Second-1800' }).status(200).end();
+    } else {
+      res.status(200).end();
     }
-
-    res.set('Content-Type', 'text/xml; charset="utf-8"');
-    res.status(200).send(xml);
   });
 
-  // Media file serving — dynamic vpath static mount so changes to folders config
-  // are picked up without restarting the DLNA server
-  app.use('/media/:vpath', (req, res, next) => {
-    const folder = config.program.folders[req.params.vpath];
-    if (!folder) return res.status(404).end();
-    express.static(folder.root)(req, res, next);
-  });
+  // ── Media serving with time-seek support ─────────────────────────────────
+  // Build a vpathEncoded → root map for the time-seek middleware
+  const rootMap = {};
+  const folders = config.program.folders || {};
+  for (const [name, cfg] of Object.entries(folders)) {
+    rootMap[encodeURIComponent(name)] = cfg.root;
+  }
 
-  // Album art serving (proxied from the main art cache directory)
+  // Time-seek intercept (must come BEFORE express.static)
+  app.use('/media', timeSeekMiddleware(rootMap));
+
+  // Static file serving per vpath
+  for (const [name, cfg] of Object.entries(folders)) {
+    app.use('/media/' + encodeURIComponent(name), express.static(cfg.root));
+  }
+
+  // Album art serving
   app.use('/album-art', express.static(config.program.storage.albumArtDirectory));
 
   return app;
 }
 
-// ─── Lifecycle ────────────────────────────────────────────────────────────────
+// ── Lifecycle ─────────────────────────────────────────────────────────────────
+
+export function bumpSystemUpdateID() {
+  _systemUpdateID = (_systemUpdateID + 1) & 0xFFFFFFFF;
+  _notifySubscribers().catch(() => {});
+  // Invalidate file tree cache so new scans are reflected immediately
+  _vpathFilesCache.clear();
+}
 
 export function isRunning() { return _running; }
 
 export async function start() {
   if (_running) return;
 
-  const port = config.program.dlna?.port || 10293;
-  const ip   = getLanIp();
-  const baseUrl = `http://${ip}:${port}`;
+  const port    = config.program.dlna?.port || 10293;
+  const ip      = getLanIp();
+  _baseUrl      = `http://${ip}:${port}`;
 
   try {
-    // Stand up the HTTP server
-    const app = buildDlnaApp(baseUrl);
+    const app = buildDlnaApp();
     _httpServer = http.createServer(app);
 
     await new Promise((resolve, reject) => {
       _httpServer.once('error', reject);
-      _httpServer.listen(port, resolve);
+      _httpServer.listen(port, '0.0.0.0', resolve);
     });
 
-    // Start SSDP multicast advertisement
-    const { Server: SsdpServer } = require('node-ssdp');
-    const uuid = config.program.instanceId || 'mstream-default';
-
-    _ssdpServer = new SsdpServer({
-      location:       { port, path: '/dlna/description.xml' },
-      udn:            `uuid:${uuid}`,
-      ssdpSig:        'mStream Velvet/1.0',
-      allowWildcards: true,
-    });
-    _ssdpServer.addUSN('upnp:rootdevice');
-    _ssdpServer.addUSN(`uuid:${uuid}`);
-    _ssdpServer.addUSN('urn:schemas-upnp-org:device:MediaServer:1');
-    _ssdpServer.addUSN('urn:schemas-upnp-org:service:ContentDirectory:1');
-
-    await _ssdpServer.start();
-
+    await _startSsdp(port);
     _running = true;
-    winston.info(`[DLNA] started → http://${ip}:${port}/dlna/description.xml — SSDP advertising`);
+    winston.info(`[DLNA] started → ${_baseUrl}/dlna/description.xml`);
   } catch (err) {
     winston.error('[DLNA] failed to start: ' + err.message);
     await stop().catch(() => {});
@@ -595,21 +1105,18 @@ export async function start() {
 
 export async function stop() {
   _running = false;
-
-  if (_ssdpServer) {
-    try { await _ssdpServer.stop(); } catch (_e) {}
-    _ssdpServer = null;
-  }
+  _stopSsdp();
 
   if (_httpServer) {
     await new Promise(resolve => _httpServer.close(() => resolve()));
     _httpServer = null;
   }
 
+  _subscribers.clear();
   winston.info('[DLNA] stopped');
 }
 
-// ─── Admin API + boot wiring ──────────────────────────────────────────────────
+// ── Admin API + boot wiring ───────────────────────────────────────────────────
 
 /**
  * Called from server.js to register admin API routes and (optionally) auto-start.
@@ -623,7 +1130,8 @@ export function setup(mstream) {
     res.json({
       enabled: config.program.dlna?.enabled || false,
       port:    config.program.dlna?.port    || 10293,
-      name:    config.program.dlna?.name    || 'mStream',
+      name:    config.program.dlna?.name    || 'mStream Velvet',
+      browse:  config.program.dlna?.browse  || 'dirs',
       running: isRunning(),
     });
   });
@@ -636,24 +1144,24 @@ export function setup(mstream) {
       enabled: Joi.boolean().optional(),
       port:    Joi.number().integer().min(1024).max(65535).optional(),
       name:    Joi.string().allow('').max(64).optional(),
+      browse:  Joi.string().valid('dirs', 'artist', 'album', 'genre', 'flat').optional(),
     }).min(1);
     joiValidate(schema, req.body);
 
-    // Update in-memory config
     if (!config.program.dlna) config.program.dlna = {};
     if (req.body.enabled !== undefined) config.program.dlna.enabled = req.body.enabled;
     if (req.body.port    !== undefined) config.program.dlna.port    = req.body.port;
     if (req.body.name    !== undefined) config.program.dlna.name    = req.body.name;
+    if (req.body.browse  !== undefined) config.program.dlna.browse  = req.body.browse;
 
-    // Persist to disk
     const raw = await adminUtil.loadFile(config.configFile);
     if (!raw.dlna) raw.dlna = {};
     if (req.body.enabled !== undefined) raw.dlna.enabled = req.body.enabled;
     if (req.body.port    !== undefined) raw.dlna.port    = req.body.port;
     if (req.body.name    !== undefined) raw.dlna.name    = req.body.name;
+    if (req.body.browse  !== undefined) raw.dlna.browse  = req.body.browse;
     await adminUtil.saveFile(raw, config.configFile);
 
-    // Apply the enabled/disabled state live (no restart needed)
     if (req.body.enabled === true  && !isRunning()) {
       await start().catch(e => { throw new Error('DLNA failed to start: ' + e.message); });
     }
@@ -669,3 +1177,4 @@ export function setup(mstream) {
     start().catch(e => winston.warn('[DLNA] auto-start failed: ' + e.message));
   }
 }
+
