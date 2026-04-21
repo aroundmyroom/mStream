@@ -816,7 +816,21 @@
   // Probe for no-auth mode first, then show login if needed
   tryNoAuthLogin();
 
-  window.addEventListener('pagehide', function(){ if (_pollTimer) clearInterval(_pollTimer); });
+  // ── Auto-pause on close/navigate-away ──────────────────────────────────────
+  var _pauseSent = false;
+  function sendPause(){
+    if (_pauseSent || !_token) return;
+    _pauseSent = true;
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', 'api/v1/server-playback/set-pause', false); // synchronous
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.setRequestHeader('x-access-token', _token);
+      xhr.send(JSON.stringify({ paused: true }));
+    } catch(e) {}
+  }
+  window.addEventListener('pagehide',     function(){ sendPause(); if (_pollTimer) clearInterval(_pollTimer); });
+  window.addEventListener('beforeunload', function(){ sendPause(); });
   </script>
 </body>
 </html>

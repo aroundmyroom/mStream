@@ -1,5 +1,48 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.12.2-velvet — April 21, 2026 — Server Speaker & Reliability Fixes
+
+### fix: Cast-to-speaker button stays white after page refresh
+- `S.castingToMpv` was in-memory only; refresh always reset it to `false`. Now persisted to localStorage and restored on boot by checking live MPV status.
+
+### fix: Cast-to-speaker not restored after server restart
+- After restart MPV queue is empty; old code cleared the cast flag. Now re-loads the current song into MPV at last saved position and restores cast mode automatically.
+
+### fix: Cast-to-speaker did not disable browser crossfade
+- Both browser and MPV would try to fade simultaneously. Activating cast now zeroes crossfade (saving the value) and restores it on deactivate.
+
+### fix: MPV crossfade cut songs off
+- Node.js IPC-based volume ramp was out of sync with MPV's playlist clock. Removed entirely; `--gapless-audio=yes` is kept for clean inter-track transitions.
+
+### fix: MPV keeps playing when browser tab is closed
+- `pagehide` + `beforeunload` handlers in server-remote now send a synchronous XHR pause command before unload.
+
+### fix: Scheduled library scan never ran after server restart
+- `setInterval` clock resets on each process start. With `bootScanEnabled: false` and restarts < 12 h apart, scans were skipped indefinitely. `runAfterBoot()` now checks last-scan timestamp and fires immediately if overdue.
+
+### fix: Scan progress bar did not appear automatically
+- `pollScan()` stopped when no scan was active. Now always reschedules: 3 s while scanning, 15 s while idle — progress bar appears within 15 s of any scan starting.
+
+---
+
+## v6.12.1-velvet — April 2026 — Audiobook mode
+
+### feat: Audiobook mode — chapter navigation, speed control, per-book progress saving
+- New **prev/next chapter** buttons in the transport bar, visible only for `audio-books` vpath tracks. Prev restarts the current chapter when more than 3 s in, otherwise goes to the preceding one.
+- **Playback speed selector** (0.75×, 1×, 1.25×, 1.5×, 1.75×, 2×) — speed button labelled with the current rate opens a popup. Saved per-user in localStorage and restored on reload. Hidden for normal music.
+- **Per-book progress** — position saved every 5 s while playing, immediately on pause, and on tab close. Re-opening a book resumes at the saved position. Position cleared when a book ends naturally.
+- **Chapter bar** — thin strip below the progress bar with coloured tick marks per chapter; current chapter highlighted and labelled.
+- **M4B chapter extraction at scan time** — `src/db/scanner.mjs` uses `ffprobe` to extract embedded chapters from `.m4b` files and stores them as cuepoints. `task-queue.js` passes `ffprobePath` to the scanner.
+- **M4B on-demand extraction** — if an `.m4b` has no cuepoints yet (not yet rescanned), `GET /api/v1/db/cuepoints` runs ffprobe on the spot, stores the result, and returns chapters immediately. No rescan needed for first play.
+- **Chapters shown before waveform** — `durationchange` + `loadedmetadata` listeners trigger `renderCueMarkers()` as soon as the browser knows the file duration, completely independently of waveform generation. Chapters appear within seconds even for multi-hour files.
+- **Audiobook controls restored on page reload** — `_updateAudioBookMode()` is called again once `vpathMeta` is known (after `getall` response), resolving a boot-time race where controls were hidden because vpath types were not yet available.
+- **No auto-resume for audiobooks** — even when "Auto-resume on reload" is on, audiobooks are silently paused after `vpathMeta` loads. Users resume deliberately.
+- **fix: child-vpath detection** — `_isAudioBookSong()` was checking `filepath.startsWith(filepathPrefix)` but filepaths always include the parent vpath prefix (e.g. `Music/Audiobooks & Podcasts/…`). Fixed to `startsWith(parentVpath + '/' + filepathPrefix)`.
+- **fix: playback rate reset after stall** — `audioEl.load()` (called by the network-recovery path) resets `playbackRate` to 1. `_onAudioPlay` now re-applies `S.bookSpeed` whenever playback starts.
+- **fix: variable name clash** — local `const t = audioEl.currentTime` inside `_updateAudioBookChapterBar` shadowed the global `t()` i18n function. Renamed to `pos`.
+
+---
+
 ## v6.12.1-velvet — April 2026 — DLNA Polish & Background Fix
 
 ### fix: DLNA browse — albumsOnly containers returned 0 items

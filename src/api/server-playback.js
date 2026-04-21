@@ -40,6 +40,8 @@ const SERVER_AUDIO_CTRL_CANDIDATES = ['Master', 'Speaker', 'PCM', 'Headphone'];
 let serverQueue  = [];
 let currentIndex = -1;
 
+
+
 function runCmd(bin, args, timeout = 5000) {
   try {
     const res = child_process.spawnSync(bin, args, {
@@ -199,6 +201,7 @@ export function bootMpv() {
     '--no-video',
     '--no-terminal',
     '--really-quiet',
+    '--gapless-audio=yes',
     `--input-ipc-server=${sockPath}`,
   ], { stdio: 'ignore', detached: false });
 
@@ -565,8 +568,9 @@ export function setup(mstream) {
     const { volume } = req.body;
     if (volume === undefined) return res.status(400).json({ error: 'volume required' });
     try {
+      const v = Math.max(0, Math.min(130, Number(volume)));
       if (isRunning() && ipcSock && !ipcSock.destroyed)
-        await ipcCommand(['set_property', 'volume', Math.max(0, Math.min(130, Number(volume)))]);
+        await ipcCommand(['set_property', 'volume', v]);
       res.json({});
     } catch (e) { res.status(500).json({ error: e.message }); }
   });

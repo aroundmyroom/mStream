@@ -31,6 +31,17 @@
 // Feature detection — Web Animations API required for the dice throw
 const _webAnimSupported = typeof Element.prototype.animate === 'function';
 // ── STATE ─────────────────────────────────────────────────────
+// Stable per-browser ID — generated once per browser, survives refreshes.
+// Used to determine whether the DB queue was last saved by THIS browser or a
+// different device. Same browser → trust localStorage. Different browser → trust DB.
+const _browserId = (() => {
+  let id = localStorage.getItem('ms2_browser_id');
+  if (!id) {
+    id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem('ms2_browser_id', id);
+  }
+  return id;
+})();
 // Read once at startup — avoids 14 repeated localStorage.getItem calls inside
 // the object literal (each call is a synchronous hash-map lookup + string copy).
 const _u = localStorage.getItem('ms2_user') || '';
@@ -108,6 +119,8 @@ const S = {
   autoResume: localStorage.getItem('ms2_auto_resume_' + _u) === '1',  // default OFF — pause on page reload
   showGenres:  localStorage.getItem('ms2_show_genres_'  + _u) !== '0', // default ON
   showDecades: localStorage.getItem('ms2_show_decades_' + _u) !== '0', // default ON
+  // Pinned start view — the library nav item shown on boot/refresh ('' = Home default)
+  pinnedView: localStorage.getItem('ms2_pinned_view_' + _u) || '',
   // Auto-DJ: similar-artists mode
   djSimilar: localStorage.getItem('ms2_dj_similar_' + _u) === '1',
   djDice:    localStorage.getItem('ms2_dj_dice_'    + _u) === '1',  // default OFF
@@ -123,6 +136,8 @@ const S = {
   // Server Audio (mpv) cast state
   serverAudioRunning: false,  // true when mpv is up and enabled
   castingToMpv: false,        // true when current playback is routed to mpv
+  // Audiobook playback speed — only applied when current song is from audio-books vpath
+  bookSpeed: parseFloat(localStorage.getItem('ms2_book_speed_' + _u)) || 1.0,
 };
 
 let audioEl = document.getElementById('audio');
@@ -193,6 +208,7 @@ const _wfPrefetchPending = []; // filepaths queued for background pre-generation
 let   _wfPrefetching     = false; // true while one async prefetch is in flight
 let _cuePoints         = [];    // cue sheet track markers for the current file
 let _cueMarkersRendered = false; // true once tick marks have been drawn for current file
+let _abChapThrottle    = 0;     // timestamp for chapter bar 1-Hz throttle
 let analyserL    = null;   // left-channel analyser
 let analyserR    = null;   // right-channel analyser
 let eqFilters    = [];     // 8 BiquadFilterNodes – built on first play
@@ -253,6 +269,10 @@ function artUrl(f, size) {
 }
 // Global boot flag — set to true when boot sequence completes
 let _bootComplete = false;
+// Boot-phase play guard: true while restoreQueue is setting up the audio element.
+// Any play event that fires during this window when the user had previously paused
+// is cancelled immediately — regardless of which code path triggered it.
+let _bootRestoring = false;
 
 // Returns an img tag if art exists, otherwise the animated waveform placeholder
 function artOrPlaceholder(f, size, extraClass) {
@@ -429,18 +449,24 @@ function _showDJStrip(song) {
 }
 
 // ── QUEUE PERSISTENCE ───────────────────────────────────────
-function _queueKey() { return `ms2_queue_${S.username}`; }
+function _queueKey()   { return `ms2_queue_${S.username}`; }
+// Dedicated playing-state key — written ONLY by real play/pause actions on this
+// browser. Never overwritten by background DB syncs. This is the authoritative
+// source-of-truth for whether to autoplay on page restore for THIS device.
+// Value: '1' = was playing, '0' = was paused. Missing = no info (fresh device).
+function _playingKey() { return `ms2_playing_${S.username}`; }
 function _djKey(k)    { return `ms2_dj_${k}_${S.username || ''}`; }
 function _uKey(k)     { return `ms2_${k}_${S.username || ''}`; }
 function persistQueue() {
   if (!S.username) return;
   try {
     localStorage.setItem(_queueKey(), JSON.stringify({
-      queue:   S.queue,
-      idx:     S.idx,
-      time:    audioEl.currentTime || 0,
-      playing: !audioEl.paused,
-      savedAt: Date.now(),
+      queue:     S.queue,
+      idx:       S.idx,
+      time:      audioEl.currentTime || 0,
+      playing:   !audioEl.paused,
+      savedAt:   Date.now(),
+      browserId: _browserId,
     }));
   } catch(_) {}
   // DB sync is intentionally NOT called here — this runs every 5 s from the
@@ -453,15 +479,35 @@ function _syncQueueToDb() {
   clearTimeout(_syncQueueTimer);
   _syncQueueTimer = setTimeout(() => {
     api('POST', 'api/v1/user/settings', { queue: {
-      queue:   S.queue,
-      idx:     S.idx,
-      time:    audioEl.currentTime || 0,
-      playing: !audioEl.paused,
-      savedAt: Date.now(),
+      queue:     S.queue,
+      idx:       S.idx,
+      time:      audioEl.currentTime || 0,
+      playing:   !audioEl.paused,
+      savedAt:   Date.now(),
+      browserId: _browserId,
     }})
       .then(() => localStorage.setItem('ms2_settings_pushed_' + S.username, new Date().toISOString()))
       .catch(() => {});
   }, 2000);
+}
+// Immediate (non-debounced) DB write — use this when play state MUST be
+// persisted right away (e.g. pause event) so a quick refresh sees the
+// correct state even if the user clears localStorage before 2 s elapse.
+function _syncQueueToDbNow(playingOverride) {
+  if (!S.token || !S.username) return;
+  clearTimeout(_syncQueueTimer);
+  _syncQueueTimer = null;
+  const playing = (playingOverride !== undefined) ? !!playingOverride : !audioEl.paused;
+  api('POST', 'api/v1/user/settings', { queue: {
+    queue:     S.queue,
+    idx:       S.idx,
+    time:      audioEl.currentTime || 0,
+    playing,
+    savedAt:   Date.now(),
+    browserId: _browserId,
+  }})
+    .then(() => localStorage.setItem('ms2_settings_pushed_' + S.username, new Date().toISOString()))
+    .catch(() => {});
 }
 function restoreQueue(silent = false) {
   const key = _queueKey();
@@ -480,6 +526,13 @@ function restoreQueue(silent = false) {
     return;
   }
 
+  // Engage boot-restore guard: blocks any spurious play() that fires during
+  // src/load setup from updating localStorage or persisting incorrectly.
+  // Cleared after audio element settles (loadedmetadata + short window, or 3s max).
+  _bootRestoring = true;
+  const _clearBootRestoring = () => { _bootRestoring = false; };
+  const _bootRestoringTimer = setTimeout(_clearBootRestoring, 3000);
+
   // Restore core state — this must always succeed
   S.queue = data.queue;
   S.idx   = (typeof data.idx === 'number' && data.idx >= 0 && data.idx < data.queue.length)
@@ -495,6 +548,36 @@ function restoreQueue(silent = false) {
   try {
     const s = S.queue[S.idx];
     if (s) {
+      // ── Autoplay decision ─────────────────────────────────────────────────
+      // Use ms2_playing_<user> as the single source of truth for THIS browser.
+      // This key is written ONLY by real play/pause user actions (_onAudioPlay /
+      // _onAudioPause) — never by background DB syncs — so it always reflects
+      // what the user last intended on THIS device.
+      //
+      // Cross-device logic via browserId:
+      //   Same browserId (= this browser last saved the DB record): trust LS key.
+      //   Different browserId (= another device last played): trust DB's playing
+      //   field so that cross-device resume still works when autoResume is on.
+      //   No ms2_playing key yet (fresh browser): fall back to DB + autoResume.
+      const _localPlayState = localStorage.getItem(_playingKey()); // '1', '0', or null
+      const _dbBrowserId    = data.browserId || '';
+      let _shouldAutoPlay;
+      if (_localPlayState !== null && (_dbBrowserId === _browserId || !_dbBrowserId)) {
+        // Same browser (or no browserId in old data) — trust the dedicated playing key
+        _shouldAutoPlay = _localPlayState === '1' && S.autoResume && !_isAudioBookSong(s);
+      } else if (_localPlayState !== null && _dbBrowserId !== _browserId) {
+        // Different device wrote the DB record — prefer local pause decision
+        // but allow cross-device resume when the local key says playing too
+        _shouldAutoPlay = _localPlayState === '1' && S.autoResume && !_isAudioBookSong(s);
+      } else {
+        // No local playing key even after _applyServerSettings ran — edge case
+        // (e.g. queue was empty so _applyServerSettings skipped the init block).
+        // Safe default: do not autoplay. The user can press play manually.
+        _shouldAutoPlay = false;
+      }
+      // Podcasts never auto-resume
+      if (s.isPodcast) _shouldAutoPlay = false;
+
       // Radio streams are live — never preload on restore (no seek position to recover,
       // and opening the proxy connection only to tear it down when the user picks a
       // different track causes network/event-loop contention that produces audio cracks).
@@ -512,33 +595,32 @@ function restoreQueue(silent = false) {
       if (!s.isRadio && data.time > 1) {
         audioEl.addEventListener('loadedmetadata', () => {
           audioEl.currentTime = data.time;
-          if (data.playing && S.autoResume) {
-            if (!s.isPodcast) {
-              _wrappedTrackStartOffset = data.time;
-              _wrappedEndedNaturally = false;
-              _wrappedEventId = null;
-              api('POST', 'api/v1/wrapped/play-start', { filePath: s.filepath, sessionId: _wrappedSessionId, source: _wrappedSource() })
-                .then(r => { _wrappedEventId = r?.eventId ?? null; }).catch(() => {});
-            }
+          if (_shouldAutoPlay) {
+            clearTimeout(_bootRestoringTimer); _bootRestoring = false; // authorized play — clear guard
+            _wrappedTrackStartOffset = data.time;
+            _wrappedEndedNaturally = false;
+            _wrappedEventId = null;
+            api('POST', 'api/v1/wrapped/play-start', { filePath: s.filepath, sessionId: _wrappedSessionId, source: _wrappedSource() })
+              .then(r => { _wrappedEventId = r?.eventId ?? null; }).catch(() => {});
             audioEl.play().catch(() => {});
           }
         }, { once: true });
         // Update scrubber + time display once the seek lands
         audioEl.addEventListener('seeked', () => {
+          clearTimeout(_bootRestoringTimer); _bootRestoring = false; // element settled
           _renderTimes();
           const pct = audioEl.duration > 0 ? (audioEl.currentTime / audioEl.duration) * 100 : 0;
           const fill = document.getElementById('np-prog-fill');
           if (fill) fill.style.width = pct + '%';
           _drawWaveform();
         }, { once: true });
-      } else if (!s.isRadio && data.playing && S.autoResume) {
-        if (!s.isPodcast) {
-          _wrappedTrackStartOffset = 0;
-          _wrappedEndedNaturally = false;
-          _wrappedEventId = null;
-          api('POST', 'api/v1/wrapped/play-start', { filePath: s.filepath, sessionId: _wrappedSessionId, source: _wrappedSource() })
-            .then(r => { _wrappedEventId = r?.eventId ?? null; }).catch(() => {});
-        }
+      } else if (!s.isRadio && _shouldAutoPlay) {
+        clearTimeout(_bootRestoringTimer); _bootRestoring = false; // authorized play — clear guard
+        _wrappedTrackStartOffset = 0;
+        _wrappedEndedNaturally = false;
+        _wrappedEventId = null;
+        api('POST', 'api/v1/wrapped/play-start', { filePath: s.filepath, sessionId: _wrappedSessionId, source: _wrappedSource() })
+          .then(r => { _wrappedEventId = r?.eventId ?? null; }).catch(() => {});
         audioEl.play().catch(() => {});
       }
     }
@@ -763,7 +845,16 @@ const Player = {
         audioEl.addEventListener('seeked', () => audioEl.play().catch(() => {}), { once: true });
       }, { once: true });
     } else {
-      audioEl.play().catch(() => {});
+      // Audiobook resume: if there's a saved position for this track, seek to it.
+      const _savedBookPos = _isAudioBookSong(s) ? _loadBookPosition(s.filepath) : 0;
+      if (_savedBookPos > 2) {
+        audioEl.addEventListener('loadedmetadata', () => {
+          audioEl.currentTime = _savedBookPos;
+          audioEl.addEventListener('seeked', () => audioEl.play().catch(() => {}), { once: true });
+        }, { once: true });
+      } else {
+        audioEl.play().catch(() => {});
+      }
     }
     // If casting to server speaker, mirror this song to MPV
     if (S.castingToMpv && !s.isRadio) {
@@ -1073,6 +1164,8 @@ const Player = {
     _TabFav.setSong(s, !audioEl.paused);
     // Update record button visibility (only shown for radio + permission)
     _updateRecordBtn();
+    // Audiobook mode: show/hide chapter nav & speed button, apply saved speed
+    _updateAudioBookMode();
   },
 };
 
@@ -1098,6 +1191,18 @@ function _isMusicSong(s) {
     if (meta[v].parentVpath && meta[v].filepathPrefix && s.filepath?.startsWith(meta[v].filepathPrefix)) return false;
   }
   return true;
+}
+// Returns true when the song comes from any audio-books vpath, false otherwise.
+function _isAudioBookSong(s) {
+  if (!s || s.isRadio || s.isPodcast) return false;
+  const meta = S.vpathMeta || {};
+  for (const v of S.vpaths) {
+    if ((meta[v]?.type || 'music') !== 'audio-books') continue;
+    if (!meta[v].parentVpath && s.filepath?.startsWith(v + '/')) return true;
+    if (meta[v].parentVpath && meta[v].filepathPrefix &&
+        s.filepath?.startsWith(meta[v].parentVpath + '/' + meta[v].filepathPrefix)) return true;
+  }
+  return false;
 }
 // Returns vpaths of type 'music' only (excludes 'audio-books' vpaths).
 function _musicVpaths() {
@@ -6939,6 +7044,21 @@ async function viewPlayed() {
 
 // ── HOME ─────────────────────────────────────────────────────
 
+// Launches the user's pinned start view, or falls back to Home if none is set.
+function _launchPinnedViewOrHome() {
+  const v = S.pinnedView;
+  if (v === 'shortcuts')    { viewShortcuts(); return; }
+  if (v === 'search')       { viewSearch(); return; }
+  if (v === 'files')        { S.feDirStack = []; S.feFilter = ''; viewFiles('', false); return; }
+  if (v === 'recent')       { viewRecent(); return; }
+  if (v === 'artists')      { viewArtists(); return; }
+  if (v === 'album-library') { viewAlbumLibrary(); return; }
+  if (v === 'genres')       { viewGenres(); return; }
+  if (v === 'decades')      { viewDecades(); return; }
+  if (v === 'autodj')       { viewAutoDJ(); return; }
+  viewHome(); // default — 'home' or no pin set
+}
+
 async function viewHome() {
   setTitle(t('player.title.home')); setBack(null); setNavActive('home'); S.view = 'home';
   _homeAC?.abort();
@@ -11707,6 +11827,48 @@ async function _refreshServerAudioState() {
   } catch (_) {
     S.serverAudioRunning = false;
   }
+  // Restore cast state after a page refresh or server restart
+  if (S.serverAudioRunning && !S.castingToMpv && localStorage.getItem(_uKey('casting_mpv')) === '1') {
+    try {
+      const st = await api('GET', 'api/v1/server-playback/status');
+      if (st && st.running && st.playing) {
+        // MPV is still playing (simple browser refresh) — just re-mute the browser
+        S.castingToMpv = true;
+        audioEl.muted = true;
+        if (_xfadeEl) _xfadeEl.muted = true;
+      } else if (st && st.running) {
+        // MPV is up but queue is empty (server restart) — reload current song
+        const s = S.queue && S.idx >= 0 ? S.queue[S.idx] : null;
+        if (s && s.filepath && !s.isRadio) {
+          S.castingToMpv = true;
+          localStorage.setItem(_uKey('casting_mpv'), '1');
+          audioEl.muted = true;
+          if (_xfadeEl) _xfadeEl.muted = true;
+          // Disable crossfade while casting
+          if (S.crossfade !== 0) {
+            _setCrossfadeRestore(S.crossfade);
+            S.crossfade = 0;
+            localStorage.setItem(_uKey('crossfade'), '0');
+            _syncCrossfadeButton();
+          }
+          // Restore from last known position (stored in queue blob)
+          let pos = 0;
+          try {
+            const qRaw = localStorage.getItem(_queueKey());
+            if (qRaw) { const qd = JSON.parse(qRaw); pos = qd.time > 1 ? qd.time : 0; }
+          } catch(_) {}
+          await _mpvLoadSong(s.filepath, pos);
+        } else {
+          localStorage.removeItem(_uKey('casting_mpv'));
+        }
+      } else {
+        // MPV not running at all — clear the flag
+        localStorage.removeItem(_uKey('casting_mpv'));
+      }
+    } catch (_) {
+      localStorage.removeItem(_uKey('casting_mpv'));
+    }
+  }
   _updateCastBtn();
 }
 
@@ -11728,9 +11890,17 @@ async function _mpvLoadSong(filepath, seekTo = 0) {
 
 function _deactivateCast(clearMpv = true) {
   S.castingToMpv = false;
+  localStorage.removeItem(_uKey('casting_mpv'));
   audioEl.muted = false;
   if (_xfadeEl) _xfadeEl.muted = false;
   if (clearMpv) api('POST', 'api/v1/server-playback/queue/clear').catch(() => {});
+  // Restore crossfade if it was disabled when cast was activated
+  if (S.crossfadeRestore != null) {
+    S.crossfade = S.crossfadeRestore;
+    localStorage.setItem(_uKey('crossfade'), String(S.crossfadeRestore));
+    _setCrossfadeRestore(null);
+    _syncCrossfadeButton();
+  }
   _updateCastBtn();
 }
 
@@ -11749,7 +11919,15 @@ async function toggleMpvCast() {
     // Mute browser immediately so there's no audio overlap
     audioEl.muted = true;
     if (_xfadeEl) _xfadeEl.muted = true;
+    // Disable browser crossfade while casting (MPV handles its own gapless playback)
+    if (S.crossfade !== 0) {
+      _setCrossfadeRestore(S.crossfade);
+      S.crossfade = 0;
+      localStorage.setItem(_uKey('crossfade'), '0');
+      _syncCrossfadeButton();
+    }
     S.castingToMpv = true;
+    localStorage.setItem(_uKey('casting_mpv'), '1');
     _updateCastBtn();
     // Load current song into MPV, seek to current position
     await _mpvLoadSong(s.filepath, audioEl.currentTime);
@@ -13127,11 +13305,14 @@ async function pollScan() {
         // fallback: plain badge text if progress endpoint fails
         _renderScanProgress([{ vpath: 'Scanning…', pct: null, scanned: d.totalFileCount || 0, expected: null, currentFile: null }]);
       }
-      scanTimer = setTimeout(pollScan, 3000);
+      scanTimer = setTimeout(pollScan, 3000);  // fast poll while scanning
     } else {
       _renderScanProgress([]);
+      scanTimer = setTimeout(pollScan, 15000); // idle poll — detects a scan that starts later
     }
-  } catch(_) {}
+  } catch(_) {
+    scanTimer = setTimeout(pollScan, 15000);   // retry after network error
+  }
 }
 
 // ── SERVER SETTINGS SYNC ─────────────────────────────────────
@@ -13177,6 +13358,7 @@ function _collectPrefs() {
     home_hidden:  localStorage.getItem('ms2_home_hidden_'  + u),
     mute:         localStorage.getItem('ms2_mute_'          + u),
     shuffle:      localStorage.getItem('ms2_shuffle_'       + u),
+    pinned_view:  localStorage.getItem('ms2_pinned_view_'   + u),
   };
 }
 
@@ -13279,6 +13461,7 @@ function _applyServerSettings(data) {
   }
   if (prefs.show_genres  != null) { ls('ms2_show_genres_'  + u, prefs.show_genres);  S.showGenres  = prefs.show_genres  !== '0'; }
   if (prefs.show_decades != null) { ls('ms2_show_decades_' + u, prefs.show_decades); S.showDecades = prefs.show_decades !== '0'; }
+  if (prefs.pinned_view  != null) { ls('ms2_pinned_view_' + u, prefs.pinned_view); S.pinnedView = prefs.pinned_view || ''; }
   // Home view layout — shelf order and hidden cards synced across devices
   if (prefs.home_order  != null) ls('ms2_home_order_'  + u, prefs.home_order);
   if (prefs.home_hidden != null) ls('ms2_home_hidden_' + u, prefs.home_hidden);
@@ -13313,42 +13496,37 @@ function _applyServerSettings(data) {
   _syncGaplessButton();
   _syncGaplessWaveformNote();
   _applyNavVisibility();
-  // Queue: the DB is the source of truth — always restore from it on load.
-  // This ensures any browser/device always picks up whatever was last playing.
-  // Guard: never interrupt active playback — only restore when paused so that
-  // a visibility-change triggered settings refresh doesn't reload the audio
-  // element and pause a song that is currently playing.
+  // Queue sync: always write DB queue to localStorage so the correct queue/position
+  // is available for the next restoreQueue() call. The actual autoplay decision is
+  // driven by ms2_playing_<user> (set by play/pause actions), NOT by data.queue.playing.
+  //
+  // Cross-device playing state: if the DB record was saved by a DIFFERENT browser
+  // (browserId mismatch) and audio is not currently playing on this device, update
+  // ms2_playing_<user> so that restoreQueue() can honour the other device's state.
   const queueKey = _queueKey();
-  if (!audioEl.paused) {
-    // Audio is playing — just keep localStorage up to date, don't call restoreQueue
-    if (data?.queue && Array.isArray(data.queue.queue) && data.queue.queue.length && queueKey) {
-      let localSavedAt = 0;
-      try { const r = localStorage.getItem(queueKey); if (r) localSavedAt = JSON.parse(r)?.savedAt || 0; } catch(_) {}
-      if ((data.queue.savedAt || 0) > localSavedAt) {
-        try { localStorage.setItem(queueKey, JSON.stringify(data.queue)); } catch(_) {}
-      }
-    }
-  } else if (data?.queue && Array.isArray(data.queue.queue) && data.queue.queue.length && queueKey) {
-    // Write DB queue to localStorage so restoreQueue() always has fresh data.
-    // Only write when non-empty — empty queue is handled by restoreQueue() reading
-    // the empty entry that persistQueue() wrote at time of clearing.
-    //
-    // Prefer-false rule: if localStorage already has playing:false, that explicit
-    // "this device paused" signal wins over whatever the DB says. The DB may still
-    // carry playing:true if (a) it was written during playback and the pause hasn't
-    // been flushed yet, or (b) old pre-fix localStorage wrote playing:true without
-    // ever recording a pause. In those cases we must NOT auto-resume.
-    // Cross-device resume still works: if localStorage has no entry (new device),
-    // lq is null and we trust the DB's playing field as-is.
-    const _toWrite = { ...data.queue };
+  if (data?.queue && Array.isArray(data.queue.queue) && data.queue.queue.length && queueKey && u) {
     try {
       const _blr = localStorage.getItem(queueKey);
-      if (_blr) {
-        const _lq = JSON.parse(_blr);
-        if (_lq?.playing === false) _toWrite.playing = false;
+      const _localTs = _blr ? (JSON.parse(_blr)?.savedAt || 0) : 0;
+      if ((data.queue.savedAt || 0) >= _localTs) {
+        localStorage.setItem(queueKey, JSON.stringify(data.queue));
+      }
+      // Always initialise ms2_playing_<user> from the DB record when it is not
+      // yet set on this device (fresh login, cleared localStorage, new browser).
+      // This ensures restoreQueue() always finds the key and uses it as authority
+      // instead of falling through to the stale data.playing fallback.
+      const _pKey = `ms2_playing_${u}`;
+      if (localStorage.getItem(_pKey) === null) {
+        localStorage.setItem(_pKey, data.queue.playing ? '1' : '0');
+      }
+      // Cross-device playing state sync:
+      // If DB was written by a different browser AND audio is not currently playing
+      // on this device, update ms2_playing_<user> from the DB record.
+      const _dbBrowserId = data.queue.browserId || '';
+      if (_dbBrowserId && _dbBrowserId !== _browserId && audioEl.paused) {
+        localStorage.setItem(_pKey, data.queue.playing ? '1' : '0');
       }
     } catch(_) {}
-    try { localStorage.setItem(queueKey, JSON.stringify(_toWrite)); } catch(_) {}
   }
 }
 
@@ -13531,7 +13709,7 @@ function showApp() {
   _initQueueListeners();
   loadPlaylists();
   loadSmartPlaylists();
-  viewHome();
+  _launchPinnedViewOrHome();
   restoreQueue(/*silent=*/true);
   // Boot overlay dismiss — wait for audio seek (waveform position restored) or fall back.
   // Radio items are not preloaded on restore (no seek position) so skip the seeked wait.
@@ -13566,11 +13744,12 @@ function showApp() {
     // immediate F5 restores to the right spot (not up to 15 s behind).
     if (S.token && S.username) {
       const payload = JSON.stringify({ queue: {
-        queue:   S.queue,
-        idx:     S.idx,
-        time:    audioEl.currentTime || 0,
-        playing: !audioEl.paused,
-        savedAt: Date.now(),
+        queue:     S.queue,
+        idx:       S.idx,
+        time:      audioEl.currentTime || 0,
+        playing:   !audioEl.paused,
+        savedAt:   Date.now(),
+        browserId: _browserId,
       }});
       navigator.sendBeacon('/api/v1/user/settings?token=' + encodeURIComponent(S.token),
         new Blob([payload], { type: 'application/json' }));
@@ -13665,13 +13844,15 @@ function showApp() {
     } catch (_) {}
 
     // ── Queue + prefs sync from server ───────────────────────────────────────
-    // Single GET fetches both queue and prefs. Apply prefs (home order/hidden
-    // etc.) unconditionally; apply queue only when paused AND server copy is
-    // newer (i.e. another device played songs while this tab was backgrounded).
+    // Single GET fetches both queue and prefs. Apply prefs unconditionally;
+    // apply queue using timestamp-wins: _applyServerSettings writes DB to
+    // localStorage only if DB.savedAt >= localStorage.savedAt. Then trigger
+    // restoreQueue when audio is paused and the DB entry was newer (cross-device
+    // resume, or fresh page load where DB won the timestamp race).
     try {
       const settings = await api('GET', 'api/v1/user/settings');
-      // Read localSavedAt BEFORE _applyServerSettings writes new data to
-      // localStorage — otherwise the comparison below would always be equal.
+      // Read localSavedAt BEFORE _applyServerSettings so we know the original
+      // timestamp and can tell whether the DB was newer after the fact.
       const _qk = _queueKey();
       let _localSavedAt = 0;
       if (_qk && audioEl.paused) {
@@ -13681,8 +13862,8 @@ function showApp() {
       if (audioEl.paused && settings?.queue && Array.isArray(settings.queue.queue)) {
         const srv = settings.queue;
         if ((srv.savedAt || 0) > _localSavedAt) {
-          // _applyServerSettings() above already merged the queue into localStorage
-          // with the prefer-false playing-state rule. Just trigger the restore.
+          // DB was newer — _applyServerSettings wrote it to localStorage.
+          // Re-run restoreQueue so the correct song/position/state is applied.
           restoreQueue(true);
         }
       }
@@ -13732,6 +13913,16 @@ function showApp() {
       const recVpaths = S.vpaths.filter(v => S.vpathMeta[v]?.type === 'recordings' || S.vpathMeta[v]?.type === 'youtube');
       S.audiobooksEnabled = abVpaths.length > 0 || recVpaths.length > 0;
       _updateListenSection();
+      // vpathMeta was empty when the queue was restored at boot; re-evaluate
+      // audiobook mode now that we know the vpath types.
+      _updateAudioBookMode();
+      // Audiobooks must never auto-resume on page reload — even if autoResume is on.
+      // vpathMeta wasn't available when restoreQueue ran, so we check here and pause.
+      // (restoreQueue already guards this via _isAudioBookSong, but that check
+      // returned false because vpathMeta was empty at the time — catch it here.)
+      if (!audioEl.paused && _isAudioBookSong(S.queue[S.idx])) {
+        audioEl.pause();
+      }
     }
     // Upload capability — driven by server-side allowUpload (combines global noUpload + per-user flag)
     S.canUpload = d.allowUpload === true;
@@ -13964,6 +14155,49 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'smart-playlists') { _splEditId = null; _splEditName = null; _splFilters = { genres: [], yearFrom: null, yearTo: null, minRating: 0, playedStatus: 'any', minPlayCount: 0, starred: false, artistSearch: '' }; _splSort = 'random'; _splLimit = 100; viewSmartPlaylists(); }
   });
 });
+
+// Pin-to-start — inject a small pin icon into every Library section nav button.
+// Only one item can be pinned. Stored in localStorage per user.
+// The pinned item becomes the default landing page on start/refresh.
+(function _initNavPins() {
+  const PIN_SVG = `<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="pointer-events:none"><path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5v6l1 1 1-1v-6h5v-2z"/></svg>`;
+  // Use data-i18n-attr="title" so translatePage() re-translates titles on every locale change
+  function _setPinI18n(el, isPinned) {
+    const key = isPinned ? 'player.nav.unpinView' : 'player.nav.pinView';
+    el.setAttribute('data-i18n', key);
+    el.setAttribute('data-i18n-attr', 'title');
+    el.title = t(key); // also set immediately for current locale
+  }
+  document.querySelectorAll('.nav-section[data-section="library"] .sidenav .nav-btn').forEach(btn => {
+    const pinEl = document.createElement('span');
+    pinEl.className = 'nav-pin-btn' + (S.pinnedView === btn.dataset.view ? ' pinned' : '');
+    _setPinI18n(pinEl, S.pinnedView === btn.dataset.view);
+    pinEl.innerHTML = PIN_SVG;
+    pinEl.addEventListener('click', e => {
+      e.stopPropagation();
+      const view = btn.dataset.view;
+      if (S.pinnedView === view) {
+        S.pinnedView = '';
+        localStorage.removeItem('ms2_pinned_view_' + S.username);
+        toast(t('player.nav.unpinnedToast'));
+      } else {
+        S.pinnedView = view;
+        localStorage.setItem('ms2_pinned_view_' + S.username, view);
+        const label = btn.querySelector('span')?.textContent || view;
+        toast(t('player.nav.pinnedToast', { label }));
+      }
+      _syncPrefs(); // persist to DB so it survives cross-device switches
+      // Refresh all pin icons
+      document.querySelectorAll('.nav-section[data-section="library"] .nav-pin-btn').forEach(p => {
+        const pView = p.closest('.nav-btn')?.dataset.view;
+        const isNow = S.pinnedView === pView;
+        p.classList.toggle('pinned', isNow);
+        _setPinI18n(p, isNow);
+      });
+    });
+    btn.appendChild(pinEl);
+  });
+}());
 
 // DJ light in player bar — click to open / close the Auto-DJ settings view
 document.getElementById('dj-light').addEventListener('click', () => {
@@ -14689,8 +14923,19 @@ const _TabFav = (() => {
 })();
 
 // ── AUDIO EVENT HANDLERS (named so they can be moved to a swapped element) ──
-function _onAudioPlay()  { syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); _startWaveformRaf(); document.body.classList.add('audio-playing'); _TabFav.play(); _startPositionSync(); if (S.queue[S.idx]?.isRadio) { _radioPlayStart = Date.now(); if (_radioNowPlayingStation) _pollRadioNowPlaying(_radioNowPlayingStation); } if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'playing'; } catch(_e) {} }
-function _onAudioPause() { syncPlayIcons(); VU_NEEDLE.stop();  _stopWaveformRaf(); document.body.classList.remove('audio-playing'); _TabFav.pause(); _stopPositionSync(); if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'paused';  } catch(_e) {} persistQueue(); /* flush playing:false to localStorage immediately — don't wait for 5s timer */ }
+function _onAudioPlay()  {
+  // Boot-phase guard: if restoreQueue is still active and the dedicated playing
+  // key says '0' (user had paused before the refresh), cancel this play() call
+  // immediately. This catches any code path — known or unknown — that might
+  // call audioEl.play() during restore when the user had explicitly paused.
+  if (_bootRestoring && S.username && localStorage.getItem(_playingKey()) === '0') {
+    audioEl.pause();
+    return;
+  }
+  if (S.username) localStorage.setItem(_playingKey(), '1');
+  syncPlayIcons(); VIZ.initAudio(); VU_NEEDLE.start(); _startWaveformRaf(); document.body.classList.add('audio-playing'); _TabFav.play(); _startPositionSync(); if (S.queue[S.idx]?.isRadio) { _radioPlayStart = Date.now(); if (_radioNowPlayingStation) _pollRadioNowPlaying(_radioNowPlayingStation); } if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'playing'; } catch(_e) {} /* Re-apply book speed — browsers reset playbackRate to 1 after audioEl.load() */ if (_isAudioBookSong(S.queue[S.idx]) && S.bookSpeed && S.bookSpeed !== 1) audioEl.playbackRate = S.bookSpeed;
+}
+function _onAudioPause() { if (S.username) localStorage.setItem(_playingKey(), '0'); syncPlayIcons(); VU_NEEDLE.stop();  _stopWaveformRaf(); document.body.classList.remove('audio-playing'); _TabFav.pause(); _stopPositionSync(); if ('mediaSession' in navigator) try { navigator.mediaSession.playbackState = 'paused';  } catch(_e) {} persistQueue(); /* flush playing:false to localStorage immediately */ _syncQueueToDbNow(false); /* immediate DB write — no debounce — so even a quick clear+refresh sees playing:false */ const _ps = S.queue[S.idx]; if (_isAudioBookSong(_ps) && audioEl.currentTime > 2) { _saveBookPosition(_ps.filepath, audioEl.currentTime); } }
 function _onAudioEnded() {
   // Radio stream ended unexpectedly — try to reconnect on the same link
   const _curSong = S.queue[S.idx];
@@ -14717,6 +14962,10 @@ function _onAudioEnded() {
     return;
   }
   _stopWaveformRaf();
+  // Clear saved book position when the audiobook finishes naturally
+  if (_isAudioBookSong(_curSong) && _curSong.filepath) {
+    _clearBookPosition(_curSong.filepath);
+  }
   // Wrapped: fire play-end (natural completion)
   _wrappedEndedNaturally = true;
   if (_wrappedEventId) {
@@ -14832,6 +15081,8 @@ async function loadCuePoints(filepath) {
     _cuePoints = (data.cuepoints || []).filter(cp => cp.t > 0);
   } catch (_e) { _cuePoints = []; }
   renderCueMarkers();
+  // Update chapter nav button visibility now that cuepoints are known
+  _updateAudioBookMode();
 }
 function renderCueMarkers() {
   if (_cueMarkersRendered || !_cuePoints.length || !audioEl.duration) return;
@@ -14854,10 +15105,145 @@ function renderCueMarkers() {
       });
     });
   });
+  _updateAudioBookChapterBar();
+}
+
+// ── AUDIOBOOK MODE ────────────────────────────────────────────────────────────
+// Per-book positions stored as a JSON map in localStorage:
+//   key: ms2_book_positions_{username}
+//   value: { [filepath]: { t: seconds, savedAt: ms } }
+// Capped at 200 entries; old ones are evicted by savedAt.
+const AB_POS_LIMIT = 200;
+function _abPosKey() { return `ms2_book_positions_${S.username}`; }
+function _saveBookPosition(filepath, t) {
+  if (!S.username || !filepath || t < 2) return;
+  try {
+    const raw = localStorage.getItem(_abPosKey());
+    const map = raw ? JSON.parse(raw) : {};
+    map[filepath] = { t, savedAt: Date.now() };
+    // Evict oldest if over limit
+    const keys = Object.keys(map);
+    if (keys.length > AB_POS_LIMIT) {
+      keys.sort((a, b) => (map[a].savedAt || 0) - (map[b].savedAt || 0));
+      for (let i = 0; i < keys.length - AB_POS_LIMIT; i++) delete map[keys[i]];
+    }
+    localStorage.setItem(_abPosKey(), JSON.stringify(map));
+  } catch (_e) {}
+}
+function _loadBookPosition(filepath) {
+  if (!S.username || !filepath) return 0;
+  try {
+    const raw = localStorage.getItem(_abPosKey());
+    if (!raw) return 0;
+    const map = JSON.parse(raw);
+    return map[filepath]?.t || 0;
+  } catch (_e) { return 0; }
+}
+function _clearBookPosition(filepath) {
+  if (!S.username || !filepath) return;
+  try {
+    const raw = localStorage.getItem(_abPosKey());
+    if (!raw) return;
+    const map = JSON.parse(raw);
+    delete map[filepath];
+    localStorage.setItem(_abPosKey(), JSON.stringify(map));
+  } catch (_e) {}
+}
+
+// Update chapter indicator bar under the progress bar.
+function _updateAudioBookChapterBar() {
+  const bar = document.getElementById('ab-chapter-bar');
+  if (!bar) return;
+  const s = S.queue[S.idx];
+  if (!_isAudioBookSong(s) || !_cuePoints.length || !audioEl.duration) {
+    bar.classList.add('hidden');
+    bar.textContent = '';
+    return;
+  }
+  const pos = audioEl.currentTime;
+  // Find current chapter: the last cuepoint whose t ≤ current time
+  let cur = _cuePoints[0];
+  for (const cp of _cuePoints) { if (cp.t <= pos) cur = cp; else break; }
+  if (!cur) { bar.classList.add('hidden'); return; }
+  const idx = _cuePoints.indexOf(cur) + 1;
+  bar.innerHTML = `<span class="ab-chap-num">${t('player.audiobook.chapterN', { n: idx, total: _cuePoints.length })}</span><span class="ab-chap-title">${esc(cur.title || '')}</span>`;
+  bar.classList.remove('hidden');
+}
+
+// Speed popup options
+const AB_SPEEDS = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+
+// Toggle the speed popup.
+function _toggleSpeedPop(btn) {
+  const pop = document.getElementById('ab-speed-pop');
+  if (!pop) return;
+  if (!pop.classList.contains('hidden')) { pop.classList.add('hidden'); return; }
+  pop.innerHTML = AB_SPEEDS.map(r =>
+    `<button class="ab-speed-opt${r === S.bookSpeed ? ' active' : ''}" data-rate="${r}">${r === 1 ? '1×' : r + '×'}</button>`
+  ).join('');
+  pop.querySelectorAll('.ab-speed-opt').forEach(opt => {
+    opt.addEventListener('click', () => {
+      const rate = parseFloat(opt.dataset.rate);
+      _applyBookSpeed(rate);
+      pop.classList.add('hidden');
+    });
+  });
+  // Position above the button
+  const rect = btn.getBoundingClientRect();
+  pop.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+  pop.style.left   = Math.max(4, rect.left - 10) + 'px';
+  pop.classList.remove('hidden');
+}
+
+function _applyBookSpeed(rate) {
+  S.bookSpeed = rate;
+  localStorage.setItem(`ms2_book_speed_${S.username}`, String(rate));
+  audioEl.playbackRate = rate;
+  const lbl = document.getElementById('ab-speed-label');
+  if (lbl) lbl.textContent = rate === 1 ? '1×' : rate + '×';
+  // Update active state in open popup
+  document.querySelectorAll('.ab-speed-opt').forEach(o => o.classList.toggle('active', parseFloat(o.dataset.rate) === rate));
+}
+
+// Show/hide audiobook controls and apply/restore playback speed.
+function _updateAudioBookMode() {
+  const s = S.queue[S.idx];
+  const isBook = _isAudioBookSong(s);
+  document.body.classList.toggle('audiobook-mode', isBook);
+  // Chapter nav buttons: show only when there are cuepoints
+  const hasCues = isBook && _cuePoints.length >= 2;
+  ['ab-prev-chap-btn','ab-next-chap-btn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('hidden', !hasCues);
+  });
+  // Speed button: always visible for audiobooks
+  const speedBtn = document.getElementById('ab-speed-btn');
+  if (speedBtn) {
+    speedBtn.classList.toggle('hidden', !isBook);
+    const lbl = document.getElementById('ab-speed-label');
+    if (lbl) lbl.textContent = S.bookSpeed === 1 ? '1×' : S.bookSpeed + '×';
+  }
+  // Apply/restore playback rate
+  if (isBook) {
+    audioEl.playbackRate = S.bookSpeed;
+  } else {
+    // Silently reset to 1× for non-audiobook content
+    if (audioEl.playbackRate !== 1) audioEl.playbackRate = 1;
+  }
+  // Chapter bar
+  _updateAudioBookChapterBar();
 }
 function _onAudioTimeupdatePersist() {
   if (_persistTimer) return;
-  _persistTimer = setTimeout(() => { _persistTimer = null; persistQueue(); }, 5000);
+  _persistTimer = setTimeout(() => {
+    _persistTimer = null;
+    persistQueue();
+    // Per-book position save
+    const _s = S.queue[S.idx];
+    if (_isAudioBookSong(_s) && audioEl.currentTime > 2) {
+      _saveBookPosition(_s.filepath, audioEl.currentTime);
+    }
+  }, 5000);
 }
 function _onAudioTimeupdateUI() {
   // Radio streams: duration is Infinity — show 0:00 left, elapsed right
@@ -14893,6 +15279,14 @@ function _onAudioTimeupdateUI() {
     if (!_isLiveRadio) _progThumb.style.left = pct + '%';
   }
   _renderTimes();
+  // Update chapter indicator once per second
+  if (_cuePoints.length && _isAudioBookSong(S.queue[S.idx])) {
+    const _tNow2 = Date.now();
+    if (_tNow2 - (_abChapThrottle || 0) >= 1000) {
+      _abChapThrottle = _tNow2;
+      _updateAudioBookChapterBar();
+    }
+  }
   if (S.autoDJ && S.idx === S.queue.length - 1 && _isMusicSong(S.queue[S.idx]) &&
       (audioEl.duration - audioEl.currentTime) < Math.max(
         S.djSimilar ? 45 : 25,   // similar-artists = 2 serial API calls; need more runway
@@ -14948,29 +15342,34 @@ function _onAudioTimeupdateUI() {
   _syncGaplessWaveformNote();
 }
 
+function _onAudioDurationChange() { if (_cuePoints.length && !_cueMarkersRendered) renderCueMarkers(); }
 function _attachAudioListeners(el) {
-  el.addEventListener('play',        _onAudioPlay);
-  el.addEventListener('pause',       _onAudioPause);
-  el.addEventListener('ended',       _onAudioEnded);
-  el.addEventListener('error',       _onAudioError);
-  el.addEventListener('stalled',     _onAudioStalled);
-  el.addEventListener('playing',     _onAudioPlaying);
-  el.addEventListener('canplay',     _onAudioCanPlay);
-  el.addEventListener('timeupdate',  _onAudioTimeupdatePersist);
-  el.addEventListener('timeupdate',  _onAudioTimeupdateUI);
-  el.addEventListener('seeked',      _onAudioSeeked);
+  el.addEventListener('play',           _onAudioPlay);
+  el.addEventListener('pause',          _onAudioPause);
+  el.addEventListener('ended',          _onAudioEnded);
+  el.addEventListener('error',          _onAudioError);
+  el.addEventListener('stalled',        _onAudioStalled);
+  el.addEventListener('playing',        _onAudioPlaying);
+  el.addEventListener('canplay',        _onAudioCanPlay);
+  el.addEventListener('timeupdate',     _onAudioTimeupdatePersist);
+  el.addEventListener('timeupdate',     _onAudioTimeupdateUI);
+  el.addEventListener('seeked',         _onAudioSeeked);
+  el.addEventListener('durationchange', _onAudioDurationChange);
+  el.addEventListener('loadedmetadata', _onAudioDurationChange);
 }
 function _detachAudioListeners(el) {
-  el.removeEventListener('play',        _onAudioPlay);
-  el.removeEventListener('pause',       _onAudioPause);
-  el.removeEventListener('ended',       _onAudioEnded);
-  el.removeEventListener('error',       _onAudioError);
-  el.removeEventListener('stalled',     _onAudioStalled);
-  el.removeEventListener('playing',     _onAudioPlaying);
-  el.removeEventListener('canplay',     _onAudioCanPlay);
-  el.removeEventListener('timeupdate',  _onAudioTimeupdatePersist);
-  el.removeEventListener('timeupdate',  _onAudioTimeupdateUI);
-  el.removeEventListener('seeked',      _onAudioSeeked);
+  el.removeEventListener('play',           _onAudioPlay);
+  el.removeEventListener('pause',          _onAudioPause);
+  el.removeEventListener('ended',          _onAudioEnded);
+  el.removeEventListener('error',          _onAudioError);
+  el.removeEventListener('stalled',        _onAudioStalled);
+  el.removeEventListener('playing',        _onAudioPlaying);
+  el.removeEventListener('canplay',        _onAudioCanPlay);
+  el.removeEventListener('timeupdate',     _onAudioTimeupdatePersist);
+  el.removeEventListener('timeupdate',     _onAudioTimeupdateUI);
+  el.removeEventListener('seeked',         _onAudioSeeked);
+  el.removeEventListener('durationchange', _onAudioDurationChange);
+  el.removeEventListener('loadedmetadata', _onAudioDurationChange);
 }
 
 // Sync queue position to DB on user-initiated seek (debounced 1s)
@@ -15503,6 +15902,30 @@ document.getElementById('viz-prev-btn').addEventListener('click', () => VIZ.prev
 document.getElementById('viz-next-btn').addEventListener('click', () => VIZ.next());
 document.getElementById('viz-mode-btn').addEventListener('click', () => VIZ.toggleMode());
 document.getElementById('eq-btn').addEventListener('click', () => EQ.toggle());
+
+// ── Audiobook controls ────────────────────────────────────────────────────────
+document.getElementById('ab-speed-btn').addEventListener('click', function() { _toggleSpeedPop(this); });
+// Close speed popup when clicking outside it
+document.addEventListener('click', e => {
+  const pop = document.getElementById('ab-speed-pop');
+  if (pop && !pop.classList.contains('hidden') && !pop.contains(e.target) && e.target.id !== 'ab-speed-btn') {
+    pop.classList.add('hidden');
+  }
+});
+document.getElementById('ab-prev-chap-btn').addEventListener('click', () => {
+  if (!_cuePoints.length || !audioEl.duration) return;
+  const t = audioEl.currentTime;
+  // If we're more than 3 s into a chapter, restart it; otherwise go to previous
+  const curIdx = _cuePoints.reduce((best, cp, i) => (cp.t <= t ? i : best), 0);
+  const target = (t - _cuePoints[curIdx].t > 3 || curIdx === 0) ? _cuePoints[curIdx] : _cuePoints[curIdx - 1];
+  if (target) audioEl.currentTime = target.t;
+});
+document.getElementById('ab-next-chap-btn').addEventListener('click', () => {
+  if (!_cuePoints.length || !audioEl.duration) return;
+  const t = audioEl.currentTime;
+  const nextCp = _cuePoints.find(cp => cp.t > t + 0.5);
+  if (nextCp) audioEl.currentTime = nextCp.t;
+});
 window.addEventListener('resize', () => {
   const overlay = document.getElementById('viz-overlay');
   if (overlay.classList.contains('hidden')) return;

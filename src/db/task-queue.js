@@ -8,6 +8,7 @@ import * as config from '../state/config.js';
 import { getDirname } from '../util/esm-helpers.js';
 import * as db from '../db/manager.js';
 import * as scanProgress from '../state/scan-progress.js';
+import { ffprobeBin } from '../util/ffmpeg-bootstrap.js';
 
 const __dirname = getDirname(import.meta.url);
 
@@ -77,7 +78,8 @@ function runScan(scanObj) {
       .map(v => config.program.folders[v].root),
     excludedPaths: Object.keys(config.program.folders)
       .filter(v => v !== scanObj.vpath && isChildOf(scanObj.vpath, v) && config.program.folders[v].type === 'excluded')
-      .map(v => config.program.folders[v].root)
+      .map(v => config.program.folders[v].root),
+    ffprobePath: ffprobeBin(),
   };
 
   const baseline = db.countFilesByVpath(scanObj.vpath) || 0;
@@ -195,10 +197,18 @@ export function runAfterBoot() {
   setTimeout(() => {
     // This only gets run once after boot. Will not be run on server restart b/c scanIntervalTimer is already set
     if (config.program.scanOptions.scanInterval > 0 && scanIntervalTimer === null) {
-      if (config.program.scanOptions.bootScanEnabled === true) {
+      const intervalMs = config.program.scanOptions.scanInterval * 60 * 60 * 1000;
+
+      // Always run a scan on boot if: explicitly enabled OR last scan was more
+      // than one interval ago (catches the case where the server was restarted
+      // and the setInterval clock reset, leaving a gap > the configured interval).
+      const lastScan  = db.getLastScannedMs();
+      const overdue   = lastScan == null || (Date.now() - lastScan) >= intervalMs;
+      if (config.program.scanOptions.bootScanEnabled === true || overdue) {
         scanAll();
       }
-      scanIntervalTimer = setInterval(() => scanAll(), config.program.scanOptions.scanInterval * 60 * 60 * 1000);
+
+      scanIntervalTimer = setInterval(() => scanAll(), intervalMs);
     }
   }, config.program.scanOptions.bootScanDelay * 1000);
 }

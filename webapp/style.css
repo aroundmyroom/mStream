@@ -197,6 +197,16 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .nav-btn.active{background:var(--active);color:var(--primary);}
 .nav-btn svg{flex-shrink:0;opacity:.8;}
 .nav-btn.active svg{opacity:1;}
+/* Pin-to-start button — appears on hover, stays visible when pinned */
+.nav-btn{position:relative;}
+.nav-pin-btn{position:absolute;right:5px;top:50%;transform:translateY(-50%);
+  width:16px;height:16px;display:flex;align-items:center;justify-content:center;
+  border-radius:3px;opacity:0;transition:opacity .12s,color .12s;
+  color:var(--t2);cursor:pointer;}
+.nav-btn:hover .nav-pin-btn{opacity:.45;}
+.nav-btn:hover .nav-pin-btn:hover{opacity:1;color:var(--primary);}
+.nav-pin-btn.pinned{opacity:1;color:var(--primary);}
+
 .playlist-nav{gap:0;}
 .pl-row{display:flex;align-items:center;width:100%;border-radius:var(--r);overflow:hidden;transition:background .15s;}
 .pl-row:hover{background:var(--hover);}
@@ -1424,7 +1434,7 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 #tip-box.tip-show{opacity:1;transform:translateY(0);}
 
 /* ── DJ SIMILAR STRIP ───────────────────────────────────────── */
-.dj-similar-strip{position:fixed;left:var(--sidebar);right:0;bottom:var(--player);height:34px;display:flex;align-items:center;padding:0 14px 0 17px;background:var(--card);border-top:2px solid var(--border);border-left:3px solid var(--primary);box-shadow:0 -4px 20px rgba(109,40,217,.12);z-index:198;pointer-events:none;transform:translateY(100%);opacity:0;transition:transform .3s cubic-bezier(.22,1,.36,1),opacity .35s ease;--strip-dur:30000ms;}
+.dj-similar-strip{position:fixed;left:var(--sidebar);right:0;bottom:var(--player);height:34px;display:flex;align-items:center;padding:0 14px 0 17px;background:var(--card);border-top:2px solid var(--border);box-shadow:0 -4px 20px rgba(109,40,217,.12);z-index:198;pointer-events:none;transform:translateY(100%);opacity:0;transition:transform .3s cubic-bezier(.22,1,.36,1),opacity .35s ease;--strip-dur:30000ms;}
 .dj-similar-strip::before{content:'';position:absolute;top:-2px;left:0;height:2px;width:0%;background:var(--primary);border-radius:0 2px 2px 0;}
 .dj-similar-strip.dj-strip-in::before{animation:dj-strip-progress var(--strip-dur) linear forwards;}
 @keyframes dj-strip-progress{from{width:0%}to{width:100%}}
@@ -2340,3 +2350,57 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .admin-stat-box{background:var(--bg);border:1px solid var(--border);border-radius:var(--r2);padding:12px 20px;min-width:120px;}
 .admin-stat-value{font-size:26px;font-weight:700;color:var(--primary);}
 .admin-stat-label{font-size:12px;color:var(--t3);margin-top:2px;}
+
+/* ── Audiobook controls ──────────────────────────────────────────────────── */
+/* Speed button label */
+.ab-speed-label{font-size:12px;font-weight:700;letter-spacing:-.01em;line-height:1;}
+/* Speed popup */
+.ab-speed-pop{
+  position:fixed;
+  padding:6px 4px;
+  border-radius:10px;
+  background:var(--card);
+  border:1px solid var(--border2);
+  box-shadow:0 14px 34px rgba(0,0,0,.45);
+  z-index:520;
+  display:flex;
+  flex-direction:column;
+  gap:1px;
+  min-width:90px;
+}
+.ab-speed-opt{
+  display:flex;align-items:center;justify-content:center;
+  padding:6px 18px;
+  font-size:13px;font-weight:500;
+  color:var(--t1);
+  border-radius:6px;
+  cursor:pointer;
+  transition:background .12s;
+  border:none;background:transparent;width:100%;
+}
+.ab-speed-opt:hover{background:var(--hover);}
+.ab-speed-opt.active{color:var(--primary);font-weight:700;}
+/* Chapter indicator bar (between progress bar and VU strip) */
+.ab-chapter-bar{
+  width:100%;
+  text-align:center;
+  font-size:11px;
+  color:var(--t2);
+  padding:2px 12px 1px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  line-height:1.3;
+  letter-spacing:.01em;
+}
+.ab-chapter-bar .ab-chap-num{color:var(--t3);margin-right:5px;}
+.ab-chapter-bar .ab-chap-title{color:var(--t1);font-weight:500;}
+/* chapter nav buttons act like ctrl-sm */
+.ab-ctrl{opacity:1;}
+/* Make chapter buttons stand out subtly in audiobook mode */
+body.audiobook-mode #ab-prev-chap-btn,
+body.audiobook-mode #ab-next-chap-btn{color:var(--primary);opacity:.9;}
+body.audiobook-mode #ab-speed-btn{color:var(--primary);}
+@media(max-width:640px){
+  .ab-chapter-bar{font-size:10px;padding:1px 6px;}
+}

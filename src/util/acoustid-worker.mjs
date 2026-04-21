@@ -26,7 +26,7 @@
 
 import { workerData, parentPort } from 'node:worker_threads';
 import { DatabaseSync } from 'node:sqlite';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import https from 'node:https';
 import path from 'node:path';
 
@@ -104,12 +104,22 @@ const _getStats = db.prepare(`
 
 // ── fpcalc ───────────────────────────────────────────────────────────────────
 
+// Detect ionice once at module start. Present on all standard Linux distros and
+// Debian-based Docker images (util-linux). Absent on Alpine / minimal containers.
+// Fall back to bare fpcalc so AcoustID still works everywhere.
+let _ioniceAvailable = false;
+try { execFileSync('ionice', ['--version'], { stdio: 'ignore' }); _ioniceAvailable = true; } catch { /* not installed */ }
+
 function runFpcalc(absolutePath) {
   return new Promise((resolve, reject) => {
     // -json: JSON output  -length 120: only first 120 s needed (saves time on long tracks)
-    // Run fpcalc at idle I/O class (ionice -c 3) + nice 19 so disk fingerprinting
-    // never competes with the audio stream being served to the browser.
-    const proc = spawn('ionice', ['-c', '3', 'nice', '-n', '19', fpcalcBin, '-json', '-length', '120', absolutePath], {
+    // Run fpcalc at idle I/O class + nice 19 when ionice is available so disk
+    // fingerprinting never competes with the audio stream being served.
+    // Falls back to bare fpcalc on Alpine / minimal Docker images.
+    const [cmd, args] = _ioniceAvailable
+      ? ['ionice', ['-c', '3', 'nice', '-n', '19', fpcalcBin, '-json', '-length', '120', absolutePath]]
+      : [fpcalcBin, ['-json', '-length', '120', absolutePath]];
+    const proc = spawn(cmd, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';

@@ -1103,6 +1103,10 @@
   "player.nav.genres": "Genres",
   "player.nav.decades": "Decades",
   "player.nav.autoDj": "Auto-DJ",
+  "player.nav.pinView": "Pin as start view",
+  "player.nav.unpinView": "Unpin start view",
+  "player.nav.pinnedToast": "Start view pinned: {{label}}",
+  "player.nav.unpinnedToast": "Start view unpinned",
   "player.nav.mediaStreams": "Media & Streams",
   "player.nav.radioStreams": "Radio Streams",
   "player.nav.audioContent": "Audio Content",
@@ -1917,5 +1921,9 @@
   "admin.dlna.warningTitle": "⚠ LAN only",
   "admin.dlna.warningBody": "The DLNA port serves all music without authentication. Never expose it to the internet or untrusted networks. Firewall or block port 10293 (or your custom port) from external access.",
   "admin.dlna.saved": "Saved",
-  "admin.dlna.saveFailed": "Save failed"
+  "admin.dlna.saveFailed": "Save failed",
+  "player.ctrl.prevChapter": "Previous chapter",
+  "player.ctrl.nextChapter": "Next chapter",
+  "player.ctrl.playbackSpeed": "Playback speed",
+  "player.audiobook.chapterN": "Chapter {{n}} of {{total}}"
 }

@@ -1,5 +1,6 @@
 import Joi from 'joi';
 import path from 'path';
+import { execFile } from 'child_process';
 import * as vpath from '../util/vpath.js';
 import * as dbQueue from '../db/task-queue.js';
 import * as db from '../db/manager.js';
@@ -8,6 +9,7 @@ import { joiValidate } from '../util/validation.js';
 import WebError from '../util/web-error.js';
 import { mergeGenreRows } from '../util/genre-merge.js';
 import { indexFileOnDemand } from '../util/on-demand-index.js';
+import { ffprobeBin } from '../util/ffmpeg-bootstrap.js';
 
 function renderMetadataObj(row) {
   return {
@@ -668,15 +670,43 @@ export function setup(mstream) {
   });
 
   // Returns embedded cue sheet track markers for a single file (used by the player seek bar)
-  mstream.get('/api/v1/db/cuepoints', (req, res) => {
+  mstream.get('/api/v1/db/cuepoints', async (req, res) => {
     try {
       const pathInfo = vpath.getVPathInfo(req.query.fp, req.user);
       const row = db.findFileByPath(pathInfo.relativePath, pathInfo.vpath);
+      // If this is an M4B with no chapters yet, extract on-the-fly via ffprobe
+      if (row && (!row.cuepoints || row.cuepoints === '[]') && /\.m4b$/i.test(pathInfo.fullPath)) {
+        const chapters = await _extractM4bChaptersOnDemand(pathInfo.fullPath);
+        if (chapters && chapters.length >= 2) {
+          db.updateFileCue(pathInfo.relativePath, pathInfo.vpath, JSON.stringify(chapters));
+          return res.json({ cuepoints: chapters });
+        }
+      }
       res.json({ cuepoints: row?.cuepoints ? JSON.parse(row.cuepoints) : [] });
     } catch (_e) {
       res.json({ cuepoints: [] });
     }
   });
+
+function _extractM4bChaptersOnDemand(filePath) {
+  return new Promise(resolve => {
+    const probe = ffprobeBin();
+    if (!probe) return resolve(null);
+    const args = ['-v', 'quiet', '-print_format', 'json', '-show_chapters', filePath];
+    execFile(probe, args, { maxBuffer: 2 * 1024 * 1024, timeout: 20000 }, (err, stdout) => {
+      if (err) return resolve(null);
+      try {
+        const chapters = JSON.parse(stdout).chapters;
+        if (!Array.isArray(chapters) || chapters.length < 2) return resolve(null);
+        resolve(chapters.map((ch, i) => ({
+          no: i + 1,
+          title: (ch.tags?.title || `Chapter ${i + 1}`).trim(),
+          t: Math.round(parseFloat(ch.start_time) * 100) / 100 || 0,
+        })).filter(cp => cp.t >= 0));
+      } catch (_e) { resolve(null); }
+    });
+  });
+}
 
   // ── GENRE BROWSING ────────────────────────────────────────────
   mstream.get('/api/v1/db/genres', (req, res) => {

@@ -71,6 +71,7 @@ let _ssdpServer  = null;
 const _subscribers = new Map();
 const MAX_SUBSCRIBERS = 256;
 const GENA_DEFAULT_TIMEOUT = 1800; // seconds
+setInterval(() => { const now = Date.now(); for (const [sid, sub] of _subscribers) { if (sub.expiry < now) _subscribers.delete(sid); } }, 60_000).unref();
 
 // SystemUpdateID — bumped after each scan complete; clients use it to
 // invalidate their browse caches. Wraps at 2^32.
@@ -462,9 +463,10 @@ async function handleBrowse(body, res) {
   const browseFlag = soapField(body, 'BrowseFlag') || 'BrowseDirectChildren';
   const startIdx   = Math.max(0, parseInt(soapField(body, 'StartingIndex') || '0', 10) || 0);
   const rawCount   = Math.max(0, parseInt(soapField(body, 'RequestedCount') || '0', 10) || 0);
+  const reqCount   = rawCount === 0 ? MAX_BROWSE_COUNT : Math.min(rawCount, MAX_BROWSE_COUNT);
   const sources    = await resolveAlbumsSources();
 
-  function pg(arr) { return rawCount > 0 ? arr.slice(startIdx, startIdx + rawCount) : arr.slice(startIdx); }
+  function pg(arr) { return arr.slice(startIdx, startIdx + reqCount); }
 
   // ── Root ──────────────────────────────────────────────────────────────────
   if (objectId === '0') {

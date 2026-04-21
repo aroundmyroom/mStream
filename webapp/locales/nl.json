@@ -1103,6 +1103,10 @@
   "player.nav.genres": "Genres",
   "player.nav.decades": "Decennia",
   "player.nav.autoDj": "Auto-DJ",
+  "player.nav.pinView": "Vastzetten als startweergave",
+  "player.nav.unpinView": "Startweergave losmaken",
+  "player.nav.pinnedToast": "Startweergave vastgezet: {{label}}",
+  "player.nav.unpinnedToast": "Startweergave losgekoppeld",
   "player.nav.mediaStreams": "Media & streams",
   "player.nav.radioStreams": "Radiostreams",
   "player.nav.audioContent": "Audio-inhoud",
@@ -1923,5 +1927,9 @@
   "admin.dlna.warningTitle": "⚠ Alleen lokaal netwerk",
   "admin.dlna.warningBody": "De DLNA-poort serveert alle muziek zonder authenticatie. Stel hem nooit bloot aan het internet of onvertrouwde netwerken. Blokkeer poort 10293 (of je aangepaste poort) voor externe toegang.",
   "admin.dlna.saved": "Opgeslagen",
-  "admin.dlna.saveFailed": "Opslaan mislukt"
+  "admin.dlna.saveFailed": "Opslaan mislukt",
+  "player.ctrl.prevChapter": "Vorig hoofdstuk",
+  "player.ctrl.nextChapter": "Volgend hoofdstuk",
+  "player.ctrl.playbackSpeed": "Afspeelsnelheid",
+  "player.audiobook.chapterN": "Hoofdstuk {{n}} van {{total}}"
 }

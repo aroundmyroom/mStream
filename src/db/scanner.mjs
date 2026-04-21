@@ -9,6 +9,7 @@ import mime from 'mime-types';
 import axios from 'axios';
 import http from 'http';
 import https from 'https';
+import { execFile } from 'child_process';
 
 // Disable keep-alive on both agents: between batch flushes the server-side
 // keep-alive timeout can expire, leaving a stale socket in the pool. When
@@ -44,7 +45,8 @@ const schema = Joi.object({
     Joi.string(), Joi.boolean()
   ).required(),
   otherRoots: Joi.array().items(Joi.string()).required(),
-  excludedPaths: Joi.array().items(Joi.string()).default([])
+  excludedPaths: Joi.array().items(Joi.string()).default([]),
+  ffprobePath: Joi.string().optional().allow('', null)
 });
 
 const { error: validationError } = schema.validate(loadJson);
@@ -297,6 +299,15 @@ async function processFileResult(absPath, relPath, modTime, data) {
             await reportError(absPath, 'cue', `Sidecar .cue file parse failed: ${_e.message}`, _e.stack);
           }
         }
+        // M4B chapter fallback (only when no cuepoints found yet)
+        if (cuepoints === '[]' && /\.m4b$/i.test(absPath) && loadJson.ffprobePath) {
+          try {
+            const chapters = await extractM4bChapters(absPath, loadJson.ffprobePath);
+            if (chapters) cuepoints = JSON.stringify(chapters);
+          } catch (_e) {
+            await reportError(absPath, 'cue', `M4B chapter extraction failed: ${_e.message}`, _e.stack);
+          }
+        }
         await ax({
           method: 'POST',
           url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-cue`,
@@ -488,6 +499,26 @@ function parseSidecarCue(audioFilePath) {
   return tracks.length > 1 ? tracks : null;
 }
 
+// Extract chapters from an M4B/M4A file via ffprobe.
+// Returns [{no, title, t}] (t = seconds) or null if no chapters found.
+function extractM4bChapters(filePath, ffprobePath) {
+  return new Promise((resolve, reject) => {
+    const args = ['-v', 'quiet', '-print_format', 'json', '-show_chapters', filePath];
+    execFile(ffprobePath, args, { maxBuffer: 2 * 1024 * 1024, timeout: 20000 }, (err, stdout) => {
+      if (err) { reject(err); return; }
+      let chapters;
+      try { chapters = JSON.parse(stdout).chapters; } catch (_e) { resolve(null); return; }
+      if (!Array.isArray(chapters) || chapters.length < 2) { resolve(null); return; }
+      const pts = chapters.map((ch, i) => ({
+        no:    i + 1,
+        title: (ch.tags?.title || `Chapter ${i + 1}`).trim(),
+        t:     Math.round(parseFloat(ch.start_time) * 100) / 100 || 0,
+      })).filter(cp => cp.t >= 0);
+      resolve(pts.length >= 2 ? pts : null);
+    });
+  });
+}
+
 // Returns a promise that rejects after `ms` milliseconds with a timeout error.
 function withTimeout(promise, ms) {
   let timer;
@@ -620,6 +651,16 @@ async function parseMyFile(thisSong, modified) {
     } catch (_e) {
       // non-critical
       await reportError(thisSong, 'cue', `Sidecar .cue file parse failed: ${_e.message}`, _e.stack);
+    }
+  }
+
+  // M4B chapter extraction via ffprobe (only when no cuepoints found yet)
+  if (!songInfo.cuepoints && /\.m4b$/i.test(thisSong) && loadJson.ffprobePath) {
+    try {
+      const chapters = await extractM4bChapters(thisSong, loadJson.ffprobePath);
+      if (chapters) songInfo.cuepoints = JSON.stringify(chapters);
+    } catch (_e) {
+      await reportError(thisSong, 'cue', `M4B chapter extraction failed: ${_e.message}`, _e.stack);
     }
   }
 
