@@ -83,7 +83,7 @@ async function insertEntries(song) {
     "art_source": song._artSource || null,
     "cover_file": song._coverFile || null,
     "vpath": loadJson.vpath,
-    "ts": song._preserveTs || song.modified || Math.floor(Date.now() / 1000),
+    "ts": song._preserveTs || song.modified || null,
     "sID": loadJson.scanId,
     "replaygainTrackDb": song.replaygain_track_gain ? song.replaygain_track_gain.dB : null,
     "genre": song.genre ? String(song.genre) : null,

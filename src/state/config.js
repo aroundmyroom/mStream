@@ -61,6 +61,11 @@ const listenBrainzOptions = Joi.object({
   enabled: Joi.boolean().default(false),
 });
 
+const discordWebhookOptions = Joi.object({
+  enabled: Joi.boolean().default(false),
+  url:     Joi.string().uri().allow('').default(''),
+});
+
 const discogsOptions = Joi.object({
   enabled:        Joi.boolean().default(false),
   allowArtUpdate: Joi.boolean().default(false),
@@ -107,6 +112,7 @@ const schema = Joi.object({
   }),
   lastFM: lastFMOptions.default(lastFMOptions.validate({}).value),
   listenBrainz: listenBrainzOptions.default(listenBrainzOptions.validate({}).value),
+  discordWebhook: discordWebhookOptions.default(discordWebhookOptions.validate({}).value),
   discogs: discogsOptions.default(discogsOptions.validate({}).value),
   scanOptions: scanOptions.default(scanOptions.validate({}).value),
   noUpload: Joi.boolean().default(false),
@@ -139,6 +145,8 @@ const schema = Joi.object({
       'lastfm-password': Joi.string().optional(),
       'lastfm-session': Joi.string().optional(),
       'listenbrainz-token': Joi.string().allow('').optional(),
+      'discord-webhook-enabled': Joi.boolean().optional(),
+      'discord-webhook-nick': Joi.string().allow('').max(64).optional(),
       'allow-radio-recording': Joi.boolean().optional(),
       'allow-youtube-download': Joi.boolean().optional(),
       'allow-upload': Joi.boolean().optional(),

@@ -1,5 +1,6 @@
 import winston from 'winston';
 import express from 'express';
+import compression from 'compression';
 import fs from 'fs';
 import path from 'path';
 import Joi from 'joi';
@@ -18,6 +19,8 @@ import * as adminApi from './api/admin.js';
 import * as remoteApi from './api/remote.js';
 import * as sharedApi from './api/shared.js';
 import * as scrobblerApi from './api/scrobbler.js';
+import * as discordWebhookApi from './api/discord-webhook.js';
+import * as customWebhooksApi from './api/custom-webhooks.js';
 import * as discogsApi from './api/discogs.js';
 import * as waveformApi from './api/waveform.js';
 import * as config from './state/config.js';
@@ -90,6 +93,7 @@ export async function serveIt(configFile) {
   }
 
   // Magic Middleware Things
+  mstream.use(compression()); // gzip static assets and API responses
   mstream.use(cookieParser());
   mstream.use(express.json({ limit: config.program.maxRequestSize }));
   mstream.use(express.urlencoded({ extended: true }));
@@ -199,6 +203,8 @@ export async function serveIt(configFile) {
   transcode.setup(mstream);
   scrobblerApi.setup(mstream);
   scrobblerApi.setupListenBrainz(mstream);
+  discordWebhookApi.setup(mstream);
+  customWebhooksApi.setup(mstream);
   discogsApi.setup(mstream);
   waveformApi.setup(mstream);
   userSettingsApi.setup(mstream);

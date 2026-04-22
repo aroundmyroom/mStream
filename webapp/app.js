@@ -70,6 +70,10 @@ const S = {
   lastfmHasApiKey: false,
   listenbrainzEnabled: false,
   listenbrainzLinked: false,
+  discordWebhookServerEnabled: false,
+  discordWebhookEnabled: false,
+  customWebhooksServerEnabled: false,   // true if at least one slot is admin-enabled
+  customWebhooksEnabled: [false, false], // per-slot user opt-in
   vpaths:   [],
   queue:    [],
   idx:      -1,
@@ -202,6 +206,7 @@ let _nextElGain  = null;   // per-element GainNode for _xfadeEl — for schedule
 let _gaplessTimer= null;   // setTimeout handle: starts xEl 80ms before end
 let _msPosThrottle = 0;    // timestamp of last setPositionState call — throttled to 1 Hz
 let _rgGainNode  = null;   // ReplayGain gain node — inserted before _audioGain
+let _castMuteGain = null; // GainNode: 0 when casting to MPV, 1 otherwise — keeps analysers fed
 let _waveformData = null;  // decoded waveform array [0..255] for current track
 let _waveformFp  = null;   // filepath matching _waveformData (avoids double-fetch)
 const _wfPrefetchPending = []; // filepaths queued for background pre-generation
@@ -459,12 +464,17 @@ function _djKey(k)    { return `ms2_dj_${k}_${S.username || ''}`; }
 function _uKey(k)     { return `ms2_${k}_${S.username || ''}`; }
 function persistQueue() {
   if (!S.username) return;
+  // Use the dedicated playing key as source-of-truth for the playing flag.
+  // This key is set to '0' before beforeunload persists, so a refresh never
+  // writes playing:true into localStorage even when music was playing.
+  const _pkRaw = localStorage.getItem(_playingKey());
+  const _playing = _pkRaw !== null ? _pkRaw === '1' : !audioEl.paused;
   try {
     localStorage.setItem(_queueKey(), JSON.stringify({
       queue:     S.queue,
       idx:       S.idx,
       time:      audioEl.currentTime || 0,
-      playing:   !audioEl.paused,
+      playing:   _playing,
       savedAt:   Date.now(),
       browserId: _browserId,
     }));
@@ -559,24 +569,9 @@ function restoreQueue(silent = false) {
       //   Different browserId (= another device last played): trust DB's playing
       //   field so that cross-device resume still works when autoResume is on.
       //   No ms2_playing key yet (fresh browser): fall back to DB + autoResume.
-      const _localPlayState = localStorage.getItem(_playingKey()); // '1', '0', or null
-      const _dbBrowserId    = data.browserId || '';
-      let _shouldAutoPlay;
-      if (_localPlayState !== null && (_dbBrowserId === _browserId || !_dbBrowserId)) {
-        // Same browser (or no browserId in old data) — trust the dedicated playing key
-        _shouldAutoPlay = _localPlayState === '1' && S.autoResume && !_isAudioBookSong(s);
-      } else if (_localPlayState !== null && _dbBrowserId !== _browserId) {
-        // Different device wrote the DB record — prefer local pause decision
-        // but allow cross-device resume when the local key says playing too
-        _shouldAutoPlay = _localPlayState === '1' && S.autoResume && !_isAudioBookSong(s);
-      } else {
-        // No local playing key even after _applyServerSettings ran — edge case
-        // (e.g. queue was empty so _applyServerSettings skipped the init block).
-        // Safe default: do not autoplay. The user can press play manually.
-        _shouldAutoPlay = false;
-      }
-      // Podcasts never auto-resume
-      if (s.isPodcast) _shouldAutoPlay = false;
+      // Never autoplay on page restore — the user must press play manually.
+      // This is unconditional: it doesn't matter what was in localStorage or DB.
+      const _shouldAutoPlay = false;
 
       // Radio streams are live — never preload on restore (no seek position to recover,
       // and opening the proxy connection only to tear it down when the user picks a
@@ -834,7 +829,11 @@ const Player = {
     const _cueSeek = _pendingCueSeek;
     _pendingCueSeek = null;
     audioEl.src = mediaUrl(s.filepath);
-    audioEl.muted = S.castingToMpv; // keep muted if casting to server speaker
+    // Do NOT set audioEl.muted here — casting silence is handled by _castMuteGain
+    // (a GainNode before the audio destination). Setting element.muted=true would
+    // silence the MediaElementSourceNode and cut signal to VU/spectrum analysers.
+    audioEl.muted = false;
+    VIZ.setCastMute(S.castingToMpv); // re-apply cast mute via gain node
     audioEl.load();
     VIZ.initAudio();   // ensure AudioContext + analysers exist BEFORE play fires
     if (_cueSeek != null && _cueSeek > 0) {
@@ -936,7 +935,7 @@ const Player = {
         }).then(r => { _wrappedPodcastEventId = r?.eventId ?? null; }).catch(() => {});
       }
     }
-    if ((S.lastfmEnabled || (S.listenbrainzEnabled && S.listenbrainzLinked)) && !s.isRadio && !s.isPodcast) {
+    if ((S.lastfmEnabled || (S.listenbrainzEnabled && S.listenbrainzLinked) || S.discordWebhookEnabled || S.customWebhooksEnabled.some(Boolean)) && !s.isRadio && !s.isPodcast) {
       if (S.listenbrainzEnabled && S.listenbrainzLinked) {
         api('POST', 'api/v1/listenbrainz/playing-now', { filePath: s.filepath }).catch(() => {});
       }
@@ -959,6 +958,12 @@ const Player = {
             msgs.push('ListenBrainz: ' + (e?.message || 'failed'));
           }
         }
+        if (S.discordWebhookEnabled) {
+          api('POST', 'api/v1/discord-webhook/scrobble-by-filepath', { filePath: s.filepath }).catch(() => {});
+        }
+        S.customWebhooksEnabled.forEach((on, i) => {
+          if (on) api('POST', 'api/v1/custom-webhooks/scrobble-by-filepath', { filePath: s.filepath, slot: i }).catch(() => {});
+        });
         if (scrobbleEl && msgs.length) {
           const ok = msgs.every(m => m.endsWith('✓'));
           scrobbleEl.textContent = msgs.join(' · ');
@@ -3894,7 +3899,13 @@ const VIZ = (() => {
     _node.connect(analyserNode);          // butterchurn tap (pre-pan)
     // VU/PPM analysers tap POST-panner so balance is reflected on the meters
     _node.connect(_pannerNode);
-    _pannerNode.connect(audioCtx.destination);
+    // Cast-mute gain node: sits between panner and destination so that
+    // silencing browser output (when casting to MPV) does NOT suppress the
+    // analyser taps — VU meters keep working even when cast-mode is active.
+    _castMuteGain = audioCtx.createGain();
+    _castMuteGain.gain.value = S.castingToMpv ? 0 : 1;
+    _pannerNode.connect(_castMuteGain);
+    _castMuteGain.connect(audioCtx.destination);
     _pannerNode.connect(splitter);        // post-pan L+R tap
     splitter.connect(analyserL, 0);       // left  channel (balance-aware)
     splitter.connect(analyserR, 1);       // right channel (balance-aware)
@@ -3903,6 +3914,18 @@ const VIZ = (() => {
       audioCtx = null;
       const row = document.getElementById('vu-spec-row');
       if (row) row.style.display = 'none';
+    }
+  }
+
+  // Silence/restore browser audio output via gain node so Web Audio analysers
+  // (VU meters, spectrum) still receive signal even in cast-to-MPV mode.
+  // Falls back to element.muted when the AudioContext hasn't been initialised yet.
+  function _setCastMute(muted) {
+    if (audioCtx && _castMuteGain) {
+      _castMuteGain.gain.value = muted ? 0 : 1;
+    } else {
+      audioEl.muted = muted;
+      if (_xfadeEl) _xfadeEl.muted = muted;
     }
   }
 
@@ -4854,6 +4877,26 @@ const VIZ = (() => {
     if (a) a.textContent = s?.artist || '';
   }
 
+  // Lazy-load the heavy butterchurn preset bundles the first time the
+  // visualizer is opened. Returns a promise that resolves when done.
+  let _presetsLoading = null;
+  function _loadPresetScripts() {
+    if (_presetsLoading) return _presetsLoading;
+    const toLoad = [
+      { src: '/assets/js/lib/butterchurn-presets.min.js',  check: () => window.butterchurnPresets },
+      { src: '/assets/js/lib/butterchurn-presets-extra.js', check: () => window.butterchurnPresetsExtra },
+    ].filter(e => !e.check());
+    if (!toLoad.length) return (_presetsLoading = Promise.resolve());
+    _presetsLoading = Promise.all(toLoad.map(e => new Promise(resolve => {
+      const s = document.createElement('script');
+      s.src = e.src;
+      s.onload = resolve;
+      s.onerror = resolve; // don't block if network fails
+      document.head.appendChild(s);
+    })));
+    return _presetsLoading;
+  }
+
   return {
     open() {
       ensureAudio();
@@ -4864,7 +4907,7 @@ const VIZ = (() => {
       if (vizTopMode === 0) {
         const canvas = document.getElementById('viz-canvas');
         if (!visualizer) {
-          initViz(canvas);
+          _loadPresetScripts().then(() => initViz(canvas));
         } else {
           canvas.width  = canvas.clientWidth;
           canvas.height = canvas.clientHeight;
@@ -4913,6 +4956,7 @@ const VIZ = (() => {
       }
     },
     initAudio()   { ensureAudio(); },
+    setCastMute(muted) { _setCastMute(muted); },
   };
 })();
 
@@ -9898,6 +9942,162 @@ async function viewListenBrainz() {
   });
 }
 
+// ── DISCORD WEBHOOK ───────────────────────────────────────────
+async function viewDiscordWebhook() {
+  setTitle(t('player.title.discordWebhook')); setBack(null); setNavActive('discord-webhook'); S.view = 'discord-webhook';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+
+  let status = { serverEnabled: false, webhookEnabled: false, nick: '' };
+  try { status = await api('GET', 'api/v1/discord-webhook/status'); } catch(_) {}
+
+  setBody(`
+    <div class="playback-panel">
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">🎮</div>
+          <div>
+            <div class="playback-section-title">${t('player.discordWebhook.title')}</div>
+            <div class="playback-section-desc">${t('player.discordWebhook.desc')}</div>
+          </div>
+        </div>
+
+        ${!status.serverEnabled ? `<div class="playback-row"><div class="playback-row-label"><div class="playback-row-name" style="color:var(--text-muted)">${t('player.discordWebhook.notEnabled')}</div></div></div>` : `
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">${t('player.discordWebhook.labelEnable')}</div>
+            <div class="playback-row-hint">${t('player.discordWebhook.enableHint')}</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="dw-enabled" ${status.webhookEnabled ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="playback-row">
+          <label class="playback-row-label" for="dw-nick">
+            <div class="playback-row-name">${t('player.discordWebhook.labelNick')}</div>
+            <div class="playback-row-hint">${t('player.discordWebhook.nickHint')}</div>
+          </label>
+          <input type="text" id="dw-nick" class="settings-input" style="max-width:220px" placeholder="${esc(t('player.discordWebhook.nickPlaceholder'))}" maxlength="64" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore value="${esc(status.nick || '')}">
+        </div>
+        <div class="playback-row" style="justify-content:flex-end">
+          <button class="btn-primary" id="dw-save-btn">${t('player.discordWebhook.btnSave')}</button>
+        </div>`}
+      </div>
+    </div>`);
+
+  if (!status.serverEnabled) return;
+
+  document.getElementById('dw-save-btn')?.addEventListener('click', async () => {
+    const btn     = document.getElementById('dw-save-btn');
+    const enabled = document.getElementById('dw-enabled')?.checked ?? false;
+    const nick    = (document.getElementById('dw-nick')?.value || '').trim().slice(0, 64);
+    btn.disabled = true;
+    try {
+      await api('POST', 'api/v1/discord-webhook/save', { enabled, nick });
+      S.discordWebhookEnabled = status.serverEnabled && enabled;
+      toast(t('player.toast.discordWebhookSaved'));
+    } catch(e) {
+      toast(t('player.toast.errorMsg', { error: e.message }));
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+// ── WEBHOOKS ──────────────────────────────────────────────────
+async function viewWebhooks() {
+  setTitle(t('player.title.webhooks')); setBack(null); setNavActive('webhooks'); S.view = 'webhooks';
+  S.curSongs = [];
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+
+  // Fetch Discord + custom webhook status in parallel
+  const [dwStatus, cwStatus] = await Promise.all([
+    api('GET', 'api/v1/discord-webhook/status').catch(() => null),
+    api('GET', 'api/v1/custom-webhooks/status').catch(() => null),
+  ]);
+
+  // Build a unified list of all server-enabled webhook items
+  const items = [];
+  if (dwStatus?.serverEnabled) {
+    items.push({ type: 'discord', name: 'Discord', userEnabled: dwStatus.webhookEnabled === true, nick: dwStatus.nick || '' });
+  }
+  const cwSlots = cwStatus?.webhooks || [];
+  cwSlots.forEach((s, i) => {
+    if (s.serverEnabled) {
+      items.push({ type: 'custom', slot: i, name: s.name || t('player.webhooks.slotLabel', { n: i + 1 }), userEnabled: s.userEnabled === true, nick: s.nick || '' });
+    }
+  });
+
+  setBody(`
+    <div class="playback-panel">
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">🔗</div>
+          <div>
+            <div class="playback-section-title">${t('player.webhooks.title')}</div>
+            <div class="playback-section-desc">${t('player.webhooks.desc')}</div>
+          </div>
+        </div>
+
+        ${items.length === 0
+          ? `<div class="playback-row"><div class="playback-row-label"><div class="playback-row-name" style="color:var(--text-muted)">${t('player.webhooks.notEnabled')}</div></div></div>`
+          : items.map((item, idx) => `
+            <div style="border-top:1px solid var(--border);padding-top:1rem;margin-top:1rem;">
+              <div class="playback-row">
+                <div class="playback-row-label">
+                  <div class="playback-row-name">${esc(item.name)}</div>
+                  <div class="playback-row-hint">${t('player.webhooks.enableHint')}</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="wh-enabled-${idx}" ${item.userEnabled ? 'checked' : ''}>
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="playback-row">
+                <label class="playback-row-label" for="wh-nick-${idx}">
+                  <div class="playback-row-name">${t('player.webhooks.labelNick')}</div>
+                  <div class="playback-row-hint">${t('player.webhooks.nickHint')}</div>
+                </label>
+                <input type="text" id="wh-nick-${idx}" class="settings-input" style="max-width:220px" placeholder="${esc(t('player.webhooks.nickPlaceholder'))}" maxlength="64" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore value="${esc(item.nick)}">
+              </div>
+              <div class="playback-row" style="justify-content:flex-end">
+                <button class="btn-primary" id="wh-save-${idx}">${t('player.webhooks.btnSave')}</button>
+              </div>
+            </div>`
+          ).join('')
+        }
+      </div>
+    </div>`);
+
+  if (items.length === 0) return;
+
+  items.forEach((item, idx) => {
+    document.getElementById(`wh-save-${idx}`)?.addEventListener('click', async () => {
+      const btn     = document.getElementById(`wh-save-${idx}`);
+      const enabled = document.getElementById(`wh-enabled-${idx}`)?.checked ?? false;
+      const nick    = (document.getElementById(`wh-nick-${idx}`)?.value || '').trim().slice(0, 64);
+      btn.disabled = true;
+      try {
+        if (item.type === 'discord') {
+          await api('POST', 'api/v1/discord-webhook/save', { enabled, nick });
+          S.discordWebhookEnabled = S.discordWebhookServerEnabled && enabled;
+        } else {
+          await api('POST', 'api/v1/custom-webhooks/save', { slot: item.slot, enabled, nick });
+          S.customWebhooksEnabled[item.slot] = enabled;
+        }
+        toast(t('player.toast.webhooksSaved'));
+      } catch(e) {
+        toast(t('player.toast.errorMsg', { error: e.message }));
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
 // ── SUBSONIC SETTINGS ─────────────────────────────────────────
 async function viewSubsonic() {
   setTitle(t('player.title.subsonicApi')); setBack(null); setNavActive('subsonic'); S.view = 'subsonic';
@@ -11834,16 +12034,15 @@ async function _refreshServerAudioState() {
       if (st && st.running && st.playing) {
         // MPV is still playing (simple browser refresh) — just re-mute the browser
         S.castingToMpv = true;
-        audioEl.muted = true;
-        if (_xfadeEl) _xfadeEl.muted = true;
+        VIZ.setCastMute(true);
+        _startMpvHeartbeat();
       } else if (st && st.running) {
         // MPV is up but queue is empty (server restart) — reload current song
         const s = S.queue && S.idx >= 0 ? S.queue[S.idx] : null;
         if (s && s.filepath && !s.isRadio) {
           S.castingToMpv = true;
           localStorage.setItem(_uKey('casting_mpv'), '1');
-          audioEl.muted = true;
-          if (_xfadeEl) _xfadeEl.muted = true;
+          VIZ.setCastMute(true);
           // Disable crossfade while casting
           if (S.crossfade !== 0) {
             _setCrossfadeRestore(S.crossfade);
@@ -11858,6 +12057,7 @@ async function _refreshServerAudioState() {
             if (qRaw) { const qd = JSON.parse(qRaw); pos = qd.time > 1 ? qd.time : 0; }
           } catch(_) {}
           await _mpvLoadSong(s.filepath, pos);
+          _startMpvHeartbeat();
         } else {
           localStorage.removeItem(_uKey('casting_mpv'));
         }
@@ -11874,25 +12074,84 @@ async function _refreshServerAudioState() {
 
 // Immediately mute/load one song into MPV and (optionally) seek
 let _mpvLoadingSong = false;
+let _mpvHeartbeatTimer = null;
+let _mpvHeartbeatWorker = null;
+
+// Web Worker source for the MPV heartbeat.
+// Workers run in a separate thread and are not subject to the aggressive
+// main-thread timer throttling browsers apply to backgrounded tabs.
+// navigator.locks (if available) prevents Chrome from suspending the worker
+// entirely under energy-saver / background battery policies.
+const _MPV_HEARTBEAT_WORKER_SRC = `
+let _t = null;
+async function _run() {
+  function _startTick() {
+    _t = setInterval(() => self.postMessage('tick'), 8000);
+    self.onmessage = e => { if (e.data === 'stop') { clearInterval(_t); _t = null; } };
+  }
+  if (typeof navigator !== 'undefined' && navigator.locks) {
+    // Holding a shared Web Lock prevents Chrome from throttling this worker
+    // when the page is hidden (energy-saver / tab-discard policies).
+    navigator.locks.request('mstream-mpv-hb', { mode: 'shared' }, () =>
+      new Promise(resolve => {
+        _t = setInterval(() => self.postMessage('tick'), 8000);
+        self.onmessage = e => {
+          if (e.data === 'stop') { clearInterval(_t); _t = null; resolve(); }
+        };
+      })
+    ).catch(() => _startTick()); // fallback if locks unavailable
+  } else {
+    _startTick();
+  }
+}
+self.onmessage = e => { if (e.data === 'start') _run(); };
+`;
+
+function _startMpvHeartbeat() {
+  _stopMpvHeartbeat();
+  if (typeof Worker !== 'undefined') {
+    try {
+      const blob = new Blob([_MPV_HEARTBEAT_WORKER_SRC], { type: 'application/javascript' });
+      _mpvHeartbeatWorker = new Worker(URL.createObjectURL(blob));
+      _mpvHeartbeatWorker.onmessage = () => {
+        api('POST', 'api/v1/server-playback/heartbeat').catch(() => {});
+      };
+      _mpvHeartbeatWorker.postMessage('start');
+      return;
+    } catch (_) { /* fall through to setInterval fallback */ }
+  }
+  // Fallback: plain setInterval (may be throttled in background tabs)
+  _mpvHeartbeatTimer = setInterval(() => {
+    api('POST', 'api/v1/server-playback/heartbeat').catch(() => {});
+  }, 8000);
+}
+
+function _stopMpvHeartbeat() {
+  if (_mpvHeartbeatWorker) {
+    _mpvHeartbeatWorker.postMessage('stop');
+    _mpvHeartbeatWorker.terminate();
+    _mpvHeartbeatWorker = null;
+  }
+  clearInterval(_mpvHeartbeatTimer);
+  _mpvHeartbeatTimer = null;
+}
+
 async function _mpvLoadSong(filepath, seekTo = 0) {
   _mpvLoadingSong = true;
   await api('POST', 'api/v1/server-playback/queue/clear');
-  await api('POST', 'api/v1/server-playback/queue/add', { filepath });
-  if (seekTo > 1) {
-    setTimeout(() => {
-      _mpvLoadingSong = false;
-      api('POST', 'api/v1/server-playback/seek', { position: Math.floor(seekTo) }).catch(() => {});
-    }, 2500);
-  } else {
-    setTimeout(() => { _mpvLoadingSong = false; }, 2500);
-  }
+  // Pass seekTo to the server so it can seek the moment mpv fires file-loaded,
+  // rather than using a hardcoded client-side delay (which was unreliable).
+  await api('POST', 'api/v1/server-playback/queue/add', { filepath, seekTo });
+  // Guard long enough for the browser element's own seeked events from the
+  // initial file load to settle before we start mirroring user seeks to MPV.
+  setTimeout(() => { _mpvLoadingSong = false; }, 800);
 }
 
 function _deactivateCast(clearMpv = true) {
   S.castingToMpv = false;
+  _stopMpvHeartbeat();
   localStorage.removeItem(_uKey('casting_mpv'));
-  audioEl.muted = false;
-  if (_xfadeEl) _xfadeEl.muted = false;
+  VIZ.setCastMute(false);
   if (clearMpv) api('POST', 'api/v1/server-playback/queue/clear').catch(() => {});
   // Restore crossfade if it was disabled when cast was activated
   if (S.crossfadeRestore != null) {
@@ -11917,8 +12176,7 @@ async function toggleMpvCast() {
   }
   try {
     // Mute browser immediately so there's no audio overlap
-    audioEl.muted = true;
-    if (_xfadeEl) _xfadeEl.muted = true;
+    VIZ.setCastMute(true);
     // Disable browser crossfade while casting (MPV handles its own gapless playback)
     if (S.crossfade !== 0) {
       _setCrossfadeRestore(S.crossfade);
@@ -11931,6 +12189,7 @@ async function toggleMpvCast() {
     _updateCastBtn();
     // Load current song into MPV, seek to current position
     await _mpvLoadSong(s.filepath, audioEl.currentTime);
+    _startMpvHeartbeat(); // keep server watchdog alive
     // If browser is currently paused, pause MPV too
     if (audioEl.paused) {
       setTimeout(() => {
@@ -11940,8 +12199,7 @@ async function toggleMpvCast() {
     toast(t('player.toast.castingToMpv'));
   } catch (err) {
     // Revert
-    audioEl.muted = false;
-    if (_xfadeEl) _xfadeEl.muted = false;
+    VIZ.setCastMute(false);
     S.castingToMpv = false;
     _updateCastBtn();
     toast(t('player.toast.castFailed'));
@@ -12652,7 +12910,7 @@ function _getOrCreateXfadeEl() {
   if (_xfadeEl) return _xfadeEl;
   _xfadeEl = document.createElement('audio');
   _xfadeEl.volume = 0;
-  _xfadeEl.muted  = S.castingToMpv; // stay silent in browser when casting
+  // cast-mute is handled by _castMuteGain (GainNode) — no need to mute the element
   _xfadeEl.style.display = 'none';
   document.body.appendChild(_xfadeEl);
   _xfadeWired = false;
@@ -13145,7 +13403,8 @@ function _doXfadeHandoff(nextIdx) {
   // Promote the new element
   audioEl = newEl;
   audioEl.volume = vol;
-  audioEl.muted  = S.castingToMpv; // keep castmute state consistent after element swap
+  audioEl.muted  = false; // never mute the element — cast silence is via _castMuteGain
+  VIZ.setCastMute(S.castingToMpv); // re-apply cast mute via gain node (keeps VU fed)
 
   // Re-attach all permanent listeners to the new element
   _attachAudioListeners(audioEl);
@@ -13198,7 +13457,7 @@ function _doXfadeHandoff(nextIdx) {
       source:    _wrappedSource(),
     }).then(r => { _wrappedEventId = r?.eventId ?? null; }).catch(() => {});
   }
-  if ((S.lastfmEnabled || (S.listenbrainzEnabled && S.listenbrainzLinked)) && !s.isRadio && !s.isPodcast) {
+  if ((S.lastfmEnabled || (S.listenbrainzEnabled && S.listenbrainzLinked) || S.discordWebhookEnabled || S.customWebhooksEnabled.some(Boolean)) && !s.isRadio && !s.isPodcast) {
     if (S.listenbrainzEnabled && S.listenbrainzLinked) {
       api('POST', 'api/v1/listenbrainz/playing-now', { filePath: s.filepath }).catch(() => {});
     }
@@ -13217,6 +13476,12 @@ function _doXfadeHandoff(nextIdx) {
           msgs.push('ListenBrainz ✓');
         } catch (e) { msgs.push('ListenBrainz: ' + (e?.message || 'failed')); }
       }
+      if (S.discordWebhookEnabled) {
+        api('POST', 'api/v1/discord-webhook/scrobble-by-filepath', { filePath: s.filepath }).catch(() => {});
+      }
+      S.customWebhooksEnabled.forEach((on, i) => {
+        if (on) api('POST', 'api/v1/custom-webhooks/scrobble-by-filepath', { filePath: s.filepath, slot: i }).catch(() => {});
+      });
       if (scrobbleEl && msgs.length) {
         const ok = msgs.every(m => m.endsWith('✓'));
         scrobbleEl.textContent = msgs.join(' · ');
@@ -13554,6 +13819,8 @@ async function tryLogin(username, password) {
   // If similar-artists was saved on but there's no API key, clear it so AutoDJ doesn't try to use it
   if (!S.lastfmHasApiKey && S.djSimilar) { S.djSimilar = false; localStorage.removeItem(_uKey('dj_similar')); }
   try { const lb = await api('GET', 'api/v1/listenbrainz/status'); S.listenbrainzEnabled = lb?.serverEnabled === true; S.listenbrainzLinked = lb?.linked === true; } catch(_) { S.listenbrainzEnabled = false; S.listenbrainzLinked = false; }
+  try { const dw = await api('GET', 'api/v1/discord-webhook/status'); S.discordWebhookServerEnabled = dw?.serverEnabled === true; S.discordWebhookEnabled = dw?.serverEnabled === true && dw?.webhookEnabled === true; } catch(_) { S.discordWebhookServerEnabled = false; S.discordWebhookEnabled = false; }
+  try { const cw = await api('GET', 'api/v1/custom-webhooks/status'); const cws = cw?.webhooks || []; S.customWebhooksServerEnabled = cws.some(s => s.serverEnabled); S.customWebhooksEnabled = [0,1].map(i => cws[i]?.serverEnabled === true && cws[i]?.userEnabled === true); } catch(_) { S.customWebhooksServerEnabled = false; S.customWebhooksEnabled = [false, false]; }
   try { const rd = await api('GET', 'api/v1/radio/enabled'); S.radioEnabled = rd?.enabled === true; } catch(_) { S.radioEnabled = false; }
   S.feedsEnabled = true; // Podcasts always available — user needs the section to add their first feed
   await _loadServerSettings();
@@ -13582,16 +13849,21 @@ async function checkSession() {
         S.isAdmin = true;
         try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; S.itunesEnabled = dc?.itunesEnabled !== false; S.deezerEnabled = dc?.deezerEnabled !== false; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; S.itunesEnabled = false; S.deezerEnabled = false; }
       } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; S.itunesEnabled = false; S.deezerEnabled = false; }
-      const [ls, lb, rd] = await Promise.all([
+      const [ls, lb, dw, rd, cw] = await Promise.all([
         api('GET', 'api/v1/lastfm/status').catch(() => null),
         api('GET', 'api/v1/listenbrainz/status').catch(() => null),
+        api('GET', 'api/v1/discord-webhook/status').catch(() => null),
         api('GET', 'api/v1/radio/enabled').catch(() => null),
+        api('GET', 'api/v1/custom-webhooks/status').catch(() => null),
       ]);
-      S.lastfmEnabled       = ls?.serverEnabled !== false;
-      S.lastfmHasApiKey     = ls?.hasApiKey === true;
-      S.listenbrainzEnabled = lb?.serverEnabled === true;
-      S.listenbrainzLinked  = lb?.linked === true;
-      S.radioEnabled        = rd?.enabled === true;
+      S.lastfmEnabled        = ls?.serverEnabled !== false;
+      S.lastfmHasApiKey      = ls?.hasApiKey === true;
+      S.listenbrainzEnabled  = lb?.serverEnabled === true;
+      S.listenbrainzLinked   = lb?.linked === true;
+      S.discordWebhookServerEnabled = dw?.serverEnabled === true;
+      S.discordWebhookEnabled = dw?.serverEnabled === true && dw?.webhookEnabled === true;
+      S.radioEnabled         = rd?.enabled === true;
+      { const cws = cw?.webhooks || []; S.customWebhooksServerEnabled = cws.some(s => s.serverEnabled); S.customWebhooksEnabled = [0,1].map(i => cws[i]?.serverEnabled === true && cws[i]?.userEnabled === true); }
       S.feedsEnabled = true; // Podcasts always available — user needs the section to add their first feed
       await _loadServerSettings();
       return true;
@@ -13640,16 +13912,21 @@ async function checkSession() {
         S.isAdmin = true;
         try { const dc = await api('GET', 'api/v1/admin/discogs/config'); S.discogsEnabled = dc?.enabled === true; S.discogsAllowUpdate = dc?.allowArtUpdate === true; S.allowId3Edit = dc?.allowId3Edit === true; S.itunesEnabled = dc?.itunesEnabled !== false; S.deezerEnabled = dc?.deezerEnabled !== false; } catch(_) { S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; S.itunesEnabled = false; S.deezerEnabled = false; }
       } catch(_) { S.isAdmin = false; S.discogsEnabled = false; S.discogsAllowUpdate = false; S.allowId3Edit = false; S.itunesEnabled = false; S.deezerEnabled = false; }
-      const [ls2, lb2, rd2] = await Promise.all([
+      const [ls2, lb2, dw2, rd2, cw2] = await Promise.all([
         api('GET', 'api/v1/lastfm/status').catch(() => null),
         api('GET', 'api/v1/listenbrainz/status').catch(() => null),
+        api('GET', 'api/v1/discord-webhook/status').catch(() => null),
         api('GET', 'api/v1/radio/enabled').catch(() => null),
+        api('GET', 'api/v1/custom-webhooks/status').catch(() => null),
       ]);
-      S.lastfmEnabled       = ls2?.serverEnabled !== false;
-      S.lastfmHasApiKey     = ls2?.hasApiKey === true;
-      S.listenbrainzEnabled = lb2?.serverEnabled === true;
-      S.listenbrainzLinked  = lb2?.linked === true;
-      S.radioEnabled        = rd2?.enabled === true;
+      S.lastfmEnabled        = ls2?.serverEnabled !== false;
+      S.lastfmHasApiKey      = ls2?.hasApiKey === true;
+      S.listenbrainzEnabled  = lb2?.serverEnabled === true;
+      S.listenbrainzLinked   = lb2?.linked === true;
+      S.discordWebhookServerEnabled = dw2?.serverEnabled === true;
+      S.discordWebhookEnabled = dw2?.serverEnabled === true && dw2?.webhookEnabled === true;
+      S.radioEnabled         = rd2?.enabled === true;
+      { const cws = cw2?.webhooks || []; S.customWebhooksServerEnabled = cws.some(s => s.serverEnabled); S.customWebhooksEnabled = [0,1].map(i => cws[i]?.serverEnabled === true && cws[i]?.userEnabled === true); }
       S.feedsEnabled = true; // Podcasts are always available — user needs section to add first feed
       return true;
     }
@@ -13699,6 +13976,8 @@ function showApp() {
   }
   if (S.lastfmEnabled) document.getElementById('lastfm-nav-btn').classList.remove('hidden');
   if (S.listenbrainzEnabled) document.getElementById('listenbrainz-nav-btn')?.classList.remove('hidden');
+  // Discord and custom webhooks both surface under the unified 'Webhooks' nav button
+  if (S.discordWebhookServerEnabled || S.customWebhooksServerEnabled) document.getElementById('webhooks-nav-btn')?.classList.remove('hidden');
   if (S.radioEnabled) {
     document.getElementById('radio-nav-btn').classList.remove('hidden');
   }
@@ -13739,7 +14018,20 @@ function showApp() {
   if (localStorage.getItem(_uKey('autodj'))) { setAutoDJ(true, /*skipAutoStart=*/true); }
   // Guarantee a save on F5 / tab close
   window.addEventListener('beforeunload', () => {
-    persistQueue(); // always update localStorage
+    // Always save playing:false on unload — a refresh or tab close is always a pause.
+    // This prevents the DB and localStorage from ever recording playing:true across
+    // a page reload, which was the root cause of autoplay-on-refresh.
+    if (S.username) localStorage.setItem(_playingKey(), '0');
+    persistQueue(); // always update localStorage (reads audioEl.paused, now forced paused via key)
+    // Stop MPV when the browser closes — without this MPV keeps playing indefinitely
+    // because there is no heartbeat or session concept to detect tab closure.
+    if (S.castingToMpv && S.token) {
+      localStorage.removeItem(_uKey('casting_mpv'));
+      navigator.sendBeacon(
+        '/api/v1/server-playback/queue/clear?token=' + encodeURIComponent(S.token),
+        new Blob(['{}'], { type: 'application/json' })
+      );
+    }
     // Flush exact current position to DB synchronously via sendBeacon so an
     // immediate F5 restores to the right spot (not up to 15 s behind).
     if (S.token && S.username) {
@@ -13747,7 +14039,7 @@ function showApp() {
         queue:     S.queue,
         idx:       S.idx,
         time:      audioEl.currentTime || 0,
-        playing:   !audioEl.paused,
+        playing:   false,  // always save paused — refresh is never a resume trigger
         savedAt:   Date.now(),
         browserId: _browserId,
       }});
@@ -13886,6 +14178,15 @@ function showApp() {
       if (pd.allowMpvCast        != null) { S.allowMpvCast         = pd.allowMpvCast         === true; _updateCastBtn(); }
       if (pd.allowServerRemote   != null)   S.allowServerRemote   = pd.allowServerRemote   !== false;
     } catch (_) {}
+
+    // ── MPV heartbeat rescue ──────────────────────────────────────────────────
+    // Browser timer throttling can stretch the 8 s setInterval to 30 s+ when
+    // the tab is backgrounded, causing the server watchdog to kill MPV.
+    // Send an immediate heartbeat the moment the tab becomes visible again so
+    // the 45 s watchdog window is reset before it fires.
+    if (S.castingToMpv) {
+      api('POST', 'api/v1/server-playback/heartbeat').catch(() => {});
+    }
   });
   // Fetch ping to get transcode server info + vpath metadata
   api('GET', 'api/v1/ping').then(d => {
@@ -14145,6 +14446,8 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     else if (v === 'play-history') viewPlayHistory();
     else if (v === 'lastfm')       viewLastFM();
     else if (v === 'listenbrainz') viewListenBrainz();
+    else if (v === 'discord-webhook') viewDiscordWebhook();
+    else if (v === 'webhooks')        viewWebhooks();
     else if (v === 'discogs')      viewDiscogs();
     else if (v === 'subsonic')     viewSubsonic();
     else if (v === 'radio')        viewRadio();
@@ -14924,11 +15227,10 @@ const _TabFav = (() => {
 
 // ── AUDIO EVENT HANDLERS (named so they can be moved to a swapped element) ──
 function _onAudioPlay()  {
-  // Boot-phase guard: if restoreQueue is still active and the dedicated playing
-  // key says '0' (user had paused before the refresh), cancel this play() call
-  // immediately. This catches any code path — known or unknown — that might
-  // call audioEl.play() during restore when the user had explicitly paused.
-  if (_bootRestoring && S.username && localStorage.getItem(_playingKey()) === '0') {
+  // Boot guard: block ALL play() calls until the boot overlay has dismissed.
+  // This covers every code path — restoreQueue, media session, network recovery,
+  // or anything else — so a page refresh NEVER starts playing automatically.
+  if (!_bootComplete) {
     audioEl.pause();
     return;
   }
@@ -15458,7 +15760,12 @@ function _reloadFromPosition(attempt) {
     const onMeta = () => {
       if (resumeAt > 1) audioEl.currentTime = resumeAt;
       VIZ.initAudio();
-      audioEl.play().catch(() => _reloadFromPosition(attempt + 1));
+      // Only resume if the user was actually playing before the stall.
+      // If they had paused (playingKey='0'), do NOT auto-resume — this was
+      // the exact cause of autoplay-on-refresh: stall fires during src load
+      // in restoreQueue, then recovery plays unconditionally after boot completes.
+      const _wasPlaying = S.username ? localStorage.getItem(_playingKey()) === '1' : !audioEl.paused;
+      if (_wasPlaying) audioEl.play().catch(() => _reloadFromPosition(attempt + 1));
     };
     audioEl.addEventListener('loadedmetadata', onMeta, { once: true });
     // If loadedmetadata never fires (proxy keeps resetting), retry

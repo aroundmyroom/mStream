@@ -17,6 +17,7 @@ import * as config from '../state/config.js';
 import * as db from '../db/manager.js';
 import * as admin from '../util/admin.js';
 import { fpcalcBin, ensureFpcalc } from '../util/fpcalc-bootstrap.js';
+import { isScanning } from '../db/task-queue.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const _workerPath = path.join(__dirname, '../util/acoustid-worker.mjs');
@@ -152,9 +153,10 @@ export function setup(mstream) {
       enabled,
       hasKey,
       fpcalcAvailable: _fpcalcReady !== false, // true until proven otherwise
-      running:   _running,
-      stopping:  _stopping,
-      startedAt: _startedAt,
+      running:    _running,
+      stopping:   _stopping,
+      startedAt:  _startedAt,
+      scanActive: isScanning(),
       stats: {
         total:     stats.total     || 0,
         found:     stats.found     || 0,

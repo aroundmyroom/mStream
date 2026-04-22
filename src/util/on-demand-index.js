@@ -76,7 +76,7 @@ export async function indexFileOnDemand(pathInfo) {
       format:   meta.format.container || null,
       genre:    t.genre && t.genre[0] ? t.genre[0] : null,
       modified: stat.mtime.getTime(),
-      ts:       Date.now(),
+      ts:       stat.mtime.getTime(), // use file mtime so on-demand files don't flood "Recently Added"
     };
     return db.insertFile(fileData);
   } catch (_e) {

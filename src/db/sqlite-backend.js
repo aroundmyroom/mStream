@@ -462,7 +462,7 @@ export function init(dbDirectory) {
     liveArt:        db.prepare('SELECT DISTINCT aaFile FROM files WHERE aaFile IS NOT NULL'),
     liveHashes:     db.prepare('SELECT DISTINCT hash FROM files WHERE hash IS NOT NULL'),
     staleHashes:    db.prepare('SELECT hash FROM files WHERE vpath = ? AND sID != ? AND hash IS NOT NULL'),
-    removeStale:    db.prepare('DELETE FROM files WHERE vpath = ? AND sID != ?'),
+    removeStale:    db.prepare('DELETE FROM files WHERE vpath = ? AND (sID IS NULL OR sID != ?)'),
     removeByPath:   db.prepare('DELETE FROM files WHERE filepath = ? AND vpath = ?'),
     insertScanRun:  db.prepare('INSERT INTO scan_runs (scan_id, vpath, started_at, finished_at) VALUES (?, ?, ?, ?)'),
     getLastScanRun: db.prepare('SELECT MAX(finished_at) AS ts FROM scan_runs'),
@@ -1804,8 +1804,8 @@ export function getAllFilesWithMetadata(vpaths, username, opts) {
   // Exclude recently-heard artists (DJ cooldown window)
   if (opts.ignoreArtists && Array.isArray(opts.ignoreArtists) && opts.ignoreArtists.length > 0) {
     const placeholders = opts.ignoreArtists.map(() => '?').join(',');
-    sql += ` AND (f.artist IS NULL OR f.artist NOT IN (${placeholders}))`;
-    params.push(...opts.ignoreArtists);
+    sql += ` AND (f.artist IS NULL OR LOWER(f.artist) NOT IN (${placeholders}))`;
+    params.push(...opts.ignoreArtists.map(a => String(a).toLowerCase()));
   }
 
   const rows = db.prepare(sql).all(...params);
@@ -1837,8 +1837,8 @@ function _buildRandomWhere(opts, filtered) {
   }
   if (opts.ignoreArtists && Array.isArray(opts.ignoreArtists) && opts.ignoreArtists.length > 0) {
     const placeholders = opts.ignoreArtists.map(() => '?').join(',');
-    sql += ` AND (f.artist IS NULL OR f.artist NOT IN (${placeholders}))`;
-    params.push(...opts.ignoreArtists);
+    sql += ` AND (f.artist IS NULL OR LOWER(f.artist) NOT IN (${placeholders}))`;
+    params.push(...opts.ignoreArtists.map(a => String(a).toLowerCase()));
   }
   return { sql, params };
 }

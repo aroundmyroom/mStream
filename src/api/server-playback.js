@@ -39,7 +39,34 @@ const SERVER_AUDIO_CTRL_CANDIDATES = ['Master', 'Speaker', 'PCM', 'Headphone'];
 // Each entry: { relPath, title, artist, album, albumArt }
 let serverQueue  = [];
 let currentIndex = -1;
+let _pendingSeek = null; // seconds to seek to once the next file-loaded event fires
 
+// ── Cast heartbeat watchdog ───────────────────────────────────────────────
+// While a client is casting, it sends POST /api/v1/server-playback/heartbeat
+// every HEARTBEAT_INTERVAL_MS.  If HEARTBEAT_TIMEOUT_MS elapses without a
+// ping, MPV is stopped — covering crashes, network drops and force-kills.
+const HEARTBEAT_INTERVAL_MS = 8000;   // client sends every 8 s
+// 5 minutes — generous safety net. The Web Worker heartbeat fires reliably
+// even in backgrounded tabs (navigator.locks keeps it alive). This long
+// timeout only fires if the browser process is killed or network drops for
+// an extended period; it should never trigger during normal background use.
+const HEARTBEAT_TIMEOUT_MS  = 300000; // stop mpv after 5 min of silence
+let _heartbeatTimer = null;
+
+function _resetHeartbeat() {
+  clearTimeout(_heartbeatTimer);
+  _heartbeatTimer = setTimeout(() => {
+    if (isRunning()) {
+      winston.info('[server-audio] Cast heartbeat timed out — stopping mpv');
+      clearQueue().catch(() => {});
+    }
+  }, HEARTBEAT_TIMEOUT_MS);
+}
+
+function _clearHeartbeat() {
+  clearTimeout(_heartbeatTimer);
+  _heartbeatTimer = null;
+}
 
 
 function runCmd(bin, args, timeout = 5000) {
@@ -322,6 +349,17 @@ function handleIpcMessage(msg) {
       currentIndex = msg.data;
     }
   }
+
+  // File has loaded and playback started — apply any pending seek position.
+  // This replaces the old client-side hardcoded 2500 ms delay and fires at
+  // exactly the right moment regardless of file size or network latency.
+  if (msg.event === 'file-loaded') {
+    const pos = _pendingSeek;
+    _pendingSeek = null;
+    if (pos !== null && pos > 1) {
+      ipcCommand(['seek', pos, 'absolute']).catch(() => {});
+    }
+  }
 }
 
 // ── Status ─────────────────────────────────────────────────────────────────
@@ -426,6 +464,10 @@ export async function addToQueue(relPath, meta = {}) {
   };
   serverQueue.push(entry);
 
+  // Store seek position so handleIpcMessage can apply it on file-loaded.
+  const seekTo = Number(meta.seekTo) || 0;
+  if (seekTo > 1) _pendingSeek = Math.floor(seekTo);
+
   if (isRunning() && ipcSock && !ipcSock.destroyed) {
     await ipcCommand(['loadfile', abs, 'append-play']);
   }
@@ -434,6 +476,8 @@ export async function addToQueue(relPath, meta = {}) {
 }
 
 export async function clearQueue() {
+  _pendingSeek = null; // cancel any pending seek from a previous load
+  _clearHeartbeat();   // no client casting anymore
   serverQueue  = [];
   currentIndex = -1;
   if (isRunning() && ipcSock && !ipcSock.destroyed) {
@@ -483,14 +527,22 @@ export function setup(mstream) {
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // POST /api/v1/server-playback/queue/add  { filepath, title, artist, album, albumArt }
+  // POST /api/v1/server-playback/queue/add  { filepath, title, artist, album, albumArt, seekTo }
   mstream.post('/api/v1/server-playback/queue/add', async (req, res) => {
-    const { filepath, title, artist, album, albumArt } = req.body;
+    const { filepath, title, artist, album, albumArt, seekTo } = req.body;
     if (!filepath) return res.status(400).json({ error: 'filepath required' });
     try {
-      const index = await addToQueue(filepath, { title, artist, album, albumArt });
+      const index = await addToQueue(filepath, { title, artist, album, albumArt, seekTo: seekTo || 0 });
+      _resetHeartbeat(); // a song was loaded — start the watchdog
       res.json({ index });
     } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
+  // POST /api/v1/server-playback/heartbeat — client pings this while casting
+  // (every ~8 s).  Absence of pings triggers the watchdog and stops mpv.
+  mstream.post('/api/v1/server-playback/heartbeat', (req, res) => {
+    if (serverQueue.length > 0) _resetHeartbeat();
+    res.json({});
   });
 
   // POST /api/v1/server-playback/queue/clear

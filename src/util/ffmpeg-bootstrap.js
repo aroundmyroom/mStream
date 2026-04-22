@@ -286,17 +286,21 @@ async function downloadAndInstall() {
       const archivePath = path.join(dir, info.asset);
       await downloadToFile(info.url, archivePath);
 
-      // Checksum verification
+      // Checksum verification — hard-fail if we can't obtain the expected hash, so a
+      // transient network blip or compromised CDN can't slip an unverified binary through.
       const expected = await fetchExpectedChecksum(info.asset);
-      if (expected) {
-        const actual = await computeFileChecksum(archivePath);
-        if (actual !== expected) {
-          await fsp.unlink(archivePath).catch(() => {});
-          winston.error(`[ffmpeg-bootstrap] Checksum mismatch! expected ${expected}, got ${actual}`);
-          return false;
-        }
-        winston.info('[ffmpeg-bootstrap] Checksum verified');
+      if (!expected) {
+        await fsp.unlink(archivePath).catch(() => {});
+        winston.error(`[ffmpeg-bootstrap] Could not fetch checksum for ${info.asset} — refusing to install unverified binary`);
+        return false;
       }
+      const actual = await computeFileChecksum(archivePath);
+      if (actual !== expected) {
+        await fsp.unlink(archivePath).catch(() => {});
+        winston.error(`[ffmpeg-bootstrap] Checksum mismatch! expected ${expected}, got ${actual}`);
+        return false;
+      }
+      winston.info('[ffmpeg-bootstrap] Checksum verified');
 
       // Extract
       if (info.asset.endsWith('.tar.xz')) {

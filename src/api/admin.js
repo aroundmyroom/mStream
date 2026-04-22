@@ -726,6 +726,76 @@ export function setup(mstream) {
     res.json({});
   });
 
+  // ── Discord webhook config (admin only) ─────────────────────────────────
+  mstream.get("/api/v1/admin/discord-webhook/config", (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    res.json({
+      enabled: config.program.discordWebhook?.enabled === true,
+      url:     config.program.discordWebhook?.url    || '',
+    });
+  });
+
+  mstream.post("/api/v1/admin/discord-webhook/config", async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const schema = Joi.object({
+      enabled: Joi.boolean().required(),
+      url:     Joi.string().uri().allow('').required(),
+    });
+    joiValidate(schema, req.body);
+
+    // Security: only allow discord.com webhook URLs
+    if (req.body.url) {
+      let parsed;
+      try { parsed = new URL(req.body.url); } catch (_) {
+        return res.status(400).json({ error: 'Invalid webhook URL' });
+      }
+      if (parsed.hostname !== 'discord.com' && parsed.hostname !== 'discordapp.com') {
+        return res.status(400).json({ error: 'Only discord.com webhook URLs are accepted' });
+      }
+    }
+
+    const loadConfig = await admin.loadFile(config.configFile);
+    if (!loadConfig.discordWebhook) loadConfig.discordWebhook = {};
+    loadConfig.discordWebhook.enabled = req.body.enabled;
+    loadConfig.discordWebhook.url     = req.body.url;
+    await admin.saveFile(loadConfig, config.configFile);
+
+    config.program.discordWebhook.enabled = req.body.enabled;
+    config.program.discordWebhook.url     = req.body.url;
+
+    res.json({});
+  });
+
+  // ── Custom webhooks config (admin only) ─────────────────────────────────
+  mstream.get("/api/v1/admin/custom-webhooks/config", (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const raw = Array.isArray(config.program.customWebhooks) ? config.program.customWebhooks : [];
+    const slots = Array.from({ length: 2 }, (_, i) => ({
+      name:    String(raw[i]?.name    || '').slice(0, 64),
+      url:     String(raw[i]?.url     || ''),
+      enabled: raw[i]?.enabled === true,
+    }));
+    res.json({ webhooks: slots });
+  });
+
+  mstream.post("/api/v1/admin/custom-webhooks/config", async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const slotSchema = Joi.object({
+      name:    Joi.string().allow('').max(64).required(),
+      url:     Joi.string().uri({ scheme: ['http', 'https'] }).allow('').required(),
+      enabled: Joi.boolean().required(),
+    });
+    const schema = Joi.object({ webhooks: Joi.array().items(slotSchema).max(2).required() });
+    joiValidate(schema, req.body);
+
+    const loadConfig = await admin.loadFile(config.configFile);
+    loadConfig.customWebhooks = req.body.webhooks;
+    await admin.saveFile(loadConfig, config.configFile);
+    config.program.customWebhooks = req.body.webhooks;
+
+    res.json({});
+  });
+
   mstream.post("/api/v1/admin/users/vpaths", async (req, res) => {
     const schema = Joi.object({
       username: Joi.string().required(),

@@ -1,5 +1,40 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.12.3-velvet — April 2026 — Webhooks & Reliability Fixes
+
+### feat: Custom webhooks
+- New admin page (Settings → Webhooks) consolidates Discord webhook + up to 2 generic named webhooks (any http/https URL) in one place.
+- Payload on scrobble: `{ event, artist, album, track, username, timestamp }`.
+- Per-user enable/disable and display name per slot saved in the DB.
+- Player "Webhooks" nav button shows all active slots (Discord first if server-enabled, then custom slots).
+
+### fix: MPV stops playing when browser tab goes to background
+- Chrome suspends setInterval in hidden tabs, killing the cast heartbeat. Fix: Web Worker thread sends pings every 8 s; `navigator.locks.request()` prevents Chrome from suspending it. Server timeout raised to 5 minutes.
+- Seek-on-restore now driven by MPV `file-loaded` IPC event instead of hardcoded 2.5 s client delay.
+
+### fix: VU meter drops to zero after cast-to-speaker + next song
+- `audioEl.muted=true` silenced the MediaElementSourceNode, cutting analyser signal. Fix: `_castMuteGain` GainNode placed after the analyser taps; `gain.value=0` mutes output without affecting VU/spectrum data.
+
+### fix: Auto-DJ artist exclusion was case-sensitive
+- SQLite `NOT IN` is case-sensitive; "Adeva" and "adeva" were treated as different artists. Fix: `LOWER(f.artist) NOT IN (…)` with lowercased params in both ignoreArtists clauses.
+
+### fix: Scanner removeStale skipped rows with NULL sID
+- `sID != ?` evaluates to NULL (not TRUE) for NULL rows. Expanded to `(sID IS NULL OR sID != ?)`.
+
+### fix: On-demand indexed files appeared at top of Recently Added
+- `ts` was `Date.now()`, pushing old files to top. Now uses file `mtime` to match full-scanner behaviour.
+
+### fix: ffmpeg bootstrap accepted binaries without checksum
+- A missing checksum from the manifest was silently ignored. Now a hard failure: download deleted, error logged.
+
+### fix: AcoustID status endpoint lacked live scan state
+- Response now includes `scanActive` from `isScanning()`.
+
+### fix: Discord webhook config not persisted via admin UI
+- Added `GET/POST /api/v1/admin/discord-webhook/config` to admin.js; POST validates discord.com URL and persists to config file. Schema added to central Joi config validator.
+
+---
+
 ## v6.12.2-velvet — April 21, 2026 — Server Speaker & Reliability Fixes
 
 ### fix: Cast-to-speaker button stays white after page refresh

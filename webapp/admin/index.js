@@ -4387,6 +4387,166 @@ const listenBrainzView = Vue.component('listenbrainz-view', {
   }
 });
 
+const discordWebhookView = Vue.component('discord-webhook-view', {
+  data() {
+    return { enabled: false, url: '', pending: false };
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">{{ t('admin.discordWebhook.title') }}</span>
+              <p style="margin-bottom:1rem;">{{ t('admin.discordWebhook.desc') }}</p>
+              <table><tbody>
+                <tr>
+                  <td style="width:140px"><b>{{ t('admin.discordWebhook.labelEnable') }}</b></td>
+                  <td><input type="checkbox" v-model="enabled" style="margin:0;width:auto;height:auto;" /> {{ t('admin.discordWebhook.checkboxEnable') }}</td>
+                </tr>
+                <tr>
+                  <td><b>{{ t('admin.discordWebhook.labelUrl') }}</b></td>
+                  <td><input v-model="url" type="text" :placeholder="t('admin.discordWebhook.urlPlaceholder')" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore data-bwignore spellcheck="false" style="margin:0;width:100%;max-width:520px" /></td>
+                </tr>
+                <tr>
+                  <td></td>
+                  <td style="font-size:0.82rem;color:#999;">{{ t('admin.discordWebhook.urlHint') }}</td>
+                </tr>
+              </tbody></table>
+            </div>
+            <div class="card-action">
+              <button class="btn" v-on:click="save()" :disabled="pending">
+                {{ pending ? t('admin.common.saving') : t('admin.common.save') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  async mounted() {
+    try {
+      const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/discord-webhook/config` });
+      this.enabled = res.data.enabled === true;
+      this.url     = res.data.url || '';
+    } catch(e) { /* ignore */ }
+  },
+  methods: {
+    save: async function() {
+      this.pending = true;
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/discord-webhook/config`, data: { enabled: this.enabled, url: this.url } });
+        iziToast.success({ title: this.t('admin.discordWebhook.toastSaved'), position: 'topCenter', timeout: 3000 });
+      } catch(err) {
+        const msg = err?.response?.data?.error || this.t('admin.discordWebhook.toastFailed');
+        iziToast.error({ title: msg, position: 'topCenter', timeout: 4000 });
+      } finally { this.pending = false; }
+    }
+  }
+});
+
+const customWebhooksView = Vue.component('custom-webhooks-view', {
+  data() {
+    return {
+      discord: { enabled: false, url: '' },
+      webhooks: [
+        { name: '', url: '', enabled: false },
+        { name: '', url: '', enabled: false },
+      ],
+      pending: false,
+    };
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">{{ t('admin.customWebhooks.title') }}</span>
+              <p style="margin-bottom:1.25rem;">{{ t('admin.customWebhooks.desc') }}</p>
+
+              <!-- Discord webhook slot -->
+              <div style="border:1px solid #ddd;border-radius:6px;padding:1rem;margin-bottom:1rem;">
+                <div style="font-weight:600;margin-bottom:.75rem;">Discord Webhook</div>
+                <table><tbody>
+                  <tr>
+                    <td style="width:140px"><b>{{ t('admin.customWebhooks.labelEnable') }}</b></td>
+                    <td><input type="checkbox" v-model="discord.enabled" style="margin:0;width:auto;height:auto;" /> {{ t('admin.customWebhooks.checkboxEnable') }}</td>
+                  </tr>
+                  <tr>
+                    <td><b>{{ t('admin.customWebhooks.labelUrl') }}</b></td>
+                    <td><input v-model="discord.url" type="text" placeholder="https://discord.com/api/webhooks/…" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore spellcheck="false" style="margin:0;width:100%;max-width:520px" /></td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td style="font-size:0.82rem;color:#999;">{{ t('admin.discordWebhook.urlHint') }}</td>
+                  </tr>
+                </tbody></table>
+              </div>
+
+              <!-- Custom webhook slots -->
+              <div v-for="(wh, i) in webhooks" :key="i" style="border:1px solid #ddd;border-radius:6px;padding:1rem;margin-bottom:1rem;">
+                <div style="font-weight:600;margin-bottom:.75rem;">{{ t('admin.customWebhooks.slotLabel', { n: i + 1 }) }}</div>
+                <table><tbody>
+                  <tr>
+                    <td style="width:140px"><b>{{ t('admin.customWebhooks.labelEnable') }}</b></td>
+                    <td><input type="checkbox" v-model="wh.enabled" style="margin:0;width:auto;height:auto;" /> {{ t('admin.customWebhooks.checkboxEnable') }}</td>
+                  </tr>
+                  <tr>
+                    <td><b>{{ t('admin.customWebhooks.labelName') }}</b></td>
+                    <td><input v-model="wh.name" type="text" :placeholder="t('admin.customWebhooks.namePlaceholder')" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore spellcheck="false" style="margin:0;width:100%;max-width:320px" /></td>
+                  </tr>
+                  <tr>
+                    <td><b>{{ t('admin.customWebhooks.labelUrl') }}</b></td>
+                    <td><input v-model="wh.url" type="text" :placeholder="t('admin.customWebhooks.urlPlaceholder')" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore spellcheck="false" style="margin:0;width:100%;max-width:520px" /></td>
+                  </tr>
+                  <tr>
+                    <td></td>
+                    <td style="font-size:0.82rem;color:#999;">{{ t('admin.customWebhooks.urlHint') }}</td>
+                  </tr>
+                </tbody></table>
+              </div>
+            </div>
+            <div class="card-action">
+              <button class="btn" v-on:click="save()" :disabled="pending">
+                {{ pending ? t('admin.common.saving') : t('admin.common.save') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`,
+  async mounted() {
+    try {
+      const [dw, cw] = await Promise.all([
+        API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/discord-webhook/config` }),
+        API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/custom-webhooks/config` }),
+      ]);
+      this.discord = { enabled: dw.data.enabled === true, url: dw.data.url || '' };
+      const slots = cw.data.webhooks || [];
+      this.webhooks = [0, 1].map(i => ({
+        name:    slots[i]?.name    || '',
+        url:     slots[i]?.url     || '',
+        enabled: slots[i]?.enabled === true,
+      }));
+    } catch(e) { /* ignore */ }
+  },
+  methods: {
+    save: async function() {
+      this.pending = true;
+      try {
+        await Promise.all([
+          API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/discord-webhook/config`, data: { enabled: this.discord.enabled, url: this.discord.url } }),
+          API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/custom-webhooks/config`, data: { webhooks: this.webhooks } }),
+        ]);
+        iziToast.success({ title: this.t('admin.customWebhooks.toastSaved'), position: 'topCenter', timeout: 3000 });
+      } catch(err) {
+        const msg = err?.response?.data?.error || this.t('admin.customWebhooks.toastFailed');
+        iziToast.error({ title: msg, position: 'topCenter', timeout: 4000 });
+      } finally { this.pending = false; }
+    }
+  }
+});
+
 const languagesView = Vue.component('languages-view', {
   data() {
     return {
@@ -4607,8 +4767,9 @@ const acoustidView = Vue.component('acoustid-view', {
       pending:  false,
       fpcalcAvailable: true,
       // worker status
-      running:  false,
-      stopping: false,
+      running:    false,
+      stopping:   false,
+      scanActive: false,
       stats: { total: 0, found: 0, not_found: 0, errors: 0, pending: 0, queued: 0 },
       startedAt: null,
       rateWindow: [], // [{processed, at}] rolling 10-min window for rate calc
@@ -4662,8 +4823,9 @@ const acoustidView = Vue.component('acoustid-view', {
       return (sec / 86400).toFixed(1) + 'd';
     },
     statusLabel() {
-      if (this.stopping) return this.t('admin.acoustid.statusStopping');
-      if (this.running)  return this.t('admin.acoustid.statusRunning');
+      if (this.stopping)                   return this.t('admin.acoustid.statusStopping');
+      if (this.running && this.scanActive) return this.t('admin.acoustid.statusWaitingScan');
+      if (this.running)                   return this.t('admin.acoustid.statusRunning');
       return this.t('admin.acoustid.statusIdle');
     },
     statusColor() {
@@ -4804,6 +4966,7 @@ const acoustidView = Vue.component('acoustid-view', {
         const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/acoustid/status` });
         this.running         = !!res.data.running;
         this.stopping        = !!res.data.stopping;
+        this.scanActive      = !!res.data.scanActive;
         this.startedAt       = res.data.startedAt || null;
         this.fpcalcAvailable = res.data.fpcalcAvailable !== false;
         if (res.data.stats) this.stats = res.data.stats;
@@ -6232,6 +6395,8 @@ const vm = new Vue({
     'wrapped-admin-view': wrappedAdminView,
     'lastfm-view': lastFMView,
     'listenbrainz-view': listenBrainzView,
+    'discord-webhook-view': discordWebhookView,
+    'custom-webhooks-view': customWebhooksView,
     'discogs-view': discogsView,
     'lyrics-view': lyricsView,
     'radio-view': radioView,

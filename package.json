@@ -1,6 +1,6 @@
 {
   "name": "mstream",
-  "version": "6.12.2-velvet",
+  "version": "6.12.3-velvet",
   "description": "mStream Velvet — fork of mStream 5.14.3 (branch: sqlite) by aroundmyroom",
   "type": "module",
   "main": "cli-boot-wrapper.js",
@@ -93,6 +93,7 @@
     "axios": "^1.15.0",
     "busboy": "^1.6.0",
     "commander": "^14.0.3",
+    "compression": "^1.8.1",
     "cookie-parser": "^1.4.7",
     "electron-updater": "^6.7.3",
     "escape-string-regexp": "^5.0.0",
