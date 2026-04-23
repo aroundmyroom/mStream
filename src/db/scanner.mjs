@@ -1,3 +1,11 @@
+// Compute audio identity hash — based on song metadata (artist+album+title+duration)
+// Survives transcoding: if audio content is the same, audio_hash stays the same
+// even if file encoding changes (MP3 → FLAC, 128k → 320k, etc.)
+function calculateAudioHash(songInfo) {
+  const audioId = `${(songInfo.artist || '').toLowerCase().trim()}|${(songInfo.album || '').toLowerCase().trim()}|${(songInfo.title || '').toLowerCase().trim()}|${Math.round(songInfo.duration || 0)}`;
+  return crypto.createHash('sha256').update(audioId).digest('hex');
+}
+
 import { parseFile } from 'music-metadata';
 import fs from 'fs';
 import fsp from 'node:fs/promises';
@@ -79,11 +87,15 @@ async function insertEntries(song) {
     "disk": song.disk.no ? song.disk.no : null,
     "modified": song.modified,
     "hash": song.hash,
+    "audio_hash": song.audio_hash,
     "aaFile": song.aaFile ? song.aaFile : null,
     "art_source": song._artSource || null,
     "cover_file": song._coverFile || null,
     "vpath": loadJson.vpath,
-    "ts": song._preserveTs || song.modified || null,
+    // _preserveTs = original ts from DB (re-index); song.modified = file mtime ms (new file only).
+    // Never use song.modified as ts fallback for re-indexed files (_isReindex=true) because
+    // art/tag edits change file mtime → would make old files appear as "recently added".
+    "ts": song._preserveTs || (song._isReindex ? null : song.modified) || null,
     "sID": loadJson.scanId,
     "replaygainTrackDb": song.replaygain_track_gain ? song.replaygain_track_gain.dB : null,
     "genre": song.genre ? String(song.genre) : null,
@@ -93,7 +105,8 @@ async function insertEntries(song) {
     "sample_rate": song._sampleRate  ?? null,
     "channels":    song._channels    ?? null,
     "artist_id": _makeArtistId(song.artist ? String(song.artist) : null),
-    "album_id": _makeAlbumId(song.artist ? String(song.artist) : null, song.album ? String(song.album) : null)
+    "album_id": _makeAlbumId(song.artist ? String(song.artist) : null, song.album ? String(song.album) : null),
+    "_oldHash": song._oldHash || null
   };
 
   await ax({
@@ -238,8 +251,14 @@ async function processFileResult(absPath, relPath, modTime, data) {
     }
     // Preserve original insertion timestamp so editing tags/art doesn't
     // re-flood "Recently Added" (file hash changes after rewrite → ts = now without this).
+    // Always mark re-indexed files so insertEntries won't use song.modified as ts fallback
+    // (song.modified = new mtime after art/tag edit → would show as "recently added" if old ts was null).
+    songInfo._isReindex = true;
     if (data._preserveTs) {
       songInfo._preserveTs = data._preserveTs;
+    }
+    if (data._oldHash) {
+      songInfo._oldHash = data._oldHash;
     }
     await insertEntries(songInfo);
     await confirmOk(absPath);
@@ -621,6 +640,13 @@ async function parseMyFile(thisSong, modified) {
     songInfo.hash = null;
   }
 
+  // Calculate audio_hash (metadata-based identity, survives transcoding)
+  try {
+    songInfo.audio_hash = calculateAudioHash(songInfo);
+  } catch (err) {
+    console.error(`Warning: audio_hash failed on ${thisSong}: ${err.message}`);
+    songInfo.audio_hash = null;
+  }
   // Extract embedded cue sheet (present in single-file FLAC/WAV album rips)
   try {
     const cue = songInfo.cuesheet;

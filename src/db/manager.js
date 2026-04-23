@@ -41,6 +41,7 @@ export function beginTransaction() { backend.beginTransaction(); }
 export function commitTransaction() { backend.commitTransaction(); }
 export function vacuumInto(destPath) { backend.vacuumInto(destPath); }
 export function removeFileByPath(filepath, vpath) { return backend.removeFileByPath(filepath, vpath); }
+export function migrateHash(oldHash, newHash) { return backend.migrateHash(oldHash, newHash); }
 export function getLiveArtFilenames() { return backend.getLiveArtFilenames(); }
 export function getLiveHashes() { return backend.getLiveHashes(); }
 export function getStaleFileHashes(vpath, scanId) { return backend.getStaleFileHashes(vpath, scanId); }

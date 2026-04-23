@@ -1012,6 +1012,7 @@ export function setup(mstream) {
     const rating = parseInt(req.query.rating || req.body?.rating || '0', 10); // 1-5 stars or 0=remove
 
     if (!id) return sendResponse(req, res, makeError(ERRORS.MISSING_PARAM.code, 'id required'));
+    if (rating < 0 || rating > 5) return sendResponse(req, res, makeError(ERRORS.MISSING_PARAM.code, 'rating must be 0-5'));
 
     // Convert Subsonic 1-5 to mStream 1-10
     const mstreamRating = rating > 0 ? rating * 2 : null;
@@ -1028,44 +1029,51 @@ export function setup(mstream) {
 
   // ── scrobble ─────────────────────────────────────────────────────────────────
   router('scrobble', (req, res) => {
-    const id = [].concat(req.query.id || req.body?.id || []).flat().filter(Boolean)[0];
+    // Spec: `id` is repeatable — a client can send multiple ids in one call.
+    const ids = [].concat(req.query.id || req.body?.id || []).flat().filter(Boolean);
     const submission = String(req.query.submission || req.body?.submission || 'true') !== 'false';
 
-    if (id && !submission) {
-      // submission=false means "now playing" — track it for getNowPlaying
+    if (!ids.length) return sendResponse(req, res, makeError(ERRORS.MISSING_PARAM.code, 'id required'));
+
+    if (!submission) {
+      // submission=false means "now playing" — spec: last id in the list wins
+      const id = ids[ids.length - 1];
       const playerName = req.query.c || req.body?.c || 'Unknown';
       const playerId   = req.query.c || req.body?.c || 'Unknown';
       nowPlayingStore.set(req.subsonicUser, { id, playerName, playerId, startedAt: Date.now() });
     }
 
-    if (id && submission) {
+    if (submission) {
       // Clear now-playing entry when submission is complete
       nowPlayingStore.delete(req.subsonicUser);
-      const now = Math.floor(Date.now() / 1000);
-      const existing = db.findUserMetadata(id, req.subsonicUser);
-      if (existing) {
-        db.updateUserMetadata({ ...existing, pc: (existing.pc || 0) + 1, lp: now });
-      } else {
-        db.insertUserMetadata({ hash: id, user: req.subsonicUser, rating: null, pc: 1, lp: now });
-      }
-      db.saveUserDB();
+      // Iterate all ids — spec allows batching multiple plays in one call
+      for (const id of ids) {
+        const now = Math.floor(Date.now() / 1000);
+        const existing = db.findUserMetadata(id, req.subsonicUser);
+        if (existing) {
+          db.updateUserMetadata({ ...existing, pc: (existing.pc || 0) + 1, lp: now });
+        } else {
+          db.insertUserMetadata({ hash: id, user: req.subsonicUser, rating: null, pc: 1, lp: now });
+        }
 
-      // Insert into play_events so this play is visible in Home stats, Yesterday shelf, etc.
-      try {
-        db.insertPlayEvent({ user_id: req.subsonicUser, file_hash: id, started_at: Date.now(), duration_ms: null, source: 'subsonic', session_id: null });
-      } catch (_) {}
+        // Insert into play_events so this play is visible in Home stats, Yesterday shelf, etc.
+        try {
+          db.insertPlayEvent({ user_id: req.subsonicUser, file_hash: id, started_at: Date.now(), duration_ms: null, source: 'subsonic', session_id: null });
+        } catch (_) {}
 
-      // Forward to Last.fm and/or ListenBrainz if the user has enabled it
-      const userObj = config.program.users[req.subsonicUser];
-      const doLastfm = userObj?.['subsonic-scrobble-lastfm'] === true;
-      const doLb     = userObj?.['subsonic-scrobble-lb']     === true;
-      if (doLastfm || doLb) {
-        const row = db.getSongByHash(id, req.subsonicUser);
-        if (row) {
-          if (doLastfm) scrobblerApi.scrobbleLastfmForUser(userObj, { artist: row.artist, album: row.album, track: row.title });
-          if (doLb)     scrobblerApi.scrobbleLbForUser(req.subsonicUser, { artist: row.artist, album: row.album, track: row.title });
+        // Forward to Last.fm and/or ListenBrainz if the user has enabled it
+        const userObj = config.program.users[req.subsonicUser];
+        const doLastfm = userObj?.['subsonic-scrobble-lastfm'] === true;
+        const doLb     = userObj?.['subsonic-scrobble-lb']     === true;
+        if (doLastfm || doLb) {
+          const row = db.getSongByHash(id, req.subsonicUser);
+          if (row) {
+            if (doLastfm) scrobblerApi.scrobbleLastfmForUser(userObj, { artist: row.artist, album: row.album, track: row.title });
+            if (doLb)     scrobblerApi.scrobbleLbForUser(req.subsonicUser, { artist: row.artist, album: row.album, track: row.title });
+          }
         }
       }
+      db.saveUserDB();
     }
     sendResponse(req, res, makeResponse());
   });
@@ -1453,10 +1461,13 @@ export function setup(mstream) {
 
   // ── getArtistInfo / getAlbumInfo ─────────────────────────────────────────────
   // Stubs — no biography/image fetching; return empty objects to silence client retries
-  router('getArtistInfo',  (req, res) => sendResponse(req, res, makeResponse('ok', { artistInfo: {} })));
-  router('getArtistInfo2', (req, res) => sendResponse(req, res, makeResponse('ok', { artistInfo: {} })));
-  router('getAlbumInfo',   (req, res) => sendResponse(req, res, makeResponse('ok', { albumInfo: {} })));
-  router('getAlbumInfo2',  (req, res) => sendResponse(req, res, makeResponse('ok', { albumInfo: {} })));
+  // biography (ArtistInfo) and notes (AlbumInfo) must always be present —
+  // Substreamer, DSub, and similar clients crash their markdown renderer when
+  // the key is absent. artistInfo2/albumInfo2 use their own wrapper names.
+  router('getArtistInfo',  (req, res) => sendResponse(req, res, makeResponse('ok', { artistInfo:  { biography: '' } })));
+  router('getArtistInfo2', (req, res) => sendResponse(req, res, makeResponse('ok', { artistInfo2: { biography: '' } })));
+  router('getAlbumInfo',   (req, res) => sendResponse(req, res, makeResponse('ok', { albumInfo:   { notes: '' } })));
+  router('getAlbumInfo2',  (req, res) => sendResponse(req, res, makeResponse('ok', { albumInfo2:  { notes: '' } })));
 
   // ── getSimilarSongs / getTopSongs ─────────────────────────────────────────────
   // Stubs — no audio-analysis/MusicBrainz lookup yet; return empty song lists
@@ -1533,10 +1544,15 @@ export function setup(mstream) {
   });
 
   // ── Catch-all for unsupported endpoints ──────────────────────────────────────
+  // Unknown Subsonic method — return error 70 (not found) so clients can
+  // distinguish a typo'd method from a generic backend failure (code 0).
+  // Matches Navidrome / Gonic behaviour.
   mstream.all('/rest/:action', subsonicAuth, (req, res) => {
-    sendResponse(req, res, makeResponse());
+    const raw = String(req.params.action || '').replace(/\.view$/i, '');
+    sendResponse(req, res, makeError(ERRORS.NOT_FOUND.code, `Subsonic method "${raw}" not found`));
   });
   mstream.all('/rest/:action.view', subsonicAuth, (req, res) => {
-    sendResponse(req, res, makeResponse());
+    const raw = String(req.params.action || '').replace(/\.view$/i, '');
+    sendResponse(req, res, makeError(ERRORS.NOT_FOUND.code, `Subsonic method "${raw}" not found`));
   });
 }

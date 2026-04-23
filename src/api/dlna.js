@@ -910,8 +910,11 @@ function timeSeekMiddleware(rootMap) {
       'pipe:1',
     ];
     const ff = spawn(ffmpegBin(), args, { stdio: ['ignore', 'pipe', 'ignore'] });
+    ff.on('error', err => {
+      winston.error(`[dlna time-seek] ffmpeg error: ${err.message}`);
+      if (!res.headersSent) { res.status(500).end(); } else { try { res.end(); } catch (_) { /* already closed */ } }
+    });
     ff.stdout.pipe(res);
-    ff.on('error', () => res.end());
     req.on('close', () => ff.kill('SIGKILL'));
   };
 }

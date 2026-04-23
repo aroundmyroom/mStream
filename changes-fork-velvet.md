@@ -1,5 +1,49 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.12.6-velvet — April 2026 — Page-Load Performance Fix
+
+### fix: 14-second audio delay on page refresh — root cause eliminated
+- **Root cause**: `getUserPlaylists()` in `src/db/sqlite-backend.js` joined playlist entries to the `files` table using `f.vpath || '/' || f.filepath = e.filepath`. SQLite cannot use any index for an expression on the stored side of a join, so every page refresh triggered a full scan of all 134,565 rows in the `files` table — taking **~7,000 ms** synchronously on the Node.js event loop via `DatabaseSync`.
+- **Effect**: While the event loop was blocked, every pending request queued behind it — including the audio `<source>` request, album-art, home-view, ping, and all session APIs. Users experienced a 7–14 second freeze before audio started on every browser refresh.
+- **Fix**: Rewrote the join to split `e.filepath` with `SUBSTR`/`INSTR` at the first `/`, producing separate `vpath` and `filepath` components that match the composite index `idx_files_filepath_vpath`. Query time: **7,000 ms → 10 ms**.
+- Also added expression index `idx_files_full_path ON files(vpath || '/' || filepath)` to `CREATE TABLE` DDL for future-proofing; and created it on live DBs at startup.
+- **Secondary fix**: Removed dead `playlists: db.getUserPlaylists()` call from `GET /api/v1/ping` — the client never reads `d.playlists` from ping (only `/api/v1/playlist/getall` is used), so this was calling the slow query twice per boot for no reason.
+- **Supporting fix** (prior session): `_onAudioStalled` now returns early when `audioEl.readyState === 0` — prevents the stall-recovery timer from firing during initial load and creating a self-amplifying retry loop.
+- **Supporting fix** (prior session): `<audio preload="auto">` ensures the browser begins buffering the audio file immediately on `src` assignment.
+
+**Files changed**: `src/db/sqlite-backend.js`, `src/api/playlist.js`, `webapp/index.html`, `webapp/app.js`
+
+## v6.12.5-velvet — April 2026 — Hash Migration on Tag Rewrite
+
+### fix: Preserve play counts, ratings, and play history when a file is re-indexed after external tag editing
+- **Problem**: When an external tool (e.g. MusicBrainz Picard) rewrites a file's tags, the mtime changes. The scanner detects the change, deletes the old DB row, re-parses the file and inserts a new row — but the new row has a different MD5 hash. The old `user_metadata` (play count, rating, star, last-played) and `play_events` (full play history) rows were keyed on the old hash and became orphaned.
+- **Fix**: `get-file` and `get-files-batch` now include `_oldHash` in their stale response. The `add-file` handler calls `db.migrateHash(oldHash, newHash)` when the hash changed, updating all `user_metadata` and `play_events` rows in the same transaction.
+- Radio recordings, ytdl, podcasts, and on-demand indexing are unaffected (different code paths that do not delete-then-reinsert).
+
+**Files changed**: `src/api/scanner.js`, `src/db/sqlite-backend.js`, `src/db/manager.js`
+
+## v6.12.4-velvet — April 2026 — Dual-Hash Identity & Test Framework
+
+### feat: Dual-Hash Identity (audio_hash column)
+- Added `audio_hash` column to files table: SHA-256 hash of `artist|album|title|duration`
+- Metadata-based identity survives transcoding (MP3 → FLAC, bitrate changes, etc.)
+- Enables play-count and rating preservation across format conversions
+- Automatic database migration for existing installations
+- Scanner computes both `hash` (file content) and `audio_hash` (metadata) on every parse
+- **Use case**: User transcodes 500-song collection to FLAC; all stats auto-preserved via audio_hash
+
+### feat: Integration Test Framework
+- Node.js native node:test framework (v24+, zero external dependencies)
+- 25 tests total: FTS5 search (11), album queries (8), dual-hash scenarios (6)
+- All tests passing in <600ms total execution time
+- CI/CD: GitHub Actions workflow runs on push/PR to master
+- Test files:
+  - `test/integration/fts5-search.test.cjs` — FTS5 operator tests, case-insensitivity, performance baseline
+  - `test/integration/on-demand-index.test.cjs` — album grouping, artist filtering, vpath boundaries
+  - `test/integration/dual-hash-identity.test.cjs` — transcode scenarios, play-count preservation
+
+**Files changed**: `src/db/sqlite-backend.js`, `src/db/scanner.mjs`, `test/integration/` (new), `.github/workflows/integration-tests.yml` (new)
+
 ## v6.12.3-velvet — April 2026 — Webhooks & Reliability Fixes
 
 ### feat: Custom webhooks

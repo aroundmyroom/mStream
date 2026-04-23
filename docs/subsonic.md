@@ -153,8 +153,8 @@ Supported extensions returned by `getOpenSubsonicExtensions`:
 | `download` | ✅ | Same as stream |
 | `getCoverArt` | ✅ | Serves from albumArtDirectory; resolves folder IDs (`d:…`, vpath integers) to real art via `getAaFileForDir`; bare album/artist/song hashes via `getAaFileById`; SVG folder icon fallback |
 | `getLyrics` | ✅ | Returns lyrics from file tags if present |
-| `scrobble` | ✅ | Updates `playCount` and `lastPlayed` in user_metadata |
-| `setRating` | ✅ | Stores 1–5 rating in user_metadata |
+| `scrobble` | ✅ | Updates `playCount` and `lastPlayed` in user_metadata; supports multiple `id` params in one call (batch scrobble per OpenSubsonic spec); forwards to Last.fm / ListenBrainz if enabled |
+| `setRating` | ✅ | Stores 1–5 rating in user_metadata; returns error for out-of-range values |
 
 ### Playlists
 | Endpoint | Status | Notes |

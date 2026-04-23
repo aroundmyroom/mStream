@@ -211,6 +211,8 @@ let _waveformData = null;  // decoded waveform array [0..255] for current track
 let _waveformFp  = null;   // filepath matching _waveformData (avoids double-fetch)
 const _wfPrefetchPending = []; // filepaths queued for background pre-generation
 let   _wfPrefetching     = false; // true while one async prefetch is in flight
+let   _wfPrefetchAbort   = null;  // AbortController for the currently in-flight prefetch fetch
+let   _wfFetchAbort      = null;  // AbortController for the current live waveform fetch
 let _cuePoints         = [];    // cue sheet track markers for the current file
 let _cueMarkersRendered = false; // true once tick marks have been drawn for current file
 let _abChapThrottle    = 0;     // timestamp for chapter bar 1-Hz throttle
@@ -413,6 +415,8 @@ function _showInfoStrip(badge, contentHtml, ms = 30000, center = false) {
   document.getElementById('dj-strip-badge').textContent = badge;
   document.getElementById('dj-strip-content').innerHTML = contentHtml;
   strip.classList.toggle('dj-strip-center', !!center);
+  const closeBtn = document.getElementById('dj-strip-close');
+  if (closeBtn) { closeBtn.onclick = () => _dismissInfoStrip(); }
   clearTimeout(_similarStripT);
   strip.classList.remove('dj-strip-out');
   // Reset and restart progress bar animation
@@ -584,8 +588,18 @@ function restoreQueue(silent = false) {
       highlightRow();
       if (s.isRadio) { _startRadioNowPlaying(s); }
       if (!s.isRadio) {
-        loadCuePoints(s.filepath);
-        _fetchWaveform(s.filepath);
+        // Boot restore (silent=true): defer cue points + waveform until AFTER the
+        // audio connection has its first bytes.  During boot, Chrome's HTTP/1.1
+        // connection pool (max 6 per host) is already occupied by the session
+        // setup, ping, home-view, and restoreQueue audio request.  Extra API
+        // calls here stall the media connection for 10+ s.
+        if (silent) {
+          setTimeout(() => loadCuePoints(s.filepath), 2000);
+          setTimeout(() => _fetchWaveform(s.filepath), 4000);
+        } else {
+          loadCuePoints(s.filepath);
+          _fetchWaveform(s.filepath);
+        }
       }
       if (!s.isRadio && data.time > 1) {
         audioEl.addEventListener('loadedmetadata', () => {
@@ -767,8 +781,13 @@ const Player = {
     _syncPrefs();
     const idx = start ?? 0;
     this.playAt(idx);
-    // Pre-fetch waveforms for upcoming songs (skip the one about to play — playAt handles it)
-    songs.forEach((s, i) => { if (i !== idx) _wfPrefetchEnqueue(s.filepath); });
+    // Pre-fetch waveforms for the next few upcoming songs only.
+    // Limiting to 3 prevents the server from queueing many ffmpeg jobs
+    // while the current song's waveform might not even be cached yet.
+    const _WF_AHEAD = 3;
+    songs.forEach((s, i) => {
+      if (i !== idx && i > idx && i <= idx + _WF_AHEAD) _wfPrefetchEnqueue(s.filepath);
+    });
   },
   playSingle(song) {
     S.queue = [song];
@@ -977,8 +996,6 @@ const Player = {
   toggle() {
     // If nothing is loaded and nothing is queued — truly nothing to do
     if (!audioEl.src && !S.queue.length) return;
-    // src is cleared on logout — if there's a queued track, reload it and play
-    if (!audioEl.src) { this.playAt(S.idx); return; }
     // src is set: toggle play/pause regardless of queue state
     // (queue may have been cleared while a song was already loaded)
     if (audioEl.paused) {
@@ -7339,66 +7356,21 @@ async function viewHome() {
 
 async function viewShortcuts() {
   setTitle(t('player.title.shortcuts')); setBack(null); setNavActive('shortcuts'); S.view = 'shortcuts';
-  // Abort any previous home-view body listeners to prevent accumulation
   _shortcutsAC?.abort();
   _shortcutsAC = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-  setBody('<div class="loading-state"></div>');
 
   const sig = _navCancel();
   const abEx = _audioBookExclusions();
-  // compute how many cards fit in one row at current container width
   const _cw    = (document.getElementById('content-body')?.clientWidth || 800) - 32;
-  const _limit = Math.max(4, Math.floor((_cw + 10) / 130)); // 120px card + 10px gap
+  const _limit = Math.max(4, Math.floor((_cw + 10) / 130));
   const base = {
     limit: _limit,
     ...(abEx.ignoreVPaths.length             ? { ignoreVPaths:             abEx.ignoreVPaths }             : {}),
     ...(abEx.excludeFilepathPrefixes.length  ? { excludeFilepathPrefixes:  abEx.excludeFilepathPrefixes }  : {}),
   };
 
-  let recentlyPlayed = [], mostPlayed = [], radioStations = [], podcastFeeds = [];
-  try {
-    [recentlyPlayed, mostPlayed, radioStations, podcastFeeds] = await Promise.all([
-      api('POST', 'api/v1/db/stats/recently-played', base, sig).catch(() => []),
-      api('POST', 'api/v1/db/stats/most-played',     base, sig).catch(() => []),
-      api('GET',  'api/v1/radio/stations',       undefined, sig).catch(() => []),
-      api('GET',  'api/v1/podcast/feeds',         undefined, sig).catch(() => []),
-    ]);
-  } catch(e) { if (e.name === 'AbortError') return; }
+  // ── helpers (defined early so progressive .then() closures can use them) ─────
 
-  if (S.view !== 'shortcuts') return;
-
-  recentlyPlayed = recentlyPlayed.map(norm);
-  mostPlayed     = mostPlayed.map(s => { const n = norm(s); n._playCount = s.metadata?.['play-count']; return n; });
-  if (podcastFeeds.length) _podcastFeeds = podcastFeeds;
-
-  // ── "Because you listened to" shelves (requires Last.fm API key) ────────────
-  let becauseShelves = [];  // [{ artist: string, songs: norm[] }]
-  if (S.lastfmHasApiKey && mostPlayed.length) {
-    // Build pool of up to 10 most-played unique artists, then pick 2 at random
-    // so the shelves rotate on each Home visit instead of always showing the same pair.
-    const artistPool = [...new Set(mostPlayed.map(s => s.artist).filter(Boolean))].slice(0, 10);
-    // Fisher-Yates shuffle the pool, then take first 2
-    for (let i = artistPool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [artistPool[i], artistPool[j]] = [artistPool[j], artistPool[i]];
-    }
-    const topArtists = artistPool.slice(0, 2);
-    const becauseData = await Promise.all(topArtists.map(async artist => {
-      try {
-        const sim = await api('GET', `api/v1/lastfm/similar-artists?artist=${encodeURIComponent(artist)}`, undefined, sig).catch(() => ({ artists: [] }));
-        if (!sim.artists?.length) return null;
-        const songs = await api('POST', 'api/v1/db/songs-by-artists', { artists: sim.artists.slice(0, 15), limit: _limit }, sig).catch(() => []);
-        if (!songs.length) return null;
-        return { artist, songs: songs.map(norm) };
-      } catch(_) { return null; }
-    }));
-    becauseShelves = becauseData.filter(Boolean);
-  }
-  if (S.view !== 'shortcuts') return;
-
-  // ── helpers ─────────────────────────────────────────────────
-
-  // Art card — radio & podcast: 88×88 image on top, name + sub below
   function artCard(imgUrl, title, sub, attrs) {
     const artInner = imgUrl
       ? `<img src="${imgUrl}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`
@@ -7412,7 +7384,6 @@ async function viewShortcuts() {
     </div>`;
   }
 
-  // Song card — same art-on-top layout
   function songCard(s, showCount) {
     const url = artUrl(s['album-art'], 's');
     const artInner = url
@@ -7430,11 +7401,7 @@ async function viewShortcuts() {
     </div>`;
   }
 
-  // Folder & playlist art cards — deterministic color per name, art-card layout
   function folderCard(label, attrs) {
-    // viewBox crops to the folder with ~8px margin each side.
-    // Path redesigned so body height = 52 units vs width = 76 units (ratio 1.46:1)
-    // instead of the old 39-tall (ratio 1.95:1) which looked squashed.
     const art = `<svg viewBox="4 24 92 68" xmlns="http://www.w3.org/2000/svg">
       <rect width="100" height="100" style="fill:var(--surface)"/>
       <path d="M12 46 H34 L42 32 H84 Q88 32 88 37 V80 Q88 84 84 84 H16 Q12 84 12 80 Z"
@@ -7451,23 +7418,8 @@ async function viewShortcuts() {
     </div>`;
   }
 
-  function playlistCard(label, attrs) {
-    const art = `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-      <rect width="100" height="100" style="fill:var(--surface)"/>
-      <line x1="12" y1="34" x2="80" y2="34" style="stroke:var(--t2)" stroke-width="4" stroke-linecap="round"/>
-      <line x1="12" y1="50" x2="80" y2="50" style="stroke:var(--t2)" stroke-width="4" stroke-linecap="round"/>
-      <line x1="12" y1="66" x2="54" y2="66" style="stroke:var(--t2)" stroke-width="4" stroke-linecap="round"/>
-      <circle cx="74" cy="67" r="14" style="fill:var(--surface);stroke:var(--primary)" stroke-width="2.2"/>
-      <polygon points="70,61 70,73 83,67" style="fill:var(--primary)"/>
-    </svg>`;
-    return `<div class="hc" ${attrs || ''}>
-      <div class="hc-art">${art}</div>
-      <div class="hc-info"><div class="hc-title">${esc(label)}</div></div>
-    </div>`;
-  }
-
   const _GRIP_ICO = `<svg width="10" height="14" viewBox="0 0 10 16" fill="currentColor" aria-hidden="true"><circle cx="2.5" cy="2" r="1.5"/><circle cx="7.5" cy="2" r="1.5"/><circle cx="2.5" cy="6" r="1.5"/><circle cx="7.5" cy="6" r="1.5"/><circle cx="2.5" cy="10" r="1.5"/><circle cx="7.5" cy="10" r="1.5"/><circle cx="2.5" cy="14" r="1.5"/><circle cx="7.5" cy="14" r="1.5"/></svg>`;
-  function shelf(id, title, cards) {
+  function mkShelf(id, title, cards) {
     if (!cards) return '';
     return `<div class="home-shelf" data-shelf="${id}" draggable="true">
       <div class="home-shelf-header">
@@ -7478,10 +7430,8 @@ async function viewShortcuts() {
     </div>`;
   }
 
-  // ── five shelves ────────────────────────────────────────────
-
-  // shelf order helpers (shared with drag-to-reorder)
-  const _ORDER_KEY = `ms2_home_order_${S.username || ''}`;  
+  // shelf order helpers
+  const _ORDER_KEY = `ms2_home_order_${S.username || ''}`;
   function _savedOrder() { try { return JSON.parse(localStorage.getItem(_ORDER_KEY) || 'null'); } catch(_) { return null; } }
   function _saveOrder() {
     const v = document.getElementById('content-body')?.querySelector('.home-view');
@@ -7491,105 +7441,91 @@ async function viewShortcuts() {
     api('POST', 'api/v1/user/settings', { prefs: { home_order: order } }).catch(() => {});
   }
 
-  // 1. Radio Stations
-  const radioHtml    = radioStations.map(s =>
-    artCard(s.img ? artUrl(s.img, 's') : null, s.name, s.genre ? s.genre.split(',')[0].trim() : '', `data-rsid="${esc(String(s.id))}" data-hid="rs:${esc(String(s.id))}"`)
-  ).join('');
-  const radioShelf   = shelf('radio', t('player.shortcuts.shelfRadio'), radioHtml || null);
-
-  // 2. Podcasts
-  const podcastHtml  = podcastFeeds.map(f =>
-    artCard(f.img ? artUrl(f.img, 's') : null, f.title || f.url, '', `data-pfid="${esc(String(f.id))}" data-hid="pf:${esc(String(f.id))}"`)
-  ).join('');
-  const podcastShelf = shelf('podcasts', t('player.shortcuts.shelfPodcasts'), podcastHtml || null);
-
-  // 3. Playlists & Folders
+  // ── render skeleton immediately ──────────────────────────────
+  // Playlists/vpaths shelf fills synchronously — no API needed.
   const vpathHtml    = S.vpaths.map(v    => folderCard(v,       `data-icid="${esc('vp:' + v)}" data-hid="ic:vp:${esc(v)}"`)   ).join('');
   const playlistHtml = S.playlists.map(p => folderCard(p.name,  `data-icid="${esc('pl:' + p.name)}" data-hid="ic:pl:${esc(p.name)}"`)  ).join('');
-  const playlistShelf = shelf('playlists', t('player.shortcuts.shelfPlaylists'), (vpathHtml + playlistHtml) || null);
+  const playlistShelfHtml = mkShelf('playlists', t('player.shortcuts.shelfPlaylists'), (vpathHtml + playlistHtml) || null);
 
-  // 4 & 5. Song shelves
-  const recentShelf = shelf('recent', t('player.shortcuts.shelfRecent'), recentlyPlayed.map(s => songCard(s, false)).join('') || null);
-  const mostShelf   = shelf('most',   t('player.shortcuts.shelfMost'),   mostPlayed.map(s => songCard(s, true)).join('')  || null);
+  const _defOrder = ['radio', 'podcasts', 'playlists', 'recent', 'most'];
+  const _ord = (_savedOrder() || _defOrder).filter(id => _defOrder.includes(id));
+  _defOrder.forEach(id => { if (!_ord.includes(id)) _ord.push(id); });
 
-  // 6. "Because you listened to …" shelves
-  const becauseShelfEntries = becauseShelves.map(({ artist, songs }) => {
-    const key   = `bec:${artist}`;
-    const cards = songs.map(s => songCard(s, false)).join('');
-    return [key, shelf(key, t('player.shortcuts.becauseYouListened', { artist: esc(artist) }), cards)];
-  });
-  const becauseSongsList = becauseShelves.flatMap(b => b.songs);
-
-  // ── render (restore saved shelf order) ──────────────────────
-  const _shelfMap  = { radio: radioShelf, podcasts: podcastShelf, playlists: playlistShelf, recent: recentShelf, most: mostShelf };
-  becauseShelfEntries.forEach(([k, v]) => { _shelfMap[k] = v; });
-  const _defOrder  = ['radio', 'podcasts', 'playlists', 'recent', 'most', ...becauseShelfEntries.map(([k]) => k)];
-  const _order     = (_savedOrder() || _defOrder).filter(id => _shelfMap[id]);
-  _defOrder.forEach(id => { if (!_order.includes(id)) _order.push(id); });
-  const _orderedHtml = _order.map(id => _shelfMap[id] || '').join('');
-
-  // Toolbar with Customize button sits ABOVE all shelves and is not inside any
-  // shelf element, so drag-to-reorder cannot move it.
   const _toolbarHtml = `<div class="home-toolbar"><button class="home-customize-btn">${t('player.shortcuts.btnCustomize')}</button></div>`;
-  setBody(`<div class="home-view">${_toolbarHtml}${_orderedHtml}</div>`);
+  // Build initial HTML: playlists shelf has real content; data-dependent shelves are empty slot divs
+  const skeletonHtml = _ord.map(id =>
+    id === 'playlists' ? (playlistShelfHtml || `<div id="sc-slot-${id}"></div>`)
+                       : `<div id="sc-slot-${id}"></div>`
+  ).join('');
+  setBody(`<div class="home-view">${_toolbarHtml}${skeletonHtml}</div>`);
 
   const body = document.getElementById('content-body');
 
-  body.querySelectorAll('[data-rsid]').forEach(card => {
-    card.addEventListener('click', () => {
-      const s = radioStations.find(x => String(x.id) === card.dataset.rsid);
-      if (s) { _radioStations = radioStations; _playRadio(s); }
-    });
-  });
+  // Replace a slot div with a rendered shelf element; no-op if already navigated away
+  function _fillSlot(id, shelfHtml) {
+    if (S.view !== 'shortcuts') return;
+    const slot = document.getElementById(`sc-slot-${id}`);
+    if (!slot) return; // slot already replaced or never existed
+    if (!shelfHtml) { slot.remove(); return; }
+    const tmp = document.createElement('div');
+    tmp.innerHTML = shelfHtml;
+    const el = tmp.firstElementChild;
+    slot.replaceWith(el);
+    _bindShelfDrag(el);
+    _applyVisibility();
+  }
 
-  body.querySelectorAll('[data-pfid]').forEach(card => {
-    card.addEventListener('click', () => {
-      const f = podcastFeeds.find(x => String(x.id) === card.dataset.pfid);
-      if (f) viewPodcastEpisodes(f);
-    });
-  });
+  // ── accumulated data for click handlers ─────────────────────
+  const _allSongs = [];
+  let _radStations = [], _podFeeds = [];
 
-  body.querySelectorAll('.home-song').forEach(card => {
-    card.addEventListener('click', () => {
-      const fp = card.dataset.fp;
-      const s = recentlyPlayed.concat(mostPlayed).concat(becauseSongsList).find(x => x.filepath === fp);
+  // ── event delegation — click handlers on the body ────────────
+  const _scACOpts = _shortcutsAC ? { signal: _shortcutsAC.signal } : {};
+  body.addEventListener('click', e => {
+    const view = body.querySelector('.home-view');
+    // radio card
+    const rsCard = e.target.closest('[data-rsid]');
+    if (rsCard) { const s = _radStations.find(x => String(x.id) === rsCard.dataset.rsid); if (s) { _radioStations = _radStations; _playRadio(s); } return; }
+    // podcast card
+    const pfCard = e.target.closest('[data-pfid]');
+    if (pfCard) { const f = _podFeeds.find(x => String(x.id) === pfCard.dataset.pfid); if (f) viewPodcastEpisodes(f); return; }
+    // song card
+    const sc = e.target.closest('.home-song');
+    if (sc) {
+      if (view?.classList.contains('home-editing')) return;
+      const s = _allSongs.find(x => x.filepath === sc.dataset.fp);
       if (s) { _setPlaySource('shortcuts', 'Shortcuts'); Player.queueAndPlay(s); }
-    });
-  });
-
-  body.querySelectorAll('[data-icid]').forEach(card => {
-    card.addEventListener('click', () => {
-      const id = card.dataset.icid;
+      return;
+    }
+    // folder / playlist card
+    const ic = e.target.closest('[data-icid]');
+    if (ic) {
+      if (view?.classList.contains('home-editing')) return;
+      const id = ic.dataset.icid;
       if (id.startsWith('vp:'))      { S.feDirStack = []; viewFiles('/' + id.slice(3), false); }
       else if (id.startsWith('pl:')) openPlaylist(id.slice(3));
-    });
-  });
+    }
+  }, _scACOpts);
 
-  // ── shelf drag-to-reorder ────────────────────────────────────
-  // dragstart fires on the shelf element, not the grip child, so composedPath()
-  // is useless — use a mousedown flag instead.
+  // ── shelf drag-to-reorder (event delegation + per-shelf listeners) ───────────
   let _dragSrc = null, _canDrag = false;
-  body.querySelectorAll('.home-grip').forEach(grip => {
-    grip.addEventListener('mousedown', () => { _canDrag = true; });
-  });
-  body.addEventListener('mouseup', () => { _canDrag = false; });
-  body.querySelectorAll('.home-shelf').forEach(shelf => {
+  body.addEventListener('mousedown', e => { if (e.target.closest('.home-grip')) _canDrag = true; }, _scACOpts);
+  body.addEventListener('mouseup',   () => { _canDrag = false; }, _scACOpts);
+
+  function _bindShelfDrag(shelf) {
     shelf.addEventListener('dragstart', e => {
       if (!_canDrag) { e.preventDefault(); return; }
-      _dragSrc = shelf;
-      shelf.classList.add('hs-dragging');
+      _dragSrc = shelf; shelf.classList.add('hs-dragging');
       e.dataTransfer.effectAllowed = 'move';
     });
     shelf.addEventListener('dragend', () => {
-      _canDrag = false;
-      _dragSrc = null;
+      _canDrag = false; _dragSrc = null;
       body.querySelectorAll('.home-shelf').forEach(s => s.classList.remove('hs-dragging', 'hs-over'));
       _saveOrder();
     });
     shelf.addEventListener('dragover', e => {
       if (!_dragSrc || _dragSrc === shelf) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
       body.querySelectorAll('.home-shelf').forEach(s => s.classList.remove('hs-over'));
       shelf.classList.add('hs-over');
     });
@@ -7599,17 +7535,18 @@ async function viewShortcuts() {
     shelf.addEventListener('drop', e => {
       e.preventDefault();
       if (!_dragSrc || _dragSrc === shelf) return;
-      const view = shelf.closest('.home-view');
-      const all  = [...view.querySelectorAll(':scope > .home-shelf')];
-      const si   = all.indexOf(_dragSrc);
-      const di   = all.indexOf(shelf);
-      if (si < di) view.insertBefore(_dragSrc, shelf.nextSibling);
-      else         view.insertBefore(_dragSrc, shelf);
+      const v = shelf.closest('.home-view');
+      const all = [...v.querySelectorAll(':scope > .home-shelf')];
+      const si = all.indexOf(_dragSrc), di = all.indexOf(shelf);
+      if (si < di) v.insertBefore(_dragSrc, shelf.nextSibling);
+      else         v.insertBefore(_dragSrc, shelf);
     });
-  });
+  }
+  // Bind drag on the playlists shelf that's already in the DOM
+  body.querySelectorAll('.home-shelf').forEach(_bindShelfDrag);
 
-  // ── favorites / compact home ─────────────────────────────────
-  const _HIDDEN_KEY = `ms2_home_hidden_${S.username || ''}`;  
+  // ── visibility / customize ────────────────────────────────────
+  const _HIDDEN_KEY = `ms2_home_hidden_${S.username || ''}`;
   function _loadHidden() {
     try { return new Set(JSON.parse(localStorage.getItem(_HIDDEN_KEY) || '[]')); }
     catch(_) { return new Set(); }
@@ -7619,7 +7556,6 @@ async function viewShortcuts() {
     localStorage.setItem(_HIDDEN_KEY, v);
     api('POST', 'api/v1/user/settings', { prefs: { home_hidden: v } }).catch(() => {});
   }
-
   function _applyVisibility() {
     const view = body.querySelector('.home-view');
     if (!view) return;
@@ -7630,13 +7566,11 @@ async function viewShortcuts() {
     });
     body.querySelectorAll('.home-shelf').forEach(s => {
       const all = s.querySelectorAll('[data-hid]').length;
-      if (all === 0) { s.classList.remove('hs-empty'); return; } // dynamic shelf (songs) — always visible
+      if (all === 0) { s.classList.remove('hs-empty'); return; }
       const vis = s.querySelectorAll('[data-hid]:not(.hc-hidden)').length;
       s.classList.toggle('hs-empty', !editing && vis === 0);
     });
   }
-
-  // Customize button is now rendered in the toolbar above shelves — no injection needed.
 
   _applyVisibility();
 
@@ -7652,8 +7586,8 @@ async function viewShortcuts() {
     });
   }
 
-  // In edit mode, intercept card clicks to toggle visibility instead of playing
-  const _homeACOpts = _shortcutsAC ? { capture: true, signal: _shortcutsAC.signal } : { capture: true };
+  // Customize edit mode — card click toggles visibility (captured before normal click handler)
+  const _editACOpts = _shortcutsAC ? { capture: true, signal: _shortcutsAC.signal } : { capture: true };
   body.addEventListener('click', e => {
     const view = body.querySelector('.home-view');
     if (!view || !view.classList.contains('home-editing')) return;
@@ -7665,7 +7599,74 @@ async function viewShortcuts() {
     if (hidden.has(hid)) hidden.delete(hid); else hidden.add(hid);
     _saveHidden(hidden);
     _applyVisibility();
-  }, _homeACOpts);
+  }, _editACOpts);
+
+  // ── progressive API calls — fill slots as each resolves ──────
+
+  // Radio stations
+  api('GET', 'api/v1/radio/stations', undefined, sig).catch(() => []).then(raw => {
+    _radStations = Array.isArray(raw) ? raw : [];
+    const html = _radStations.map(s =>
+      artCard(s.img ? artUrl(s.img, 's') : null, s.name, s.genre ? s.genre.split(',')[0].trim() : '',
+        `data-rsid="${esc(String(s.id))}" data-hid="rs:${esc(String(s.id))}"`)
+    ).join('');
+    _fillSlot('radio', mkShelf('radio', t('player.shortcuts.shelfRadio'), html || null));
+  });
+
+  // Podcasts
+  api('GET', 'api/v1/podcast/feeds', undefined, sig).catch(() => []).then(raw => {
+    _podFeeds = Array.isArray(raw) ? raw : [];
+    if (_podFeeds.length) _podcastFeeds = _podFeeds;
+    const html = _podFeeds.map(f =>
+      artCard(f.img ? artUrl(f.img, 's') : null, f.title || f.url, '',
+        `data-pfid="${esc(String(f.id))}" data-hid="pf:${esc(String(f.id))}"`)
+    ).join('');
+    _fillSlot('podcasts', mkShelf('podcasts', t('player.shortcuts.shelfPodcasts'), html || null));
+  });
+
+  // Recently played
+  api('POST', 'api/v1/db/stats/recently-played', base, sig).catch(() => []).then(raw => {
+    const songs = (Array.isArray(raw) ? raw : []).map(norm);
+    _allSongs.push(...songs);
+    _fillSlot('recent', mkShelf('recent', t('player.shortcuts.shelfRecent'), songs.map(s => songCard(s, false)).join('') || null));
+  });
+
+  // Most played → then "Because you listened to" (non-blocking, appended when ready)
+  api('POST', 'api/v1/db/stats/most-played', base, sig).catch(() => []).then(async raw => {
+    const mostPlayed = (Array.isArray(raw) ? raw : []).map(s => { const n = norm(s); n._playCount = s.metadata?.['play-count']; return n; });
+    _allSongs.push(...mostPlayed);
+    _fillSlot('most', mkShelf('most', t('player.shortcuts.shelfMost'), mostPlayed.map(s => songCard(s, true)).join('') || null));
+
+    // "Because you listened to" — fires only after most-played renders; each shelf appends independently
+    if (!S.lastfmHasApiKey || !mostPlayed.length) return;
+    const artistPool = [...new Set(mostPlayed.map(s => s.artist).filter(Boolean))].slice(0, 10);
+    for (let i = artistPool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [artistPool[i], artistPool[j]] = [artistPool[j], artistPool[i]];
+    }
+    for (const artist of artistPool.slice(0, 2)) {
+      if (S.view !== 'shortcuts') return;
+      try {
+        const sim = await api('GET', `api/v1/lastfm/similar-artists?artist=${encodeURIComponent(artist)}`, undefined, sig).catch(() => ({ artists: [] }));
+        if (!sim.artists?.length) continue;
+        const songs = await api('POST', 'api/v1/db/songs-by-artists', { artists: sim.artists.slice(0, 15), limit: _limit }, sig).catch(() => []);
+        if (!songs.length || S.view !== 'shortcuts') continue;
+        const normSongs = songs.map(norm);
+        _allSongs.push(...normSongs);
+        const key = `bec:${artist}`;
+        const shelfEl = mkShelf(key, t('player.shortcuts.becauseYouListened', { artist: esc(artist) }), normSongs.map(s => songCard(s, false)).join(''));
+        if (!shelfEl) continue;
+        const view = body?.querySelector('.home-view');
+        if (!view) continue;
+        const tmp = document.createElement('div');
+        tmp.innerHTML = shelfEl;
+        const el = tmp.firstElementChild;
+        view.appendChild(el);
+        _bindShelfDrag(el);
+        _applyVisibility();
+      } catch(_) { /* ignore */ }
+    }
+  });
 }
 
 // ── FILE EXPLORER ─────────────────────────────────────────────
@@ -12493,13 +12494,16 @@ async function _wfPrefetchDrain() {
   if (_wfPrefetching || _wfPrefetchPending.length === 0) return;
   _wfPrefetching = true;
   const fp = _wfPrefetchPending.shift();
+  const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  _wfPrefetchAbort = ac;
   try {
     if (!_wfLsGet(fp)) { // double-check: may have been fetched since enqueue
-      const d = await api('GET', `api/v1/db/waveform?filepath=${encodeURIComponent(fp)}`);
+      const d = await api('GET', `api/v1/db/waveform?filepath=${encodeURIComponent(fp)}&prefetch=1`, undefined, ac?.signal);
       if (d.waveform && d.waveform.length > 0) _wfLsSet(fp, d.waveform);
     }
-  } catch (_e) { /* silent — waveform unavailable or ffmpeg busy */ }
+  } catch (_e) { /* silent — waveform unavailable, ffmpeg busy, or aborted */ }
   finally {
+    _wfPrefetchAbort = null;
     _wfPrefetching = false;
     if (_wfPrefetchPending.length > 0) setTimeout(_wfPrefetchDrain, 300);
   }
@@ -12524,6 +12528,13 @@ async function _fetchWaveform(filepath) {
   if (!filepath || /^https?:\/\//i.test(filepath)) { _waveformData = null; _waveformFp = null; _drawWaveform(); return; }
   if (_waveformFp === filepath) { _drawWaveform(); return; }   // in-memory cache
 
+  // Abort any in-progress live fetch for a previous song
+  if (_wfFetchAbort) { _wfFetchAbort.abort(); _wfFetchAbort = null; }
+  // Abort the in-flight prefetch request so the server slot opens for us
+  if (_wfPrefetchAbort) { _wfPrefetchAbort.abort(); _wfPrefetchAbort = null; }
+  // Clear queued prefetch items — server will be busy with this live song
+  _wfPrefetchPending.length = 0;
+
   // Check localStorage before going to the server
   const cached = _wfLsGet(filepath);
   if (cached) {
@@ -12538,6 +12549,9 @@ async function _fetchWaveform(filepath) {
   _waveformFp   = null;
   _drawWaveform();  // clear canvas while loading
 
+  const progTrack = document.getElementById('prog-track');
+  if (progTrack) progTrack.classList.add('wf-loading');
+
   const wfStatus = document.getElementById('wf-status');
   if (wfStatus) {
     wfStatus.dataset.loading = '1';
@@ -12545,8 +12559,12 @@ async function _fetchWaveform(filepath) {
     wfStatus.classList.add('visible');
   }
 
+  const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  _wfFetchAbort = ac;
+
   try {
-    const d = await api('GET', `api/v1/db/waveform?filepath=${encodeURIComponent(filepath)}`);
+    const d = await api('GET', `api/v1/db/waveform?filepath=${encodeURIComponent(filepath)}`, undefined, ac?.signal);
+    if (ac?.signal.aborted) return;  // stale — user already moved to another song
     if (d.waveform && d.waveform.length > 0) {
       _waveformData = d.waveform;
       _waveformFp   = filepath;
@@ -12554,7 +12572,11 @@ async function _fetchWaveform(filepath) {
       _wfFadeIn();
       if (!audioEl.paused) _startWaveformRaf();
     }
-  } catch(_e) { /* waveform unavailable — silent fail */ } finally {
+  } catch(_e) {
+    if (_e?.name !== 'AbortError') { /* waveform unavailable — silent fail */ }
+  } finally {
+    if (_wfFetchAbort === ac) _wfFetchAbort = null;
+    if (progTrack) progTrack.classList.remove('wf-loading');
     if (wfStatus) { wfStatus.dataset.loading = '0'; }
     _syncGaplessWaveformNote();
   }
@@ -12696,7 +12718,11 @@ function _syncGaplessWaveformNote() {
   if (wfStatus.dataset.loading === '1') return;
   const cur = S.queue[S.idx];
   const hasFiniteDuration = !!audioEl.duration && Number.isFinite(audioEl.duration);
-  const inTransitionWindow = hasFiniteDuration
+  // Only show the gapless note during ACTIVE playback — never while paused/restoring.
+  // On a fresh page load currentTime=0 so currentTime<=10 would fire immediately,
+  // which is misleading noise for a user who hasn't pressed play yet.
+  const inTransitionWindow = !audioEl.paused
+    && hasFiniteDuration
     && !cur?.isRadio
     && (audioEl.currentTime <= 10 || (audioEl.duration - audioEl.currentTime) <= 10);
   if (S.gapless && inTransitionWindow) {
@@ -13965,7 +13991,7 @@ function showApp() {
   const _skipShowT = setTimeout(() => { if (_bootSkip) _bootSkip.classList.remove('hidden'); }, 2500);
   if (_bootSkip) _bootSkip.onclick = () => { clearTimeout(_skipShowT); _bootDismiss(); };
   // Hard timeout — always dismiss after 6 s no matter what
-  const _bootHardT = setTimeout(() => _bootDismiss(), 6000);
+  const _bootHardT = setTimeout(() => { _bootDismiss(); }, 6000);
 
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').classList.remove('hidden');
@@ -13986,18 +14012,22 @@ function showApp() {
   document.getElementById('queue-btn').classList.add('active');
   _syncGaplessWaveformNote();
   _initQueueListeners();
-  loadPlaylists();
-  loadSmartPlaylists();
-  _launchPinnedViewOrHome();
+  // Defer non-critical startup API calls by 2 s so the audio media request
+  // (fired by restoreQueue below) gets connection slots first.  Chrome opens
+  // max 6 HTTP/1.1 connections per host; if all 6 are busy with playlists /
+  // home-view / ping when the audio GET fires, the audio waits in Chrome's
+  // queue for 10+ seconds.
+  setTimeout(() => { loadPlaylists(); loadSmartPlaylists(); }, 2000);
+  // restoreQueue FIRST so the audio media request gets connection slots before
+  // the home-view API calls.  Chrome allows max 6 HTTP/1.1 connections per host;
+  // firing the home view first filled all slots and delayed audio by 10+ s.
   restoreQueue(/*silent=*/true);
+  // Delay home-view launch by 500 ms — audio GET is in flight by then, so the
+  // remaining connection slots are enough for the home-view API calls.
+  setTimeout(_launchPinnedViewOrHome, 500);
   // Boot overlay dismiss — wait for audio seek (waveform position restored) or fall back.
   // Radio items are not preloaded on restore (no seek position) so skip the seeked wait.
   const _restoredSong = S.queue.length > 0 && S.idx >= 0 ? S.queue[S.idx] : null;
-  if (S.queue.length) {
-    _bootOnDismiss = () => _showInfoStrip('✓',
-      `<span class="dj-strip-label">${t('player.autodj.stripQueueRestored')}</span><span class="dj-strip-sep">·</span><span class="dj-strip-queued">${S.queue.length}</span><span class="dj-strip-title">&nbsp;${t('label.getLastSongs', {count: S.queue.length})}</span>`,
-      5000);
-  }
   if (_restoredSong && !_restoredSong.isRadio) {
     _bootMsg('Restoring your session\u2026');
     audioEl.addEventListener('seeked', function _onBootSeeked() {
@@ -15348,6 +15378,11 @@ function _onAudioError() {
   }
 }
 function _onAudioStalled() {
+  // readyState=0 means no bytes received yet — this is the normal initial-load state
+  // when the server is slow to respond. Calling audioEl.load() here would cancel the
+  // in-flight HTTP request and restart it, creating a retry loop that multiplies the
+  // load time. The error event covers genuine server-unreachable failures.
+  if (audioEl.readyState === 0) { return; }
   clearTimeout(_netRecoveryTimer);
   _netRecoveryTimer = setTimeout(() => {
     if (audioEl.readyState < 3) {

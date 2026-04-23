@@ -12,10 +12,79 @@ import WebError from '../util/web-error.js';
 const POINTS = 600;
 
 // PCM sample rate fed to ffmpeg.
-// 8000 Hz gives ~2400 raw samples per display bar on a 7-minute track —
-// enough that RMS naturally produces a smooth envelope without any extra
-// smoothing pass.  Low enough to decode fast.
-const SAMPLE_RATE = 8000;
+// 4000 Hz is sufficient for waveform visualisation — each of the 600 display
+// bars covers ~2400 raw samples on a 10-minute track (RMS naturally smooth).
+// Halved from 8000 Hz: ~2× faster ffmpeg decode for the same visual quality.
+const SAMPLE_RATE = 4000;
+
+// ── WAVEFORM GENERATION QUEUE ──────────────────────────────────────────────
+// Serialises ffmpeg spawns to at most _WF_MAX_CONCURRENT at a time.
+// Live requests (priority=1) are sorted ahead of background prefetch (priority=0).
+// In-flight dedup: if the same cacheHash is already generating, all callers
+// share the same Promise — no duplicate ffmpeg processes for the same file.
+const _WF_MAX_CONCURRENT = 2;  // 1 live + 1 prefetch can overlap; avoids stalling
+const _wfInFlight = new Map(); // cacheHash → { promise, priority }
+const _wfQueue    = [];        // { cacheHash, fullPath, cachePath, priority, resolve, reject }
+let   _wfRunning  = 0;
+
+function _wfDequeue() {
+  if (_wfRunning >= _WF_MAX_CONCURRENT || _wfQueue.length === 0) return;
+  _wfQueue.sort((a, b) => b.priority - a.priority); // high priority first
+  const job = _wfQueue.shift();
+  _wfRunning++;
+  _wfRunJob(job).finally(() => {
+    _wfRunning--;
+    _wfInFlight.delete(job.cacheHash);
+    _wfDequeue();
+  });
+}
+
+async function _wfRunJob(job) {
+  try {
+    const chunks = [];
+    await new Promise((resolve, reject) => {
+      const proc = spawn(ffmpegBin(), [
+        '-i', job.fullPath,
+        '-vn', '-ac', '1', '-ar', String(SAMPLE_RATE),
+        '-f', 'f32le', '-'
+      ], { stdio: ['ignore', 'pipe', 'ignore'] });
+      // Kill ffmpeg if client disconnected before we could deliver the result
+      job.killProc = () => { try { proc.kill('SIGKILL'); } catch (_e) {} };
+      proc.on('error', reject);
+      proc.stdout.on('data', chunk => chunks.push(chunk));
+      proc.stdout.on('end',  resolve);
+      proc.stdout.on('error', reject);
+    });
+    const buf      = Buffer.concat(chunks);
+    const f32      = new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4));
+    const waveform = downsample(f32, POINTS);
+    if (job.cachePath) {
+      try { fs.writeFileSync(job.cachePath, JSON.stringify(waveform)); } catch (_e) {}
+    }
+    job.resolve(waveform);
+  } catch (err) {
+    job.reject(err);
+  }
+}
+
+function _wfGenerate(cacheHash, fullPath, cachePath, priority = 0) {
+  if (_wfInFlight.has(cacheHash)) {
+    const entry = _wfInFlight.get(cacheHash);
+    // Upgrade priority in-queue if a live caller joins after a prefetch queued it
+    if (priority > entry.priority) {
+      entry.priority = priority;
+      const qe = _wfQueue.find(j => j.cacheHash === cacheHash);
+      if (qe) qe.priority = priority;
+    }
+    return entry.promise;
+  }
+  let resolve, reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  _wfInFlight.set(cacheHash, { promise, priority });
+  _wfQueue.push({ cacheHash, fullPath, cachePath, priority, resolve, reject });
+  _wfDequeue();
+  return promise;
+}
 
 /**
  * Downsample a Float32Array of PCM amplitudes into `count` points,
@@ -115,7 +184,7 @@ export function setup(mstream) {
       try {
         const cached = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
         return res.json({ waveform: cached });
-      } catch (_e) { /* corrupt cache — fall through to regenerate */ }
+      } catch (_e) { /* fall through to regenerate */ }
     }
 
     if (!fs.existsSync(ffmpegBin())) {
@@ -125,30 +194,23 @@ export function setup(mstream) {
       );
     }
 
-    // Run ffmpeg: decode to mono f32le PCM at SAMPLE_RATE Hz, pipe stdout
-    const chunks = [];
-    await new Promise((resolve, reject) => {
-      const proc = spawn(ffmpegBin(), [
-        '-i', pathInfo.fullPath,
-        '-vn', '-ac', '1', '-ar', String(SAMPLE_RATE),
-        '-f', 'f32le', '-'
-      ], { stdio: ['ignore', 'pipe', 'ignore'] });
+    // priority=1 for live requests; 0 for background prefetch (?prefetch=1)
+    const priority = req.query.prefetch === '1' ? 0 : 1;
 
-      proc.on('error', reject);
-      proc.stdout.on('data',  chunk => chunks.push(chunk));
-      proc.stdout.on('end',   resolve);
-      proc.stdout.on('error', reject);
+    // Enqueue (or join existing in-flight job) — shared Promise per cacheHash
+    let job;
+    const waveform = await new Promise((outerResolve, outerReject) => {
+      _wfGenerate(cacheHash, pathInfo.fullPath, cachePath, priority)
+        .then(outerResolve)
+        .catch(outerReject);
+      // If client disconnects before result arrives, try to abort the ffmpeg
+      req.on('close', () => {
+        job = _wfQueue.find(j => j.cacheHash === cacheHash);
+        if (job?.killProc) job.killProc();
+        outerReject(new Error('client disconnected'));
+      });
     });
 
-    const buf      = Buffer.concat(chunks);
-    const f32      = new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4));
-    const waveform = downsample(f32, POINTS);
-
-    // Persist to cache
-    if (cachePath) {
-      try { fs.writeFileSync(cachePath, JSON.stringify(waveform)); } catch (_e) {}
-    }
-
-    res.json({ waveform });
+    if (!res.writableEnded) res.json({ waveform });
   });
 }

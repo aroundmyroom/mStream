@@ -1435,16 +1435,15 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 
 /* ── DJ SIMILAR STRIP ───────────────────────────────────────── */
 .dj-similar-strip{position:fixed;left:var(--sidebar);right:0;bottom:var(--player);height:34px;display:flex;align-items:center;padding:0 14px 0 17px;background:var(--card);border-top:2px solid var(--border);box-shadow:0 -4px 20px rgba(109,40,217,.12);z-index:198;pointer-events:none;transform:translateY(100%);opacity:0;transition:transform .3s cubic-bezier(.22,1,.36,1),opacity .35s ease;--strip-dur:30000ms;}
-.dj-similar-strip::before{content:'';position:absolute;top:-2px;left:0;height:2px;width:0%;background:var(--primary);border-radius:0 2px 2px 0;}
-.dj-similar-strip.dj-strip-in::before{animation:dj-strip-progress var(--strip-dur) linear forwards;}
-@keyframes dj-strip-progress{from{width:0%}to{width:100%}}
+.dj-strip-close{pointer-events:all;flex-shrink:0;margin-left:10px;background:none;border:none;cursor:pointer;color:var(--t3);font-size:14px;line-height:1;padding:4px 6px;border-radius:4px;transition:color .15s,background .15s;}
+.dj-strip-close:hover{color:var(--t1);background:var(--raised);}
+
 .dj-similar-strip.dj-strip-in{transform:translateY(0);opacity:1;}
 .dj-similar-strip.dj-strip-out{transform:translateY(100%);opacity:0;transition:transform .5s ease,opacity .5s ease;}
 /* ── PLAYER BAR POSITION: TOP mode ────────────────────────── */
 :root.bar-top #app{grid-template-rows:var(--player) 1fr;grid-template-areas:"side player player" "side main queue";}
 :root.bar-top .player{background:linear-gradient(0deg,var(--surface) 0%,var(--raised) 100%);box-shadow:0 1px 0 rgba(139,92,246,.20),0 24px 60px rgba(0,0,0,.45),inset 0 -1px 0 rgba(139,92,246,.14);}
 :root.bar-top .dj-similar-strip{top:var(--player);bottom:auto;transform:translateY(-100%);border-top:none;border-bottom:2px solid var(--border);box-shadow:0 4px 20px rgba(109,40,217,.12);}
-:root.bar-top .dj-similar-strip::before{top:auto;bottom:-2px;}
 :root.bar-top .dj-similar-strip.dj-strip-out{transform:translateY(-100%);}
 :root.bar-top #dj-dice{bottom:auto;top:calc(var(--player) + 10px);}
 :root.bar-top .toast{bottom:auto;top:calc(var(--player) + 14px);}
@@ -1935,6 +1934,30 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .prog-track:hover #prog-thumb{width:15px;height:15px;box-shadow:0 1px 10px var(--primary-g);}
 /* When waveform data is loaded the canvas shows played/unplayed — hide the plain gradient bar */
 .prog-track.wf-active #prog-fill{background:transparent;}
+
+/* ── WAVEFORM LOADING SWEEP ─────────────────────────────────── */
+/* Animated shimmer overlaid on the progress track while waveform is generating */
+@keyframes wf-sweep {
+  0%   { background-position: -150% 0; }
+  100% { background-position: 150% 0; }
+}
+.prog-track.wf-loading::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0.3;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--primary) 50%,
+    transparent 100%
+  );
+  background-size: 60% 100%;
+  animation: wf-sweep 1.5s linear infinite;
+}
 
 /* ── GENRE VIEW ─────────────────────────────────────────────── */
 .genre-sections{padding:16px 16px 8px;display:flex;flex-direction:column;gap:8px;}
