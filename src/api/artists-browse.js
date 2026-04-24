@@ -882,7 +882,7 @@ export function setup(mstream) {
   // ── POST /api/v1/admin/artists/hydration-seed ─────────────────────────────
   mstream.post('/api/v1/admin/artists/hydration-seed', (req, res) => {
     if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
-    const schema = Joi.object({ limit: Joi.number().integer().min(1).max(9999).default(500) });
+    const schema = Joi.object({ limit: Joi.number().integer().min(1).max(100000).default(500) });
     try { joiValidate(schema, req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
 
     try {
@@ -896,7 +896,7 @@ export function setup(mstream) {
 
   mstream.post('/api/v1/admin/artists/hydrate-tadb-noimage', (req, res) => {
     if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
-    const schema = Joi.object({ limit: Joi.number().integer().min(1).max(9999).default(500) });
+    const schema = Joi.object({ limit: Joi.number().integer().min(1).max(100000).default(500) });
     try { joiValidate(schema, req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
 
     try {

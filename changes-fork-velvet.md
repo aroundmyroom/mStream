@@ -1,5 +1,11 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.12.9-velvet — April 2026 — Hydration queue limit fix
+
+### fix: Artist hydration "Queue All" button fails with 400 for libraries > 9999 missing artists
+- Joi `max` for `limit` raised from `9999` → `100000` in both `POST /api/v1/admin/artists/hydration-seed` and `POST /api/v1/admin/artists/hydrate-tadb-noimage`
+- The admin UI "Queue All" button passes `counts.missing` directly as the limit; users with 10 000+ artists waiting received a `"limit" must be less than or equal to 9999` 400 error
+
 ## v6.12.8-velvet — Search performance fix
 
 ### fix: Search — FTS5 query optimisation (was hanging on large libraries)
