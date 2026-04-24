@@ -32,7 +32,7 @@ const CACHE_TTL      = 5 * 60 * 1000; // 5 minutes
 const ARTIST_IMG_DIR = path.join(process.cwd(), 'image-cache', 'artists');
 const ARTIST_IMG_SIZE = 400; // square JPEG size for stored artist images
 const HYDRATE_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours
-const HYDRATE_QUEUE_LIMIT = 800;
+const HYDRATE_QUEUE_LIMIT = 2000;
 const HYDRATE_DELAY_OK_MS = 1400;
 const HYDRATE_DELAY_IDLE_MS = 2200;
 const HYDRATE_DELAY_ERR_MS = 4000;
@@ -172,11 +172,15 @@ function downloadBuffer(url) {
   });
 }
 
-function downloadJson(url, headers = null) {
+function downloadJson(url, headers = null, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith('https') ? https : http;
-    const req = mod.get(url, headers ? { headers } : undefined, res => {
-      if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+    const opts = { headers: { connection: 'close', ...(headers || {}) } };
+    const req = mod.get(url, opts, res => {
+      if (res.statusCode !== 200) {
+        res.resume(); // drain to free socket
+        return reject(new Error(`HTTP ${res.statusCode}`));
+      }
       const chunks = [];
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
@@ -187,6 +191,9 @@ function downloadJson(url, headers = null) {
         }
       });
       res.on('error', reject);
+    });
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`Request timeout after ${timeoutMs}ms: ${url}`));
     });
     req.on('error', reject);
   });
@@ -325,6 +332,17 @@ async function fetchFromLastfm(artistName) {
   }
 }
 
+async function fetchFromTheAudioDB(artistName) {
+  try {
+    const url = `https://www.theaudiodb.com/api/v1/json/2/search.php?s=${encodeURIComponent(artistName)}`;
+    const data = await downloadJson(url);
+    const imgUrl = data?.artists?.[0]?.strArtistThumb || null;
+    return imgUrl || null;
+  } catch (_e) {
+    return null;
+  }
+}
+
 async function fetchFromMusicBrainz(artistName) {
   const url = `https://musicbrainz.org/ws/2/artist?query=${encodeURIComponent(artistName)}&fmt=json&limit=1`;
   try {
@@ -351,7 +369,7 @@ async function saveArtistImage(artistKey, imageUrl) {
     const buf     = await downloadBuffer(imageUrl);
     const outName = artistKey.replace(/[^a-z0-9_-]/g, '_') + '.jpg';
     const outPath = path.join(ARTIST_IMG_DIR, outName);
-    await sharp(buf).resize(ARTIST_IMG_SIZE, ARTIST_IMG_SIZE, { fit: 'cover' }).jpeg({ quality: 85 }).toFile(outPath);
+    await sharp(buf).resize(ARTIST_IMG_SIZE, ARTIST_IMG_SIZE, { fit: 'cover', position: 'top' }).jpeg({ quality: 85 }).toFile(outPath);
     return outName;
   } catch (_e) {
     return null;
@@ -371,9 +389,13 @@ async function _hydrateArtistImage(artistKey, canonicalName) {
   if (!row || row.imageFile) return 'skip';
   if (row.lastFetched) return 'skip';
 
-  // Prefer Discogs for artist photos; use Last.fm only as fallback.
+  // Prefer Discogs for artist photos; use TheAudioDB and Last.fm as fallbacks.
   let imageUrl = await fetchArtistImageFromDiscogs(row.canonicalName);
   let source = 'discogs';
+  if (!imageUrl) {
+    imageUrl = await fetchFromTheAudioDB(row.canonicalName);
+    source = 'theaudiodb';
+  }
   if (!imageUrl) {
     const result = await fetchFromLastfm(row.canonicalName);
     imageUrl = result?.imageUrl || null;
@@ -414,6 +436,55 @@ function _enqueueHydration(artistKey, canonicalName) {
   _imgHydrateStats.enqueued += 1;
 }
 
+// Enqueue a no-image artist for a TheAudioDB-only retry pass.
+function _enqueueHydrationTadb(artistKey, canonicalName) {
+  const key = String(artistKey || '').toLowerCase().trim();
+  // Use a tadb-namespaced key so it doesn't collide with normal queue entries
+  const qKey = 'tadb:' + key;
+  if (!key || _imgHydrateQueued.has(qKey)) return;
+  if (_imgHydrateQueue.length >= HYDRATE_QUEUE_LIMIT) {
+    _imgHydrateStats.dropped += 1;
+    return;
+  }
+  _imgHydrateQueued.add(qKey);
+  _imgHydrateQueue.push({ artistKey: key, canonicalName, tadbOnly: true });
+  _imgHydrateStats.enqueued += 1;
+}
+
+// Retry artists that previously got no-image, using TheAudioDB only.
+async function _hydrateArtistImageTadb(artistKey, canonicalName) {
+  const key = String(artistKey || '').toLowerCase().trim();
+  if (!key) return 'skip';
+
+  const now = Date.now();
+  const lastTry = _imgHydrateLastTry.get('tadb:' + key) || 0;
+  if (now - lastTry < HYDRATE_COOLDOWN_MS) return 'skip';
+  _imgHydrateLastTry.set('tadb:' + key, now);
+
+  const row = db.getArtistRow(canonicalName || artistKey);
+  if (!row || row.imageFile) return 'skip'; // already has image now
+
+  const imageUrl = await fetchFromTheAudioDB(row.canonicalName);
+  if (!imageUrl) {
+    db.markArtistFetchAttempt(row.canonicalName); // update lastFetched timestamp
+    return 'no-image';
+  }
+
+  const imageFile = await saveArtistImage(row.artistKey, imageUrl);
+  if (!imageFile) {
+    db.markArtistFetchAttempt(row.canonicalName);
+    return 'failed';
+  }
+
+  db.saveArtistInfo(row.canonicalName, {
+    bio: row.bio || null,
+    imageFile,
+    imageSource: 'theaudiodb',
+  });
+  invalidateArtistCache();
+  return 'success';
+}
+
 function _queueHomeImageHydration(stats) {
   const top = (stats.topArtists || []).slice(0, 50);
   const recent = (stats.recentArtists || []).slice(0, 50);
@@ -452,7 +523,9 @@ async function _drainHydrationQueue() {
       if (!item) continue;
       _imgHydrateQueued.delete(item.artistKey);
       try {
-        const result = await _hydrateArtistImage(item.artistKey, item.canonicalName);
+        const result = item.tadbOnly
+          ? await _hydrateArtistImageTadb(item.artistKey, item.canonicalName)
+          : await _hydrateArtistImage(item.artistKey, item.canonicalName);
         _imgHydrateStats.processed += 1;
         if (result === 'success') {
           _imgHydrateStats.succeeded += 1;
@@ -506,6 +579,18 @@ function seedHydrationFromMissing(limit = 500) {
   for (const a of rows) {
     const before = _imgHydrateQueue.length;
     _enqueueHydration(a, a);
+    if (_imgHydrateQueue.length > before) enqueued += 1;
+  }
+  _drainHydrationQueue().catch(() => {});
+  return enqueued;
+}
+
+function seedHydrationFromNoImage(limit = 500) {
+  const rows = db.getArtistsForTadbRetry(Math.max(1, Math.min(2000, Number(limit) || 500)));
+  let enqueued = 0;
+  for (const a of rows) {
+    const before = _imgHydrateQueue.length;
+    _enqueueHydrationTadb(a, a);
     if (_imgHydrateQueue.length > before) enqueued += 1;
   }
   _drainHydrationQueue().catch(() => {});
@@ -604,6 +689,24 @@ export function setup(mstream) {
       res.json({ artists });
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── GET /api/v1/artists/image?artist= ────────────────────────────────────
+  // Lightweight endpoint used by Playing Now to get the cached local image
+  // for a given artist name (raw tag value). Returns { imageFile } if we have
+  // one cached, or {} if not (and enqueues hydration so next call may have it).
+  mstream.get('/api/v1/artists/image', (req, res) => {
+    const name = req.query.artist;
+    if (!name || typeof name !== 'string') return res.json({});
+    try {
+      const row = db.getArtistRowByName(String(name).trim());
+      if (row?.imageFile) return res.json({ imageFile: row.imageFile });
+      // No image yet — enqueue hydration and return empty so client shows nothing
+      if (row) _enqueueHydration(row.artistKey, row.canonicalName);
+      res.json({});
+    } catch (_e) {
+      res.json({});
     }
   });
 
@@ -779,11 +882,25 @@ export function setup(mstream) {
   // ── POST /api/v1/admin/artists/hydration-seed ─────────────────────────────
   mstream.post('/api/v1/admin/artists/hydration-seed', (req, res) => {
     if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
-    const schema = Joi.object({ limit: Joi.number().integer().min(1).max(2000).default(500) });
+    const schema = Joi.object({ limit: Joi.number().integer().min(1).max(9999).default(500) });
     try { joiValidate(schema, req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
 
     try {
       const enqueued = seedHydrationFromMissing(req.body?.limit || 500);
+      const counts = db.getArtistImageAuditCounts();
+      res.json({ ok: true, enqueued, ...hydrationStatusSnapshot(), counts });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  mstream.post('/api/v1/admin/artists/hydrate-tadb-noimage', (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const schema = Joi.object({ limit: Joi.number().integer().min(1).max(9999).default(500) });
+    try { joiValidate(schema, req.body || {}); } catch (e) { return res.status(400).json({ error: e.message }); }
+
+    try {
+      const enqueued = seedHydrationFromNoImage(req.body?.limit || 500);
       const counts = db.getArtistImageAuditCounts();
       res.json({ ok: true, enqueued, ...hydrationStatusSnapshot(), counts });
     } catch (err) {
@@ -802,6 +919,34 @@ export function setup(mstream) {
 
     try {
       const candidates = await searchDiscogsArtistCandidates(artistRow.canonicalName, 10);
+      res.json({ artistKey: artistRow.artistKey, canonicalName: artistRow.canonicalName, candidates });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── GET /api/v1/admin/artists/tadb-candidates?artistKey= ─────────────────
+  mstream.get('/api/v1/admin/artists/tadb-candidates', async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    const artistKey = String(req.query.artistKey || '');
+    if (!artistKey) return res.status(400).json({ error: 'Missing artistKey' });
+
+    const artistRow = db.getArtistRow(artistKey);
+    if (!artistRow) return res.status(404).json({ error: 'Artist not found' });
+
+    try {
+      const url = `https://www.theaudiodb.com/api/v1/json/2/search.php?s=${encodeURIComponent(artistRow.canonicalName)}`;
+      const data = await downloadJson(url);
+      const artists = Array.isArray(data?.artists) ? data.artists : [];
+      const candidates = artists.slice(0, 6).map(a => ({
+        id:        a.idArtist || null,
+        title:     a.strArtist || artistRow.canonicalName,
+        imageUrl:  a.strArtistThumb || null,
+        thumbUrl:  a.strArtistThumb || null,
+        genre:     a.strGenre || null,
+        country:   a.strCountry || null,
+        sourceUrl: a.strArtistThumb ? `https://www.theaudiodb.com/artist/${a.idArtist}` : null,
+      })).filter(c => c.imageUrl);
       res.json({ artistKey: artistRow.artistKey, canonicalName: artistRow.canonicalName, candidates });
     } catch (err) {
       res.status(500).json({ error: err.message });

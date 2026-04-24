@@ -1,5 +1,72 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.12.7-velvet — April 2026 — Playing Now, Artist Images & DLNA Polish
+
+### feat: Playing Now view — full redesign
+- Hero section with blurred album-art background, album art thumbnail, song title/artist/album overlay
+- Artist image loaded from local cache via new `GET /api/v1/artists/image?artist=` endpoint; enqueues hydration if not yet cached
+- Bio from Last.fm via new `GET /api/v1/lastfm/artist-info` endpoint; collapsible with "Read more" button
+- Similar-artists chip list (highlighted for in-library artists; click to navigate to profile)
+- Album grid for library albums by the current artist
+- Smooth fade transition on song change
+
+### feat: Artist image — TheAudioDB source + top-crop
+- **TheAudioDB** added as image source between Discogs and Last.fm
+- `sharp` resize now uses `position: 'top'` — portrait photos no longer cut off the head
+- `object-position: top` CSS on Playing Now artist image and artist profile image
+- Hydration queue limit raised 800 → 2000; seed endpoint max raised to 9999
+- New admin endpoint: `POST /api/v1/admin/artists/hydrate-tadb-noimage` (retry no-image artists via TheAudioDB only)
+- New admin endpoint: `GET /api/v1/admin/artists/tadb-candidates?artistKey=` (preview TADB images before applying)
+- `downloadJson` now has configurable timeout, `connection: close` header, socket drain on non-200 responses
+- `getArtistRowByName(name)` — resolves raw ID3 tag values (including featuring variants) to canonical artist row
+
+### feat: Artist profile page — Similar Artists above albums
+- Similar Artists section moved above the album library
+
+### feat: CUE sheet chapter navigation for all files
+- On-demand CUE extraction for files with `cuepoints IS NULL` (newly added or sidecar `.cue` added post-scan); supports embedded CUESHEET tag and sidecar `.cue` files; stores `[]` sentinel to avoid re-probing
+- Chapter nav buttons (`ab-prev-chap-btn` / `ab-next-chap-btn`) and chapter-indicator bar now activate for **any** file with ≥ 2 cuepoints, not just audiobook-vpath files
+
+### fix: AcoustID processed count no longer resets on every restart
+- Worker wrote `status='found'` even when `mbid=null` (fingerprint matched but no MusicBrainz recording linked). Startup migration was re-queuing ~4 000 such rows on every restart.
+- Fix: worker now writes `status='not_found'` when `mbid` is null; startup migration is a true no-op.
+
+### fix: MusicBrainz worker — DB write retry + WAL
+- DB write retry loop up to 3 minutes on `SQLITE_BUSY`; WAL mode + `busy_timeout=60 000 ms`; pending rows reset at startup
+
+### feat: Last.fm artist resolution for Auto-DJ + artist-info endpoint
+- `resolveArtistNamesForDJ()` normalises `&` ↔ `and` so Last.fm names match library artists
+- New `GET /api/v1/lastfm/artist-info` returns bio (HTML stripped), genre tags, listener/play counts
+
+### fix: Subsonic timing-safe password comparison
+- `_constantTimeEqual()` using `crypto.timingSafeEqual` for both token and plaintext auth paths
+
+### feat: DLNA polish
+- Invalid XML sanitiser strips C0 control chars and UTF-16 surrogates from DIDL metadata
+- Audiobook `upnp:class` (`object.item.audioItem.audioBook`) for tracks in audio-books vpaths
+- MP3 inputs use `-c:a copy` passthrough (no re-encode)
+- HEAD probe support for Sony/Marantz renderers
+
+### fix: SSRF hardening — full IPv6 coverage (podcasts & radio)
+- Added IPv6 loopback, ULA, link-local, IPv4-mapped IPv6, and APIPA blocking
+
+### feat: Artist Library — list / comfy / compact density toggle
+- Three view modes with localStorage persistence per user
+
+### fix: FTS5 search — wrap queries in double-quotes
+- Prevents syntax errors on names with `.`, `(`, `)`, `*`, `-`; enforces 3-char minimum
+
+### fix: Child-vpath access control
+- `computeChildExclusions()` automatically excludes child sub-folders from DB queries for users without access
+
+### fix: Scanner — Recently Added timestamp
+- `_isReindex` only set for stale files; new files use wall-clock ts
+
+### chore: Branding — "mStream Velvet" everywhere
+- All 12 locale files, HTML titles, admin UI updated from bare "mStream" to "mStream Velvet"
+
+**Files changed**: `src/api/artists-browse.js`, `src/api/db.js`, `src/api/dlna.js`, `src/api/podcasts.js`, `src/api/radio.js`, `src/api/scrobbler.js`, `src/api/subsonic.js`, `src/db/manager.js`, `src/db/scanner.mjs`, `src/db/sqlite-backend.js`, `src/state/lastfm.js`, `src/util/acoustid-worker.mjs`, `src/util/mb-enrich-worker.mjs`, `webapp/admin/index.js`, `webapp/app.js`, `webapp/style.css`, all locale files, HTML files
+
 ## v6.12.6-velvet — April 2026 — Page-Load Performance Fix
 
 ### fix: 14-second audio delay on page refresh — root cause eliminated

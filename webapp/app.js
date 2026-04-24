@@ -213,7 +213,8 @@ const _wfPrefetchPending = []; // filepaths queued for background pre-generation
 let   _wfPrefetching     = false; // true while one async prefetch is in flight
 let   _wfPrefetchAbort   = null;  // AbortController for the currently in-flight prefetch fetch
 let   _wfFetchAbort      = null;  // AbortController for the current live waveform fetch
-let _cuePoints         = [];    // cue sheet track markers for the current file
+let _cuePoints         = [];    // cue sheet track markers for the current file (t>0 only)
+let _cueTrack1Title    = '';    // title of track 1 (t=0 entry, filtered from _cuePoints)
 let _cueMarkersRendered = false; // true once tick marks have been drawn for current file
 let _abChapThrottle    = 0;     // timestamp for chapter bar 1-Hz throttle
 let analyserL    = null;   // left-channel analyser
@@ -883,7 +884,7 @@ const Player = {
       _applyRGGain(s);
       _fetchWaveform(s.filepath);
     } else {
-      _cuePoints = []; ['cue-markers','np-cue-markers'].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ''; });
+      _cuePoints = []; _cueTrack1Title = ''; ['cue-markers','np-cue-markers'].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ''; });
     }
     this.updateBar();
     highlightRow();
@@ -5428,7 +5429,7 @@ async function viewArtists() {
 
     function _openArtist(akey, aname) {
       const variants = _varMap.get(akey) || [aname];
-      viewArtistAlbums(aname, variants.filter(Boolean), () => viewArtists());
+      viewArtistProfile(akey, aname, variants.filter(Boolean), () => viewArtists());
     }
 
     function _setArtistFiltering(active) {
@@ -5527,8 +5528,13 @@ async function viewArtists() {
           <input id="art-search" class="fe-filter-input" type="text" placeholder="${t('player.artists.searchAllPlaceholder', { count: totalCount.toLocaleString() })}" autocomplete="off">
           <span id="art-match-count" class="fe-match-count"></span>
           <button id="art-search-clear" class="fe-filter-clear hidden" title="${t('player.ctrl.clear')}">✕</button>
+          <div class="allib-view-controls">
+            <button class="allib-density-btn" data-art-density="list" title="${t('player.artists.densityList')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="1" width="14" height="2" rx="1"/><rect x="0" y="6" width="14" height="2" rx="1"/><rect x="0" y="11" width="14" height="2" rx="1"/></svg></button>
+            <button class="allib-density-btn" data-art-density="comfy" title="${t('player.artists.densityComfy')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="6" height="6" rx="1"/><rect x="8" y="0" width="6" height="6" rx="1"/><rect x="0" y="8" width="6" height="6" rx="1"/><rect x="8" y="8" width="6" height="6" rx="1"/></svg></button>
+            <button class="allib-density-btn" data-art-density="compact" title="${t('player.artists.densityCompact')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="4" height="4" rx=".5"/><rect x="5" y="0" width="4" height="4" rx=".5"/><rect x="10" y="0" width="4" height="4" rx=".5"/><rect x="0" y="5" width="4" height="4" rx=".5"/><rect x="5" y="5" width="4" height="4" rx=".5"/><rect x="10" y="5" width="4" height="4" rx=".5"/><rect x="0" y="10" width="4" height="4" rx=".5"/><rect x="5" y="10" width="4" height="4" rx=".5"/><rect x="10" y="10" width="4" height="4" rx=".5"/></svg></button>
+          </div>
         </div>
-        <div id="art-letter-results" class="artist-list"></div>
+        <div id="art-letter-results"></div>
       </div>
       ${shelves}
     </div>`;
@@ -5587,9 +5593,24 @@ async function viewArtists() {
       btn.addEventListener('click', (ev) => _markArtistImageWrong(btn.dataset.akey, btn.dataset.aname, ev));
     });
 
+    // ── density preference ─────────────────────────────────────────────────
+    const _ART_DENSITY_KEY = `ms2_art_density_${S.username || ''}`;
+    let curDensity = localStorage.getItem(_ART_DENSITY_KEY) || 'list';
+
+    function _applyDensity(density) {
+      curDensity = density;
+      localStorage.setItem(_ART_DENSITY_KEY, density);
+      resultsEl.className = density === 'list' ? 'artist-list'
+        : density === 'comfy' ? 'artist-grid artist-grid--comfy'
+        : 'artist-grid artist-grid--compact';
+      body.querySelectorAll('[data-art-density]').forEach(b =>
+        b.classList.toggle('active', b.dataset.artDensity === density)
+      );
+    }
+
     // ── render artist list rows (letter/search results) ────────────────────
     function renderArtistRows(artists) {
-      _storeVariants(artists); // cache variants for click handling
+      _storeVariants(artists);
       return artists.filter(a => a.canonicalName).map(a => {
         const av = a.canonicalName.replace(/^The\s+/i, '').charAt(0).toUpperCase() || '?';
         const sub = a.songCount ? `${a.songCount} song${a.songCount !== 1 ? 's' : ''}` : '';
@@ -5608,9 +5629,21 @@ async function viewArtists() {
       }).join('');
     }
 
-    function bindRows(container) {
+    function renderArtistCards(artists) {
+      _storeVariants(artists);
+      return artists.filter(a => a.canonicalName).map(a => artistCard(a)).join('');
+    }
+
+    function renderArtistResults(artists) {
+      return curDensity === 'list' ? renderArtistRows(artists) : renderArtistCards(artists);
+    }
+
+    function bindResults(container) {
       container.querySelectorAll('.artist-row').forEach(row => {
         row.addEventListener('click', () => _openArtist(row.dataset.akey, row.dataset.aname));
+      });
+      container.querySelectorAll('.artist-home-card').forEach(card => {
+        card.addEventListener('click', () => _openArtist(card.dataset.akey, card.dataset.aname));
       });
       container.querySelectorAll('.artist-wrong-btn').forEach(btn => {
         btn.addEventListener('mousedown', (ev) => { ev.preventDefault(); ev.stopPropagation(); });
@@ -5621,6 +5654,22 @@ async function viewArtists() {
 
     // ── letter pills ───────────────────────────────────────────────────────
     const resultsEl   = body.querySelector('#art-letter-results');
+
+    // Apply saved density on load
+    _applyDensity(curDensity);
+
+    // Density button clicks
+    body.querySelectorAll('[data-art-density]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _applyDensity(btn.dataset.artDensity);
+        // Re-render current results under new density
+        const currentArtists = resultsEl._lastArtists;
+        if (currentArtists && currentArtists.length) {
+          resultsEl.innerHTML = renderArtistResults(currentArtists);
+          bindResults(resultsEl);
+        }
+      });
+    });
     const searchInput = body.querySelector('#art-search');
     const searchClear = body.querySelector('#art-search-clear');
     const matchCount  = body.querySelector('#art-match-count');
@@ -5634,10 +5683,11 @@ async function viewArtists() {
       resultsEl.innerHTML = '<div class="loading-state" style="height:60px;padding:16px 0"></div>';
       try {
         const d = await api('GET', `api/v1/artists/letter?l=${encodeURIComponent(letter)}`);
-        const rows = renderArtistRows(d.artists || []);
-        if (!rows) { resultsEl.innerHTML = '<div class="fe-match-count" style="padding:8px 2px">No artists found</div>'; return; }
-        resultsEl.innerHTML = rows;
-        bindRows(resultsEl);
+        const artists = d.artists || [];
+        resultsEl._lastArtists = artists;
+        if (!artists.length) { resultsEl.innerHTML = '<div class="fe-match-count" style="padding:8px 2px">No artists found</div>'; return; }
+        resultsEl.innerHTML = renderArtistResults(artists);
+        bindResults(resultsEl);
         body.scrollTop = 0;
       } catch(e) {
         if (e.name !== 'AbortError') resultsEl.innerHTML = `<div class="fe-match-count" style="padding:8px 2px">Error: ${esc(e.message)}</div>`;
@@ -5676,9 +5726,10 @@ async function viewArtists() {
         const d = await api('GET', `api/v1/artists/search?q=${encodeURIComponent(q)}`);
         const artists = (d.artists || []).filter(a => a.canonicalName);
         matchCount.textContent = artists.length ? `${artists.length} result${artists.length !== 1 ? 's' : ''}` : 'No results';
+        resultsEl._lastArtists = artists;
         if (!artists.length) { resultsEl.innerHTML = ''; return; }
-        resultsEl.innerHTML = renderArtistRows(artists);
-        bindRows(resultsEl);
+        resultsEl.innerHTML = renderArtistResults(artists);
+        bindResults(resultsEl);
       } catch(e) { if (e.name !== 'AbortError') resultsEl.innerHTML = ''; }
     }
 
@@ -5731,6 +5782,152 @@ async function viewArtistAlbums(displayName, variantsOrBackFn, backFn) {
     };
     renderAlbumGrid(allAlbums, displayName, variants, restoreFullArtistView, displayName);
   } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
+}
+
+// ── ARTIST PROFILE PAGE ──────────────────────────────────────────────────────
+// Full profile: artist image (left) + bio (right) + albums + similar artists.
+// Reuses pnow-* CSS classes so layout matches Playing Now.
+async function viewArtistProfile(artistKey, displayName, variants, backFn) {
+  const back = backFn || (() => viewArtists());
+  setTitle(displayName);
+  setBack(back);
+  setNavActive('artists');
+  S.view = 'artist-profile';
+  const sig = _navCancel();
+
+  const body = document.getElementById('content-body');
+  body.innerHTML = `<div class="artpro-view pnow-view pnow-fading">
+    <div class="artpro-header">
+      <div class="artpro-img-wrap" id="artpro-img-wrap"><div class="artpro-img-ph"></div></div>
+      <div class="artpro-info">
+        <div class="artpro-name">${esc(displayName)}</div>
+        <div class="pnow-bio" id="artpro-bio"></div>
+        <button class="pnow-bio-more hidden" id="artpro-bio-more">${t('player.pnow.readMore')}</button>
+      </div>
+    </div>
+    <div class="artpro-body">
+      <div class="pnow-section-title" id="artpro-sim-title"></div>
+      <div class="pnow-sim-list" id="artpro-sim"></div>
+      <div class="pnow-section-title" id="artpro-albums-title">${t('player.pnow.inYourLibrary')}</div>
+      <div class="pnow-albums" id="artpro-albums"><div class="loading-state" style="height:80px;padding:16px 0"></div></div>
+    </div>
+  </div>`;
+
+  requestAnimationFrame(() => {
+    const el = body.querySelector('.artpro-view');
+    if (el) { el.classList.remove('pnow-fading'); el.classList.add('pnow-visible'); }
+  });
+
+  // Used when navigating into an album — back returns to this profile
+  const goBack = () => viewArtistProfile(artistKey, displayName, variants, backFn);
+
+  // Load profile (image + DB bio) and albums in parallel
+  const [profileRes, albumsRes] = await Promise.allSettled([
+    api('GET', `api/v1/artists/profile?key=${encodeURIComponent(artistKey)}`, undefined, sig),
+    api('POST', 'api/v1/db/artists-albums-multi', { artists: variants || [displayName] }, sig),
+  ]);
+  if (S.view !== 'artist-profile') return;
+
+  const profile = profileRes.status === 'fulfilled' ? profileRes.value : null;
+
+  // ── Artist image ────────────────────────────────────────────────────────
+  const wrap = document.getElementById('artpro-img-wrap');
+  if (wrap && profile?.imageFile) {
+    wrap.innerHTML = `<img class="artpro-img" src="api/v1/artists/images/${encodeURIComponent(profile.imageFile)}" alt="${esc(displayName)}" loading="lazy" onerror="this.parentNode.innerHTML=''">`;
+  }
+
+  // ── Bio helper ──────────────────────────────────────────────────────────
+  const bioEl   = document.getElementById('artpro-bio');
+  const bioMore = document.getElementById('artpro-bio-more');
+  function _applyBio(bioText) {
+    if (!bioText || !bioEl) return;
+    bioEl.textContent = bioText;
+    if (bioEl.scrollHeight > bioEl.clientHeight + 4 && bioMore) {
+      bioMore.classList.remove('hidden');
+      bioMore.onclick = () => {
+        bioEl.classList.toggle('expanded');
+        bioMore.textContent = bioEl.classList.contains('expanded')
+          ? t('player.pnow.readLess') : t('player.pnow.readMore');
+      };
+    }
+  }
+  if (profile?.bio) _applyBio(profile.bio);
+
+  // ── Albums ──────────────────────────────────────────────────────────────
+  const albumsEl    = document.getElementById('artpro-albums');
+  const albumsTitle = document.getElementById('artpro-albums-title');
+  const albums = albumsRes.status === 'fulfilled' ? (albumsRes.value?.albums || []) : [];
+  if (albums.length && albumsEl) {
+    albumsEl.innerHTML = albums.map(alb => {
+      const albArtU = artUrl(alb.album_art_file, 's');
+      const albArtHtml = albArtU
+        ? `<img src="${albArtU}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`
+        : noArtHtml();
+      return `<div class="album-card" data-alb-idx="${albums.indexOf(alb)}">
+        <div class="album-art">${albArtHtml}<div class="play-ov"><svg width="24" height="24" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div>
+        <div class="album-meta"><div class="album-name">${esc(alb.name || '—')}</div>${alb.year ? `<div class="album-year">${alb.year}</div>` : ''}</div>
+      </div>`;
+    }).join('');
+    albumsEl.querySelectorAll('.album-card').forEach((card, i) => {
+      card.addEventListener('click', () => {
+        const alb = albums[i];
+        viewAlbumSongs(alb.name, displayName, goBack, {
+          albumDir: alb.dir,
+          artistVariants: variants || [displayName],
+          skipAOFilter: true,
+        });
+      });
+    });
+  } else if (albumsEl) {
+    albumsEl.innerHTML = `<p style="color:var(--t3);font-size:13px;">${t('player.pnow.noAlbums')}</p>`;
+  }
+
+  // ── Last.fm: bio fallback + similar artists ──────────────────────────────
+  if (!S.lastfmHasApiKey) return;
+  try {
+    const [bioData, simData] = await Promise.all([
+      api('GET', `api/v1/lastfm/artist-info?artist=${encodeURIComponent(displayName)}`),
+      api('GET', `api/v1/lastfm/similar-artists?artist=${encodeURIComponent(displayName)}`),
+    ]);
+    if (S.view !== 'artist-profile') return;
+
+    // Bio fallback: use Last.fm if DB had no bio
+    if (!profile?.bio && bioData?.bio) {
+      _applyBio(bioData.bio.trim());
+    }
+    if (bioData?.listeners && bioEl) {
+      const note = document.createElement('p');
+      note.style.cssText = 'font-size:11px;color:var(--t3);margin-top:6px;';
+      note.textContent = t('player.pnow.listeners', { n: Number(bioData.listeners).toLocaleString() });
+      bioEl.after(note);
+    }
+
+    // Similar artists chips
+    const simArtists = simData?.artists || [];
+    const simEl    = document.getElementById('artpro-sim');
+    const simTitle = document.getElementById('artpro-sim-title');
+    if (simArtists.length && simEl && simTitle) {
+      simTitle.textContent = t('player.pnow.similarArtists');
+      let inLibrarySet = new Set();
+      try {
+        const libCheck = await api('POST', 'api/v1/db/songs-by-artists', { artists: simArtists.slice(0, 12), limit: 24 });
+        if (S.view !== 'artist-profile') return;
+        for (const row of libCheck) {
+          const a = row.metadata?.artist || row.artist;
+          if (a) inLibrarySet.add(a.toLowerCase());
+        }
+      } catch (_e) { /* ignore */ }
+      simEl.innerHTML = simArtists.slice(0, 12).map(a =>
+        `<button class="pnow-sim-chip${inLibrarySet.has(a.toLowerCase()) ? ' in-library' : ''}">${esc(a)}</button>`
+      ).join('');
+      simEl.querySelectorAll('.pnow-sim-chip').forEach((chip, i) => {
+        chip.addEventListener('click', () => {
+          const a = simArtists[i];
+          viewArtistProfile(a.toLowerCase(), a, [a], goBack);
+        });
+      });
+    }
+  } catch (_e) { /* Last.fm unavailable */ }
 }
 
 // ── ALBUM LIBRARY (Albums New) ────────────────────────────────────────────────
@@ -7043,7 +7240,7 @@ async function doSearch(q) {
 
     res.querySelectorAll('.artist-row[data-artist-disp]').forEach(r => {
       let vars; try { vars = JSON.parse(r.dataset.artistVariants); } catch { vars = [r.dataset.artistDisp]; }
-      r.addEventListener('click', () => viewArtistAlbums(r.dataset.artistDisp, vars, () => viewSearch()));
+      r.addEventListener('click', () => viewArtistProfile(r.dataset.artistDisp.toLowerCase(), r.dataset.artistDisp, vars, () => viewSearch()));
     });
     res.querySelectorAll('.artist-row[data-browse-path]').forEach(r => r.addEventListener('click', () => {
       S.feSearchReturn = () => viewSearch();
@@ -7108,6 +7305,7 @@ async function viewPlayed() {
 // Launches the user's pinned start view, or falls back to Home if none is set.
 function _launchPinnedViewOrHome() {
   const v = S.pinnedView;
+  if (v === 'playing-now')  { viewPlayingNow(); return; }
   if (v === 'shortcuts')    { viewShortcuts(); return; }
   if (v === 'search')       { viewSearch(); return; }
   if (v === 'files')        { S.feDirStack = []; S.feFilter = ''; viewFiles('', false); return; }
@@ -7118,6 +7316,268 @@ function _launchPinnedViewOrHome() {
   if (v === 'decades')      { viewDecades(); return; }
   if (v === 'autodj')       { viewAutoDJ(); return; }
   viewHome(); // default — 'home' or no pin set
+}
+
+// ── PLAYING NOW VIEW ──────────────────────────────────────────────────────────
+// Full-page "Spotify-style" view for the currently playing track:
+//   hero (big art + title + artist), metadata table, artist bio (Last.fm),
+//   albums from library, similar artists.
+let _pnowSongFp    = null;  // filepath of song currently rendered in view
+let _pnowArtist    = null;  // artist string currently rendered
+let _pnowViewActive = false; // true while this view is shown
+
+async function viewPlayingNow() {
+  setTitle(t('player.nav.playingNow'));
+  setBack(null);
+  setNavActive('playing-now');
+  S.view = 'playing-now';
+  _pnowViewActive = true;
+  await _renderPlayingNow();
+}
+
+async function _renderPlayingNow(fade) {
+  if (S.view !== 'playing-now') return;
+  const body = document.getElementById('content-body');
+  if (!body) return;
+
+  const s = S.queue[S.idx] || null;
+
+  // ── Nothing playing ──────────────────────────────────────────────────────
+  if (!s || s.isRadio) {
+    _pnowSongFp = null;
+    _pnowArtist = null;
+    body.innerHTML = `<div class="pnow-view pnow-visible">
+      <div class="pnow-empty">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="12" cy="12" r="10"/>
+          <polygon points="10,8 16,12 10,16"/>
+        </svg>
+        <p>${t('player.pnow.noSong')}</p>
+      </div>
+    </div>`;
+    return;
+  }
+
+  // ── Fade out if already showing different content ────────────────────────
+  const existing = body.querySelector('.pnow-view');
+  if (fade && existing) {
+    existing.classList.add('pnow-fading');
+    existing.classList.remove('pnow-visible');
+    await new Promise(r => setTimeout(r, 260));
+    if (S.view !== 'playing-now') return;
+  }
+
+  _pnowSongFp = s.filepath;
+  _pnowArtist = s.artist || null;
+
+  const artU = artUrl(s['album-art'], 'l');
+  const artHtml = artU
+    ? `<img src="${artU}" alt="" onerror="this.parentNode.innerHTML=noArtHtml()">`
+    : noArtHtml();
+
+  const stars = Array.from({length:5}, (_, i) => {
+    const lit = i < Math.round((s.rating || 0) / 2);
+    return `<span class="star${lit ? ' lit' : ''}">★</span>`;
+  }).join('');
+
+  const artistLine = s.artist ? `<div class="pnow-artist">${esc(s.artist)}</div>` : '';
+  const albumLine  = [s.album, s.year].filter(Boolean).join(' · ');
+
+  // Tech pills: format, bitrate, sample-rate
+  const ext = (s.filepath || '').split('.').pop().toUpperCase();
+  const pills = [
+    ext ? `<span class="pnow-pill pnow-pill--gray">${esc(ext)}</span>` : '',
+    s.bitrate  ? `<span class="pnow-pill pnow-pill--gray">${s.bitrate} kbps</span>` : '',
+    s['sample-rate'] ? `<span class="pnow-pill pnow-pill--gray">${(s['sample-rate']/1000).toFixed(1)} kHz</span>` : '',
+    s.genre    ? `<span class="pnow-pill">${esc(s.genre)}</span>` : '',
+  ].filter(Boolean).join('');
+
+  // Metadata table rows
+  function mv(v) { return v != null ? `<span class="pnow-meta-v">${esc(String(v))}</span>` : `<span class="pnow-meta-v dim">—</span>`; }
+  const rgStr = s.replaygain != null ? `${s.replaygain > 0 ? '+' : ''}${Number(s.replaygain).toFixed(2)} dB` : null;
+  const metaRows = [
+    [t('metadata.title'),  s.title],
+    [t('metadata.artist'), s.artist],
+    [t('metadata.album'),  s.album],
+    [t('metadata.year'),   s.year],
+    [t('metadata.track'),  s.track],
+    [t('metadata.disc'),   s.disk],
+    [t('metadata.replayGain'), rgStr],
+  ].map(([k, v]) => `<span class="pnow-meta-k">${esc(k||'')}:</span>${mv(v)}`).join('');
+
+  body.innerHTML = `<div class="pnow-view pnow-fading">
+    <div class="pnow-hero">
+      <div class="pnow-hero-bg" id="pnow-bg" ${artU ? `style="background-image:url(${artU})"` : ''}></div>
+      <div class="pnow-art">${artHtml}</div>
+      <div class="pnow-hero-info">
+        <div class="pnow-label">${t('player.pnow.nowPlaying')}</div>
+        <div class="pnow-title">${esc(s.title || s.filepath?.split('/').pop() || '—')}</div>
+        ${artistLine}
+        ${albumLine ? `<div class="pnow-album">${esc(albumLine)}</div>` : ''}
+        <div class="pnow-stars">${stars}</div>
+      </div>
+    </div>
+    ${pills ? `<div class="pnow-pills">${pills}</div>` : ''}
+    <div class="pnow-body">
+      <div class="pnow-main">
+        <div class="pnow-section-title" id="pnow-bio-title"></div>
+        <div class="pnow-bio" id="pnow-bio"></div>
+        <button class="pnow-bio-more hidden" id="pnow-bio-more">${t('player.pnow.readMore')}</button>
+        <div class="pnow-section-title" id="pnow-sim-title"></div>
+        <div class="pnow-sim-list" id="pnow-sim"></div>
+        <div class="pnow-section-title" id="pnow-albums-title"></div>
+        <div class="pnow-albums" id="pnow-albums"></div>
+      </div>
+      <div class="pnow-sidebar">
+        <div id="pnow-artist-img-wrap"></div>
+        <div class="pnow-section-title">${t('player.pnow.trackInfo')}</div>
+        <div class="pnow-meta-grid">${metaRows}</div>
+      </div>
+    </div>
+  </div>`;
+
+  // Fade in
+  requestAnimationFrame(() => {
+    const el = body.querySelector('.pnow-view');
+    if (el) { el.classList.remove('pnow-fading'); el.classList.add('pnow-visible'); }
+  });
+
+  // Async: load artist bio + similar artists + library albums in parallel
+  _pnowLoadArtistData(s.artist, s.filepath);
+}
+
+async function _pnowLoadArtistData(artist, forFp) {
+  if (S.view !== 'playing-now' || _pnowSongFp !== forFp) return;
+
+  const bioEl      = document.getElementById('pnow-bio');
+  const bioTitle   = document.getElementById('pnow-bio-title');
+  const bioMore    = document.getElementById('pnow-bio-more');
+  const simEl      = document.getElementById('pnow-sim');
+  const simTitle   = document.getElementById('pnow-sim-title');
+  const albumsEl   = document.getElementById('pnow-albums');
+  const albumsTitle= document.getElementById('pnow-albums-title');
+  if (!bioEl || !albumsEl) return;
+
+  // ── 0. Artist image from local cache (TheAudioDB/Discogs/Last.fm, stored server-side) ─
+  if (artist) {
+    api('GET', `api/v1/artists/image?artist=${encodeURIComponent(artist)}`)
+      .then(d => {
+        if (_pnowSongFp !== forFp) return;
+        const wrap = document.getElementById('pnow-artist-img-wrap');
+        if (d?.imageFile && wrap) {
+          wrap.innerHTML = `<img class="pnow-tadb-img" src="api/v1/artists/images/${encodeURIComponent(d.imageFile)}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=''">`;
+        }
+      })
+      .catch(() => {});
+  }
+
+  // ── 1. Library albums for this artist ───────────────────────────────────
+  if (artist) {
+    if (albumsTitle) albumsTitle.textContent = t('player.pnow.inYourLibrary');
+    try {
+      const d = await api('POST', 'api/v1/db/artists-albums-multi', { artists: [artist] });
+      if (_pnowSongFp !== forFp) return;
+      const albums = d.albums || [];
+      if (albums.length && albumsEl) {
+        albumsEl.innerHTML = albums.map(alb => {
+          const albArtU = artUrl(alb.album_art_file, 's');
+          const albArtHtml = albArtU
+            ? `<img src="${albArtU}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`
+            : noArtHtml();
+          return `<div class="album-card" data-alb-artist="${esc(alb.artist||artist)}" data-alb-name="${esc(alb.name||'')}">
+            <div class="album-art">${albArtHtml}<div class="play-ov"><svg width="24" height="24" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div>
+            <div class="album-meta"><div class="album-name">${esc(alb.name || '—')}</div>${alb.year ? `<div class="album-year">${alb.year}</div>` : ''}</div>
+          </div>`;
+        }).join('');
+        // Click album card → open that specific album's songs
+        albumsEl.querySelectorAll('.album-card').forEach((card, i) => {
+          card.addEventListener('click', () => {
+            const alb = albums[i];
+            viewAlbumSongs(alb.name, artist, () => viewPlayingNow(), {
+              albumDir: alb.dir,
+              artistVariants: [artist],
+              skipAOFilter: true,
+            });
+          });
+        });
+      } else if (albumsEl) {
+        albumsEl.innerHTML = `<p style="color:var(--t3);font-size:13px;">${t('player.pnow.noAlbums')}</p>`;
+      }
+    } catch (_e) { /* library not available */ }
+  }
+
+  // ── 2. Last.fm: bio + similar artists (only if API key configured) ───────
+  if (!artist || !S.lastfmHasApiKey) {
+    if (bioTitle) bioTitle.textContent = '';
+    return;
+  }
+
+  try {
+    const [bioData, simData] = await Promise.all([
+      api('GET', `api/v1/lastfm/artist-info?artist=${encodeURIComponent(artist)}`),
+      api('GET', `api/v1/lastfm/similar-artists?artist=${encodeURIComponent(artist)}`),
+    ]);
+    if (_pnowSongFp !== forFp) return;
+
+    // Bio
+    const bio = bioData?.bio?.trim();
+    if (bio && bioEl && bioTitle) {
+      bioTitle.textContent = t('player.pnow.about');
+      bioEl.textContent = bio;
+      // Show "Read more" toggle if text overflows
+      if (bioEl.scrollHeight > bioEl.clientHeight + 4) {
+        if (bioMore) {
+          bioMore.classList.remove('hidden');
+          bioMore.onclick = () => {
+            bioEl.classList.toggle('expanded');
+            bioMore.textContent = bioEl.classList.contains('expanded')
+              ? t('player.pnow.readLess') : t('player.pnow.readMore');
+          };
+        }
+      }
+      // Listener count as a note under bio
+      if (bioData.listeners) {
+        const note = document.createElement('p');
+        note.style.cssText = 'font-size:11px;color:var(--t3);margin-top:6px;';
+        note.textContent = t('player.pnow.listeners', { n: Number(bioData.listeners).toLocaleString() });
+        bioEl.after(note);
+      }
+    }
+
+    // Similar artists chips
+    const simArtists = simData?.artists || [];
+    if (simArtists.length && simEl && simTitle) {
+      simTitle.textContent = t('player.pnow.similarArtists');
+      // Check which similar artists exist in the local library
+      let inLibrarySet = new Set();
+      try {
+        const libCheck = await api('POST', 'api/v1/db/songs-by-artists', { artists: simArtists.slice(0, 12), limit: 24 });
+        if (_pnowSongFp !== forFp) return;
+        for (const row of libCheck) {
+          const a = row.metadata?.artist || row.artist;
+          if (a) inLibrarySet.add(a.toLowerCase());
+        }
+      } catch (_e) { /* ignore */ }
+      simEl.innerHTML = simArtists.slice(0, 12).map(a =>
+        `<button class="pnow-sim-chip${inLibrarySet.has(a.toLowerCase()) ? ' in-library' : ''}">${esc(a)}</button>`
+      ).join('');
+      simEl.querySelectorAll('.pnow-sim-chip').forEach((chip, i) => {
+        chip.addEventListener('click', () => {
+          const a = simArtists[i];
+          viewArtistProfile(a.toLowerCase(), a, [a], () => viewPlayingNow());
+        });
+      });
+    }
+  } catch (_e) { /* Last.fm unavailable */ }
+}
+
+// Called whenever the song changes — refresh the view if it's active
+function _pnowOnSongChange() {
+  if (S.view !== 'playing-now') return;
+  const s = S.queue[S.idx] || null;
+  const newFp = s?.filepath || null;
+  if (newFp === _pnowSongFp) return;
+  _renderPlayingNow(true);
 }
 
 async function viewHome() {
@@ -10164,7 +10624,7 @@ async function viewSubsonic() {
           </div>
           <div>
             <div class="playback-section-title">Subsonic API Password</div>
-            <div class="playback-section-desc">Set the password used by Subsonic-compatible apps (Ultrasonic, DSub, Symfonium, Tempo, Jamstash, etc.). This is separate from your mStream login password. Use HTTP token auth (MD5) in your app for best security.</div>
+            <div class="playback-section-desc">Set the password used by Subsonic-compatible apps (Ultrasonic, DSub, Symfonium, Tempo, Jamstash, etc.). This is separate from your mStream Velvet login password. Use HTTP token auth (MD5) in your app for best security.</div>
           </div>
         </div>
 
@@ -14272,6 +14732,7 @@ function showApp() {
     // Per-user MPV permissions
     S.allowMpvCast = d.allowMpvCast === true;
     S.allowServerRemote = d.allowServerRemote !== false;
+    _updateCastBtn(); // re-evaluate now that allowMpvCast is known (serverAudioRunning may already be set)
     if (d.version) {
       const brand = document.querySelector('.sidebar-brand');
       if (brand) brand.title = `mStream Velvet v${d.version}`;
@@ -14455,7 +14916,8 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const v = btn.dataset.view;
     if (v !== 'podcasts') S.audioContentReturn = null; // clear Audio Content context on any other nav
-    if (v === 'home')         viewHome();
+    if (v === 'playing-now')  viewPlayingNow();
+    else if (v === 'home')         viewHome();
     else if (v === 'shortcuts')   viewShortcuts();
     else if (v === 'recent')      viewRecent();
     else if (v === 'artists') viewArtists();
@@ -14919,7 +15381,7 @@ document.getElementById('ctx-menu').querySelectorAll('.ctx-item').forEach(btn =>
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
     }
     if (action === 'rate')        { showRatePanel(0, 0, song); document.getElementById('rate-panel').style.left = '50%'; document.getElementById('rate-panel').style.top = '40%'; }
-    if (action === 'go-artist')   { if (song.artist) viewArtistAlbums(song.artist, [song.artist], () => viewArtists()); }
+    if (action === 'go-artist')   { if (song.artist) viewArtistProfile(song.artist.toLowerCase(), song.artist, [song.artist], () => viewArtists()); }
     if (action === 'go-album')    { if (song.album)  viewAlbumSongs(song.album, song.artist || null, null, { skipAOFilter: true }); }
     if (action === 'delete-recording') {
       const fname = song.filepath.split('/').pop();
@@ -15415,8 +15877,10 @@ async function loadCuePoints(filepath) {
   try {
     const fp = encodeURIComponent(filepath);
     const data = await api('GET', `api/v1/db/cuepoints?fp=${fp}`);
-    _cuePoints = (data.cuepoints || []).filter(cp => cp.t > 0);
-  } catch (_e) { _cuePoints = []; }
+    const all = data.cuepoints || [];
+    _cueTrack1Title = all.find(cp => cp.t === 0)?.title || '';
+    _cuePoints = all.filter(cp => cp.t > 0);
+  } catch (_e) { _cuePoints = []; _cueTrack1Title = ''; }
   renderCueMarkers();
   // Update chapter nav button visibility now that cuepoints are known
   _updateAudioBookMode();
@@ -15487,23 +15951,25 @@ function _clearBookPosition(filepath) {
   } catch (_e) {}
 }
 
-// Update chapter indicator bar under the progress bar.
+// Update chapter/track indicator (lives inside .bal-row, same height as L/slider/R).
+// _cuePoints only contains entries with t>0 (track 1 at t=0 is filtered out),
+// so total tracks = _cuePoints.length + 1 and trackNum = boundaries passed + 1.
 function _updateAudioBookChapterBar() {
   const bar = document.getElementById('ab-chapter-bar');
   if (!bar) return;
-  const s = S.queue[S.idx];
-  if (!_isAudioBookSong(s) || !_cuePoints.length || !audioEl.duration) {
+  if (!_cuePoints.length || !audioEl.duration) {
     bar.classList.add('hidden');
     bar.textContent = '';
     return;
   }
   const pos = audioEl.currentTime;
-  // Find current chapter: the last cuepoint whose t ≤ current time
-  let cur = _cuePoints[0];
-  for (const cp of _cuePoints) { if (cp.t <= pos) cur = cp; else break; }
-  if (!cur) { bar.classList.add('hidden'); return; }
-  const idx = _cuePoints.indexOf(cur) + 1;
-  bar.innerHTML = `<span class="ab-chap-num">${t('player.audiobook.chapterN', { n: idx, total: _cuePoints.length })}</span><span class="ab-chap-title">${esc(cur.title || '')}</span>`;
+  const total = _cuePoints.length + 1;                      // track 1 at t=0 was filtered
+  const passed = _cuePoints.filter(cp => cp.t <= pos);      // boundaries we've crossed
+  const trackNum = passed.length + 1;                       // 1-based current track
+  const cur = passed[passed.length - 1] || null;            // last boundary crossed (null = track 1)
+  const title = cur?.title || (trackNum === 1 ? _cueTrack1Title : '');
+  const _chapKey = _isAudioBookSong(S.queue[S.idx]) ? 'player.audiobook.chapterN' : 'player.audiobook.trackN';
+  bar.innerHTML = `<span class="ab-chap-num">${t(_chapKey, { n: trackNum, total })}</span><span class="ab-chap-title">${title ? esc(title) : ''}</span>`;
   bar.classList.remove('hidden');
 }
 
@@ -15547,8 +16013,8 @@ function _updateAudioBookMode() {
   const s = S.queue[S.idx];
   const isBook = _isAudioBookSong(s);
   document.body.classList.toggle('audiobook-mode', isBook);
-  // Chapter nav buttons: show only when there are cuepoints
-  const hasCues = isBook && _cuePoints.length >= 2;
+  // Chapter nav buttons: show for any file with cuepoints (not just audiobook vpath)
+  const hasCues = _cuePoints.length >= 2;
   ['ab-prev-chap-btn','ab-next-chap-btn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.toggle('hidden', !hasCues);
@@ -15616,8 +16082,8 @@ function _onAudioTimeupdateUI() {
     if (!_isLiveRadio) _progThumb.style.left = pct + '%';
   }
   _renderTimes();
-  // Update chapter indicator once per second
-  if (_cuePoints.length && _isAudioBookSong(S.queue[S.idx])) {
+  // Update track/chapter indicator once per second for any CUE file
+  if (_cuePoints.length) {
     const _tNow2 = Date.now();
     if (_tNow2 - (_abChapThrottle || 0) >= 1000) {
       _abChapThrottle = _tNow2;
@@ -15716,6 +16182,8 @@ function _onAudioSeeked() {
   persistQueue(); // update localStorage immediately
   clearTimeout(_seekSyncTimer);
   _seekSyncTimer = setTimeout(() => _syncQueueToDb(), 1000);
+  // Update track indicator immediately after seek (bypasses 1-Hz throttle)
+  if (_cuePoints.length) { _abChapThrottle = 0; _updateAudioBookChapterBar(); }
   // Mirror seek to MPV when casting to server speaker (debounced 400ms to avoid
   // double-firing on initial load seeks)
   if (S.castingToMpv && !_mpvLoadingSong) {
@@ -16244,6 +16712,9 @@ document.getElementById('viz-prev-btn').addEventListener('click', () => VIZ.prev
 document.getElementById('viz-next-btn').addEventListener('click', () => VIZ.next());
 document.getElementById('viz-mode-btn').addEventListener('click', () => VIZ.toggleMode());
 document.getElementById('eq-btn').addEventListener('click', () => EQ.toggle());
+
+// ── Playing Now view — update on song change ──────────────────────────────────
+document.addEventListener('mstream-song-change', () => _pnowOnSongChange());
 
 // ── Audiobook controls ────────────────────────────────────────────────────────
 document.getElementById('ab-speed-btn').addEventListener('click', function() { _toggleSpeedPop(this); });
@@ -16853,3 +17324,4 @@ try {
 
   document.addEventListener('mousedown', () => { clearTimeout(autoT); tip.classList.remove('tip-show'); });
 })();
+

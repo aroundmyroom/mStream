@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>mStream – Shared Playlist</title>
+  <title>mStream Velvet – Shared Playlist</title>
   <link rel="apple-touch-icon" sizes="180x180" href="../assets/fav/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="32x32"  href="../assets/fav/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16"  href="../assets/fav/favicon-16x16.png">
@@ -189,7 +189,7 @@
         <polygon fill="#26477B" points="99,118.5 99,49.5 110.5,56.5 121,49.5 121,118.5"/>
         <polygon fill="#6684B2" points="124,118.5 124,48.5 145,35.5 145,118.5"/>
       </svg>
-      mStream
+      mStream Velvet
       <span class="sh-brand-sub">/ Shared Playlist</span>
     </div>
     <button id="sh-theme-btn" title="Toggle theme">
@@ -501,7 +501,7 @@ function updateNowPlaying() {
   document.getElementById('sh-year').textContent   = year;
   document.getElementById('sh-count').textContent  =
     S.idx >= 0 ? 'Track ' + (S.idx + 1) + ' of ' + S.queue.length : '';
-  document.title = title + (artist ? ' · ' + artist : '') + ' — mStream';
+  document.title = title + (artist ? ' · ' + artist : '') + ' — mStream Velvet';
 
   const artWrap = document.getElementById('sh-art-wrap');
   if (song) {

@@ -1269,7 +1269,12 @@ function escapeFts(term) { return String(term).replace(/"/g, '""'); }
 // Sanitize raw user input for FTS5 trigram queries:
 // trigram doesn't use operators, but strip characters that could cause issues.
 function sanitizeTrigram(raw) {
-  return String(raw).replace(/["*\-()]/g, ' ').replace(/\s+/g, ' ').trim();
+  // Wrap in double-quotes to form a phrase/literal query.
+  // This prevents FTS5 syntax errors on names containing . ( ) * - etc.
+  // Any literal " inside the input is escaped by doubling (FTS5 convention).
+  const cleaned = String(raw).replace(/\s+/g, ' ').trim();
+  if (cleaned.length < 3) return ''; // trigram needs at least 3 chars
+  return '"' + cleaned.replace(/"/g, '""') + '"';
 }
 
 // ── Folder search ─────────────────────────────────────────────────────────
@@ -1282,7 +1287,7 @@ export function searchFolders(query, vpaths, ignoreVPaths) {
   if (filtered.length === 0) return [];
 
   const q = sanitizeTrigram(query);
-  if (q.length < 3) return []; // trigram needs at least 3 chars
+  if (!q) return []; // trigram needs at least 3 chars
 
   const vIn = inClause('f.vpath', filtered);
   const rows = db.prepare(`
@@ -1306,7 +1311,7 @@ export function searchArtistsNormalized(query, vpaths, ignoreVPaths) {
   if (!query || !query.trim()) return [];
 
   const q = sanitizeTrigram(query);
-  if (q.length < 3) return [];
+  if (!q) return [];
 
   // Compute the set of vpaths the user is allowed to see
   let filteredVpaths = null;
@@ -1498,6 +1503,88 @@ export function getArtistRow(artistClean) {
   };
 }
 
+/**
+ * Find an artist row by either canonical name OR any raw variant tag value.
+ * Used by the Playing Now image endpoint to resolve song artist tags that may
+ * not match the canonical name exactly (e.g. featuring variants).
+ */
+export function getArtistRowByName(name) {
+  if (!name) return null;
+  // 1. Exact canonical match (fast — indexed)
+  const direct = getArtistRow(name);
+  if (direct) return direct;
+  // 2. Search inside raw_variants JSON array for an exact match
+  const row = db.prepare(
+    `SELECT * FROM artists_normalized
+     WHERE EXISTS (SELECT 1 FROM json_each(artist_raw_variants) WHERE value = ?)
+     LIMIT 1`
+  ).get(name);
+  if (!row) return null;
+  return {
+    artistKey:    row.artist_clean.toLowerCase(),
+    canonicalName: row.artist_clean,
+    bio:          row.bio || null,
+    imageFile:    row.image_file || null,
+    imageSource:  row.image_source || null,
+    lastFetched:  row.last_fetched || null,
+    nameOverride: row.name_override || 0,
+    songCount:    row.song_count || 0,
+    rawVariants:  (() => { try { return JSON.parse(row.artist_raw_variants); } catch { return [row.artist_clean]; } })(),
+  };
+}
+
+/**
+ * Normalize an artist name for fuzzy matching.
+ * Lowercases, converts ' & ' and '&' → ' and ', collapses spaces, trims.
+ * Used to match Last.fm artist names (which may use 'and') against library
+ * artist names (which may use '&') and vice versa.
+ */
+function _normArtist(name) {
+  return name.toLowerCase()
+    .replace(/\s*&\s*/g, ' and ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Given a list of artist names from an external source (e.g. Last.fm similar-artists),
+ * resolve each against the library's artists_normalized table using fuzzy normalization.
+ * Returns an array of raw artist tag values (as stored in files.artist) for all matched
+ * library artists — suitable for use in an IN(...) filter on the files table.
+ *
+ * Matching strategy (in order):
+ *   1. Exact case-insensitive match on artist_clean
+ *   2. Normalized match: '&' ↔ 'and', whitespace collapsed (both sides normalized)
+ *
+ * Artists not found in the library are silently dropped so the caller gets only
+ * names that will actually match rows in the files table.
+ */
+export function resolveArtistNamesForDJ(names) {
+  if (!names || names.length === 0) return [];
+  // Exact case-insensitive match on canonical artist name
+  const exactStmt = db.prepare(
+    `SELECT artist_raw_variants FROM artists_normalized WHERE lower(artist_clean) = lower(?)`
+  );
+  // Normalized match — normalize '&' variants and whitespace in both SQL and param
+  // SQL: lower → replace ' & '→' and ' → replace '&'→' and ' → collapse '  '→' '
+  const normStmt = db.prepare(
+    `SELECT artist_raw_variants FROM artists_normalized
+     WHERE replace(replace(replace(lower(trim(artist_clean)), ' & ', ' and '), '&', ' and '), '  ', ' ') = ?`
+  );
+  const result = new Set();
+  for (const name of names) {
+    if (!name || typeof name !== 'string') continue;
+    let row = exactStmt.get(name.trim());
+    if (!row) row = normStmt.get(_normArtist(name));
+    if (!row) continue;
+    try {
+      const variants = JSON.parse(row.artist_raw_variants);
+      for (const v of variants) result.add(v);
+    } catch (_) {}
+  }
+  return [...result];
+}
+
 // Returns all file rows for an artist (by raw variant list) with their filepaths.
 // Includes all columns needed to build release groups.
 export function getArtistFiles(rawVariants, vpaths, ignoreVPaths) {
@@ -1613,6 +1700,17 @@ export function getArtistsNeedingFetch() {
   return db.prepare(
     "SELECT artist_clean FROM artists_normalized WHERE last_fetched IS NULL ORDER BY artist_clean COLLATE NOCASE"
   ).all().map(r => r.artist_clean);
+}
+
+export function getArtistsForTadbRetry(limit = 500) {
+  // Returns no-image artists (tried before but got no image) ordered by song count desc.
+  // These will be retried via TheAudioDB only — Discogs was already tried.
+  return db.prepare(
+    `SELECT artist_clean FROM artists_normalized
+     WHERE image_file IS NULL AND last_fetched IS NOT NULL
+     ORDER BY song_count DESC NULLS LAST, artist_clean COLLATE NOCASE
+     LIMIT ?`
+  ).all(Math.max(1, Math.min(2000, Number(limit) || 500))).map(r => r.artist_clean);
 }
 
 export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms = []) {

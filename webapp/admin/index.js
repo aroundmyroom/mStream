@@ -1057,12 +1057,12 @@ const dirAccessTestModal = Vue.component('dir-access-test-modal', {
       if (this.allGood) return 'All directories are accessible with full read/write permissions. No action needed.';
       const parts = [];
       if (this.hasNoAccess)
-        parts.push('One or more directories cannot be read at all. Verify the path still exists and that the mStream process has at least read permission on that location.');
+        parts.push('One or more directories cannot be read at all. Verify the path still exists and that the mStream Velvet process has at least read permission on that location.');
       if (this.hasReadOnly) {
         if (this.platform === 'win32')
-          parts.push('One or more directories are read-only. mStream can stream music but cannot embed cover art or write tags. Right-click the folder → Properties → Security → grant the mStream service account Modify permission.');
+          parts.push('One or more directories are read-only. mStream Velvet can stream music but cannot embed cover art or write tags. Right-click the folder → Properties → Security → grant the mStream Velvet service account Modify permission.');
         else
-          parts.push('One or more directories are read-only. mStream can stream music but cannot embed cover art or write tags. Fix with: sudo chown -R $(whoami) /path/to/dir && chmod -R u+rw /path/to/dir');
+          parts.push('One or more directories are read-only. mStream Velvet can stream music but cannot embed cover art or write tags. Fix with: sudo chown -R $(whoami) /path/to/dir && chmod -R u+rw /path/to/dir');
       }
       return parts.join('  ');
     },
@@ -1314,11 +1314,11 @@ const foldersView = Vue.component('folders-view', {
         </div>
       </div>
 
-      <div v-show="foldersTS.ts === 0" style="display:flex;justify-content:center;padding:2rem;">
+      <div v-show="foldersTS.ts === 0 && Object.keys(folders).length === 0" style="display:flex;justify-content:center;padding:2rem;">
         <svg class="spinner" width="48" height="48" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
       </div>
 
-      <div v-show="foldersTS.ts > 0" class="card">
+      <div v-show="foldersTS.ts > 0 || Object.keys(folders).length > 0" class="card">
         <div class="card-content">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;">
             <span class="card-title" style="margin-bottom:0;">{{ t('admin.folders.listTitle') }}</span>
@@ -3045,7 +3045,7 @@ const rpnView = Vue.component('rpn-view', {
     <div class="container">
       <div class="row">
         <div class="col s12">
-          <h1>mStream RPN</h1>
+          <h1>mStream Velvet RPN</h1>
           <div class="card">
             <div class="tabs">
               <div class="tab"><button :class="{active: activeTab==='standard'}" @click="activeTab='standard'">Standard</button></div>
@@ -3072,7 +3072,7 @@ const rpnView = Vue.component('rpn-view', {
                     </div>
                     <div class="col s12 m6 hide-on-small-only">
                       <div class="row">
-                        <h5 class="center-align">Help Support mStream</h5>
+                        <h5 class="center-align">Help Support mStream Velvet</h5>
                       </div>
                       <div class="row">
                         <div class="col s2"></div>
@@ -6001,6 +6001,11 @@ const artistsAdminView = Vue.component('artists-admin-view', {
       selected: null,
       candidateLoading: false,
       candidates: [],
+      tadbCandidates: [],
+      tadbLoading: false,
+      searchQuery: '',
+      searchResults: [],
+      searchLoading: false,
       customImageUrl: '',
       customImagePreviewError: false,
       applying: false,
@@ -6013,6 +6018,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         discogs: { enabled: false, hasApiCredentials: false },
       },
       seedPending: false,
+      seedTadbPending: false,
       pollTimer: null,
     };
   },
@@ -6105,27 +6111,56 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         this.seedPending = false;
       }
     },
+    async seedTadbRetry(limit = 500) {
+      if (this.seedTadbPending) return;
+      this.seedTadbPending = true;
+      try {
+        const res = await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/admin/artists/hydrate-tadb-noimage`,
+          data: { limit }
+        });
+        this.hydration = res.data || this.hydration;
+        this.counts = res.data?.counts || this.counts;
+        iziToast.success({ title: this.t('admin.artists.toastTadbQueued', { count: res.data?.enqueued || 0 }), position: 'topCenter', timeout: 1800 });
+      } catch (e) {
+        iziToast.error({ title: this.t('admin.artists.toastFailedQueue'), message: e.message || '', position: 'topCenter', timeout: 2500 });
+      } finally {
+        this.seedTadbPending = false;
+      }
+    },
     async selectArtist(row) {
       this.selected = row;
       this.candidates = [];
+      this.tadbCandidates = [];
       this.customImageUrl = '';
       this.customImagePreviewError = false;
-      if (!this.discogsReady) {
-        this.candidateLoading = false;
-        return;
-      }
+      // Load Discogs + TheAudioDB candidates in parallel
       this.candidateLoading = true;
+      this.tadbLoading = true;
+      const discogsP = this.discogsReady
+        ? API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/artists/discogs-candidates`, params: { artistKey: row.artistKey } })
+            .then(res => { this.candidates = res.data.candidates || []; })
+            .catch(e => { iziToast.error({ title: this.t('admin.artists.toastFailedCandidates'), message: e.message || '', position: 'topCenter', timeout: 3000 }); })
+            .finally(() => { this.candidateLoading = false; })
+        : Promise.resolve().then(() => { this.candidateLoading = false; });
+      const tadbP = API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/artists/tadb-candidates`, params: { artistKey: row.artistKey } })
+        .then(res => { this.tadbCandidates = res.data.candidates || []; })
+        .catch(() => {})
+        .finally(() => { this.tadbLoading = false; });
+      await Promise.all([discogsP, tadbP]);
+    },
+    async searchArtists() {
+      const q = (this.searchQuery || '').trim();
+      if (q.length < 2) { this.searchResults = []; return; }
+      this.searchLoading = true;
       try {
-        const res = await API.axios({
-          method: 'GET',
-          url: `${API.url()}/api/v1/admin/artists/discogs-candidates`,
-          params: { artistKey: row.artistKey }
-        });
-        this.candidates = res.data.candidates || [];
-      } catch (e) {
-        iziToast.error({ title: this.t('admin.artists.toastFailedCandidates'), message: e.message || '', position: 'topCenter', timeout: 3000 });
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/artists/search`, params: { q } });
+        this.searchResults = res.data.artists || [];
+      } catch (_e) {
+        this.searchResults = [];
       } finally {
-        this.candidateLoading = false;
+        this.searchLoading = false;
       }
     },
     async applyImage(url, source = 'discogs') {
@@ -6186,6 +6221,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
           <button class="btn-flat" @click="load('with-image')" :style="kind==='with-image' ? 'border-color:var(--ok,#16a34a);color:var(--ok,#16a34a);' : ''">{{ t('admin.artists.tabWithImage', { count: counts.withImage || 0 }) }}</button>
           <button class="btn-flat" @click="load('wrong')" :style="kind==='wrong' ? 'border-color:var(--warn,#b45309);color:var(--warn,#b45309);' : ''">{{ t('admin.artists.tabWrong', { count: counts.wrong || 0 }) }}</button>
           <button class="btn-flat" @click="seedHydration(500)" :disabled="seedPending">{{ seedPending ? t('admin.artists.btnQueueing') : t('admin.artists.btnQueueNext') }}</button>
+          <button class="btn-flat" @click="seedHydration(counts.missing || 9999)" :disabled="seedPending || !(counts.missing > 0)">{{ t('admin.artists.btnQueueAll', { count: counts.missing || 0 }) }}</button>
           <button class="btn" @click="load(kind)" :disabled="loading">{{ loading ? t('admin.artists.btnRefreshing') : t('admin.artists.btnRefresh') }}</button>
         </div>
       </div>
@@ -6201,39 +6237,66 @@ const artistsAdminView = Vue.component('artists-admin-view', {
       <div v-if="!hydration.running && (hydration.queueLength || 0) === 0 && (counts.missing || 0) > 0" style="margin-top:8px;font-size:.82rem;color:var(--t2);">
         {{ t('admin.artists.hydrationIdleHint') }}
       </div>
-      <div v-if="(counts.noImage || 0) > 0" style="margin-top:8px;font-size:.82rem;color:var(--t2);">
-        {{ t('admin.artists.noImageHint', { count: counts.noImage || 0 }) }}
+      <div v-if="(counts.noImage || 0) > 0" style="margin-top:8px;font-size:.82rem;color:var(--t2);display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span>{{ t('admin.artists.noImageHint', { count: counts.noImage || 0 }) }}</span>
+        <button class="btn-flat btn-small" @click="seedTadbRetry(500)" :disabled="seedTadbPending" style="font-size:.78rem;padding:3px 10px;">{{ seedTadbPending ? t('admin.artists.btnQueueing') : t('admin.artists.btnRetryTadb') }}</button>
+        <button class="btn-flat btn-small" @click="seedTadbRetry(counts.noImage || 9999)" :disabled="seedTadbPending" style="font-size:.78rem;padding:3px 10px;">{{ t('admin.artists.btnRetryTadbAll', { count: counts.noImage || 0 }) }}</button>
       </div>
     </div>
 
     <div style="display:grid;grid-template-columns:minmax(340px,1fr) minmax(360px,1fr);gap:12px;margin-top:12px;align-items:start;">
       <div class="card z-depth-1" style="padding:10px 0;">
-        <div style="padding:0 14px 8px;font-size:.86rem;color:var(--t2);">{{ t('admin.artists.artistCount', { count: artists.length }) }}</div>
+        <div style="padding:0 14px 8px;display:flex;gap:8px;align-items:center;">
+          <input v-model="searchQuery" @input="searchArtists" type="search" :placeholder="t('admin.artists.searchPlaceholder')" style="flex:1;font-size:.86rem;padding:5px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--t1);" />
+          <button v-if="searchQuery" class="btn-flat" style="padding:0 8px;font-size:.8rem;" @click="searchQuery='';searchResults=[];">✕</button>
+        </div>
+        <div v-if="!searchQuery" style="padding:0 14px 8px;font-size:.82rem;color:var(--t2);">{{ t('admin.artists.artistCount', { count: artists.length }) }}</div>
         <div style="max-height:64vh;overflow:auto;">
-          <div v-if="!artists.length && !loading" style="padding:12px 14px;color:var(--t2);">{{ t('admin.artists.listEmpty') }}</div>
-          <button v-for="a in artists" :key="a.artistKey" @click="selectArtist(a)" class="btn-flat" style="width:100%;text-align:left;display:flex;align-items:center;gap:10px;border-radius:0;border-left:none;border-right:none;border-top:none;padding:9px 14px;">
-            <img v-if="a.imageFile" :src="imgSrc(a.imageFile)" alt="" style="width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border);" />
-            <div v-else style="width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--raised);color:var(--t2);font-weight:700;flex-shrink:0;">{{ (a.canonicalName||'?').replace(/^The\s+/i,'').charAt(0).toUpperCase() }}</div>
-            <div style="min-width:0;flex:1;">
-              <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ a.canonicalName }}</div>
-              <div style="font-size:.78rem;color:var(--t2);">{{ t('admin.artists.songCount', { count: a.songCount || 0 }) }}<span v-if="a.imageSource"> • {{ a.imageSource }}</span><span v-if="kind === 'no-image'"> • {{ t('admin.artists.statusNoImageTried') }}</span></div>
-            </div>
-            <span v-if="a.wrongFlag" style="font-size:.72rem;padding:3px 7px;border-radius:999px;background:rgba(180,83,9,.18);color:var(--warn,#b45309);">{{ t('admin.artists.badgeWrong') }}</span>
-          </button>
+          <div v-if="searchQuery && searchLoading" style="padding:12px 14px;color:var(--t2);">{{ t('admin.artists.searching') }}</div>
+          <template v-else-if="searchQuery">
+            <div v-if="!searchResults.length" style="padding:12px 14px;color:var(--t2);">{{ t('admin.artists.searchNoResults') }}</div>
+            <button v-for="a in searchResults" :key="a.artistKey" @click="selectArtist(a)" class="btn-flat" :style="selected && selected.artistKey===a.artistKey ? 'width:100%;text-align:left;display:flex;align-items:center;gap:10px;border-radius:0;border-left:none;border-right:none;border-top:none;padding:9px 14px;background:var(--raised);' : 'width:100%;text-align:left;display:flex;align-items:center;gap:10px;border-radius:0;border-left:none;border-right:none;border-top:none;padding:9px 14px;'">
+              <img v-if="a.imageFile" :src="imgSrc(a.imageFile)" alt="" style="width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border);" />
+              <div v-else style="width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--raised);color:var(--t2);font-weight:700;flex-shrink:0;">{{ (a.canonicalName||'?').replace(/^The\s+/i,'').charAt(0).toUpperCase() }}</div>
+              <div style="min-width:0;flex:1;">
+                <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ a.canonicalName }}</div>
+                <div style="font-size:.78rem;color:var(--t2);">{{ t('admin.artists.songCount', { count: a.songCount || 0 }) }}<span v-if="a.imageFile"> • ✓ image</span></div>
+              </div>
+            </button>
+          </template>
+          <template v-else>
+            <div v-if="!artists.length && !loading" style="padding:12px 14px;color:var(--t2);">{{ t('admin.artists.listEmpty') }}</div>
+            <button v-for="a in artists" :key="a.artistKey" @click="selectArtist(a)" class="btn-flat" :style="selected && selected.artistKey===a.artistKey ? 'width:100%;text-align:left;display:flex;align-items:center;gap:10px;border-radius:0;border-left:none;border-right:none;border-top:none;padding:9px 14px;background:var(--raised);' : 'width:100%;text-align:left;display:flex;align-items:center;gap:10px;border-radius:0;border-left:none;border-right:none;border-top:none;padding:9px 14px;'">
+              <img v-if="a.imageFile" :src="imgSrc(a.imageFile)" alt="" style="width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid var(--border);" />
+              <div v-else style="width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--raised);color:var(--t2);font-weight:700;flex-shrink:0;">{{ (a.canonicalName||'?').replace(/^The\s+/i,'').charAt(0).toUpperCase() }}</div>
+              <div style="min-width:0;flex:1;">
+                <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ a.canonicalName }}</div>
+                <div style="font-size:.78rem;color:var(--t2);">{{ t('admin.artists.songCount', { count: a.songCount || 0 }) }}<span v-if="a.imageSource"> • {{ a.imageSource }}</span><span v-if="kind === 'no-image'"> • {{ t('admin.artists.statusNoImageTried') }}</span></div>
+              </div>
+              <span v-if="a.wrongFlag" style="font-size:.72rem;padding:3px 7px;border-radius:999px;background:rgba(180,83,9,.18);color:var(--warn,#b45309);">{{ t('admin.artists.badgeWrong') }}</span>
+            </button>
+          </template>
         </div>
       </div>
 
       <div class="card z-depth-1" style="padding:14px;min-height:220px;">
         <div v-if="!selected" style="color:var(--t2);">{{ t('admin.artists.selectPrompt') }}</div>
         <div v-else>
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-            <div>
-              <div style="font-size:1rem;font-weight:700;">{{ selected.canonicalName }}</div>
-              <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.songCount', { count: selected.songCount || 0 }) }}<span v-if="kind === 'no-image'"> • {{ t('admin.artists.statusNoImageTried') }}</span></div>
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+            <div style="display:flex;align-items:center;gap:12px;">
+              <div v-if="selected.imageFile" style="flex-shrink:0;">
+                <img :src="imgSrc(selected.imageFile)" alt="" style="width:80px;height:80px;border-radius:10px;object-fit:cover;border:1px solid var(--border);display:block;" />
+                <div style="font-size:.7rem;color:var(--t3);text-align:center;margin-top:3px;">{{ selected.imageSource || 'custom' }}</div>
+              </div>
+              <div v-else style="width:80px;height:80px;border-radius:10px;background:var(--raised);display:flex;align-items:center;justify-content:center;color:var(--t3);font-size:.72rem;text-align:center;flex-shrink:0;">{{ t('admin.artists.noImageYet') }}</div>
+              <div>
+                <div style="font-size:1rem;font-weight:700;">{{ selected.canonicalName }}</div>
+                <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.songCount', { count: selected.songCount || 0 }) }}<span v-if="kind === 'no-image'"> • {{ t('admin.artists.statusNoImageTried') }}</span></div>
+              </div>
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;">
-              <button v-if="kind === 'with-image' || selected.wrongFlag" class="btn-flat" @click="setWrong(selected, false)">{{ t('admin.artists.btnImageOk') }}</button>
-              <button v-if="kind === 'with-image' || !selected.wrongFlag" class="btn-flat" style="border-color:var(--warn,#b45309);color:var(--warn,#b45309);" @click="setWrong(selected, true)">{{ t('admin.artists.btnMarkWrong') }}</button>
+              <button v-if="selected.imageFile || selected.wrongFlag" class="btn-flat" @click="setWrong(selected, false)">{{ t('admin.artists.btnImageOk') }}</button>
+              <button v-if="selected.imageFile || !selected.wrongFlag" class="btn-flat" style="border-color:var(--warn,#b45309);color:var(--warn,#b45309);" @click="setWrong(selected, true)">{{ t('admin.artists.btnMarkWrong') }}</button>
             </div>
           </div>
 
@@ -6254,6 +6317,25 @@ const artistsAdminView = Vue.component('artists-admin-view', {
             </div>
           </div>
 
+          <!-- TheAudioDB candidates -->
+          <div style="font-size:.82rem;color:var(--t2);margin-bottom:8px;">TheAudioDB</div>
+          <div v-if="tadbLoading" style="padding:8px 0;color:var(--t2);">{{ t('admin.artists.discogsLoading') }}</div>
+          <div v-else-if="!tadbCandidates.length" style="padding:8px 0;color:var(--t2);">{{ t('admin.artists.discogsNone') }}</div>
+          <div v-else style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-bottom:16px;">
+            <div v-for="c in tadbCandidates" :key="c.imageUrl" style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--surface);">
+              <img :src="c.thumbUrl || c.imageUrl" alt="" style="width:100%;aspect-ratio:1;object-fit:cover;display:block;" />
+              <div style="padding:8px;">
+                <div style="font-size:.76rem;font-weight:600;line-height:1.3;max-height:2.2em;overflow:hidden;">{{ c.title }}</div>
+                <div v-if="c.genre || c.country" style="font-size:.7rem;color:var(--t3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ [c.genre, c.country].filter(Boolean).join(' · ') }}</div>
+                <div style="display:flex;gap:6px;margin-top:7px;">
+                  <button class="btn btn-small" style="flex:1;" @click="applyImage(c.imageUrl, 'theaudiodb')" :disabled="applying">{{ t('admin.artists.btnUse') }}</button>
+                  <a v-if="c.sourceUrl" class="btn-flat btn-small" :href="c.sourceUrl" target="_blank" rel="noopener" style="padding:0 8px;">{{ t('admin.artists.btnView') }}</a>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Discogs candidates -->
           <div style="font-size:.82rem;color:var(--t2);margin-bottom:8px;">{{ t('admin.artists.labelDiscogsSuggestions') }}</div>
           <div v-if="!discogsReady" style="padding:8px 0;color:var(--warn,#b45309);">{{ t('admin.artists.discogsDisabledHint') }}</div>
           <div v-else-if="candidateLoading" style="padding:8px 0;color:var(--t2);">{{ t('admin.artists.discogsLoading') }}</div>
@@ -6354,7 +6436,7 @@ const dlnaView = Vue.component('dlna-view', {
                         <div style="font-size:.82rem;color:var(--t2);margin-top:4px">{{t('admin.dlna.helpName')}}</div>
                       </td>
                       <td>
-                        <input type="text" :value="params.name || 'mStream'"
+                        <input type="text" :value="params.name || 'mStream Velvet'"
                           @change="save({ name: $event.target.value })"
                           style="width:180px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--t1)" :disabled="busy">
                       </td>
@@ -6583,7 +6665,7 @@ const userPasswordView = Vue.component('user-password-view', {
       ${mHead('Reset Password', '{{"User: " + currentUser.value}}')}
       <div class="modal-body">
         <div class="field-group">
-          <label for="reset-password">New mStream Password</label>
+          <label for="reset-password">New mStream Velvet Password</label>
           <div class="pwd-wrap">
             <input v-model="resetPassword" id="reset-password" :type="showResetPassword ? 'text' : 'password'" placeholder="Leave blank to keep unchanged" autocomplete="new-password">
             <button type="button" class="pwd-toggle" @click="showResetPassword = !showResetPassword" tabindex="-1" :title="showResetPassword ? 'Hide' : 'Show'">
@@ -6614,7 +6696,7 @@ const userPasswordView = Vue.component('user-password-view', {
         if (!this.resetPassword && !this.subsonicPassword) {
           iziToast.warning({
             title: 'Nothing to update',
-            message: 'Enter a new mStream password, Subsonic password, or both.',
+            message: 'Enter a new mStream Velvet password, Subsonic password, or both.',
             position: 'topCenter',
             timeout: 3500
           });
@@ -6868,7 +6950,7 @@ const editPortModal = Vue.component('edit-port-modal', {
   },
   template: `
     <form @submit.prevent="updatePort">
-      ${mHead('Server Port', 'Change the port mStream listens on')}
+      ${mHead('Server Port', 'Change the port mStream Velvet listens on')}
       <div class="modal-body">
         <div class="field-group">
           <label for="edit-port">Port Number</label>

@@ -577,6 +577,12 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 
 /* ── ARTIST LIST ───────────────────────────────────────────── */
 .artist-list{display:flex;flex-direction:column;gap:1px;}
+.artist-grid{display:grid;gap:12px;}
+.artist-grid--comfy{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));}
+.artist-grid--compact{grid-template-columns:repeat(auto-fill,minmax(100px,1fr));}
+/* In compact mode slightly reduce the card info text */
+.artist-grid--compact .hc-title{font-size:.66rem;}
+.artist-grid--compact .hc-sub{font-size:.6rem;}
 .artist-row{display:flex;align-items:center;gap:14px;padding:9px 10px;border-radius:var(--r);cursor:pointer;transition:background .14s;}
 .artist-row:hover{background:var(--hover);}
 .artist-av{width:46px;height:46px;border-radius:50%;background:var(--raised);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:var(--t2);flex-shrink:0;overflow:hidden;}
@@ -1876,7 +1882,9 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .upload-progress-bar{height:100%;background:var(--primary);border-radius:2px;width:0%;transition:width .15s;}
 
 /* ── WAVEFORM STATUS LINE ───────────────────────────────────── */
-/* Lives as first child of .player-right; margin-right:auto pushes vol/balance right */
+/* Wrapper that takes all space left of vol-wrap — eliminates double margin-right:auto bug */
+.pr-info{ flex:1; min-width:0; display:flex; flex-direction:column; justify-content:center; overflow:hidden; }
+/* Lives inside pr-info */
 .wf-status{
   font-size:11px;
   font-weight:700;
@@ -1884,10 +1892,8 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
   text-transform:uppercase;
   color:var(--t2);
   white-space:nowrap;
-  align-self:flex-start;  /* top of player-right = same row as BALANCE/VOLUME labels */
-  margin-top:3px;         /* matches the 2px top padding + slight optical offset */
-  margin-right:auto;      /* shoves vol/balance controls to the far right */
-  padding-left:44px;      /* aligns with the start of the progress bar track */
+  margin-top:3px;
+  padding-left:0;
   opacity:0;
   transition:opacity .65s ease;
   pointer-events:none;
@@ -2405,25 +2411,247 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
 .ab-speed-opt.active{color:var(--primary);font-weight:700;}
 /* Chapter indicator bar (between progress bar and VU strip) */
 .ab-chapter-bar{
-  width:100%;
-  text-align:center;
+  /* Inside pr-info — pr-info takes flex:1 so vol-wrap stays at the right */
+  display:none;
   font-size:11px;
+  font-weight:700;
+  letter-spacing:.7px;
+  text-transform:uppercase;
   color:var(--t2);
-  padding:2px 12px 1px;
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
-  line-height:1.3;
-  letter-spacing:.01em;
+  line-height:1.5;
+  padding:0;
+  max-width:100%;
 }
-.ab-chapter-bar .ab-chap-num{color:var(--t3);margin-right:5px;}
-.ab-chapter-bar .ab-chap-title{color:var(--t1);font-weight:500;}
+.ab-chapter-bar:not(.hidden){ display:block; }
+.ab-chapter-bar .ab-chap-num{ color:var(--primary); font-size:11px; display:block; }
+.ab-chapter-bar .ab-chap-title{ color:var(--t1); font-size:13px; font-weight:600; letter-spacing:.02em; text-transform:none; display:block; overflow:hidden; text-overflow:ellipsis; }
 /* chapter nav buttons act like ctrl-sm */
 .ab-ctrl{opacity:1;}
 /* Make chapter buttons stand out subtly in audiobook mode */
 body.audiobook-mode #ab-prev-chap-btn,
 body.audiobook-mode #ab-next-chap-btn{color:var(--primary);opacity:.9;}
 body.audiobook-mode #ab-speed-btn{color:var(--primary);}
-@media(max-width:640px){
-  .ab-chapter-bar{font-size:10px;padding:1px 6px;}
+
+/* ══════════════════════════════════════════════════════════════
+   PLAYING NOW VIEW
+══════════════════════════════════════════════════════════════ */
+.pnow-view{ padding:0 0 60px; }
+
+/* Hero section */
+.pnow-hero{
+  position:relative;
+  overflow:hidden;
+  padding:32px 28px 28px;
+  display:flex;
+  gap:28px;
+  align-items:flex-end;
+  min-height:240px;
+}
+.pnow-hero-bg{
+  position:absolute;inset:0;
+  background-size:cover;background-position:center;
+  filter:blur(32px) brightness(.45) saturate(1.4);
+  transform:scale(1.08);
+  pointer-events:none;
+}
+.pnow-hero-bg::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(0,0,0,.15) 0%,rgba(0,0,0,.55) 100%);
+}
+.pnow-art{
+  flex-shrink:0;
+  width:180px;height:180px;
+  border-radius:var(--r2);
+  overflow:hidden;
+  box-shadow:0 12px 40px rgba(0,0,0,.6);
+  background:var(--raised);
+  display:flex;align-items:center;justify-content:center;
+  position:relative;z-index:1;
+}
+.pnow-art img{width:100%;height:100%;object-fit:cover;object-position:top;display:block;}
+.pnow-hero-info{
+  position:relative;z-index:1;
+  flex:1;min-width:0;
+  padding-bottom:4px;
+}
+.pnow-label{
+  font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  color:rgba(255,255,255,.7);margin-bottom:6px;
+}
+.pnow-title{
+  font-size:clamp(22px,4vw,42px);font-weight:700;color:#fff;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  line-height:1.1;margin-bottom:6px;
+}
+.pnow-artist{
+  font-size:16px;font-weight:600;color:rgba(255,255,255,.85);
+  margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.pnow-album{
+  font-size:13px;color:rgba(255,255,255,.6);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.pnow-stars{
+  display:inline-flex;gap:2px;margin-top:10px;
+}
+.pnow-stars .star{
+  font-size:16px;color:rgba(255,255,255,.3);cursor:default;transition:color .1s;
+}
+.pnow-stars .star.lit{ color:#f59e0b; }
+
+/* Meta pills row */
+.pnow-pills{
+  display:flex;flex-wrap:wrap;gap:6px;
+  padding:14px 28px 0;
+}
+.pnow-pill{
+  font-size:11px;font-weight:600;letter-spacing:.04em;
+  padding:3px 10px;border-radius:99px;
+  background:rgba(139,92,246,.14);color:var(--primary);
+  border:1px solid rgba(139,92,246,.22);
+  white-space:nowrap;
+}
+.pnow-pill.pnow-pill--gray{
+  background:rgba(255,255,255,.06);color:var(--t2);
+  border-color:rgba(255,255,255,.1);
+}
+
+/* Two-column body */
+.pnow-body{
+  display:grid;
+  grid-template-columns:1fr 340px;
+  gap:0;
+  padding:24px 28px 0;
+}
+@media(max-width:900px){
+  .pnow-body{ grid-template-columns:1fr; }
+  .pnow-sidebar{ border-left:none; border-top:1px solid var(--border); margin-top:20px; padding-top:20px; padding-left:0; }
+}
+
+/* Main column */
+.pnow-main{ min-width:0; padding-right:24px; }
+
+/* Metadata table */
+.pnow-meta-grid{
+  display:grid;grid-template-columns:auto 1fr;gap:4px 16px;
+  align-items:baseline;margin-bottom:24px;
+}
+.pnow-meta-k{
+  font-size:11px;font-weight:700;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--t3);white-space:nowrap;
+}
+.pnow-meta-v{ font-size:13px;color:var(--t1); }
+.pnow-meta-v.dim{ color:var(--t3); }
+
+/* Section title */
+.pnow-section-title{
+  font-size:11px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--t2);
+  margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:6px;
+}
+
+/* Albums grid */
+.pnow-albums{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(130px,1fr));
+  gap:12px;
+  margin-bottom:28px;
+}
+
+/* Bio */
+.pnow-bio{
+  font-size:13px;line-height:1.7;color:var(--t2);
+  margin-bottom:20px;
+  max-height:160px;overflow:hidden;position:relative;
+}
+.pnow-bio.expanded{ max-height:none; }
+.pnow-bio-fade{
+  position:absolute;bottom:0;left:0;right:0;height:40px;
+  background:linear-gradient(transparent, var(--bg));
+  pointer-events:none;
+}
+.pnow-bio-more{
+  background:none;border:none;color:var(--primary);
+  font-size:12px;font-weight:600;cursor:pointer;padding:0;margin-bottom:18px;
+}
+
+/* Similar artists tags */
+.pnow-sim-list{
+  display:flex;flex-wrap:wrap;gap:6px;margin-bottom:24px;
+}
+.pnow-sim-chip{
+  font-size:12px;font-weight:600;padding:5px 12px;
+  border-radius:99px;background:var(--surface);
+  border:1px solid var(--border);color:var(--t1);
+  cursor:pointer;transition:background .14s,border-color .14s;
+}
+.pnow-sim-chip:hover{ background:var(--hover);border-color:var(--primary);color:var(--primary); }
+.pnow-sim-chip.in-library{ border-color:var(--primary); }
+
+/* Sidebar */
+.pnow-sidebar{
+  border-left:1px solid var(--border);
+  padding-left:24px;
+}
+.pnow-sidebar .pnow-meta-grid{ margin-bottom:0; }
+
+/* TheAudioDB artist image */
+.pnow-tadb-img{
+  width:100%;
+  display:block;
+  border-radius:10px;
+  aspect-ratio:1;
+  object-fit:cover;
+  background:var(--surface);
+  margin-bottom:18px;
+}
+
+/* Fade transition */
+.pnow-view.pnow-fading{ opacity:0;transition:opacity .25s ease; }
+.pnow-view.pnow-visible{ opacity:1;transition:opacity .3s ease; }
+
+/* Empty state */
+.pnow-empty{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:80px 20px;gap:12px;color:var(--t3);text-align:center;
+}
+.pnow-empty svg{ opacity:.3; }
+.pnow-empty p{ font-size:14px;font-weight:500; }
+
+/* ── Artist profile page ─────────────────────────────────────────────────── */
+.artpro-view{ padding:28px 28px 48px; }
+.artpro-header{
+  display:grid;
+  grid-template-columns:200px 1fr;
+  gap:28px;
+  margin-bottom:28px;
+  align-items:start;
+}
+@media(max-width:700px){
+  .artpro-header{ grid-template-columns:1fr; }
+  .artpro-img-wrap{ max-width:160px; }
+}
+.artpro-img-wrap{ flex-shrink:0; }
+.artpro-img{
+  width:100%;display:block;
+  border-radius:10px;
+  aspect-ratio:1;object-fit:cover;object-position:top;
+  background:var(--surface);
+}
+.artpro-img-ph{
+  width:100%;aspect-ratio:1;
+  border-radius:10px;
+  background:var(--surface);
+}
+.artpro-name{
+  font-size:1.8rem;font-weight:700;
+  color:var(--t1);line-height:1.2;
+  margin-bottom:14px;
+}
+.artpro-body{
+  border-top:1px solid var(--border);
+  padding-top:22px;
 }

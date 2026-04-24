@@ -107,7 +107,9 @@ export function getArtistsForBrowse(vpaths, ignoreVPaths) { return backend.getAr
 export function getArtistsByLetter(letter) { return backend.getArtistsByLetter(letter); }
 export function getArtistHomeStats() { return backend.getArtistHomeStats(); }
 export function getArtistRow(artistClean) { return backend.getArtistRow(artistClean); }
+export function getArtistRowByName(name) { return backend.getArtistRowByName(name); }
 export function getArtistFiles(rawVariants, vpaths, ignoreVPaths) { return backend.getArtistFiles(rawVariants, vpaths, ignoreVPaths); }
+export function resolveArtistNamesForDJ(names) { return backend.resolveArtistNamesForDJ(names); }
 export function saveArtistInfo(artistClean, data) { return backend.saveArtistInfo(artistClean, data); }
 export function setArtistNameOverride(artistClean, newName) { return backend.setArtistNameOverride(artistClean, newName); }
 export function setArtistImage(artistClean, imageFile, imageSource) { return backend.setArtistImage(artistClean, imageFile, imageSource); }
@@ -116,6 +118,7 @@ export function markArtistFetchAttempt(artistClean) { return backend.markArtistF
 export function getArtistImageAudit(kind, limit) { return backend.getArtistImageAudit(kind, limit); }
 export function getArtistImageAuditCounts() { return backend.getArtistImageAuditCounts(); }
 export function getArtistsNeedingFetch() { return backend.getArtistsNeedingFetch(); }
+export function getArtistsForTadbRetry(limit) { return backend.getArtistsForTadbRetry(limit); }
 export function getRatedSongs(vpaths, username, ignoreVPaths) { return backend.getRatedSongs(vpaths, username, ignoreVPaths); }
 export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts); }
 export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts); }

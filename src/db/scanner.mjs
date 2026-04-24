@@ -92,10 +92,10 @@ async function insertEntries(song) {
     "art_source": song._artSource || null,
     "cover_file": song._coverFile || null,
     "vpath": loadJson.vpath,
-    // _preserveTs = original ts from DB (re-index); song.modified = file mtime ms (new file only).
-    // Never use song.modified as ts fallback for re-indexed files (_isReindex=true) because
-    // art/tag edits change file mtime → would make old files appear as "recently added".
-    "ts": song._preserveTs || (song._isReindex ? null : song.modified) || null,
+    // _preserveTs = original ts from DB (re-index); new files get ts = wall-clock time of scan.
+    // We intentionally do NOT use file mtime (song.modified) because users copy files with
+    // old mtimes and expect them to show up in "Recently Added" from the moment they drop them in.
+    "ts": song._preserveTs || (song._isReindex ? null : Math.floor(Date.now() / 1000)) || null,
     "sID": loadJson.scanId,
     "replaygainTrackDb": song.replaygain_track_gain ? song.replaygain_track_gain.dB : null,
     "genre": song.genre ? String(song.genre) : null,
@@ -251,9 +251,12 @@ async function processFileResult(absPath, relPath, modTime, data) {
     }
     // Preserve original insertion timestamp so editing tags/art doesn't
     // re-flood "Recently Added" (file hash changes after rewrite → ts = now without this).
-    // Always mark re-indexed files so insertEntries won't use song.modified as ts fallback
-    // (song.modified = new mtime after art/tag edit → would show as "recently added" if old ts was null).
-    songInfo._isReindex = true;
+    // Only set _isReindex for files that were already in the DB (_stale).
+    // For brand-new files (data = {}), _isReindex must remain unset so that
+    // ts = song.modified (file mtime) — making them appear in Recently Added.
+    if (data._stale) {
+      songInfo._isReindex = true;
+    }
     if (data._preserveTs) {
       songInfo._preserveTs = data._preserveTs;
     }

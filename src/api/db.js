@@ -1,5 +1,6 @@
 import Joi from 'joi';
 import path from 'path';
+import fs from 'fs';
 import { execFile } from 'child_process';
 import * as vpath from '../util/vpath.js';
 import * as dbQueue from '../db/task-queue.js';
@@ -10,6 +11,34 @@ import WebError from '../util/web-error.js';
 import { mergeGenreRows } from '../util/genre-merge.js';
 import { indexFileOnDemand } from '../util/on-demand-index.js';
 import { ffprobeBin } from '../util/ffmpeg-bootstrap.js';
+import { parseFile } from 'music-metadata';
+
+/**
+ * Returns excludeFilepathPrefixes for child vpaths that are defined in config
+ * but that the requesting user does NOT have access to.
+ *
+ * Example: user has "Music" but NOT "12-inches" (a child of "Music" whose root
+ * is /music/12\ inches/).  This returns [{ vpath:"Music", prefix:"12 inches/" }]
+ * so DB queries on "Music" automatically exclude that sub-folder.
+ */
+function computeChildExclusions(userVpaths) {
+  const allFolders = config.program.folders || {};
+  const userSet = new Set(userVpaths);
+  const exclusions = [];
+  for (const [name, cfg] of Object.entries(allFolders)) {
+    if (userSet.has(name)) continue; // user has access — nothing to exclude
+    const childRoot = cfg.root.replace(/\/?$/, '/');
+    // Find the user-accessible parent whose root is a strict prefix of this child
+    const parentName = userVpaths.find(p => {
+      const pr = (allFolders[p]?.root || '').replace(/\/?$/, '/');
+      return pr.length > 0 && childRoot.startsWith(pr) && childRoot !== pr;
+    });
+    if (!parentName) continue;
+    const prefix = childRoot.slice(allFolders[parentName].root.replace(/\/?$/, '/').length);
+    if (prefix) exclusions.push({ vpath: parentName, prefix });
+  }
+  return exclusions;
+}
 
 function renderMetadataObj(row) {
   return {
@@ -151,7 +180,9 @@ export function setup(mstream) {
       includeFilepathPrefixes: Joi.array().items(Joi.object({ vpath: Joi.string().required(), prefix: Joi.string().required() })).optional(),
     });
     joiValidate(schema, req.body);
-    const albums = db.getArtistAlbumsMulti(req.body.artists, req.user.vpaths, req.body.ignoreVPaths, req.body.excludeFilepathPrefixes, req.body.includeFilepathPrefixes);
+    const _childExcl = computeChildExclusions(req.user.vpaths);
+    const _excl = [...(req.body.excludeFilepathPrefixes || []), ..._childExcl];
+    const albums = db.getArtistAlbumsMulti(req.body.artists, req.user.vpaths, req.body.ignoreVPaths, _excl.length ? _excl : undefined, req.body.includeFilepathPrefixes);
     res.json({ albums });
   });
 
@@ -164,11 +195,13 @@ export function setup(mstream) {
   });
 
   mstream.post('/api/v1/db/album-songs', (req, res) => {
+    const _childExcl = computeChildExclusions(req.user.vpaths);
+    const _excl = [...(req.body.excludeFilepathPrefixes || []), ..._childExcl];
     const results = db.getAlbumSongs(
       req.body.album ? String(req.body.album) : null,
       req.user.vpaths,
       req.user.username,
-      { ignoreVPaths: req.body.ignoreVPaths, artist: req.body.artist, artists: req.body.artists, year: req.body.year, albumDir: req.body.albumDir || null, excludeFilepathPrefixes: req.body.excludeFilepathPrefixes, includeFilepathPrefixes: req.body.includeFilepathPrefixes }
+      { ignoreVPaths: req.body.ignoreVPaths, artist: req.body.artist, artists: req.body.artists, year: req.body.year, albumDir: req.body.albumDir || null, excludeFilepathPrefixes: _excl.length ? _excl : undefined, includeFilepathPrefixes: req.body.includeFilepathPrefixes }
     );
 
     const songs = [];
@@ -465,7 +498,8 @@ export function setup(mstream) {
     });
     joiValidate(schema, req.body);
     const { artists, limit } = req.body;
-    const results = db.getAllFilesWithMetadata(req.user.vpaths, req.user.username, { artists });
+    const _childExcl = computeChildExclusions(req.user.vpaths);
+    const results = db.getAllFilesWithMetadata(req.user.vpaths, req.user.username, { artists, excludeFilepathPrefixes: _childExcl.length ? _childExcl : undefined });
     if (!results.length) return res.json([]);
     // Fisher-Yates shuffle
     for (let i = results.length - 1; i > 0; i--) {
@@ -674,15 +708,27 @@ export function setup(mstream) {
     try {
       const pathInfo = vpath.getVPathInfo(req.query.fp, req.user);
       const row = db.findFileByPath(pathInfo.relativePath, pathInfo.vpath);
-      // If this is an M4B with no chapters yet, extract on-the-fly via ffprobe
-      if (row && (!row.cuepoints || row.cuepoints === '[]') && /\.m4b$/i.test(pathInfo.fullPath)) {
-        const chapters = await _extractM4bChaptersOnDemand(pathInfo.fullPath);
-        if (chapters && chapters.length >= 2) {
-          db.updateFileCue(pathInfo.relativePath, pathInfo.vpath, JSON.stringify(chapters));
-          return res.json({ cuepoints: chapters });
+
+      // ── On-demand extraction for files whose cuepoints column is still NULL ──
+      // (sentinel '[]' means already checked — don't retry)
+      if (row && row.cuepoints === null) {
+        // 1. M4B: extract chapters via ffprobe
+        if (/\.m4b$/i.test(pathInfo.fullPath)) {
+          const chapters = await _extractM4bChaptersOnDemand(pathInfo.fullPath);
+          if (chapters && chapters.length >= 2) {
+            db.updateFileCue(pathInfo.relativePath, pathInfo.vpath, JSON.stringify(chapters));
+            return res.json({ cuepoints: chapters });
+          }
         }
+        // 2. All other files: try embedded CUESHEET tag then sidecar .cue file
+        const cuepoints = await _extractCueOnDemand(pathInfo.fullPath);
+        // Store result (real data or '[]' sentinel) so we don't re-run on every play
+        db.updateFileCue(pathInfo.relativePath, pathInfo.vpath,
+          cuepoints ? JSON.stringify(cuepoints) : '[]');
+        if (cuepoints) return res.json({ cuepoints });
       }
-      res.json({ cuepoints: row?.cuepoints ? JSON.parse(row.cuepoints) : [] });
+
+      res.json({ cuepoints: row?.cuepoints && row.cuepoints !== '[]' ? JSON.parse(row.cuepoints) : [] });
     } catch (_e) {
       res.json({ cuepoints: [] });
     }
@@ -707,6 +753,75 @@ function _extractM4bChaptersOnDemand(filePath) {
     });
   });
 }
+
+// On-demand CUE extraction for non-M4B files:
+// 1. Tries the embedded CUESHEET tag via music-metadata
+// 2. Falls back to a sidecar .cue file in the same directory
+// Returns [{no, title, t}] (≥2 entries) or null.
+async function _extractCueOnDemand(filePath) {
+  // ── Embedded CUESHEET tag ──────────────────────────────────
+  try {
+    const parsed = await parseFile(filePath, { skipCovers: true, duration: false });
+    const cue = parsed.common?.cuesheet;
+    const sampleRate = parsed.format?.sampleRate || null;
+    if (cue && Array.isArray(cue.tracks) && cue.tracks.length && sampleRate) {
+      const pts = [];
+      for (const tr of cue.tracks) {
+        if (tr.number === 170) continue; // lead-out track
+        const idx1 = Array.isArray(tr.indexes) && tr.indexes.find(i => i.number === 1);
+        if (!idx1) continue;
+        pts.push({ no: tr.number, title: tr.title || null,
+          t: Math.round((idx1.offset / sampleRate) * 100) / 100 });
+      }
+      if (pts.length > 1) return pts;
+    }
+  } catch (_e) { /* not parseable — fall through */ }
+
+  // ── Sidecar .cue file ──────────────────────────────────────
+  try {
+    const dir  = path.dirname(filePath);
+    const base = path.basename(filePath, path.extname(filePath));
+
+    // Prefer exact-basename match, then sole .cue in directory
+    let cuePath = path.join(dir, base + '.cue');
+    if (!fs.existsSync(cuePath)) {
+      let cueFiles;
+      try { cueFiles = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.cue')); }
+      catch (_e) { return null; }
+      if (cueFiles.length !== 1) return null;
+      cuePath = path.join(dir, cueFiles[0]);
+    }
+
+    const content = fs.readFileSync(cuePath, 'utf8');
+
+    // Only handle single-FILE sheets whose FILE line references this audio file
+    const fileLines = [...content.matchAll(/^FILE\s+"([^"]+)"/gim)];
+    if (fileLines.length !== 1) return null;
+    const cueRef = path.basename(fileLines[0][1]);
+    if (cueRef.toLowerCase() !== path.basename(filePath).toLowerCase()) return null;
+
+    // Parse TRACK / TITLE / INDEX 01 MM:SS:FF
+    const tracks = [];
+    let cur = null;
+    for (const line of content.split(/\r?\n/)) {
+      const trackM = line.match(/^\s*TRACK\s+(\d+)\s+AUDIO/i);
+      if (trackM) { cur = { no: parseInt(trackM[1], 10), title: null }; continue; }
+      if (!cur) continue;
+      const titleM = line.match(/^\s*TITLE\s+"(.*)"/i);
+      if (titleM) { cur.title = titleM[1]; continue; }
+      const idxM = line.match(/^\s*INDEX\s+01\s+(\d+):(\d+):(\d+)/i);
+      if (idxM) {
+        const t = parseInt(idxM[1], 10) * 60 + parseInt(idxM[2], 10) + parseInt(idxM[3], 10) / 75;
+        tracks.push({ no: cur.no, title: cur.title, t: Math.round(t * 100) / 100 });
+        cur = null;
+      }
+    }
+    if (tracks.length > 1) return tracks;
+  } catch (_e) { /* no sidecar or unreadable */ }
+
+  return null;
+}
+
 
   // ── GENRE BROWSING ────────────────────────────────────────────
   mstream.get('/api/v1/db/genres', (req, res) => {

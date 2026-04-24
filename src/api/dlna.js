@@ -124,9 +124,19 @@ function _stopSsdp() {
 
 // ── XML / SOAP helpers ────────────────────────────────────────────────────────
 
+// XML 1.0 forbids C0 control chars (except \x09 HT, \x0A LF, \x0D CR),
+// lone UTF-16 surrogate halves (U+D800–U+DFFF), and the two non-characters
+// U+FFFE/U+FFFF. Mojibake-ridden ID3 tags occasionally smuggle these in;
+// without stripping them, a rogue \x00 or \uD800 would emit &#x0; / &#xD800;
+// and crash strict DIDL parsers on renderers like Plex, Sonos, or LG TVs.
+const XML_INVALID_CTRL = /[\x00-\x08\x0B\x0C\x0E-\x1F]/g;
+const XML_INVALID_SURR = /[\uD800-\uDFFF\uFFFE\uFFFF]/g;
+
 function xmlEsc(s) {
   if (s == null) return '';
   return String(s)
+    .replace(XML_INVALID_CTRL, '')
+    .replace(XML_INVALID_SURR, '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
@@ -238,6 +248,8 @@ function trackItem(track, parentId) {
   const durAttr = dur ? ` duration="${dur}"` : '';
   const sizeAttr = track.filesize ? ` size="${track.filesize}"` : '';
   const title = track.title || path.basename(String(track.filepath), path.extname(String(track.filepath)));
+  const isAudioBook = config.program.folders?.[track.vpath]?.type === 'audio-books';
+  const itemClass = isAudioBook ? 'object.item.audioItem.audioBook' : 'object.item.audioItem.musicTrack';
   return `  <item id="${xmlEsc(trackId(track.vpath, track.filepath))}" parentID="${xmlEsc(parentId)}" restricted="1">
     <dc:title>${xmlEsc(title)}</dc:title>
     <dc:creator>${xmlEsc(track.artist || '')}</dc:creator>${artXml(track.aaFile)}
@@ -246,7 +258,7 @@ function trackItem(track, parentId) {
     <upnp:album>${xmlEsc(track.album || '')}</upnp:album>
     ${track.track ? `<upnp:originalTrackNumber>${track.track}</upnp:originalTrackNumber>` : ''}
     ${track.genre ? `<upnp:genre>${xmlEsc(track.genre)}</upnp:genre>` : ''}
-    <upnp:class>object.item.audioItem.musicTrack</upnp:class>
+    <upnp:class>${itemClass}</upnp:class>
     <res protocolInfo="${xmlEsc(protocolInfo(track.filepath))}"${durAttr}${sizeAttr}>${xmlEsc(mediaUrl)}</res>
   </item>`;
 }
@@ -473,9 +485,11 @@ async function handleBrowse(body, res) {
     if (browseFlag === 'BrowseMetadata') {
       return sendBrowse(res, containerXml('0', '-1', config.program.dlna?.name || 'mStream Velvet', sources.length), 1, 1);
     }
-    const all = sources.map(s =>
-      containerXml(encSrc(s.vpathName), '0', s.vpathName, -1)
-    );
+    const all = sources.map(s => {
+      const srcType = config.program.folders?.[s.vpathName]?.type || config.program.folders?.[s.dbVpath]?.type || 'music';
+      const libClass = srcType === 'audio-books' ? 'object.container.album.audioBook' : 'object.container.storageFolder';
+      return containerXml(encSrc(s.vpathName), '0', s.vpathName, -1, libClass);
+    });
     const slice = pg(all);
     return sendBrowse(res, slice.join(''), slice.length, all.length);
   }
@@ -893,23 +907,56 @@ function timeSeekMiddleware(rootMap) {
 
     if (!fs.existsSync(filePath)) return next();
 
+    // Pick the output profile.
+    // MP3 inputs: every frame is independently decodable → -c:a copy is a
+    // lossless passthrough seek. Big CPU win for the common case.
+    // FLAC: ffmpeg's FLAC muxer writes STREAMINFO with the *original* file
+    // duration, not the post-seek slice — strict decoders reject it. Stay on
+    // transcode-to-MP3 path.
+    // Everything else (OGG/Opus/AAC/M4A/WAV): transcode to MP3 at 192k —
+    // the DLNA lowest common denominator every renderer speaks.
+    const ext = path.extname(filePath).toLowerCase();
+    let ffArgs;
+    if (ext === '.mp3') {
+      ffArgs = [
+        '-nostdin',
+        '-ss', String(startSec),
+        '-i',  filePath,
+        '-vn',
+        '-c:a', 'copy',
+        '-f', 'mp3',
+        '-loglevel', 'error',
+        '-',
+      ];
+    } else {
+      ffArgs = [
+        '-nostdin',
+        '-ss', String(startSec),
+        '-i',  filePath,
+        '-vn',
+        '-c:a', 'libmp3lame',
+        '-b:a', '192k',
+        '-f', 'mp3',
+        '-loglevel', 'error',
+        '-',
+      ];
+    }
+
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('TransferMode.dlna.org', 'Streaming');
     res.setHeader('ContentFeatures.dlna.org',
       'DLNA.ORG_PN=MP3;DLNA.ORG_OP=01;DLNA.ORG_CI=1;DLNA.ORG_FLAGS=' + DLNA_FLAGS);
     res.setHeader('TimeSeekRange.dlna.org', `npt=${startSec}-`);
+
+    // HEAD: clients (Sony, Marantz) probe via HEAD + TimeSeekRange to verify
+    // the server supports seeks before issuing GET. Return headers only.
+    if (req.method === 'HEAD') {
+      return res.status(200).end();
+    }
+
     res.status(200);
 
-    const args = [
-      '-ss', String(startSec),
-      '-i',  filePath,
-      '-vn',
-      '-codec:a', 'libmp3lame',
-      '-b:a', '192k',
-      '-f', 'mp3',
-      'pipe:1',
-    ];
-    const ff = spawn(ffmpegBin(), args, { stdio: ['ignore', 'pipe', 'ignore'] });
+    const ff = spawn(ffmpegBin(), ffArgs, { stdio: ['ignore', 'pipe', 'ignore'] });
     ff.on('error', err => {
       winston.error(`[dlna time-seek] ffmpeg error: ${err.message}`);
       if (!res.headersSent) { res.status(500).end(); } else { try { res.end(); } catch (_) { /* already closed */ } }

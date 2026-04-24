@@ -287,8 +287,13 @@ async function processFile(row) {
   const mbArtistId = recording && recording.artists && recording.artists.length > 0
     ? recording.artists[0].id : null;
 
+  // Only mark 'found' when we actually have a MusicBrainz recording ID.
+  // If AcoustID matched by score but returned no recordings, treat as not_found
+  // so the startup migration (found+mbid=null reset) never trips on these rows.
+  const finalStatus = mbid ? 'found' : 'not_found';
+
   await dbWriteWithRetry(() => _setResult.run(
-    best.id || null, mbid, best.score, 'found', Math.floor(Date.now() / 1000),
+    best.id || null, mbid, best.score, finalStatus, Math.floor(Date.now() / 1000),
     mbTitle, mbArtist, mbArtistId,
     row.filepath, row.vpath));
 }

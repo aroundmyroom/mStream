@@ -76,7 +76,7 @@ export async function indexFileOnDemand(pathInfo) {
       format:   meta.format.container || null,
       genre:    t.genre && t.genre[0] ? t.genre[0] : null,
       modified: stat.mtime.getTime(),
-      ts:       stat.mtime.getTime(), // use file mtime so on-demand files don't flood "Recently Added"
+      ts:       Date.now(), // wall-clock time so files played before scanner runs still appear in Recently Added
     };
     return db.insertFile(fileData);
   } catch (_e) {

@@ -9,7 +9,7 @@
  *   openSubsonic: true, type: "mstream", serverVersion: <pkg version>
  */
 
-import { createHash } from 'crypto';
+import { createHash, timingSafeEqual } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
@@ -31,6 +31,17 @@ const SERVER_TYPE = 'mstream';
  * Authenticate a Subsonic request.
  * Returns the username string on success, or null on failure.
  */
+function _constantTimeEqual(a, b) {
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ba.length !== bb.length) {
+    // Still run the comparison to avoid length-based timing leak
+    timingSafeEqual(ba, Buffer.alloc(ba.length));
+    return false;
+  }
+  return timingSafeEqual(ba, bb);
+}
+
 function authenticate(req) {
   const u = req.query.u || req.body?.u;
   if (!u) return null;
@@ -50,7 +61,7 @@ function authenticate(req) {
   const s = req.query.s || req.body?.s;
   if (t && s) {
     const expected = createHash('md5').update(storedPw + s).digest('hex');
-    return expected === t ? u : null;
+    return _constantTimeEqual(expected, t) ? u : null;
   }
 
   // ?p=plaintext  or  ?p=enc:hex
@@ -60,7 +71,7 @@ function authenticate(req) {
     if (plain.startsWith('enc:')) {
       plain = Buffer.from(plain.slice(4), 'hex').toString('utf8');
     }
-    return plain === storedPw ? u : null;
+    return _constantTimeEqual(plain, storedPw) ? u : null;
   }
 
   return null;

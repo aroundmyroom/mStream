@@ -103,6 +103,14 @@ Scribble.prototype.GetSimilarArtists = function (artist, callback, limit) {
   })
 }
 
+Scribble.prototype.GetArtistInfo = function (artist, callback) {
+  const path = '/2.0/?method=artist.getInfo&artist=' + encodeURIComponent(artist) + '&api_key=' + this.apiKey + '&format=json';
+  sendGet(path, function (ret) {
+    if (typeof (callback) === 'function')
+      { callback(ret); }
+  });
+}
+
 Scribble.prototype.GetArtistEvents = function (artist, callback, limit) {
   const amt = limit || 50;
   const path = '/2.0/?method=artist.getevents&artist=' + encodeURIComponent(artist) + '&api_key=' + this.apiKey + '&format=json&limit=' + amt

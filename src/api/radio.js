@@ -12,9 +12,22 @@ import * as admin from '../util/admin.js';
 
 function _ssrfCheck(hostname) {
   const h = hostname.toLowerCase();
-  return h === 'localhost' || h === '::1' ||
-    /^127\./.test(h) || /^10\./.test(h) ||
-    /^192\.168\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h);
+  // IPv4 private ranges + loopback
+  if (h === 'localhost') return true;
+  if (/^127\./.test(h) || /^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  // IPv4 link-local / APIPA (169.254.x.x) — includes AWS/GCP cloud metadata endpoint
+  if (/^169\.254\./.test(h)) return true;
+  // IPv6 loopback + unspecified
+  if (h === '::1' || h === '::') return true;
+  // IPv6 ULA (fc00::/7 — fc and fd prefixes)
+  if (h.startsWith('fc') || h.startsWith('fd')) return true;
+  // IPv6 link-local (fe80::/10 — second hex digit is 8, 9, a, or b)
+  if (/^fe[89ab]/.test(h)) return true;
+  // IPv4-mapped IPv6 (::ffff:a.b.c.d) — recurse with the v4 portion
+  const v4mapped = h.match(/^::ffff:((\d+\.\d+\.\d+\.\d+))$/);
+  if (v4mapped) return _ssrfCheck(v4mapped[1]);
+  return false;
 }
 
 const _URL_RE = /^https?:\/\/.+/i;

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>mStream</title>
+  <title>mStream Velvet</title>
   <link rel="apple-touch-icon" sizes="180x180" href="/assets/fav/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/fav/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/assets/fav/favicon-16x16.png">
@@ -14,7 +14,7 @@
     // Generate PWA manifest inline — avoids proxy auth blocking a separate HTTP request
     (function(){
       var o=window.location.origin;
-      var m={"name":"mStream","short_name":"mStream","icons":[{"src":o+"/assets/fav/android-chrome-192x192.png","sizes":"192x192","type":"image/png"},{"src":o+"/assets/fav/android-chrome-512x512.png","sizes":"512x512","type":"image/png"}],"theme_color":"#1e1e2e","background_color":"#1e1e2e","display":"standalone","start_url":o+"/"};
+      var m={"name":"mStream Velvet","short_name":"mStream V","icons":[{"src":o+"/assets/fav/android-chrome-192x192.png","sizes":"192x192","type":"image/png"},{"src":o+"/assets/fav/android-chrome-512x512.png","sizes":"512x512","type":"image/png"}],"theme_color":"#1e1e2e","background_color":"#1e1e2e","display":"standalone","start_url":o+"/"};
       var b=new Blob([JSON.stringify(m)],{type:'application/manifest+json'});
       var l=document.createElement('link');l.rel='manifest';l.href=URL.createObjectURL(b);
       document.head.appendChild(l);
@@ -23,7 +23,7 @@
   <script defer src="../assets/js/lib/butterchurn.min.js"></script>
   <script defer src="../assets/js/lib/audiomotion-analyzer.js"></script>
   <script defer src="../assets/js/lib/qr.js"></script>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/style.css?v=6.12.6h-velvet">
   <script src="/assets/js/i18n.js"></script>
 </head>
 <body>
@@ -454,6 +454,10 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9,22 9,12 15,12 15,22"/></svg>
           <span data-i18n="player.nav.home">Home</span>
         </button>
+        <button class="nav-btn" data-view="playing-now" id="playing-now-nav-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10,8 16,12 10,16"/></svg>
+          <span data-i18n="player.nav.playingNow">Playing Now</span>
+        </button>
         <button class="nav-btn" data-view="shortcuts">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
           <span data-i18n="player.nav.shortcuts">Shortcuts</span>
@@ -879,7 +883,10 @@
 
     <!-- Right: volume + balance -->
     <div class="player-right">
-      <div id="wf-status" class="wf-status"></div>
+      <div class="pr-info">
+        <div id="wf-status" class="wf-status"></div>
+        <div id="ab-chapter-bar" class="ab-chapter-bar hidden"></div>
+      </div>
       <div class="vol-wrap">
         <div class="vol-group">
           <span class="vol-group-lbl"><span data-i18n="player.player.balance">Balance</span> <button id="bal-center-btn" class="bal-center-btn" title="Reset to centre" data-i18n="player.ctrl.balanceCenter" data-i18n-attr="title">⊙</button></span>
@@ -915,9 +922,6 @@
       </div>
       <span id="time-total">0:00</span>
     </div>
-    <!-- Audiobook chapter indicator (hidden unless audiobook-mode) -->
-    <div id="ab-chapter-bar" class="ab-chapter-bar hidden"></div>
-
     <!-- Full-width VU / spectrum strip -->
     <div id="vu-spec-row" class="vu-spec-row" title="Click to switch: spectrum / VU meters / PPM / art-pulse" data-i18n="player.ctrl.vuSwitch" data-i18n-attr="title">
       <canvas id="mini-spec" class="mini-spec"></canvas>
@@ -1102,6 +1106,7 @@ I18N.ready.then(function () {
     .catch(function() { buildPicker(allLangs.map(function(lang) { return lang.code; })); });
 });
 </script>
-<script src="/app.js"></script>
+<script src="/app.js?v=6.12.6h-velvet"></script>
+
 </body>
 </html>

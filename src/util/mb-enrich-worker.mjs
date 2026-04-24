@@ -15,8 +15,8 @@ const IDLE_WAIT_MS   = 60_000;
 const HTTP_TIMEOUT_MS = 25_000;
 const USER_AGENT     = 'mStreamVelvet/1.0 (https://github.com/aroundmyroom/mStream; admin-contact@music.aroundtheworld.net)';
 
-const db = new DatabaseSync(dbPath, { timeout: 15_000 });
-db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=15000');
+const db = new DatabaseSync(dbPath, { timeout: 60_000 });
+db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=60000');
 
 const _getQueue = db.prepare(`
   SELECT filepath, vpath, mbid, title, artist, album, year, track
@@ -54,12 +54,29 @@ const _getStats = db.prepare(`
   FROM files
 `);
 
-// Reset pending rows left over from an interrupted previous run
-_resetPending.run();
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── DB write retry ─────────────────────────────────────────────────────────────
+// AcoustID worker may hold the write lock for extended periods.
+// Retry for up to ~3 minutes instead of crashing.
+const DB_RETRY_ATTEMPTS = 60;
+const DB_RETRY_DELAY_MS = 3_000;
+
+async function dbWriteWithRetry(fn) {
+  for (let i = 0; i < DB_RETRY_ATTEMPTS; i++) {
+    try {
+      return fn();
+    } catch (err) {
+      const locked = err && typeof err.message === 'string' &&
+        (err.message.includes('database is locked') || err.message.includes('SQLITE_BUSY'));
+      if (!locked || i === DB_RETRY_ATTEMPTS - 1) throw err;
+      if (_stopping) throw err;
+      await sleep(DB_RETRY_DELAY_MS);
+    }
+  }
+}
 
 function norm(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
@@ -132,18 +149,18 @@ function mbLookup(mbid) {
 
 async function processFile(row) {
   const ts = Math.floor(Date.now() / 1000);
-  _setPending.run(ts, row.filepath, row.vpath);
+  await dbWriteWithRetry(() => _setPending.run(ts, row.filepath, row.vpath));
 
   let apiData;
   try {
     apiData = await mbLookup(row.mbid);
   } catch (err) {
-    _setResult.run(null, null, null, null, null, 'error', ts, null, err.message.slice(0, 200), row.filepath, row.vpath);
+    await dbWriteWithRetry(() => _setResult.run(null, null, null, null, null, 'error', ts, null, err.message.slice(0, 200), row.filepath, row.vpath));
     return;
   }
 
   if (!apiData) {
-    _setResult.run(null, null, null, null, null, 'no_data', ts, null, null, row.filepath, row.vpath);
+    await dbWriteWithRetry(() => _setResult.run(null, null, null, null, null, 'no_data', ts, null, null, row.filepath, row.vpath));
     return;
   }
 
@@ -153,10 +170,10 @@ async function processFile(row) {
   const best = selectRelease(apiData.releases);
   if (!best) {
     // No release info — store artist/title at least, mark no_data
-    _setResult.run(
+    await dbWriteWithRetry(() => _setResult.run(
       null, null, null, null, null, 'no_data', ts, 'needs_review', null,
       row.filepath, row.vpath
-    );
+    ));
     return;
   }
 
@@ -188,12 +205,12 @@ async function processFile(row) {
 
   const tagStatus = computeTagStatus(row, mbData);
 
-  _setResult.run(
+  await dbWriteWithRetry(() => _setResult.run(
     mbData.mb_album, mbData.mb_year, mbData.mb_track, mbData.mb_release_id,
     normalizeAlbumDir(row.filepath),
     'done', ts, tagStatus, null,
     row.filepath, row.vpath
-  );
+  ));
 }
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
@@ -201,6 +218,9 @@ async function processFile(row) {
 let _stopping = false;
 
 async function run() {
+  // Reset pending rows left over from an interrupted previous run
+  await dbWriteWithRetry(() => _resetPending.run());
+
   parentPort.postMessage({ type: 'ready' });
 
   while (!_stopping) {

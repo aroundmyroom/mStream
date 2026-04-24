@@ -125,10 +125,14 @@ export function setup(mstream) {
       (data) => {
         if (!data) return res.json({ artists: [] });
         try {
-          const artists = (data?.similarartists?.artist || [])
+          const rawNames = (data?.similarartists?.artist || [])
             .slice(0, 20)
             .map(a => a.name)
             .filter(Boolean);
+          // Resolve against the library: normalizes '&' vs 'and', case, whitespace.
+          // Returns actual files.artist values so the Auto-DJ IN(...) filter matches.
+          // Artists not in the library are dropped — no point querying for them.
+          const artists = db.resolveArtistNamesForDJ(rawNames);
           res.json({ artists });
         } catch (_e) {
           res.json({ artists: [] });
@@ -136,6 +140,26 @@ export function setup(mstream) {
       },
       20
     );
+  });
+
+  mstream.get('/api/v1/lastfm/artist-info', (req, res) => {
+    if (!req.query.artist) return res.json({});
+    if (!Scrobbler.apiKey) return res.json({});
+    Scrobbler.GetArtistInfo(String(req.query.artist), (data) => {
+      if (!data?.artist) return res.json({});
+      try {
+        const a = data.artist;
+        // Strip HTML/links from bio summary
+        const rawBio = a.bio?.summary || '';
+        const bio = rawBio.replace(/<a[^>]*>.*?<\/a>/gi, '').replace(/<[^>]+>/g, '').trim();
+        const tags = (a.tags?.tag || []).map(tag => tag.name).slice(0, 5);
+        const listeners = a.stats?.listeners ? parseInt(a.stats.listeners, 10) : null;
+        const plays = a.stats?.playcount ? parseInt(a.stats.playcount, 10) : null;
+        res.json({ bio, tags, listeners, plays });
+      } catch (_e) {
+        res.json({});
+      }
+    });
   });
 
   mstream.post('/api/v1/lastfm/test-login', async (req, res) => {
@@ -151,7 +175,7 @@ export function setup(mstream) {
 
     await axios({
       method: 'GET',
-      url: `http://ws.audioscrobbler.com/2.0/?method=auth.getMobileSession&username=${req.body.username}&authToken=${token}&api_key=${config.program.lastFM.apiKey}&api_sig=${hash}`
+      url: `https://ws.audioscrobbler.com/2.0/?method=auth.getMobileSession&username=${req.body.username}&authToken=${token}&api_key=${config.program.lastFM.apiKey}&api_sig=${hash}`
     });
     res.json({});
   });
@@ -211,7 +235,7 @@ export function setup(mstream) {
     try {
       lfmResponse = await axios({
         method: 'GET',
-        url: `http://ws.audioscrobbler.com/2.0/?method=auth.getMobileSession&username=${encodeURIComponent(req.body.lastfmUser)}&authToken=${token}&api_key=${config.program.lastFM.apiKey}&api_sig=${apiSig}&format=json`,
+        url: `https://ws.audioscrobbler.com/2.0/?method=auth.getMobileSession&username=${encodeURIComponent(req.body.lastfmUser)}&authToken=${token}&api_key=${config.program.lastFM.apiKey}&api_sig=${apiSig}&format=json`,
         validateStatus: null,
       });
     } catch (netErr) {
