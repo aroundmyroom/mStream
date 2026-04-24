@@ -1419,9 +1419,9 @@ async function _djApiCall() {
 const DJ_ARTIST_COOLDOWN = 15; // minimum songs between the same artist
 function _djPushArtistHistory(artist) {
   if (!artist) return;
-  // Remove any earlier occurrence of this artist, then push to end
-  const norm = artist.trim().toLowerCase();
-  S.djArtistHistory = S.djArtistHistory.filter(a => a.toLowerCase() !== norm);
+  // Normalize for dedup: lowercase + strip dots so "M.C. Sar" == "MC Sar"
+  const norm = a => a.trim().toLowerCase().replace(/\./g, '');
+  S.djArtistHistory = S.djArtistHistory.filter(a => norm(a) !== norm(artist));
   S.djArtistHistory.push(artist.trim());
   if (S.djArtistHistory.length > DJ_ARTIST_COOLDOWN) S.djArtistHistory.shift();
   localStorage.setItem(_djKey('artist_history'), JSON.stringify(S.djArtistHistory));

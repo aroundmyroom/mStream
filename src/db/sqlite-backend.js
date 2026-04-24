@@ -1728,15 +1728,19 @@ export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepat
   const ftsQuery = `{${searchCol}} : "${escapeFts(searchTerm)}"*${notClause}`;
 
   const params = [...vIn.params, ...ep.params, ftsQuery];
-  let sql = `SELECT f.rowid AS id, f.* FROM files f
-    JOIN fts_files ft ON f.rowid = ft.rowid
+  // fts_files is the outer (driving) table so SQLite uses the FTS5 index scan.
+  // ORDER BY rank (not bm25()) enables FTS5 top-N early-stop: stops after
+  // collecting LIMIT ranked results instead of materialising all matches first.
+  // LIMIT 50: the client slices to 50 for display; fetching 500 is wasted work.
+  let sql = `SELECT f.rowid AS id, f.* FROM fts_files ft
+    JOIN files f ON f.rowid = ft.rowid
     WHERE ${vIn.sql.replace(/\bvpath\b/g, 'f.vpath')}${ep.sql.replace(/\bvpath\b/g, 'f.vpath').replace(/\bfilepath\b/g, 'f.filepath')}
     AND ft.fts_files MATCH ?`;
   if (filepathPrefix && typeof filepathPrefix === 'string') {
     sql += " AND f.filepath LIKE ? ESCAPE '\\'";
     params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
   }
-  sql += ' ORDER BY bm25(fts_files) LIMIT 500';
+  sql += ' ORDER BY rank LIMIT 50';
   const rows = db.prepare(sql).all(...params);
   return rows.map(mapFileRow);
 }
@@ -1757,15 +1761,16 @@ export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix
   const ftsQuery = posClause + notClause;
 
   const params = [...vIn.params, ...ep.params, ftsQuery];
-  let sql = `SELECT f.rowid AS id, f.* FROM files f
-    JOIN fts_files ft ON f.rowid = ft.rowid
+  // Same optimizations as searchFiles: FTS as outer table, ORDER BY rank.
+  let sql = `SELECT f.rowid AS id, f.* FROM fts_files ft
+    JOIN files f ON f.rowid = ft.rowid
     WHERE ${vIn.sql.replace(/\bvpath\b/g, 'f.vpath')}${ep.sql.replace(/\bvpath\b/g, 'f.vpath').replace(/\bfilepath\b/g, 'f.filepath')}
     AND ft.fts_files MATCH ?`;
   if (filepathPrefix && typeof filepathPrefix === 'string') {
     sql += " AND f.filepath LIKE ? ESCAPE '\\'";
     params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
   }
-  sql += ' ORDER BY bm25(fts_files) LIMIT 500';
+  sql += ' ORDER BY rank LIMIT 50';
   const rows = db.prepare(sql).all(...params);
   return rows.map(mapFileRow);
 }
@@ -1913,10 +1918,11 @@ export function getAllFilesWithMetadata(vpaths, username, opts) {
   }
 
   // Exclude recently-heard artists (DJ cooldown window)
+  // Normalize both sides: lowercase + strip dots so "M.C. Sar" == "MC Sar".
   if (opts.ignoreArtists && Array.isArray(opts.ignoreArtists) && opts.ignoreArtists.length > 0) {
     const placeholders = opts.ignoreArtists.map(() => '?').join(',');
-    sql += ` AND (f.artist IS NULL OR LOWER(f.artist) NOT IN (${placeholders}))`;
-    params.push(...opts.ignoreArtists.map(a => String(a).toLowerCase()));
+    sql += ` AND (f.artist IS NULL OR REPLACE(LOWER(f.artist), '.', '') NOT IN (${placeholders}))`;
+    params.push(...opts.ignoreArtists.map(a => String(a).toLowerCase().replace(/\./g, '')));
   }
 
   const rows = db.prepare(sql).all(...params);
@@ -1946,10 +1952,11 @@ function _buildRandomWhere(opts, filtered) {
     sql += ' AND um.rating >= ?';
     params.push(minRating);
   }
+  // Normalize both sides: lowercase + strip dots so "M.C. Sar" == "MC Sar".
   if (opts.ignoreArtists && Array.isArray(opts.ignoreArtists) && opts.ignoreArtists.length > 0) {
     const placeholders = opts.ignoreArtists.map(() => '?').join(',');
-    sql += ` AND (f.artist IS NULL OR LOWER(f.artist) NOT IN (${placeholders}))`;
-    params.push(...opts.ignoreArtists.map(a => String(a).toLowerCase()));
+    sql += ` AND (f.artist IS NULL OR REPLACE(LOWER(f.artist), '.', '') NOT IN (${placeholders}))`;
+    params.push(...opts.ignoreArtists.map(a => String(a).toLowerCase().replace(/\./g, '')));
   }
   return { sql, params };
 }

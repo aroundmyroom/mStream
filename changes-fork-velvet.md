@@ -1,5 +1,18 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.12.8-velvet — Search performance fix
+
+### fix: Search — FTS5 query optimisation (was hanging on large libraries)
+- **Root cause**: `ORDER BY bm25(fts_files) LIMIT 500` prevented FTS5's top-N early-stop optimisation — SQLite had to materialise **all** matching rows and rank them before applying LIMIT. For common words ("love", "the") this means scanning thousands of rows.
+- **Fix 1**: Switch to `ORDER BY rank` — the special FTS5 column that enables SQLite's internal top-N cursor; stops scanning after collecting LIMIT results instead of materialising everything.
+- **Fix 2**: Move `fts_files` to be the outer (driving) table in the JOIN; SQLite FTS5 doc explicitly states FTS should drive the join for best performance.
+- **Fix 3**: Reduce `LIMIT 500 → 50`; the client already slices song results to 50 for display, so fetching 500 was 10× wasted work on server and client.
+- Applied to both `searchFiles` and `searchFilesAllWords` in `src/db/sqlite-backend.js`.
+- **Measured speedup on our 134k-file library**: "love" 157 ms, "happy" 32 ms, "the" 201 ms, "amsterdam" 10 ms — all queries that previously hung indefinitely.
+
+### fix: Auto-DJ artist cooldown — dots stripped from artist names
+- `ignoreArtists` SQL now uses `REPLACE(LOWER(f.artist), '.', '')` so "M.C. Sar" == "MC Sar" in cooldown; same normalisation applied in `_djPushArtistHistory` client-side dedup.
+
 ## v6.12.7-velvet — April 2026 — Playing Now, Artist Images & DLNA Polish
 
 ### feat: Playing Now view — full redesign
