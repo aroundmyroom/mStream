@@ -49,6 +49,7 @@ export function removeStaleFiles(vpath, scanId) { return backend.removeStaleFile
 export function removeFilesByVpath(vpath) { return backend.removeFilesByVpath(vpath); }
 export function removeFilesByPrefix(vpath, prefix) { return backend.removeFilesByPrefix(vpath, prefix); }
 export function countFilesByVpath(vpath) { return backend.countFilesByVpath(vpath); }
+export function countFilesByVpaths(vpaths) { return backend.countFilesByVpaths(vpaths); }
 export function recordCompletedScan(vpath, scanId, scanStartTs, finishedAtSec) { return backend.recordCompletedScan(vpath, scanId, scanStartTs, finishedAtSec); }
 export function getStats() { return backend.getStats(); }
 export function getLastScannedMs() { return backend.getLastScannedMs(); }
@@ -99,6 +100,7 @@ export function getAlbumSongs(album, vpaths, username, opts) { return backend.ge
 export function getFilesForAlbumsBrowse(sources) { return backend.getFilesForAlbumsBrowse(sources); }
 export function getDB() { return backend.getDB(); }
 export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
+export function searchAlbumsByArtist(searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchAlbumsByArtist(searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
 export function listAllSongs(vpaths, ignoreVPaths, excludeFilepathPrefixes, filepathPrefix, offset, limit) { return backend.listAllSongs(vpaths, ignoreVPaths, excludeFilepathPrefixes, filepathPrefix, offset, limit); }
 export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
 export function searchFolders(query, vpaths, ignoreVPaths) { return backend.searchFolders(query, vpaths, ignoreVPaths); }

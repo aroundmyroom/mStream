@@ -131,10 +131,7 @@ export function pullMetaData(filepath, user) {
 
 export function setup(mstream) {
   mstream.get('/api/v1/db/status', (req, res) => {
-    let total = 0;
-    for (const vpathItem of req.user.vpaths) {
-      total += db.countFilesByVpath(vpathItem);
-    }
+    const total = db.countFilesByVpaths(req.user.vpaths);
 
     res.json({
       totalFileCount: total,
@@ -151,7 +148,6 @@ export function setup(mstream) {
   mstream.post('/api/v1/db/metadata/batch', (req, res) => {
     const returnThis = {};
     req.body.forEach(f => {
-      console.log(f)
       returnThis[f] = pullMetaData(f, req.user);
     });
 
@@ -243,6 +239,26 @@ export function setup(mstream) {
       }));
 
     const albums  = req.body.noAlbums  === true ? [] : searchByX(req, 'album',    undefined, posSearch, negativeTerms);
+    // ── Album augmentation: also find albums BY matching artist ────────────────
+    // Searching "Pink Floyd" in the album column only returns albums NAMED "Pink
+    // Floyd …". We also search the artist column, but grouped at the SQL level
+    // so LIMIT 50 counts unique ALBUMS rather than individual tracks. This fixes
+    // artists like Cerrone (1410 tracks → 172 albums) where a row-level LIMIT 50
+    // would only return 2–4 albums (whichever ones happened to have the most tracks).
+    if (req.body.noAlbums !== true) {
+      const byArtist = db.searchAlbumsByArtist(posSearch, req.user.vpaths, req.body.ignoreVPaths, req.body.filepathPrefix || null, req.body.excludeFilepathPrefixes, negativeTerms);
+      const seenAlbums = new Set(albums.map(a => a.name));
+      for (const a of byArtist) {
+        if (a.album && !seenAlbums.has(a.album)) {
+          seenAlbums.add(a.album);
+          albums.push({
+            name: a.album,
+            album_art_file: a.aaFile || null,
+            filepath: false
+          });
+        }
+      }
+    }
     const files   = req.body.noFiles   === true ? [] : searchByX(req, 'filepath', undefined, posSearch, negativeTerms);
     const title   = req.body.noTitles  === true ? [] : searchByX(req, 'title', 'filepath',   posSearch, negativeTerms);
 

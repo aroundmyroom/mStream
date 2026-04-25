@@ -5872,7 +5872,10 @@ async function viewArtistProfile(artistKey, displayName, variants, backFn) {
       card.addEventListener('click', () => {
         const alb = albums[i];
         viewAlbumSongs(alb.name, displayName, goBack, {
-          albumDir: alb.dir,
+          // normDir collapses CD1/CD2 sub-dirs → parent album dir, so all discs load.
+          // alb.dir is the raw per-disc dir (e.g. "Pink Floyd at Pompeii/CD1/");
+          // using it would only return that disc's tracks.
+          albumDir: alb.normDir || alb.dir,
           artistVariants: variants || [displayName],
           skipAOFilter: true,
         });

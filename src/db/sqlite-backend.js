@@ -38,6 +38,16 @@ let db;
 let _dbPath = null;
 let _rebuildInFlight = false;
 const _s = {}; // cached prepared statements — populated in init(), reused on every call
+// Dynamic statement cache: keyed by SQL string. Covers search queries whose SQL
+// varies by vpath count. On a typical server the vpath set is stable, so the
+// cache always hits after the first search — saves sqlite3_prepare_v2 overhead
+// on every keystroke (6 queries × every search request).
+const _stmtCache = new Map();
+function _prepare(sql) {
+  let s = _stmtCache.get(sql);
+  if (!s) { s = db.prepare(sql); _stmtCache.set(sql, s); }
+  return s;
+}
 
 /** Expose raw DatabaseSync instance for modules (like DLNA) that need custom queries. */
 export function getDB() { return db; }
@@ -62,16 +72,24 @@ export function init(dbDirectory) {
   db.exec('PRAGMA cache_size = -32000');
   // Keep sort/temp B-trees in memory instead of spilling to disk.
   db.exec('PRAGMA temp_store = MEMORY');
+  // Memory-mapped I/O (128 MB): reads map pages directly from the OS page cache
+  // without an extra kernel→user memcpy. Especially useful on Docker bind mounts
+  // and systems with multiple music roots where random page reads are frequent.
+  db.exec('PRAGMA mmap_size = 134217728');
   // Migrate to 8 KB pages if still on the SQLite default 4 KB.
   // Larger pages = shallower B-trees = fewer reads per query on a 167 MB+ DB.
-  // PRAGMA page_size + VACUUM rebuilds the file in-place with the new page size.
+  // IMPORTANT: page_size cannot be changed while journal_mode=WAL is active.
+  // We must temporarily switch to DELETE journal mode, VACUUM, then restore WAL.
   // Runs once on first boot after this change (~3–5 s for 167 MB); skipped on
   // all subsequent boots because page_size is already 8192.
   const currentPageSize = db.prepare('PRAGMA page_size').get().page_size;
   if (currentPageSize !== 8192) {
-    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');  // flush WAL before switching modes
+    db.exec('PRAGMA journal_mode = DELETE');     // WAL must be off for page_size change
     db.exec('PRAGMA page_size = 8192');
-    db.exec('VACUUM');
+    db.exec('VACUUM');                           // rebuilds file with new page size
+    db.exec('PRAGMA journal_mode = WAL');        // restore WAL
+    _stmtCache.clear();                          // invalidate any pre-migration stmts
   }
 
   db.exec(`
@@ -363,6 +381,8 @@ export function init(dbDirectory) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_vpath_filepath_aa ON files(vpath, filepath, aaFile)');
   // AcoustID: worker scans for NULL status to find unprocessed files
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_acoustid_status ON files(acoustid_status)');
+  // Composite index for the MB enrichment worker queue (acoustid_status + mb_enrichment_status + mbid)
+  db.exec('CREATE INDEX IF NOT EXISTS idx_files_mb_enrich_queue ON files(acoustid_status, mb_enrichment_status, mbid)');
   // One-time backfill: compute artist_id / album_id for all records added before this migration
   const _bfCount = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE artist_id IS NULL').get().cnt;
   if (_bfCount > 0) {
@@ -478,7 +498,26 @@ export function init(dbDirectory) {
     ftsInsert:  db.prepare('INSERT INTO fts_files(rowid, title, artist, album, filepath) VALUES (?, ?, ?, ?, ?)'),
     ftsDel:     db.prepare("INSERT INTO fts_files(fts_files, rowid, title, artist, album, filepath) VALUES ('delete', ?, ?, ?, ?, ?)"),
     ftsRebuild: db.prepare("INSERT INTO fts_files(fts_files) VALUES ('rebuild')"),
+    // Metadata lookup — called on every queue restore; caching avoids repeated prepare overhead
+    getFileWithMeta: db.prepare(`
+      SELECT f.rowid AS id, f.*, um.rating
+      FROM files f
+      LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
+      WHERE f.filepath = ? AND f.vpath = ?`),
+    // Artist search — static SQL (all vpath filtering done in JS); cached here
+    // to avoid re-prepare on every keystroke.
+    searchArtists: db.prepare(`
+      SELECT an.id, an.artist_clean, an.artist_raw_variants, an.vpaths_json
+      FROM artists_normalized an
+      JOIN fts_artists fa ON an.id = fa.rowid
+      WHERE fts_artists MATCH ?
+      ORDER BY rank`),  // No LIMIT — full result set returned for accurate counts
   });
+  // Run ANALYZE deferred so startup latency is not affected.
+  // ANALYZE populates sqlite_stat1 with accurate row counts, letting the query
+  // planner make optimal decisions for FTS JOIN queries and ORDER BY plans.
+  // Critical for Docker deployments with multiple music roots.
+  setImmediate(() => { try { db.exec('ANALYZE'); } catch (_e) { /* ignore */ } });
 }
 
 export function close() {
@@ -961,6 +1000,17 @@ export function countFilesByVpath(vpath) {
   return row.cnt;
 }
 
+// Batch version: one GROUP BY query instead of one query per vpath.
+// Used by /api/v1/db/status to avoid N+1 on users with many vpaths.
+export function countFilesByVpaths(vpaths) {
+  if (!vpaths || vpaths.length === 0) return 0;
+  const vIn = inClause('vpath', vpaths);
+  const rows = db.prepare(
+    `SELECT vpath, COUNT(*) AS cnt FROM files WHERE ${vIn.sql} GROUP BY vpath`
+  ).all(...vIn.params);
+  return rows.reduce((sum, r) => sum + r.cnt, 0);
+}
+
 export function recordCompletedScan(vpath, scanId, scanStartTs, finishedAtSec) {
   const toSec = (value) => {
     if (value === null || value === undefined) return null;
@@ -995,19 +1045,38 @@ export function getStats() {
   const totalArtists    = db.prepare("SELECT COUNT(DISTINCT artist) AS cnt FROM files WHERE artist IS NOT NULL AND artist != ''").get().cnt;
   const totalAlbums     = db.prepare("SELECT COUNT(DISTINCT album) AS cnt FROM files WHERE album IS NOT NULL AND album != ''").get().cnt;
   const totalGenres     = db.prepare("SELECT COUNT(DISTINCT genre) AS cnt FROM files WHERE genre IS NOT NULL AND genre != ''").get().cnt;
-  const withArt         = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE aaFile IS NOT NULL AND aaFile != ''").get().cnt;
-  const artFromDiscogs  = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE art_source = 'discogs'").get().cnt;
-  const artEmbedded     = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE art_source = 'embedded'").get().cnt;
-  const artFromDirectory= db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE art_source = 'directory'").get().cnt;
-  const withReplaygain  = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE replaygainTrackDb IS NOT NULL').get().cnt;
-  const withCue         = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE cuepoints IS NOT NULL AND cuepoints != '[]'").get().cnt;
-  const cueUnchecked    = db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE cuepoints IS NULL').get().cnt;
 
-  const yearRow         = db.prepare('SELECT MIN(year) AS oldest, MAX(year) AS newest FROM files WHERE year >= 1900 AND year <= 2030').get();
-  const newestTsRow     = _s.getLastScanRun.get();
-  const nowSec    = Math.floor(Date.now() / 1000);
-  const last7Days  = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE (CASE WHEN ts >= 1000000000000 THEN CAST(ts / 1000 AS INTEGER) ELSE ts END) >= ?").get(nowSec - 7  * 86400).cnt;
-  const last30Days = db.prepare("SELECT COUNT(*) AS cnt FROM files WHERE (CASE WHEN ts >= 1000000000000 THEN CAST(ts / 1000 AS INTEGER) ELSE ts END) >= ?").get(nowSec - 30 * 86400).cnt;
+  // Collapse 11 scalar aggregate queries into one conditional-aggregate pass.
+  const nowSec = Math.floor(Date.now() / 1000);
+  const agg = db.prepare(`
+    SELECT
+      COUNT(*) FILTER (WHERE aaFile IS NOT NULL AND aaFile != '')                                                 AS withArt,
+      COUNT(*) FILTER (WHERE art_source = 'discogs')                                                             AS artFromDiscogs,
+      COUNT(*) FILTER (WHERE art_source = 'embedded')                                                            AS artEmbedded,
+      COUNT(*) FILTER (WHERE art_source = 'directory')                                                           AS artFromDirectory,
+      COUNT(*) FILTER (WHERE replaygainTrackDb IS NOT NULL)                                                      AS withReplaygain,
+      COUNT(*) FILTER (WHERE cuepoints IS NOT NULL AND cuepoints != '[]')                                        AS withCue,
+      COUNT(*) FILTER (WHERE cuepoints IS NULL)                                                                   AS cueUnchecked,
+      MIN(CASE WHEN year >= 1900 AND year <= 2030 THEN year END)                                                 AS oldestYear,
+      MAX(CASE WHEN year >= 1900 AND year <= 2030 THEN year END)                                                 AS newestYear,
+      SUM(CASE WHEN duration IS NOT NULL THEN duration END)                                                      AS totalDuration,
+      COUNT(*) FILTER (WHERE (CASE WHEN ts >= 1000000000000 THEN CAST(ts/1000 AS INT) ELSE ts END) >= ?)        AS last7Days,
+      COUNT(*) FILTER (WHERE (CASE WHEN ts >= 1000000000000 THEN CAST(ts/1000 AS INT) ELSE ts END) >= ?)        AS last30Days
+    FROM files
+  `).get(nowSec - 7 * 86400, nowSec - 30 * 86400);
+
+  const withArt          = agg.withArt;
+  const artFromDiscogs   = agg.artFromDiscogs;
+  const artEmbedded      = agg.artEmbedded;
+  const artFromDirectory = agg.artFromDirectory;
+  const withReplaygain   = agg.withReplaygain;
+  const withCue          = agg.withCue;
+  const cueUnchecked     = agg.cueUnchecked;
+  const last7Days        = agg.last7Days;
+  const last30Days       = agg.last30Days;
+  const totalDurationSec = agg.totalDuration ? Math.round(agg.totalDuration) : 0;
+
+  const newestTsRow = _s.getLastScanRun.get();
 
   const formats = db.prepare(
     'SELECT LOWER(TRIM(format)) AS format, COUNT(*) AS cnt FROM files WHERE format IS NOT NULL AND TRIM(format) != \'\' GROUP BY LOWER(TRIM(format)) ORDER BY cnt DESC'
@@ -1029,9 +1098,6 @@ export function getStats() {
     'SELECT (year / 10 * 10) AS decade, COUNT(*) AS cnt FROM files WHERE year >= 1900 AND year <= 2030 GROUP BY decade ORDER BY decade'
   ).all();
 
-  const durRow = db.prepare('SELECT SUM(duration) AS s FROM files WHERE duration IS NOT NULL').get();
-  const totalDurationSec = durRow.s ? Math.round(durRow.s) : 0;
-
   return {
     totalFiles,
     totalArtists,
@@ -1045,8 +1111,8 @@ export function getStats() {
     withReplaygain,
     withCue,
     cueUnchecked,
-    oldestYear:  yearRow.oldest  || null,
-    newestYear:  yearRow.newest  || null,
+    oldestYear:  agg.oldestYear  || null,
+    newestYear:  agg.newestYear  || null,
     lastScannedTs: toEpochMs(newestTsRow.ts),
     addedLast7Days:  last7Days,
     addedLast30Days: last30Days,
@@ -1061,12 +1127,7 @@ export function getStats() {
 
 // Metadata Queries
 export function getFileWithMetadata(filepath, vpath, username) {
-  const row = db.prepare(`
-    SELECT f.rowid AS id, f.*, um.rating
-    FROM files f
-    LEFT JOIN user_metadata um ON f.hash = um.hash AND um.user = ?
-    WHERE f.filepath = ? AND f.vpath = ?
-  `).get(username, filepath, vpath);
+  const row = _s.getFileWithMeta.get(username, filepath, vpath);
 
   if (!row) { return null; }
   return mapFileRow(row);
@@ -1107,13 +1168,17 @@ export function getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilep
   const aIn = inClause('artist', artists.map(String));
   // GROUP BY album + physical dir so different pressings of the same album
   // each get their own entry. CD1/CD2 grouping is handled in JS via _normaliseAlbumDir.
+  // MAX(aaFile) ensures we pick a non-null art file when SQLite's indeterminate row
+  // selection might otherwise return a NULL-aaFile row from the same group.
   const rows = db.prepare(`
-    SELECT album AS name, year, aaFile AS album_art_file,
+    SELECT album AS name, MAX(year) AS year,
+      MAX(aaFile) AS album_art_file,
+      MAX(cover_file) AS cover_file,
       rtrim(filepath, replace(filepath, '/', '')) AS dir
     FROM files
     WHERE ${vIn.sql}${ep.sql}${ip.sql} AND ${aIn.sql}
     GROUP BY album, rtrim(filepath, replace(filepath, '/', ''))
-    ORDER BY year DESC
+    ORDER BY MAX(year) DESC
   `).all(...vIn.params, ...ep.params, ...ip.params, ...aIn.params);
   const albums = [], store = {};
   for (const row of rows) {
@@ -1138,12 +1203,14 @@ export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPre
   const ep = excludePrefixClauses(excludeFilepathPrefixes);
   const ip = includePrefixClauses(includeFilepathPrefixes);
   const rows = db.prepare(`
-    SELECT album AS name, year, aaFile AS album_art_file,
+    SELECT album AS name, MAX(year) AS year,
+      MAX(aaFile) AS album_art_file,
+      MAX(cover_file) AS cover_file,
       rtrim(filepath, replace(filepath, '/', '')) AS dir
     FROM files
     WHERE ${vIn.sql}${ep.sql}${ip.sql} AND artist = ?
     GROUP BY album, rtrim(filepath, replace(filepath, '/', ''))
-    ORDER BY year DESC
+    ORDER BY MAX(year) DESC
   `).all(...vIn.params, ...ep.params, ...ip.params, String(artist));
 
   const albums = [];
@@ -1290,15 +1357,13 @@ export function searchFolders(query, vpaths, ignoreVPaths) {
   if (!q) return []; // trigram needs at least 3 chars
 
   const vIn = inClause('f.vpath', filtered);
-  const rows = db.prepare(`
-    SELECT f.id, f.vpath, f.dirpath, f.folder_name
+  const sql = `SELECT f.id, f.vpath, f.dirpath, f.folder_name
     FROM folders f
     JOIN fts_folders ft ON f.id = ft.rowid
     WHERE ${vIn.sql}
     AND fts_folders MATCH ?
-    ORDER BY rank
-    LIMIT 50
-  `).all(...vIn.params, q);
+    ORDER BY rank`;
+  const rows = _prepare(sql).all(...vIn.params, q);
   return rows;
 }
 
@@ -1320,15 +1385,8 @@ export function searchArtistsNormalized(query, vpaths, ignoreVPaths) {
     if (filteredVpaths.length === 0) return [];
   }
 
-  // Fetch more than 50 from FTS so we still have 50 after vpath filtering
-  const rows = db.prepare(`
-    SELECT an.id, an.artist_clean, an.artist_raw_variants, an.vpaths_json
-    FROM artists_normalized an
-    JOIN fts_artists fa ON an.id = fa.rowid
-    WHERE fts_artists MATCH ?
-    ORDER BY rank
-    LIMIT 200
-  `).all(q);
+  // Uses cached prepared statement — static SQL, no dynamic parts.
+  const rows = _s.searchArtists.all(q);
 
   return rows
     .filter(r => {
@@ -1338,7 +1396,6 @@ export function searchArtistsNormalized(query, vpaths, ignoreVPaths) {
         return artistVpaths.some(v => filteredVpaths.includes(v));
       } catch { return true; }
     })
-    .slice(0, 50)
     .map(r => ({
       name:     r.artist_clean,
       variants: (() => { try { return JSON.parse(r.artist_raw_variants); } catch { return [r.artist_clean]; } })(),
@@ -1381,7 +1438,7 @@ export function getArtistHomeStats() {
   const totalCount = totalRow ? totalRow.c : 0;
 
   const topRows = db.prepare(
-    "SELECT * FROM artists_normalized WHERE artist_clean != '' ORDER BY song_count DESC LIMIT 20"
+    "SELECT artist_clean, image_file, bio, song_count, artist_raw_variants FROM artists_normalized WHERE artist_clean != '' ORDER BY song_count DESC LIMIT 20"
   ).all();
 
   const topArtists = topRows.map(r => ({
@@ -1404,11 +1461,48 @@ export function getArtistHomeStats() {
     LIMIT 500
   `).all();
 
+  // Recent: join last N play_events with files to get the artist, deduplicated
+  const recentRows = db.prepare(`
+    SELECT DISTINCT f.artist
+    FROM play_events pe
+    JOIN files f ON f.hash = pe.file_hash
+    WHERE f.artist IS NOT NULL AND f.artist != ''
+    ORDER BY pe.started_at DESC
+    LIMIT 50
+  `).all();
+
+  // Resolve ALL raw artist names in ONE CTE query instead of N individual lookups.
+  // Collect unique raw artist values needed across both played and recent lists.
+  const allRawArtists = [...new Set([
+    ...playedRawRows.map(r => r.raw_artist),
+    ...recentRows.map(r => r.artist),
+  ])];
+
+  // variantMap: rawArtist -> { artist_clean, image_file, bio, song_count, artist_raw_variants }
+  const variantMap = new Map();
+  if (allRawArtists.length > 0) {
+    // SQLite default max params = 999; cap to stay safe
+    const safeList = allRawArtists.slice(0, 900);
+    const placeholders = safeList.map(() => '?').join(',');
+    const cteRows = db.prepare(`
+      WITH expanded AS (
+        SELECT an.artist_clean, an.image_file, an.bio, an.song_count, an.artist_raw_variants,
+               je.value AS raw_variant
+        FROM artists_normalized an, json_each(an.artist_raw_variants) AS je
+        WHERE an.artist_clean != ''
+      )
+      SELECT raw_variant, artist_clean, image_file, bio, song_count, artist_raw_variants
+      FROM expanded
+      WHERE raw_variant IN (${placeholders})
+    `).all(...safeList);
+    for (const row of cteRows) {
+      variantMap.set(row.raw_variant, row);
+    }
+  }
+
   const playByCanonical = new Map();
   for (const row of playedRawRows) {
-    const anRow = db.prepare(
-      "SELECT * FROM artists_normalized WHERE EXISTS (SELECT 1 FROM json_each(artist_raw_variants) WHERE value = ?)"
-    ).get(row.raw_artist);
+    const anRow = variantMap.get(row.raw_artist);
     if (!anRow) continue;
     const key = anRow.artist_clean.toLowerCase();
     const prev = playByCanonical.get(key);
@@ -1431,23 +1525,11 @@ export function getArtistHomeStats() {
     .sort((a, b) => (b.playCount - a.playCount) || a.canonicalName.localeCompare(b.canonicalName))
     .slice(0, 20);
 
-  // Recent: join last N play_events with files to get the artist, deduplicated
-  const recentRows = db.prepare(`
-    SELECT DISTINCT f.artist
-    FROM play_events pe
-    JOIN files f ON f.hash = pe.file_hash
-    WHERE f.artist IS NOT NULL AND f.artist != ''
-    ORDER BY pe.started_at DESC
-    LIMIT 50
-  `).all();
-
   // Map each raw artist to its canonical group
   const recentArtists = [];
   const seen = new Set();
   for (const row of recentRows) {
-    const anRow = db.prepare(
-      "SELECT * FROM artists_normalized WHERE EXISTS (SELECT 1 FROM json_each(artist_raw_variants) WHERE value = ?)"
-    ).get(row.artist);
+    const anRow = variantMap.get(row.artist);
     if (!anRow) continue;
     const key = anRow.artist_clean.toLowerCase();
     if (seen.has(key)) continue;
@@ -1729,9 +1811,8 @@ export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepat
 
   const params = [...vIn.params, ...ep.params, ftsQuery];
   // fts_files is the outer (driving) table so SQLite uses the FTS5 index scan.
-  // ORDER BY rank (not bm25()) enables FTS5 top-N early-stop: stops after
-  // collecting LIMIT ranked results instead of materialising all matches first.
-  // LIMIT 50: the client slices to 50 for display; fetching 500 is wasted work.
+  // ORDER BY rank for relevance ordering. No LIMIT — the full result set is
+  // returned so the client can show accurate counts per category.
   let sql = `SELECT f.rowid AS id, f.* FROM fts_files ft
     JOIN files f ON f.rowid = ft.rowid
     WHERE ${vIn.sql.replace(/\bvpath\b/g, 'f.vpath')}${ep.sql.replace(/\bvpath\b/g, 'f.vpath').replace(/\bfilepath\b/g, 'f.filepath')}
@@ -1740,9 +1821,40 @@ export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepat
     sql += " AND f.filepath LIKE ? ESCAPE '\\'";
     params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
   }
-  sql += ' ORDER BY rank LIMIT 50';
-  const rows = db.prepare(sql).all(...params);
+  sql += ' ORDER BY rank';
+  const rows = _prepare(sql).all(...params);
   return rows.map(mapFileRow);
+}
+
+// Artist→Album search: find unique albums whose ARTIST column matches the query.
+// Unlike searchFiles('artist',...) which fetches 50 rows and deduplicates in JS
+// (giving only the albums with the most tracks), this query groups at the SQL
+// level so LIMIT 50 counts unique albums. This way "Cerrone" returns 50 Cerrone
+// albums instead of the same 3-5 albums that happen to have the most tracks.
+export function searchAlbumsByArtist(searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms = []) {
+  const filtered = vpathFilter(vpaths, ignoreVPaths);
+  if (filtered.length === 0) { return []; }
+
+  const vIn = inClause('vpath', filtered);
+  const ep = excludePrefixClauses(excludeFilepathPrefixes);
+
+  const notClause = negativeTerms.map(t => ` NOT "${escapeFts(t)}"`).join('');
+  const ftsQuery = `{artist} : "${escapeFts(searchTerm)}"*${notClause}`;
+
+  const params = [...vIn.params, ...ep.params, ftsQuery];
+  // GROUP BY album at SQL level: LIMIT 50 counts distinct albums, not rows.
+  // MAX(aaFile) / MAX(cover_file) picks a non-null art file from the group.
+  let sql = `SELECT f.album, MAX(f.aaFile) AS aaFile, MAX(f.cover_file) AS cover_file
+    FROM fts_files ft
+    JOIN files f ON f.rowid = ft.rowid
+    WHERE ${vIn.sql.replace(/\bvpath\b/g, 'f.vpath')}${ep.sql.replace(/\bvpath\b/g, 'f.vpath').replace(/\bfilepath\b/g, 'f.filepath')}
+    AND ft.fts_files MATCH ?`;
+  if (filepathPrefix && typeof filepathPrefix === 'string') {
+    sql += " AND f.filepath LIKE ? ESCAPE '\\'";
+    params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
+  }
+  sql += ' GROUP BY f.album';
+  return _prepare(sql).all(...params);
 }
 
 // Multi-word cross-field search: every positive token must appear somewhere
@@ -1761,7 +1873,7 @@ export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix
   const ftsQuery = posClause + notClause;
 
   const params = [...vIn.params, ...ep.params, ftsQuery];
-  // Same optimizations as searchFiles: FTS as outer table, ORDER BY rank.
+  // Same optimizations as searchFiles: FTS as outer table, ORDER BY rank. No LIMIT.
   let sql = `SELECT f.rowid AS id, f.* FROM fts_files ft
     JOIN files f ON f.rowid = ft.rowid
     WHERE ${vIn.sql.replace(/\bvpath\b/g, 'f.vpath')}${ep.sql.replace(/\bvpath\b/g, 'f.vpath').replace(/\bfilepath\b/g, 'f.filepath')}
@@ -1770,8 +1882,8 @@ export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix
     sql += " AND f.filepath LIKE ? ESCAPE '\\'";
     params.push(filepathPrefix.replace(/[%_\\]/g, '\\$&') + '%');
   }
-  sql += ' ORDER BY rank LIMIT 50';
-  const rows = db.prepare(sql).all(...params);
+  sql += ' ORDER BY rank';
+  const rows = _prepare(sql).all(...params);
   return rows.map(mapFileRow);
 }
 

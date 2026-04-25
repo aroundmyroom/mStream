@@ -1,5 +1,35 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.12.10-velvet — April 2026 — Search completeness & accuracy
+
+### fix: Search — all result categories now return complete unfiltered counts
+- Removed `LIMIT 50` from `searchFiles`, `searchFilesAllWords`, `searchFolders`
+- Removed `LIMIT 200` + `.slice(0, 50)` from `searchArtistsNormalized`
+- All search tabs (Artists, Folders, Albums, Tracks) now show real counts — searching "Cerrone" returns 10 artists, 105 folders, 174 albums, 1470 tracks instead of capped values
+
+### fix: Album search — find albums BY artist, not only albums NAMED after the query
+- New `searchAlbumsByArtist()` function in `sqlite-backend.js` groups at SQL level (`GROUP BY album`) so LIMIT counted unique albums not individual rows
+- Previously "Cerrone" returned ~4 albums (only the 50 most-ranked rows happened to cover 4 heavy-track albums); now returns all 174
+- Uses `MAX(aaFile)` / `MAX(cover_file)` so art is never lost to indeterminate GROUP BY row selection
+
+### fix: Multi-disc albums — all discs now load when clicking from artist profile
+- `viewArtistProfile` was passing `alb.dir` (raw CD1/CD2 path) to `viewAlbumSongs` instead of `alb.normDir` (collapsed parent album path)
+- The DB query `filepath LIKE 'Pink Floyd at Pompeii/CD1/%'` only matched first disc; fix uses `alb.normDir || alb.dir`
+
+### fix: Album art — cover.jpg in parent folder now found for multi-disc tracks
+- Scanner `checkDirectoryForAlbumArt()` now falls back to parent directory when the track's immediate directory (e.g. `CD1/`) has no images
+- Fixes multi-disc albums where `cover.jpg` lives at `Artist/Album/cover.jpg` but tracks are in `Artist/Album/CD1/` and `Artist/Album/CD2/`
+
+### fix: Artist profile album list — art never missing due to indeterminate GROUP BY
+- `getArtistAlbumsMulti` and `getArtistAlbums` now use `MAX(aaFile)`, `MAX(cover_file)`, `MAX(year)` instead of bare column refs in GROUP BY queries
+- SQLite previously picked an arbitrary row from the group which could have `aaFile = NULL` even when other rows had art
+
+### fix: SQLite performance — statement cache, mmap, ANALYZE, page_size migration
+- Added `_stmtCache` Map + `_prepare(sql)` helper: dynamic search SQL compiled once and reused across keystrokes
+- `PRAGMA mmap_size = 134217728` (128 MB): OS page cache shared directly instead of memcpy on every page read
+- Deferred `ANALYZE` on startup: populates `sqlite_stat1` so query planner makes optimal decisions for FTS JOIN queries
+- Fixed page_size migration: was silently skipped because SQLite cannot change page_size in WAL mode; fix switches to `journal_mode=DELETE` before VACUUM then restores WAL; page_size now 8192 (was 4096)
+
 ## v6.12.9-velvet — April 2026 — Hydration queue limit fix
 
 ### fix: Artist hydration "Queue All" button fails with 400 for libraries > 9999 missing artists

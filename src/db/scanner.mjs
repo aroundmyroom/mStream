@@ -848,6 +848,27 @@ function checkDirectoryForAlbumArt(songInfo) {
     }
 
     if (imageArray.length === 0) {
+      // No images in directory or artwork subdirs — check one level up (parent dir).
+      // This handles multi-disc albums where cover.jpg lives in the album root
+      // but tracks are in CD1/, CD2/, Disc 1/ etc. subdirectories.
+      const parentDir = path.dirname(directory);
+      // Only check if parent is inside the music root (don't escape the library)
+      if (parentDir && parentDir !== directory && parentDir.startsWith(loadJson.directory)) {
+        let parentFiles;
+        try { parentFiles = fs.readdirSync(parentDir); } catch { parentFiles = []; }
+        for (const pf of parentFiles) {
+          const ext = getFileType(pf).toLowerCase();
+          if (ext !== 'jpg' && ext !== 'png') continue;
+          let pStat;
+          try { pStat = fs.statSync(path.join(parentDir, pf)); } catch { continue; }
+          if (!pStat.isFile()) continue;
+          // Prefix with '../' so path.join(directory, '../cover.jpg') resolves correctly
+          imageArray.push(path.join('..', pf));
+        }
+      }
+    }
+
+    if (imageArray.length === 0) {
       return mapOfDirectoryAlbumArt[directory] = false;
     }
   }
