@@ -9,7 +9,7 @@ This document covers everything about how mStream Velvet reads, stores, and pres
 1. [Background — The Tag Diversity Problem](#background)
 2. [ID3 Tag Specification — The Relevant Frames](#id3-spec)
 3. [Equivalent Tags in Other Formats](#other-formats)
-4. [How mStream Reads Version Tags — the Scanner Pipeline](#scanner-pipeline)
+4. [How mStream Velvet Reads Version Tags — the Scanner Pipeline](#scanner-pipeline)
 5. [Configurable Tag Field Priority](#configurable-priority)
 6. [Heuristic Fallback — When No Tag Exists](#heuristic)
 7. [Database Storage](#database)
@@ -17,9 +17,7 @@ This document covers everything about how mStream Velvet reads, stores, and pres
 9. [Admin API Endpoints](#admin-api)
 10. [Album Library — Version Badges & Filter Pills](#album-library)
 11. [Search — Version Badges in Results](#search)
-12. [AcoustID Fingerprinting Improvements](#acoustid)
-13. [MusicBrainz Enrichment — Redirect Handling](#musicbrainz)
-14. [Setting Tags in Your Tagger](#tagging-guide)
+12. [Setting Tags in Your Tagger](#tagging-guide)
 
 ---
 
@@ -54,7 +52,7 @@ Description: EDITION          ← you choose this name
 Text:        Deluxe Edition   ← the actual value
 ```
 
-In mStream's config and throughout this document, TXXX frames are written as `TXXX:DESCRIPTION` — for example `TXXX:EDITION`, `TXXX:VERSION`, `TXXX:QUALITY`.
+In mStream Velvet's config and throughout this document, TXXX frames are written as `TXXX:DESCRIPTION` — for example `TXXX:EDITION`, `TXXX:VERSION`, `TXXX:QUALITY`.
 
 Common `TXXX` descriptions used for album version information:
 
@@ -72,7 +70,7 @@ Common `TXXX` descriptions used for album version information:
 
 - All text frames can be encoded as Latin-1, UTF-16 (with BOM), or UTF-8 (ID3v2.4).
 - `TXXX` is an `ID3v2` `T` frame (text frame) — it can appear multiple times with different descriptions.
-- mStream uses the `music-metadata` library to parse ID3 tags; it handles all encoding variants transparently.
+- mStream Velvet uses the `music-metadata` library to parse ID3 tags; it handles all encoding variants transparently.
 
 ---
 
@@ -93,7 +91,7 @@ Vorbis comments are free-form `KEY=value` pairs. There is no strict standard for
 | `REMASTER` | `TXXX:REMASTER` | Custom home workflows |
 | `COMMENT` | `COMM` | General comment |
 
-When you configure `TXXX:EDITION` in mStream's tag field list, the scanner automatically looks for the Vorbis key `EDITION` in FLAC/OGG/Opus files — the `TXXX:` prefix is stripped and the bare key name is used for Vorbis lookups.
+When you configure `TXXX:EDITION` in mStream Velvet's tag field list, the scanner automatically looks for the Vorbis key `EDITION` in FLAC/OGG/Opus files — the `TXXX:` prefix is stripped and the bare key name is used for Vorbis lookups.
 
 ### iTunes / MP4 / M4A — Custom Atoms
 
@@ -122,7 +120,7 @@ APE tags are simple `Key=Value` text pairs, case-insensitive. Common keys: `Edit
 
 ---
 
-## 4. How mStream Reads Version Tags — the Scanner Pipeline {#scanner-pipeline}
+## 4. How mStream Velvet Reads Version Tags — the Scanner Pipeline {#scanner-pipeline}
 
 The album version detection pipeline runs inside the file scanner (`src/db/scanner.mjs`) for every audio file. It has four stages:
 
@@ -405,48 +403,7 @@ Because `album_version` is indexed in the `fts_files` FTS5 table, searching for 
 
 ---
 
-## 12. AcoustID Fingerprinting Improvements {#acoustid}
-
-The AcoustID fingerprinting worker (`src/util/acoustid-worker.mjs`) received several fixes that reduce false error counts:
-
-### Short clip handling
-Files with `duration < 7 seconds` are immediately classified as `not_found` (no match possible) rather than attempting fingerprinting and failing. This is the correct outcome for jingle clips, DJ intros, and other very short files — they cannot produce a reliable fingerprint.
-
-### fpcalc failure handling
-If `fpcalc` (the fingerprint calculator binary) fails to produce output for a file (corrupt audio, unsupported codec, DRM-protected), the file is now classified as `not_found` instead of `error`. These are permanent conditions — the file will never fingerprint successfully, so marking as `error` and retrying indefinitely was wasteful.
-
-### Error classification after the changes
-After these fixes, only genuine **transient failures** (AcoustID API timeouts, network errors) remain in the `error` state and will be retried. Files that structurally cannot fingerprint are `not_found`.
-
-### Admin UI
-The admin Acoustid stats card was updated:
-- **"No match"** row now includes both `not_found` rows and `error` rows (`noMatch = not_found + errors`).
-- A separate **"Error"** row was removed — errors are not interesting to surface as a distinct category since they self-resolve on retry.
-
----
-
-## 13. MusicBrainz Enrichment — Redirect Handling {#musicbrainz}
-
-The MusicBrainz enrichment worker (`src/util/mb-enrich-worker.mjs`) now correctly handles **HTTP 301 redirects** from the MusicBrainz API.
-
-### Why redirects occur
-
-MusicBrainz merges duplicate recording entries over time. When a recording MBID is superseded by a canonical replacement, the old MBID returns HTTP 301 with a `Location` header pointing to the new MBID. Previously, the worker treated any non-200 response as an error and would retry indefinitely without ever following the redirect.
-
-### What was fixed
-
-`mbLookup(mbid)` now accepts an optional `_redirects` counter (default 0). On a 301/302/307/308 response:
-
-1. The `Location` header is parsed for a UUID matching `/recording/<uuid>`.
-2. If found, `mbLookup` calls itself recursively with the new MBID.
-3. Up to 3 redirect hops are followed. A 4th redirect returns an error.
-4. If no UUID is found in the `Location` header, an error is returned immediately.
-
-This means files that previously showed `MB HTTP 301` in the Tag Workshop error list will now enrich correctly — the old MBID is transparently replaced with the canonical one and the enrichment data (title, artist, album, year) is written normally.
-
----
-
-## 14. Setting Tags in Your Tagger {#tagging-guide}
+## 12. Setting Tags in Your Tagger {#tagging-guide}
 
 ### foobar2000
 
@@ -468,9 +425,9 @@ Picard automatically writes `DISCSUBTITLE` when the MusicBrainz release has a re
 
 ### EAC / dBpoweramp / XLD
 
-These rippers write `TIT3` (subtitle) when you fill in the "subtitle" field during rip configuration. This is the **highest-priority** field in mStream's default list.
+These rippers write `TIT3` (subtitle) when you fill in the "subtitle" field during rip configuration. This is the **highest-priority** field in mStream Velvet's default list.
 
-### What mStream stores
+### What mStream Velvet stores
 
 Regardless of which tagger you use, after the next rescan:
 - `album_version` is populated in the DB
@@ -483,4 +440,4 @@ For maximum compatibility across different players and taggers, use **both** the
 - For MP3: `TIT3 = Deluxe Edition` **and** `TXXX:EDITION = Deluxe Edition`
 - For FLAC: `SUBTITLE = Deluxe Edition` **and** `EDITION = Deluxe Edition`
 
-This ensures the tag is visible in any player, not just mStream.
+This ensures the tag is visible in any player, not just mStream Velvet.

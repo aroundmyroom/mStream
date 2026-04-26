@@ -1,5 +1,14 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.13.1-velvet — April 2026 — Artist Albums Diagnostic
+
+### feat: Artist Albums Diagnostic tool (Admin UI)
+- New Admin panel **Artist Albums Diagnostic** — helps diagnose why albums are missing from an artist's page without shell/SQLite access (aimed at Docker users)
+- New endpoint `GET /api/v1/admin/diagnostics/artist-albums?artist=<name>` (admin-only) — queries DB directly and returns: `normalizedEntry` (canonical name, rawVariants, vpaths, songCount), `effectiveArtistValues`, `albumsByVariant`, `orphanAlbums` (values NOT in rawVariants with their hidden albums), and a `summary` counter object
+- Admin UI component `artistAlbumsDiagView` added to `webapp/admin/index.js` — input + Run Diagnostic button, summary banner, Normalized Index Entry card, Orphaned Values red card (root cause), Albums Per Variant card
+- Export options: **↓ Export .txt** (human-readable report), **↓ Export .json** (raw response), **Copy JSON** (clipboard with 2s feedback) — all named from the artist query, e.g. `artist-diag-Ben_Liebrand.txt`
+- Nav item "Artist Albums Diagnostic" added to Admin sidebar (`webapp/admin/index.html`)
+
 ## v6.13.0-velvet — April 2026 — The Tagged Albums
 
 ### feat: Album version / edition tag system — scanner, DB, admin UI, frontend

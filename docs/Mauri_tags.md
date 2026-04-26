@@ -1,6 +1,6 @@
 # Album Version Tags — Design Plan
 
-**Status**: Implemented (v6.12.11-velvet staged)
+**Status**: Implemented — shipped in v6.13.0-velvet
 **Motivation**: Users with multiple editions of the same album (original, remaster, deluxe, hi-res) need a reliable way to distinguish them in the UI. The same album title appears multiple times in the artist view with no distinguishing label.
 
 ---

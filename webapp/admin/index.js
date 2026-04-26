@@ -519,6 +519,208 @@ const wrappedAdminView = Vue.component('wrapped-admin-view', {
   `,
 });
 
+// ── Artist Albums Diagnostic View ─────────────────────────────────────────
+const artistAlbumsDiagView = Vue.component('artist-albums-diag-view', {
+  data() {
+    return {
+      artistQuery: '',
+      loading: false,
+      result: null,
+      error: null,
+      copied: false,
+    };
+  },
+  methods: {
+    async runDiag() {
+      const q = this.artistQuery.trim();
+      if (!q) return;
+      this.loading = true;
+      this.result = null;
+      this.error = null;
+      this.copied = false;
+      try {
+        const r = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/diagnostics/artist-albums`, params: { artist: q } });
+        this.result = r.data;
+      } catch (e) {
+        this.error = e?.response?.data?.error || e.message || 'Request failed';
+      } finally {
+        this.loading = false;
+      }
+    },
+    exportJson() {
+      if (!this.result) return;
+      const blob = new Blob([JSON.stringify(this.result, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `artist-diag-${this.result.query.replace(/[^a-z0-9]/gi, '_')}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    exportText() {
+      if (!this.result) return;
+      const r = this.result;
+      const lines = [];
+      lines.push(`Artist Albums Diagnostic — ${r.query}`);
+      lines.push('='.repeat(60));
+      lines.push('');
+      lines.push('SUMMARY');
+      lines.push(`  Distinct effective-artist values : ${r.summary.totalEffectiveValues}`);
+      lines.push(`  Covered by normalised variants   : ${r.summary.coveredByVariants}`);
+      lines.push(`  Orphaned values (not covered)    : ${r.summary.orphanedValues}`);
+      lines.push(`  Hidden albums (orphaned)         : ${r.summary.orphanedAlbumCount}`);
+      lines.push('');
+      if (r.normalizedEntry) {
+        lines.push('NORMALIZED INDEX ENTRY');
+        lines.push(`  Canonical name : ${r.normalizedEntry.canonicalName}`);
+        lines.push(`  Song count     : ${r.normalizedEntry.songCount}`);
+        lines.push(`  Known vpaths   : ${r.normalizedEntry.vpaths.join(', ') || '(none)'}`);
+        lines.push('  Raw variants:');
+        for (const v of r.normalizedEntry.rawVariants) lines.push(`    ${v}`);
+        lines.push('');
+      } else {
+        lines.push('NORMALIZED INDEX ENTRY');
+        lines.push('  Not found.');
+        lines.push('');
+      }
+      if (r.orphanAlbums.length) {
+        lines.push('ORPHANED ARTIST VALUES (albums hidden from artist view)');
+        for (const o of r.orphanAlbums) {
+          lines.push(`  ${o.effective}  (${o.track_count} tracks)`);
+          for (const a of o.albums) {
+            lines.push(`    ${a.album || '(no album tag)'}  —  ${a.vpath}/${a.dir}`);
+          }
+        }
+        lines.push('');
+        lines.push('  Fix: retag album_artist on these files to one of the rawVariants above,');
+        lines.push('  then re-scan.');
+        lines.push('');
+      }
+      lines.push('ALBUMS PER NORMALIZED VARIANT');
+      for (const [variant, albums] of Object.entries(r.albumsByVariant)) {
+        lines.push(`  ${variant}`);
+        if (!albums.length) { lines.push('    (no albums)'); continue; }
+        for (const a of albums) lines.push(`    ${a.album || '(no album tag)'}  [${a.vpath}]`);
+      }
+      const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `artist-diag-${r.query.replace(/[^a-z0-9]/gi, '_')}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    async copyJson() {
+      if (!this.result) return;
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(this.result, null, 2));
+        this.copied = true;
+        setTimeout(() => { this.copied = false; }, 2000);
+      } catch (_) {}
+    },
+  },
+  template: `
+    <div class="admin-panel-wrap">
+      <h2 class="admin-section-title">Artist Albums Diagnostic</h2>
+      <p class="admin-desc" style="margin-bottom:12px">
+        Enter an artist name to find out why some albums may be missing from their artist view.
+      </p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:18px">
+        <input
+          v-model="artistQuery"
+          class="admin-input"
+          style="flex:1;max-width:360px"
+          placeholder="e.g. Riverside"
+          @keyup.enter="runDiag"
+        />
+        <button class="admin-btn" :disabled="loading || !artistQuery.trim()" @click="runDiag">
+          {{ loading ? 'Running…' : 'Run Diagnostic' }}
+        </button>
+        <template v-if="result">
+          <button class="admin-btn admin-btn-secondary" @click="exportText" title="Download as plain text file">
+            ↓ Export .txt
+          </button>
+          <button class="admin-btn admin-btn-secondary" @click="exportJson" title="Download as JSON file">
+            ↓ Export .json
+          </button>
+          <button class="admin-btn admin-btn-secondary" @click="copyJson" title="Copy full JSON to clipboard">
+            {{ copied ? '✓ Copied!' : 'Copy JSON' }}
+          </button>
+        </template>
+      </div>
+
+      <div v-if="error" style="color:var(--danger);margin-bottom:12px">{{ error }}</div>
+
+      <template v-if="result">
+        <!-- Summary banner -->
+        <div class="admin-card" style="margin-bottom:16px;padding:12px 16px">
+          <div style="display:flex;gap:24px;flex-wrap:wrap">
+            <div><span style="color:var(--t3);font-size:12px">Distinct effective-artist values</span><br><strong>{{ result.summary.totalEffectiveValues }}</strong></div>
+            <div><span style="color:var(--t3);font-size:12px">Covered by normalised variants</span><br><strong style="color:var(--accent)">{{ result.summary.coveredByVariants }}</strong></div>
+            <div><span style="color:var(--t3);font-size:12px">Orphaned values (not covered)</span><br><strong :style="result.summary.orphanedValues > 0 ? 'color:var(--danger)' : ''">{{ result.summary.orphanedValues }}</strong></div>
+            <div><span style="color:var(--t3);font-size:12px">Hidden albums (orphaned)</span><br><strong :style="result.summary.orphanedAlbumCount > 0 ? 'color:var(--danger)' : ''">{{ result.summary.orphanedAlbumCount }}</strong></div>
+          </div>
+        </div>
+
+        <!-- Normalized entry -->
+        <div class="admin-card" style="margin-bottom:16px;padding:12px 16px">
+          <div class="admin-label" style="margin-bottom:6px">Normalized Index Entry</div>
+          <template v-if="result.normalizedEntry">
+            <div style="margin-bottom:4px"><span style="color:var(--t3)">Canonical name: </span><strong>{{ result.normalizedEntry.canonicalName }}</strong></div>
+            <div style="margin-bottom:4px"><span style="color:var(--t3)">Song count: </span>{{ result.normalizedEntry.songCount }}</div>
+            <div style="margin-bottom:4px"><span style="color:var(--t3)">Known vpaths: </span>{{ result.normalizedEntry.vpaths.join(', ') || '(none)' }}</div>
+            <div style="margin-bottom:2px;color:var(--t3)">Raw variants queried in artist view:</div>
+            <ul style="margin:4px 0 0 16px;padding:0">
+              <li v-for="v in result.normalizedEntry.rawVariants" :key="v" style="font-size:13px;font-family:monospace">{{ v }}</li>
+            </ul>
+          </template>
+          <div v-else style="color:var(--danger)">Artist not found in normalized index — no artist card will be shown in the Artists view.</div>
+        </div>
+
+        <!-- Orphaned albums (root cause!) -->
+        <template v-if="result.orphanAlbums.length">
+          <div class="admin-card" style="margin-bottom:16px;padding:12px 16px;border:1px solid var(--danger)">
+            <div class="admin-label" style="color:var(--danger);margin-bottom:8px">⚠ Orphaned artist values — albums hidden from artist view</div>
+            <p style="font-size:13px;color:var(--t2);margin-bottom:10px">
+              These effective COALESCE(album_artist, artist) values exist in the database but are NOT included in the
+              artist's rawVariants list. Any album whose tracks have these values will be invisible in the artist view.
+            </p>
+            <div v-for="o in result.orphanAlbums" :key="o.effective" style="margin-bottom:12px">
+              <div style="font-family:monospace;font-size:13px;background:var(--bg2);padding:4px 8px;border-radius:4px;margin-bottom:4px">
+                {{ o.effective }} <span style="color:var(--t3)">({{ o.track_count }} tracks)</span>
+              </div>
+              <ul style="margin:0 0 0 16px;padding:0">
+                <li v-for="a in o.albums" :key="a.dir" style="font-size:12px;color:var(--t2)">
+                  {{ a.album || '(no album tag)' }} — <span style="color:var(--t3)">{{ a.vpath }}/{{ a.dir }}</span>
+                </li>
+              </ul>
+            </div>
+            <p style="font-size:12px;color:var(--t3);margin-top:8px">
+              Fix: ensure the album_artist tag on these files matches exactly one of the rawVariants above, or re-scan after correcting the tags.
+            </p>
+          </div>
+        </template>
+
+        <!-- Albums per variant -->
+        <div class="admin-card" style="padding:12px 16px">
+          <div class="admin-label" style="margin-bottom:8px">Albums per normalized variant</div>
+          <template v-if="result.normalizedEntry">
+            <div v-for="(albums, variant) in result.albumsByVariant" :key="variant" style="margin-bottom:10px">
+              <div style="font-family:monospace;font-size:13px;background:var(--bg2);padding:3px 8px;border-radius:3px;margin-bottom:4px">{{ variant }}</div>
+              <div v-if="!albums.length" style="font-size:12px;color:var(--t3);margin-left:12px">No albums</div>
+              <ul v-else style="margin:0 0 0 16px;padding:0">
+                <li v-for="a in albums" :key="a.dir" style="font-size:12px;color:var(--t2)">
+                  {{ a.album || '(no album tag)' }} <span style="color:var(--t3)">[{{ a.vpath }}]</span>
+                </li>
+              </ul>
+            </div>
+          </template>
+          <div v-else style="color:var(--t3);font-size:13px">No normalized entry found — no albums to show.</div>
+        </div>
+      </template>
+    </div>
+  `,
+});
 // ── Scan Error Audit View ──────────────────────────────────────────────────
 const scanErrorsView = Vue.component('scan-errors-view', {
   data() {
@@ -6497,6 +6699,7 @@ const vm = new Vue({
     'rpn-view': rpnView,
     'lock-view': lockView,
     'scan-errors-view': scanErrorsView,
+    'artist-albums-diag-view': artistAlbumsDiagView,
     'wrapped-admin-view': wrappedAdminView,
     'lastfm-view': lastFMView,
     'listenbrainz-view': listenBrainzView,

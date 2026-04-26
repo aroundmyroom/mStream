@@ -1544,6 +1544,92 @@ export function setup(mstream) {
 
     res.json({});
   });
+
+  // ── GET /api/v1/admin/diagnostics/artist-albums?artist=Riverside ───────────
+  // Diagnoses why albums may be missing from the artist view for a given artist.
+  // Returns three diagnostic sections:
+  //   1. effectiveArtistValues — all distinct COALESCE(album_artist, artist)
+  //      values in `files` for tracks that mention the artist anywhere.
+  //      Any value NOT in rawVariants will produce invisible albums.
+  //   2. normalizedEntry — what artists_normalized knows about this artist:
+  //      canonicalName, rawVariants, vpaths_json, song_count.
+  //   3. albumsByVariant — per-variant album count in the DB, so you can see
+  //      exactly which spelling has which albums.
+  mstream.get('/api/v1/admin/diagnostics/artist-albums', (req, res) => {
+    const artistParam = String(req.query.artist || '').trim();
+    if (!artistParam) {
+      return res.status(400).json({ error: 'Missing ?artist= parameter' });
+    }
+    const rawDb = db.getDB();
+
+    // 1. All distinct effective-artist values where this name appears anywhere
+    const effectiveRows = rawDb.prepare(`
+      SELECT DISTINCT COALESCE(album_artist, artist) AS effective, COUNT(*) AS track_count
+      FROM files
+      WHERE COALESCE(album_artist, artist) LIKE ? OR artist LIKE ? OR album_artist LIKE ?
+      GROUP BY COALESCE(album_artist, artist)
+      ORDER BY track_count DESC
+    `).all(`%${artistParam}%`, `%${artistParam}%`, `%${artistParam}%`);
+
+    // 2. Normalized index entry
+    const normRow = rawDb.prepare(
+      "SELECT artist_clean, artist_raw_variants, vpaths_json, song_count FROM artists_normalized WHERE lower(artist_clean) = lower(?)"
+    ).get(artistParam);
+
+    let rawVariants = [];
+    if (normRow) {
+      try { rawVariants = JSON.parse(normRow.artist_raw_variants); } catch (_) { rawVariants = [normRow.artist_clean]; }
+    }
+
+    // 3. Per-variant album breakdown
+    const albumsByVariant = {};
+    for (const variant of rawVariants) {
+      const albums = rawDb.prepare(`
+        SELECT DISTINCT album, rtrim(filepath, replace(filepath, '/', '')) AS dir, vpath
+        FROM files
+        WHERE COALESCE(album_artist, artist) = ?
+        ORDER BY album
+      `).all(variant);
+      albumsByVariant[variant] = albums.map(r => ({ album: r.album, dir: r.dir, vpath: r.vpath }));
+    }
+
+    // 4. Albums that match the search but whose effective artist is NOT in rawVariants
+    const variantSet = new Set(rawVariants.map(v => v.toLowerCase()));
+    const orphanAlbums = effectiveRows
+      .filter(r => !variantSet.has((r.effective || '').toLowerCase()))
+      .map(r => {
+        const orphanRows = rawDb.prepare(`
+          SELECT DISTINCT album, rtrim(filepath, replace(filepath, '/', '')) AS dir, vpath
+          FROM files
+          WHERE COALESCE(album_artist, artist) = ?
+          ORDER BY album
+        `).all(r.effective);
+        return {
+          effective: r.effective,
+          track_count: r.track_count,
+          albums: orphanRows.map(o => ({ album: o.album, dir: o.dir, vpath: o.vpath })),
+        };
+      });
+
+    res.json({
+      query: artistParam,
+      normalizedEntry: normRow ? {
+        canonicalName: normRow.artist_clean,
+        rawVariants,
+        vpaths: (() => { try { return JSON.parse(normRow.vpaths_json); } catch (_) { return []; } })(),
+        songCount: normRow.song_count,
+      } : null,
+      effectiveArtistValues: effectiveRows,
+      albumsByVariant,
+      orphanAlbums,
+      summary: {
+        totalEffectiveValues: effectiveRows.length,
+        coveredByVariants: effectiveRows.filter(r => variantSet.has((r.effective || '').toLowerCase())).length,
+        orphanedValues: orphanAlbums.length,
+        orphanedAlbumCount: orphanAlbums.reduce((s, o) => s + o.albums.length, 0),
+      }
+    });
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -137,6 +137,22 @@ async function writeTagsToFile(absolutePath, format, tags) {
 }
 
 /**
+ * Returns true if finalTags differ from the track's current DB values,
+ * meaning a disk write is actually needed.  Equal tracks are still marked
+ * accepted in the DB so they leave the review queue, but the file is not
+ * touched and its mtime is preserved.
+ */
+function _tagsHaveDiff(t, finalTags) {
+  const norm = s => String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (norm(finalTags.title)  !== norm(t.title))  return true;
+  if (norm(finalTags.artist) !== norm(t.artist)) return true;
+  if (norm(finalTags.album)  !== norm(t.album))  return true;
+  if ((finalTags.year  ?? null) !== (t.year  ?? null)) return true;
+  if ((finalTags.track ?? null) !== (t.track ?? null)) return true;
+  return false;
+}
+
+/**
  * Resolve absolute path from vpath + relative filepath.
  * Returns null if vpath not found in config.
  */
@@ -225,7 +241,7 @@ export function setup(mstream) {
     const tracks = db.getTracksForAccept(mb_release_id, albumDirFilter);
     if (tracks.length === 0) return res.json({ ok: true, accepted: 0, errors: [] });
 
-    const results = { accepted: 0, dbOnly: 0, errors: [] };
+    const results = { accepted: 0, skippedEqual: 0, dbOnly: 0, errors: [] };
 
     for (const t of tracks) {
       const finalTags = {
@@ -235,6 +251,17 @@ export function setup(mstream) {
         year:   t.mb_year   ?? t.year,
         track:  t.mb_track  ?? t.track,
       };
+
+      // Tags already match — mark accepted in DB, no disk write needed
+      if (!_tagsHaveDiff(t, finalTags)) {
+        try {
+          db.markTrackAccepted(t.filepath, t.vpath);
+          results.skippedEqual++;
+        } catch (dbErr) {
+          winston.error(`[tagworkshop] DB update failed ${t.filepath}: ${dbErr.message}`);
+        }
+        continue;
+      }
 
       const absPath = resolveAbsPath(t.vpath, t.filepath);
       let diskErr = null;
@@ -289,6 +316,16 @@ export function setup(mstream) {
       year:   overrides?.year !== undefined ? overrides.year : (t.mb_year ?? t.year),
       track:  t.mb_track  ?? t.track,
     };
+
+    // Tags already match — mark accepted in DB, no disk write needed
+    if (!_tagsHaveDiff(t, finalTags)) {
+      try {
+        db.markTrackAccepted(t.filepath, t.vpath);
+      } catch (dbErr) {
+        winston.error(`[tagworkshop] DB update failed ${t.filepath}: ${dbErr.message}`);
+      }
+      return res.json({ ok: true, skippedEqual: true });
+    }
 
     const absPath = resolveAbsPath(t.vpath, t.filepath);
     let diskErr = null;
