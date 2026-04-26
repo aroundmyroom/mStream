@@ -1,6 +1,6 @@
-# mStream Subsonic API
+# mStream Velvet Subsonic API
 
-mStream implements the **Subsonic REST API 1.16.1** plus the **Open Subsonic** extensions, making it compatible with the large ecosystem of Subsonic-compatible clients.
+mStream Velvet implements the **Subsonic REST API 1.16.1** plus the **Open Subsonic** extensions, making it compatible with the large ecosystem of Subsonic-compatible clients.
 
 ### Tested clients (confirmed working)
 
@@ -33,7 +33,7 @@ All endpoints are available both with and without the `.view` extension, e.g.:
 
 ## Authentication
 
-Subsonic uses a **separate password** from your mStream login. This is necessary because mStream stores passwords as PBKDF2-SHA512 hashes, which are incompatible with Subsonic's MD5 token scheme.
+Subsonic uses a **separate password** from your mStream Velvet login. This is necessary because mStream Velvet stores passwords as PBKDF2-SHA512 hashes, which are incompatible with Subsonic's MD5 token scheme.
 
 ### Setting your Subsonic password
 
@@ -260,7 +260,7 @@ Clients then navigate deeper using `getMusicDirectory?id=<dirId>`.
 ## Client Setup
 
 1. **Server URL**: `https://your-server:3000`
-2. **Username**: your mStream username
+2. **Username**: your mStream Velvet username
 3. **Password**: your **Subsonic password** (set separately via Admin UI or the Subsonic API nav page)
 4. **Use HTTPS**: yes
 5. **API version**: leave at default (1.16.1 or auto-detect)

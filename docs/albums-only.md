@@ -1,8 +1,8 @@
 # Albums-Only Folders
 
-## The Problem mStream Used to Have
+## The Problem mStream Velvet Used to Have
 
-mStream has always been great at discovering music. But it always faced one awkward question: *what actually counts as an album?*
+mStream Velvet has always been great at discovering music. But it always faced one awkward question: *what actually counts as an album?*
 
 The answer used to be: anything the scanner found with a non-empty `album` tag. That sounds reasonable — until you look at a real-world music library.
 

@@ -1,6 +1,6 @@
 # Last.fm Integration
 
-mStream integrates with [Last.fm](https://www.last.fm) so every song you play is automatically scrobbled to your profile.  
+mStream Velvet integrates with [Last.fm](https://www.last.fm) so every song you play is automatically scrobbled to your profile.  
 Authentication uses the Last.fm **Mobile Session** flow — your password is sent once to Last.fm, a session key is returned and stored, and the password is never saved to disk.
 
 ---
@@ -9,7 +9,7 @@ Authentication uses the Last.fm **Mobile Session** flow — your password is sen
 
 1. Open the **Last.fm** section in the GUIv2 sidebar (Tools → Last.fm).
 2. Enter your Last.fm username and Last.fm password and click **Connect**.
-3. mStream authenticates with Last.fm and stores only the session key in `save/conf/default.json`.  
+3. mStream Velvet authenticates with Last.fm and stores only the session key in `save/conf/default.json`.  
    Your password is discarded immediately.
 4. After 30 seconds of continuous playback, the track is scrobbled automatically.
 5. The **Now Playing details modal** shows **Last.fm: Scrobbled ✓** (green) after a successful scrobble or an error message (red) if it failed.
@@ -40,7 +40,7 @@ All endpoints require a valid user token (`x-access-token` header or `token` que
 
 ### GET `/api/v1/lastfm/status`
 
-Returns whether Last.fm is enabled server-side and the Last.fm username currently linked to the authenticated mStream user.
+Returns whether Last.fm is enabled server-side and the Last.fm username currently linked to the authenticated mStream Velvet user.
 
 **Response**
 ```json
@@ -53,7 +53,7 @@ Returns `null` for `linkedUser` when no account is linked.
 
 ### POST `/api/v1/lastfm/connect`
 
-Authenticates with Last.fm and links the account to the current mStream user.  
+Authenticates with Last.fm and links the account to the current mStream Velvet user.  
 The password is used once to obtain a session key and is never stored.
 
 **Request body**
@@ -79,7 +79,7 @@ The password is used once to obtain a session key and is never stored.
 
 ### POST `/api/v1/lastfm/disconnect`
 
-Removes the Last.fm link for the current mStream user.  
+Removes the Last.fm link for the current mStream Velvet user.  
 Clears `lastfm-user`, `lastfm-session`, and `lastfm-password` (legacy) from config and runtime.
 
 **Request body** — empty `{}`
@@ -90,7 +90,7 @@ Clears `lastfm-user`, `lastfm-session`, and `lastfm-password` (legacy) from conf
 
 ### POST `/api/v1/lastfm/scrobble-by-filepath`
 
-Scrobbles a track by its mStream filepath and logs the play count in the user's metadata.  
+Scrobbles a track by its mStream Velvet filepath and logs the play count in the user's metadata.  
 This is the endpoint the player calls automatically after 30 seconds of playback.
 
 **Request body**

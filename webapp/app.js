@@ -123,6 +123,7 @@ const S = {
   autoResume: localStorage.getItem('ms2_auto_resume_' + _u) === '1',  // default OFF — pause on page reload
   showGenres:  localStorage.getItem('ms2_show_genres_'  + _u) !== '0', // default ON
   showDecades: localStorage.getItem('ms2_show_decades_' + _u) !== '0', // default ON
+  outputDeviceId: localStorage.getItem('ms2_output_device_' + _u) || '',  // '' = browser default
   // Pinned start view — the library nav item shown on boot/refresh ('' = Home default)
   pinnedView: localStorage.getItem('ms2_pinned_view_' + _u) || '',
   // Auto-DJ: similar-artists mode
@@ -145,6 +146,43 @@ const S = {
 };
 
 let audioEl = document.getElementById('audio');
+
+// Apply the stored output device to an audio element (or all active elements)
+async function _applyOutputDevice(el) {
+  const id = S.outputDeviceId || '';
+  if (!('setSinkId' in HTMLMediaElement.prototype) || !id) return;
+  const targets = el ? [el] : [audioEl, _xfadeEl].filter(Boolean);
+  for (const t of targets) {
+    try { await t.setSinkId(id); } catch (_e) { /* device may be unavailable */ }
+  }
+}
+
+// Refresh device list on change (e.g. Bluetooth connected/disconnected)
+if (navigator.mediaDevices?.addEventListener) {
+  navigator.mediaDevices.addEventListener('devicechange', async () => {
+    if (!('setSinkId' in HTMLMediaElement.prototype)) return;
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const outputs = devices.filter(d => d.kind === 'audiooutput');
+      const ids = new Set(outputs.map(d => d.deviceId));
+      if (S.outputDeviceId && !ids.has(S.outputDeviceId)) {
+        // Stored device is gone — fall back to browser default
+        S.outputDeviceId = '';
+        localStorage.removeItem(_uKey('output_device'));
+        // Reset both audio elements to default output
+        for (const t of [audioEl, _xfadeEl].filter(Boolean)) {
+          try { await t.setSinkId(''); } catch (_e) {}
+        }
+      } else if (S.outputDeviceId) {
+        // Device still present — re-apply in case the sink was reset by the browser
+        _applyOutputDevice().catch(() => {});
+      }
+    } catch (_e) {}
+    // Re-render Settings page if it's currently open so the select stays in sync
+    if (S.view === 'playback') viewPlayback();
+  });
+}
+
 let scanTimer    = null;
 let djTimer      = null;
 let scrobbleTimer = null;
@@ -5639,12 +5677,19 @@ async function viewArtists() {
       return curDensity === 'list' ? renderArtistRows(artists) : renderArtistCards(artists);
     }
 
-    function bindResults(container) {
+    function bindResults(container, backFn) {
+      const _back = backFn || (() => viewArtists());
       container.querySelectorAll('.artist-row').forEach(row => {
-        row.addEventListener('click', () => _openArtist(row.dataset.akey, row.dataset.aname));
+        row.addEventListener('click', () => {
+          const variants = _varMap.get(row.dataset.akey) || [row.dataset.aname];
+          viewArtistProfile(row.dataset.akey, row.dataset.aname, variants.filter(Boolean), _back);
+        });
       });
       container.querySelectorAll('.artist-home-card').forEach(card => {
-        card.addEventListener('click', () => _openArtist(card.dataset.akey, card.dataset.aname));
+        card.addEventListener('click', () => {
+          const variants = _varMap.get(card.dataset.akey) || [card.dataset.aname];
+          viewArtistProfile(card.dataset.akey, card.dataset.aname, variants.filter(Boolean), _back);
+        });
       });
       container.querySelectorAll('.artist-wrong-btn').forEach(btn => {
         btn.addEventListener('mousedown', (ev) => { ev.preventDefault(); ev.stopPropagation(); });
@@ -5688,7 +5733,11 @@ async function viewArtists() {
         resultsEl._lastArtists = artists;
         if (!artists.length) { resultsEl.innerHTML = '<div class="fe-match-count" style="padding:8px 2px">No artists found</div>'; return; }
         resultsEl.innerHTML = renderArtistResults(artists);
-        bindResults(resultsEl);
+        // Back from profile → return to Artists page with the same letter active
+        bindResults(resultsEl, () => {
+          S._restoreArtistLetter = letter;
+          viewArtists();
+        });
         body.scrollTop = 0;
       } catch(e) {
         if (e.name !== 'AbortError') resultsEl.innerHTML = `<div class="fe-match-count" style="padding:8px 2px">Error: ${esc(e.message)}</div>`;
@@ -5710,6 +5759,13 @@ async function viewArtists() {
         loadLetter(btn.dataset.letter);
       });
     });
+
+    // Restore active letter after back-navigation from an artist profile
+    if (S._restoreArtistLetter) {
+      const letter = S._restoreArtistLetter;
+      S._restoreArtistLetter = null;
+      loadLetter(letter);
+    }
 
     // ── search ─────────────────────────────────────────────────────────────
     async function doSearch(q) {
@@ -5798,10 +5854,19 @@ async function viewArtistProfile(artistKey, displayName, variants, backFn) {
 
   const body = document.getElementById('content-body');
   body.innerHTML = `<div class="artpro-view pnow-view pnow-fading">
-    <div class="artpro-header">
+    <div class="artpro-hero hidden" id="artpro-hero">
+      <img class="artpro-hero-img" id="artpro-hero-img" alt="" loading="lazy">
+      <div class="artpro-hero-grad"></div>
+      <div class="artpro-hero-overlay">
+        <div class="artpro-name artpro-hero-name">${esc(displayName)}</div>
+        <div class="artpro-meta-chips hidden" id="artpro-hero-chips"></div>
+      </div>
+    </div>
+    <div class="artpro-header" id="artpro-header">
       <div class="artpro-img-wrap" id="artpro-img-wrap"><div class="artpro-img-ph"></div></div>
       <div class="artpro-info">
-        <div class="artpro-name">${esc(displayName)}</div>
+        <div class="artpro-name" id="artpro-header-name">${esc(displayName)}</div>
+        <div class="artpro-meta-chips hidden" id="artpro-chips"></div>
         <div class="pnow-bio" id="artpro-bio"></div>
         <button class="pnow-bio-more hidden" id="artpro-bio-more">${t('player.pnow.readMore')}</button>
       </div>
@@ -5835,6 +5900,38 @@ async function viewArtistProfile(artistKey, displayName, variants, backFn) {
   const wrap = document.getElementById('artpro-img-wrap');
   if (wrap && profile?.imageFile) {
     wrap.innerHTML = `<img class="artpro-img" src="api/v1/artists/images/${encodeURIComponent(profile.imageFile)}" alt="${esc(displayName)}" loading="lazy" onerror="this.parentNode.innerHTML=''">`;
+  }
+
+  // ── Fanart hero banner ──────────────────────────────────────────────────
+  if (profile?.fanartFile) {
+    const heroEl  = document.getElementById('artpro-hero');
+    const heroImg = document.getElementById('artpro-hero-img');
+    if (heroEl && heroImg) {
+      heroImg.src = `api/v1/artists/images/${encodeURIComponent(profile.fanartFile)}`;
+      heroEl.classList.remove('hidden');
+      // Hide duplicate artist name in the standard header when hero is showing
+      const headerNameEl = document.getElementById('artpro-header-name');
+      if (headerNameEl) headerNameEl.classList.add('hidden');
+    }
+  }
+
+  // ── Metadata chips (genre / country / formedYear) ───────────────────────
+  const chipsData = [
+    profile?.genre,
+    profile?.country,
+    profile?.formedYear ? String(profile.formedYear) : null,
+  ].filter(Boolean);
+  if (chipsData.length) {
+    const chipsHtml = chipsData.map(c => `<span class="artpro-meta-chip">${esc(c)}</span>`).join('');
+    const heroChipsEl   = document.getElementById('artpro-hero-chips');
+    const headerChipsEl = document.getElementById('artpro-chips');
+    if (heroChipsEl && profile?.fanartFile) {
+      heroChipsEl.innerHTML = chipsHtml;
+      heroChipsEl.classList.remove('hidden');
+    } else if (headerChipsEl) {
+      headerChipsEl.innerHTML = chipsHtml;
+      headerChipsEl.classList.remove('hidden');
+    }
   }
 
   // ── Bio helper ──────────────────────────────────────────────────────────
@@ -12424,6 +12521,24 @@ function viewPlayback() {
         </div>
       </div>
 
+      <!-- ── AUDIO OUTPUT ── -->
+      <div class="playback-section" id="audio-output-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">🔈</div>
+          <div>
+            <div class="playback-section-title">Audio Output Device</div>
+            <div class="playback-section-desc">Choose which speaker or audio device to use for playback.</div>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Output device</div>
+            <div class="playback-row-hint" id="audio-output-hint">Requires browser permission to list devices</div>
+          </div>
+          <select class="settings-select" id="audio-output-sel"><option value="">Default</option></select>
+        </div>
+      </div>
+
       ${S.allowYoutubeDownload ? `
       <!-- ── YOUTUBE DOWNLOAD ── -->
       <div class="playback-section">
@@ -12532,6 +12647,44 @@ function viewPlayback() {
     _syncPrefs();
     toast(t(S.showDecades ? 'player.toast.decadesVisible' : 'player.toast.decadesHidden'));
   });
+
+  // Audio output device selector
+  (async () => {
+    const sel  = document.getElementById('audio-output-sel');
+    const hint = document.getElementById('audio-output-hint');
+    if (!sel || !navigator.mediaDevices?.enumerateDevices) return;
+    if (!('setSinkId' in HTMLMediaElement.prototype)) {
+      sel.closest('.playback-section').style.display = 'none';
+      return;
+    }
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const outputs = devices.filter(d => d.kind === 'audiooutput');
+      if (outputs.length <= 1) {
+        sel.disabled = true;
+        if (hint) hint.textContent = 'Connect a Bluetooth speaker or second audio device to enable';
+        return; // section stays visible but select is greyed out
+      }
+      outputs.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.textContent = d.label || ('Output ' + d.deviceId.slice(0, 6));
+        if (d.deviceId === S.outputDeviceId) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.value = S.outputDeviceId || '';
+    } catch (_e) {
+      sel.disabled = true;
+      if (hint) hint.textContent = 'Browser permission required to list audio devices';
+      return;
+    }
+    sel.addEventListener('change', async e => {
+      S.outputDeviceId = e.target.value;
+      S.outputDeviceId ? localStorage.setItem(_uKey('output_device'), S.outputDeviceId)
+                       : localStorage.removeItem(_uKey('output_device'));
+      await _applyOutputDevice();
+    });
+  })();
 
   // YouTube download format preference
   const ytdlFmtSel = document.getElementById('ytdl-format-sel');
@@ -13560,6 +13713,7 @@ function _getOrCreateXfadeEl() {
   // cast-mute is handled by _castMuteGain (GainNode) — no need to mute the element
   _xfadeEl.style.display = 'none';
   document.body.appendChild(_xfadeEl);
+  _applyOutputDevice(_xfadeEl).catch(() => {}); // apply selected output device
   _xfadeWired = false;
   return _xfadeEl;
 }
@@ -14052,6 +14206,7 @@ function _doXfadeHandoff(nextIdx) {
   audioEl.volume = vol;
   audioEl.muted  = false; // never mute the element — cast silence is via _castMuteGain
   VIZ.setCastMute(S.castingToMpv); // re-apply cast mute via gain node (keeps VU fed)
+  _applyOutputDevice(audioEl).catch(() => {}); // re-apply selected output device
 
   // Re-attach all permanent listeners to the new element
   _attachAudioListeners(audioEl);
@@ -14665,6 +14820,8 @@ function showApp() {
   // Restore Auto-DJ play history before re-enabling so the DJ doesn't re-play recent songs
   const _savedIgnore = JSON.parse(localStorage.getItem(_djKey('ignore')) || 'null');
   if (_savedIgnore) S.djIgnore = _savedIgnore;
+  // Apply stored audio output device to the main audio element
+  _applyOutputDevice(audioEl).catch(() => {});
   // Restore auto-DJ state from previous session
   if (localStorage.getItem(_uKey('autodj'))) { setAutoDJ(true, /*skipAutoStart=*/true); }
   // Guarantee a save on F5 / tab close

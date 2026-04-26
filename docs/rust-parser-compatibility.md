@@ -1,7 +1,7 @@
 # Rust Parser — Compatibility Analysis
 
 Upstream commit: `98619f4` ("Experimental rust parser") + `132f168` (rustls fix) + `77da085` (pre-built binaries)  
-Analysed against: mStream-velvet fork  
+Analysed against: mStream Velvet-velvet fork  
 Date: 2026-04-01
 
 ---

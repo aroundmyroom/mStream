@@ -25,7 +25,7 @@ The backup list shows filename, size, creation date, and a **Download** button f
 
 ## Automatic weekly backup
 
-mStream checks every hour (with a 30-second delay on boot) whether 7 days have elapsed since the last automatic backup. If so, a new backup is created.
+mStream Velvet checks every hour (with a 30-second delay on boot) whether 7 days have elapsed since the last automatic backup. If so, a new backup is created.
 
 The last-run timestamp is stored in `save/backups/.last-weekly`.
 

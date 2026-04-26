@@ -58,7 +58,7 @@ If you use [Nginx Proxy Manager](https://nginxproxymanager.com/) instead of a ma
 
 ### 1 — Enable WebSockets Support (UI toggle)
 
-On your proxy host's **Details tab**, turn on **"Websockets Support"**. This injects the correct `Upgrade` and `Connection` headers for mStream's WebSocket events.
+On your proxy host's **Details tab**, turn on **"Websockets Support"**. This injects the correct `Upgrade` and `Connection` headers for mStream Velvet's WebSocket events.
 
 ### 2 — Custom Nginx Configuration (Advanced tab)
 
@@ -74,13 +74,13 @@ proxy_buffering off;
 
 | Directive | Why it is required |
 |---|---|
-| `proxy_set_header Connection ""` | Clears the `Connection: close` header that would otherwise be forwarded, ensuring the upstream connection to mStream stays persistent (works in tandem with the HTTP/1.1 that NPM sets via the WebSockets toggle). |
+| `proxy_set_header Connection ""` | Clears the `Connection: close` header that would otherwise be forwarded, ensuring the upstream connection to mStream Velvet stays persistent (works in tandem with the HTTP/1.1 that NPM sets via the WebSockets toggle). |
 | `proxy_read_timeout 3600s` | Prevents NPM from killing idle audio streams (e.g. a paused FLAC after 60 s — the nginx default). |
 | `proxy_buffering off` | Forces NPM to stream bytes directly to the browser instead of buffering the entire file. Without this, large FLACs hit the buffer limit and the connection is dropped mid-transfer, causing `ERR_CONTENT_LENGTH_MISMATCH 206`. |
 
 ### 3 — Save and verify
 
-Save the proxy host — NPM reloads nginx automatically. No mStream restart is needed. The FLAC errors should disappear immediately.
+Save the proxy host — NPM reloads nginx automatically. No mStream Velvet restart is needed. The FLAC errors should disappear immediately.
 
 ---
 

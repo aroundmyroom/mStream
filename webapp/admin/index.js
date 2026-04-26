@@ -6457,6 +6457,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationSessionFixed') }} <b>{{ hydratedThisSession == null ? 0 : hydratedThisSession }}</b></div>
         <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationSuccessRate') }} <b>{{ hydration.stats.succeeded || 0 }}</b> / {{ hydration.stats.noImage || 0 }} / {{ hydration.stats.failed || 0 }}</div>
         <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationDropped') }} <b>{{ hydration.stats.dropped || 0 }}</b></div>
+        <div v-if="hydration.throughputPerMin != null" style="font-size:.82rem;color:var(--t2);">Throughput <b>{{ hydration.throughputPerMin }}</b> /min</div>
         <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationDiscogs') }} <b :style="discogsReady ? 'color:var(--ok,#16a34a);' : 'color:var(--warn,#b45309);'">{{ discogsReady ? t('admin.artists.discogsReady') : t('admin.artists.discogsNotReady') }}</b></div>
       </div>
       <div v-if="!hydration.running && (hydration.queueLength || 0) === 0 && (counts.missing || 0) > 0" style="margin-top:8px;font-size:.82rem;color:var(--t2);">

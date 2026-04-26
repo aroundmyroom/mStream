@@ -6,7 +6,7 @@
 
 ## PATCH /api/v1/admin/directory/flags
 
-Toggles feature flags on a vpath that is already configured in mStream. At least one flag must be provided.
+Toggles feature flags on a vpath that is already configured in mStream Velvet. At least one flag must be provided.
 
 * **Auth:** admin token required
 

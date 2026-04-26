@@ -5,7 +5,7 @@
 mStream Velvet can act as a **UPnP ContentDirectory MediaServer (DMS-1.50)** that advertises your
 music library on the local network.  Smart TVs, AV receivers, NAS players, VLC, BubbleUPnP, and
 any DLNA-certified device can discover and stream your music without installing a special app,
-without an mStream account, and without touching HTTPS or JWT tokens.
+without an mStream Velvet account, and without touching HTTPS or JWT tokens.
 
 ---
 
@@ -59,7 +59,7 @@ within seconds your music collection appears on every screen in the house.
 ```
 
 1. **SSDP multicast** — on startup the DLNA server sends `ssdp:alive` on `239.255.255.250:1900` so
-   devices auto-discover mStream.  No need to type an IP address on the TV.
+   devices auto-discover mStream Velvet.  No need to type an IP address on the TV.
 2. **Device description** — devices fetch `/dlna/description.xml` to learn what services are
    offered (MediaServer:1 / ContentDirectory:1 / DMS-1.50).
 3. **ContentDirectory SOAP control** — devices send `Browse` SOAP requests to `/dlna/cd/control`
@@ -67,9 +67,9 @@ within seconds your music collection appears on every screen in the house.
 4. **Media streaming** — the device fetches each audio file directly from `/media/<vpath>/<path>`.
    Files are served in their original format — no transcoding.  All common audio formats are
    served with correct `Content-Type` headers.
-5. **Album art** — served from `/album-art/<filename>`, sourced from the mStream art cache.
+5. **Album art** — served from `/album-art/<filename>`, sourced from the mStream Velvet art cache.
 
-The DLNA server runs **completely independently** from the main mStream HTTPS server.  Plain HTTP
+The DLNA server runs **completely independently** from the main mStream Velvet HTTPS server.  Plain HTTP
 is required because DLNA devices cannot handle HTTPS or JWT authentication.
 
 ---
@@ -171,7 +171,7 @@ show the full hierarchy.
 
 ---
 
-## Comparison: mStream DLNA vs Classic NAS DLNA Servers
+## Comparison: mStream Velvet DLNA vs Classic NAS DLNA Servers
 
 | Feature | mStream Velvet DLNA | Twonky (classic NAS) | Serviio | ReadyMedia (miniDLNA) |
 |---------|-------------------|---------------------|---------|----------------------|
@@ -209,7 +209,7 @@ show the full hierarchy.
 > **⚠ The DLNA port is intentionally unauthenticated.**
 
 DLNA devices have no concept of user accounts, JWT tokens, or HTTPS.  This is a fundamental
-property of the UPnP/DLNA specification — not a limitation of mStream's implementation.
+property of the UPnP/DLNA specification — not a limitation of mStream Velvet's implementation.
 
 **All audio files in `albumsOnly` vpaths are accessible without any login** to anyone who can
 reach port 10293.
@@ -218,7 +218,7 @@ reach port 10293.
 
 - Only enable DLNA if you are on a **trusted private LAN** (home network).
 - **Never port-forward port 10293** (or your custom port) to the internet.
-- If you run mStream on a VPS or a machine with a public IP, **do not enable DLNA**.
+- If you run mStream Velvet on a VPS or a machine with a public IP, **do not enable DLNA**.
 - Firewall rule to allow LAN only (example `ufw`):
   ```shell
   ufw allow from 192.168.0.0/16 to any port 10293
@@ -282,7 +282,7 @@ These endpoints are served on the dedicated DLNA HTTP port (default 10293) with 
 | `ALL` | `/dlna/cd/events` | SSDP event subscription stub (SUBSCRIBE accepted, not tracked) |
 | `POST` | `/dlna/cd/control` | ContentDirectory SOAP control endpoint — handles `Browse`, `GetSystemUpdateID`, `GetSearchCapabilities`, `GetSortCapabilities` |
 | `GET` | `/media/:vpath/*` | Audio file streaming — served via `express.static` from the vpath root |
-| `GET` | `/album-art/:filename` | Album art served from the mStream art cache directory |
+| `GET` | `/album-art/:filename` | Album art served from the mStream Velvet art cache directory |
 
 ### Object-ID scheme
 
@@ -304,7 +304,7 @@ If your server and your playback devices (TV, phone running VLC, AV receiver) ar
 you will hit two problems:
 
 1. **Discovery fails silently** — the `ssdp:alive` multicast (`239.255.255.250:1900`) is sent on the
-   server's VLAN and never arrives on the client's VLAN.  The device sees no mStream in its source list.
+   server's VLAN and never arrives on the client's VLAN.  The device sees no mStream Velvet in its source list.
 2. **Browse or playback fails** — even if you manually point a client at the server IP, media streams
    on port 10293 must be reachable from the client's VLAN.
 

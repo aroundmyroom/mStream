@@ -2,7 +2,7 @@
 
 > **Scope**: New "Album Library" view in the Velvet UI — a separate menu item
 > that does NOT replace the existing file-browser or albums view. Built on top
-> of the existing mStream Node.js server, SQLite `files` table, and current
+> of the existing mStream Velvet Node.js server, SQLite `files` table, and current
 > API infrastructure.
 
 ---
@@ -705,7 +705,7 @@ Clicking an album card opens the **Album Detail View**:
 
 ### 4.5 Player Integration
 
-The Album Browser uses the **existing mStream player** — it calls the same
+The Album Browser uses the **existing mStream Velvet player** — it calls the same
 `addToQueue()` and `openPlaylist()` functions that the rest of the app uses.
 No new player component.
 

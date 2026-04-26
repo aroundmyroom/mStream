@@ -4,7 +4,7 @@
 # Install Electron
 npm install -g electron
 
-# Boot mStream with Electron
+# Boot mStream Velvet with Electron
 electron ./cli-boot-wrapper.js
 ```
 
@@ -22,7 +22,7 @@ electron-builder
 
 ## Modify package.json (optional)
 
-Remove all dependencies related to the command line (commander).  These packages will never be used by mStream Express and can be safely removed to reduce the output size
+Remove all dependencies related to the command line (commander).  These packages will never be used by mStream Velvet Express and can be safely removed to reduce the output size
 
 ## Cleanup node_modules (optional)
 

@@ -1,6 +1,6 @@
 # Audiobook mode
 
-mStream has dedicated audiobook support for vpaths configured with `type: "audio-books"`.
+mStream Velvet has dedicated audiobook support for vpaths configured with `type: "audio-books"`.
 
 ## Configuration
 
@@ -32,7 +32,7 @@ A speed button (showing the current multiplier, e.g. `1.25×`) opens a popup wit
 Speed control is **only shown** for audiobook tracks — it is automatically hidden during normal music playback.
 
 ### Per-book progress
-mStream remembers your position in every audiobook:
+mStream Velvet remembers your position in every audiobook:
 
 - Position is saved every 5 seconds while playing, immediately on pause, and when you close the tab.
 - When you re-open a track you were part-way through, playback automatically resumes from where you left off.
@@ -40,7 +40,7 @@ mStream remembers your position in every audiobook:
 - Up to 200 book positions are stored simultaneously; the oldest entry is dropped when the limit is reached.
 
 ### M4B support
-`.m4b` audio-book files are fully supported. mStream extracts embedded chapter metadata via **ffprobe** in two ways:
+`.m4b` audio-book files are fully supported. mStream Velvet extracts embedded chapter metadata via **ffprobe** in two ways:
 
 1. **At scan time** — when you run a library scan, `src/db/scanner.mjs` calls ffprobe and stores chapters as cuepoints in the database. Subsequent plays read directly from the DB (instant).
 2. **On first play (no rescan needed)** — if an `.m4b` was already indexed before this feature was added, the server runs ffprobe automatically the first time you play the file, stores the result, and returns the chapters in the same request.

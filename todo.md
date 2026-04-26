@@ -10,13 +10,10 @@
 - [ ] Admin Artists: add pagination/filter by minimum song count for very large libraries
 - [ ] Admin Artists: add image-dimension / file-size details to manual URL preview before apply
 - [ ] Admin Artists: add bulk Yes/No validation actions in the With image review list
-- [ ] Admin Artists: add retry/reset action for rows in the separate no-image queue
 - [ ] Admin Directories: add bulk Artists On/Off actions by folder type (music/audio-books/recordings)
 - [ ] Admin Directories: add visual parent/child relationship badges for Albums Only and Artists On/Off inheritance
 - [ ] Player Artist Library: optional badge for already-flagged wrong artists (admin-only)
 - [ ] Add global media-enrichment budget (shared limiter between artist-image hydration and album-art background tasks)
-- [ ] Add admin performance panel for enrichment throughput (items/min, queue depth, fail rate)
-
 ### Localisation (i18n) — Phase 2: Remaining admin template strings
 
 Phase 1 (i18n.js engine + admin sidebar + language pickers with real flag-button UI + locale JSON validation on activation) and Phase 3 (full player frontend — app.js + index.html) are complete, including enabled-language filtering in admin and cross-tab language sync (shipped in v6.8.4 and v6.8.5-velvet).
@@ -32,12 +29,6 @@ Recent follow-up shipped in v6.10.1-velvet: Admin → Server Audio actions now s
 - [ ] Replace remaining hardcoded English strings in `wrappedAdminView`, `foldersView`, `usersView`, `settingsView`, and `backupView` with `{{ t('admin.*') }}` calls.
 - [ ] Replace remaining hardcoded modal strings in `webapp/admin/index.js` (mpv modal + transcode modals + legacy confirm/modal copy) with i18n keys.
 - [ ] Player i18n: final sweep of remaining utility panels (Jukebox + Transcode + other info cards) to eliminate last hardcoded strings
-
----
-
-### yt-dlp year from `release_year` — LOW PRIORITY / OPTIONAL
-
-- [ ] In `src/api/ytdl.js` line ~299: `const year = info.release_year || (info.release_date ? info.release_date.substring(0,4) : null) || (info.upload_date ? info.upload_date.slice(0,4) : '');`
 
 ---
 
@@ -107,11 +98,6 @@ Audit completed 2026-03-26. Strategy: **Option A — separate `mobile.css`** loa
 
 ## FUTURE — Accessibility & Appearance
 
-### Audio Output Device Selector
-- [ ] `navigator.mediaDevices.enumerateDevices()` → dropdown in Playback Settings
-- [ ] `audioEl.setSinkId(deviceId)` on selection; persist in `localStorage`
-- [ ] Listen for `devicechange` to refresh the list
-
 ### Customizable Themes
 
 #### Track A — External / File-based Themes
@@ -131,15 +117,6 @@ Audit completed 2026-03-26. Strategy: **Option A — separate `mobile.css`** loa
 ---
 
 ## FUTURE — Home, Analytics & Discovery
-
-### Artist Metadata & Discovery — Needs More Analysis
-
-> Found by analysing Musicseerr. Each item below needs deeper investigation before implementation.
-
-- [ ] **TheAudioDB — artist imagery (fanart, banners, logos, CD art)** — Free public API (30 req/min), no auth needed. Investigate: API response shape, cache TTL strategy, where/how to surface in the UI (artist cards, Now Playing modal, future Artist page). See `docs/technology-choices.md` for existing stance.
-- [ ] **Wikidata — artist biography text** — Fully open, no API key, no rate limits. Investigate: query format (SPARQL or entity lookup), language fallback, how to cache per-artist, and whether bio fits in a Now Playing panel expansion or a future Artist page.
-- [ ] **MusicBrainz — artist MBID + structured discography** — Per-song AcoustID/MusicBrainz enrichment (title, artist, MBID per recording) is already implemented (v6.10.0). This remaining item is artist-level: MBID lookup by artist name, discography endpoint, release types (studio/live/EP), rate-limit (1 req/sec). Prerequisite for a full Artist page.
-- [ ] **Artist page** — Biography (Wikidata), discography (MusicBrainz), hero image/logo (TheAudioDB), similar artists (Last.fm). Depends on items above. Investigate: route/nav pattern, which parts are feasible without all three services being configured, fallback behaviour.
 
 ### Home Screen
 - [ ] **Time-based play stats** — `play_log` table; songs played today/week/month/year; listening streak

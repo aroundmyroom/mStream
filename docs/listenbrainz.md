@@ -4,7 +4,7 @@ mStream Velvet supports scrobbling to [ListenBrainz](https://listenbrainz.org/) 
 
 ## How It Works
 
-mStream submits two types of events to ListenBrainz for every track you play:
+mStream Velvet submits two types of events to ListenBrainz for every track you play:
 
 | Event | When | What it does |
 |-------|------|--------------|
@@ -26,12 +26,12 @@ This enables the feature server-wide. Users who have not connected a token are u
 
 1. Get your token at **[listenbrainz.org/settings](https://listenbrainz.org/settings/)** (scroll to "User Token").
 2. In the main app sidebar, click **ListenBrainz** (only visible when admin has enabled it).
-3. Paste the token and click **Connect**. mStream validates the token with the ListenBrainz API before saving.
+3. Paste the token and click **Connect**. mStream Velvet validates the token with the ListenBrainz API before saving.
 4. To stop scrobbling, click **Disconnect**.
 
 ## Token Storage
 
-Tokens are stored in the mStream config file (`save/conf/default.json`):
+Tokens are stored in the mStream Velvet config file (`save/conf/default.json`):
 - **Multi-user mode**: under `users.<username>.listenbrainz-token`
 - **No-auth mode**: under `listenBrainz.noAuthToken`
 
@@ -39,7 +39,7 @@ Tokens survive server restarts in both modes.
 
 ## Listening Now (Now Playing)
 
-When you start a track, mStream immediately sends a `playing_now` notification to ListenBrainz. This:
+When you start a track, mStream Velvet immediately sends a `playing_now` notification to ListenBrainz. This:
 
 - Shows your current track under **"Listening Now"** on your public ListenBrainz profile page
 - Updates in real time as you skip between tracks

@@ -41,7 +41,7 @@ Once at startup (after a 60-second delay) and then once every 24 hours, mStream 
 
 ## Opting out
 
-Add `"telemetry": false` to your `save/conf/default.json` and restart mStream:
+Add `"telemetry": false` to your `save/conf/default.json` and restart mStream Velvet:
 
 ```json
 {

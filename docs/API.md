@@ -1,6 +1,6 @@
 # mStream Velvet — API Reference
 
-mStream uses a REST API. All `POST` requests must set `Content-Type: application/json` unless otherwise noted. All responses are JSON.
+mStream Velvet uses a REST API. All `POST` requests must set `Content-Type: application/json` unless otherwise noted. All responses are JSON.
 
 ---
 
@@ -784,7 +784,7 @@ GET /media/<vpath>/<path/to/song.mp3>?token=<jwt>
 
 ## Subsonic Compatibility
 
-mStream implements a subset of the Subsonic API for third-party client compatibility. See [docs/subsonic.md](subsonic.md) for supported methods.
+mStream Velvet implements a subset of the Subsonic API for third-party client compatibility. See [docs/subsonic.md](subsonic.md) for supported methods.
 
 Base URL: `/rest/`
 

@@ -1,6 +1,53 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.13.2-velvet — April 2026 — Fanart Hero, Audio Output & Enrichment Fixes
+
+### feat: Artist profile — fanart hero banner + metadata chips
+- When `fanartFile` is set, the artist profile now opens with a full-width 16:5 hero banner using the fanart image (`object-position: center top`)
+- Dark gradient overlay keeps artist name readable over any image
+- Metadata chips (genre, country, formed year) rendered below the name — inside the hero when fanart is present, in the standard header when not
+- CSS: `.artpro-hero`, `.artpro-hero-img`, `.artpro-hero-grad`, `.artpro-hero-overlay`, `.artpro-meta-chips`, `.artpro-meta-chip`
+- Responsive: narrower aspect ratio + tighter padding on mobile
+
+### feat: Audio output device selector — full wiring + Bluetooth disconnect handling
+- `_applyOutputDevice()` now called on crossfade element creation, crossfade swap, and boot sequence — selected device honoured on all playback paths
+- `devicechange` listener: detects removed Bluetooth/USB device, resets stored preference to `''`, calls `setSinkId('')` on both audio elements, re-renders Settings page if open
+- Audio output section always visible (previously hidden when only 1 device) — disabled select + hint "Connect a Bluetooth speaker or second audio device to enable" when no choice available
+- Section hidden only when `setSinkId` is not supported by the browser
+
+### fix: Artist image enrichment queue — 4 bugs
+- `HYDRATE_QUEUE_LIMIT` raised from 2,000 to 50,000
+- `getArtistsNeedingFetch()` now filters to `image_file IS NULL AND last_fetched IS NULL`, ordered by `song_count DESC`, with configurable limit param — previously returned artists that already had images
+- `seedHydrationFromMissing` internal re-cap at 2,000 removed — passes limit straight to DB
+- `artist-rebuild-worker.mjs` now preserves `fanart_file`, `mbid`, `genre`, `country`, `formed_year` on every rescan rebuild — previously wiped these fields
+
+### feat: Admin artist enrichment — throughput display
+- `hydrationStatusSnapshot()` now calculates and returns `throughputPerMin` (processed / elapsed min, 1 decimal)
+- Admin enrichment stats grid shows "Throughput X /min" below the "dropped" counter
+
+### feat: Artist Library — back navigation restores letter
+- Navigating back from an artist profile to the letter browse view now re-expands the previously selected letter automatically (`S._restoreArtistLetter` state)
+
+### fix: YouTube download — prefer release year over upload date
+- `/api/v1/ytdl/info` now checks `release_year` → `release_date` → `upload_date` in order
+
+### fix: Admin DB — new enrichment helper functions
+- `deriveArtistMbidFromFiles(artistClean)` — derives MBID from scanned files
+- `resetUnenrichedArtistFetch()` — resets `last_fetched` for artists never enriched
+- `getArtistsForTadbEnrichment(limit)` — returns artists eligible for fanart/genre/country/formedYear enrichment
+
+### docs: Comprehensive scan behaviour documentation
+- `docs/scan-progress.md` — new detailed intro section: scan triggers, per-file decision table, "date/time modified" explanation, album art sources, tag update scenarios, artist index rebuild
+
+### docs: Branding cleanup
+- 30+ docs files corrected from bare "mStream" to "mStream Velvet"; code blocks, git URLs, and paths preserved
+
 ## v6.13.1-velvet — April 2026 — Artist Albums Diagnostic
+
+### fix: Tag Workshop — skip disk write when tags already match
+- `_tagsHaveDiff(t, finalTags)` helper compares proposed tags against current DB values (case-insensitive, whitespace-normalised)
+- If tags are already equal: track is marked accepted in the review queue but the audio file is **not written** (mtime preserved, no unnecessary re-scan, reduced SSD wear)
+- Applies to both bulk-accept and single-accept endpoints; response now includes `skippedEqual` counter
 
 ### feat: Artist Albums Diagnostic tool (Admin UI)
 - New Admin panel **Artist Albums Diagnostic** — helps diagnose why albums are missing from an artist's page without shell/SQLite access (aimed at Docker users)
@@ -8,6 +55,9 @@
 - Admin UI component `artistAlbumsDiagView` added to `webapp/admin/index.js` — input + Run Diagnostic button, summary banner, Normalized Index Entry card, Orphaned Values red card (root cause), Albums Per Variant card
 - Export options: **↓ Export .txt** (human-readable report), **↓ Export .json** (raw response), **Copy JSON** (clipboard with 2s feedback) — all named from the artist query, e.g. `artist-diag-Ben_Liebrand.txt`
 - Nav item "Artist Albums Diagnostic" added to Admin sidebar (`webapp/admin/index.html`)
+
+### feat: CLI boot banner — "Velvet" signature
+- `cli-boot-wrapper.js` startup banner now also prints a small ASCII-art "Velvet" word below the mStream logo
 
 ## v6.13.0-velvet — April 2026 — The Tagged Albums
 

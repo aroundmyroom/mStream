@@ -1,6 +1,6 @@
 # Podcasts & Feeds
 
-mStream includes a full server-side podcast feed subscription system. Users subscribe to RSS 2.0 feed URLs and browse episodes directly from the sidebar. No external podcast service or account is required.
+mStream Velvet includes a full server-side podcast feed subscription system. Users subscribe to RSS 2.0 feed URLs and browse episodes directly from the sidebar. No external podcast service or account is required.
 
 ---
 

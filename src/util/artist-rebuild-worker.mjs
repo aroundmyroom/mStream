@@ -87,7 +87,7 @@ try {
   const groups = buildArtistGroups(countRows);
 
   const existing = db.prepare(
-    'SELECT artist_clean, bio, image_file, image_source, last_fetched, image_flag_wrong, name_override FROM artists_normalized'
+    'SELECT artist_clean, bio, image_file, image_source, last_fetched, image_flag_wrong, name_override, fanart_file, mbid, genre, country, formed_year FROM artists_normalized'
   ).all();
   const existingMap = new Map(existing.map(r => [r.artist_clean.toLowerCase(), r]));
 
@@ -96,8 +96,9 @@ try {
   const ins = db.prepare(`
     INSERT INTO artists_normalized
       (artist_clean, artist_raw_variants, vpaths_json, bio, image_file, image_source,
-       last_fetched, image_flag_wrong, name_override, song_count)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       last_fetched, image_flag_wrong, name_override, song_count,
+       fanart_file, mbid, genre, country, formed_year)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (const [, group] of groups) {
@@ -119,7 +120,12 @@ try {
       prev ? (prev.last_fetched || null) : null,
       prev ? (prev.image_flag_wrong || 0) : 0,
       prev ? (prev.name_override || 0) : 0,
-      group.rawVariants.reduce((sum, v) => sum + (countMap.get(v.name) || 0), 0)
+      group.rawVariants.reduce((sum, v) => sum + (countMap.get(v.name) || 0), 0),
+      prev ? (prev.fanart_file || null) : null,
+      prev ? (prev.mbid || null) : null,
+      prev ? (prev.genre || null) : null,
+      prev ? (prev.country || null) : null,
+      prev ? (prev.formed_year || null) : null
     );
   }
 

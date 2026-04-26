@@ -1,6 +1,6 @@
 # Scan Error Audit
 
-mStream records every file that fails during a library scan into a persistent **scan error log** visible in the Admin Panel. Errors are deduplicated by file + error type so a recurring problem shows a count instead of flooding the log with identical rows.
+mStream Velvet records every file that fails during a library scan into a persistent **scan error log** visible in the Admin Panel. Errors are deduplicated by file + error type so a recurring problem shows a count instead of flooding the log with identical rows.
 
 ---
 

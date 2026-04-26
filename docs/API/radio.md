@@ -138,7 +138,7 @@ All IDs must belong to the authenticated user. The array represents the desired 
 
 ### `GET /api/v1/radio/stream?url=ENCODED_STREAM_URL`
 
-Pipes a live radio stream through the mStream server. This is required because the browser's Web Audio API (`createMediaElementSource`) marks the audio element as CORS-tainted for cross-origin sources — streams that lack CORS headers would be silenced. The proxy makes every stream appear same-origin to the browser.
+Pipes a live radio stream through the mStream Velvet server. This is required because the browser's Web Audio API (`createMediaElementSource`) marks the audio element as CORS-tainted for cross-origin sources — streams that lack CORS headers would be silenced. The proxy makes every stream appear same-origin to the browser.
 
 - SSRF-protected: loopback / RFC-1918 addresses are rejected with `403`
 - No `.m3u8` playlists

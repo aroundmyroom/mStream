@@ -311,7 +311,7 @@ export function setup(mstream) {
       const ytdlp = await _ytdlpBin();
       const info  = await _ytdlpInfo(rawUrl, ytdlp, _ffmpegDir());
       const { artist, title } = _parseTitle(info.title || '', info.artist || info.uploader || info.channel || '');
-      const year  = info.upload_date ? info.upload_date.slice(0, 4) : '';
+      const year  = info.release_year ? String(info.release_year) : (info.release_date ? info.release_date.substring(0, 4) : (info.upload_date ? info.upload_date.slice(0, 4) : ''));
       const thumb = info.thumbnail || null;
       res.json({ title, artist, album: '', year, thumb });
     } catch (err) {

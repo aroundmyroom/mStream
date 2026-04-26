@@ -28,7 +28,7 @@ docker pull ghcr.io/aroundmyroom/mstream-velvet:latest
 Or pin to a specific release:
 
 ```shell
-docker pull ghcr.io/aroundmyroom/mstream-velvet:v6.13.1-velvet
+docker pull ghcr.io/aroundmyroom/mstream-velvet:v6.13.2-velvet
 ```
 
 ### compose.yaml (ghcr.io — recommended)
@@ -94,11 +94,11 @@ No manual steps are needed — tagging a release is enough.
 
 ## First run — adding your music library
 
-On first start mStream creates a blank config at `save/conf/default.json`.
+On first start mStream Velvet creates a blank config at `save/conf/default.json`.
 
 ### Option 1 — environment variables (simple single-library setup)
 
-Add an `environment:` block to your `compose.yaml`. mStream will write the initial config automatically on the very first start and skip this step on every subsequent restart.
+Add an `environment:` block to your `compose.yaml`. mStream Velvet will write the initial config automatically on the very first start and skip this step on every subsequent restart.
 
 Complete copy-paste example:
 
@@ -229,4 +229,4 @@ docker run -d \
 
 ## Behind a reverse proxy
 
-If you run mStream behind nginx or Caddy, see [deploy.md](deploy.md) for the recommended nginx configuration — required for large FLAC libraries to avoid stall on idle connections.
+If you run mStream Velvet behind nginx or Caddy, see [deploy.md](deploy.md) for the recommended nginx configuration — required for large FLAC libraries to avoid stall on idle connections.

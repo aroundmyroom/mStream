@@ -1,12 +1,12 @@
 # Library Scanning
 
-mStream scans your music folders to build the database that powers search, browsing, Recently Added, and all playback features.
+mStream Velvet scans your music folders to build the database that powers search, browsing, Recently Added, and all playback features.
 
 ---
 
 ## Virtual Paths (vpaths)
 
-Every music folder in mStream is identified by a short **vpath key** (e.g. `Music`, `Blues`, `Audiobooks`).  
+Every music folder in mStream Velvet is identified by a short **vpath key** (e.g. `Music`, `Blues`, `Audiobooks`).  
 This key is used in every API call, in streaming URLs, and in the per-user access control list.
 
 ```json
@@ -25,7 +25,7 @@ A user's `vpaths` array lists which keys they can access.
 ### Scan process overview
 
 1. A scan task is queued for a vpath (either on boot, on a timer, or triggered manually from the Admin panel).
-2. mStream forks a separate Node.js process (`src/db/scanner.mjs`) for each active scan to keep the main server responsive.
+2. mStream Velvet forks a separate Node.js process (`src/db/scanner.mjs`) for each active scan to keep the main server responsive.
 3. The scanner walks the folder tree recursively, calling back into the server API for each file it finds.
 4. When a file is **new** (not in the DB for this vpath), it is fully parsed (tags, ReplayGain, album art) and inserted.
 5. When a file is **already known** (same relative path + vpath + mtime), it is skipped.  Only missing art or missing cue-points are filled in.
@@ -121,7 +121,7 @@ See [scan-error-audit.md](scan-error-audit.md) for full details.
 
 ## Database engines
 
-mStream supports two database backends:
+mStream Velvet supports two database backends:
 
 | Engine | File | Notes |
 |--------|------|-------|

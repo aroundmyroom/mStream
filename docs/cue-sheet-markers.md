@@ -1,6 +1,6 @@
 # CUE Sheet Track Markers
 
-mStream can read CUE sheet data from your audio files and display the individual tracks as clickable markers on the seek bar. This lets you jump directly to any chapter or track within a single long audio file (common with DJ mixes, classical recordings, vinyl rips, and compilation FLACs).
+mStream Velvet can read CUE sheet data from your audio files and display the individual tracks as clickable markers on the seek bar. This lets you jump directly to any chapter or track within a single long audio file (common with DJ mixes, classical recordings, vinyl rips, and compilation FLACs).
 
 ---
 
@@ -16,13 +16,13 @@ The ticks appear in both the main player bar and inside the Now Playing modal.
 
 ### 1. Embedded cue sheet (preferred)
 
-Some encoders write the CUE sheet directly into the audio file's tags (e.g., in a `CUESHEET` field of a FLAC file). mStream uses [music-metadata](https://github.com/borewit/music-metadata) to extract this automatically.
+Some encoders write the CUE sheet directly into the audio file's tags (e.g., in a `CUESHEET` field of a FLAC file). mStream Velvet uses [music-metadata](https://github.com/borewit/music-metadata) to extract this automatically.
 
 Look for `common.cuesheet` in the parsed metadata — if it contains at least one track with an `INDEX 01` entry, those timestamps are used.
 
 ### 2. Sidecar `.cue` file (fallback)
 
-If no embedded cue sheet is found, mStream looks for a matching `.cue` file in the same directory:
+If no embedded cue sheet is found, mStream Velvet looks for a matching `.cue` file in the same directory:
 
 1. First tries `<audio-basename>.cue` — e.g. `my-mix.flac` → `my-mix.cue`
 2. If not found, checks whether there is exactly **one** `.cue` file in the directory and uses that.
@@ -52,7 +52,7 @@ Each cue point object:
 
 ### Existing databases (migration)
 
-If you already have an mStream database created before this feature was added, the `cuepoints` column is added automatically on first boot via:
+If you already have an mStream Velvet database created before this feature was added, the `cuepoints` column is added automatically on first boot via:
 
 ```sql
 ALTER TABLE files ADD COLUMN cuepoints TEXT;
@@ -96,7 +96,7 @@ Returns the cue points for a given file path.
 
 Returns `{ "cuepoints": [] }` when no data exists for that file.
 
-**Authentication** — requires a valid `x-access-token` header or cookie (standard mStream auth).
+**Authentication** — requires a valid `x-access-token` header or cookie (standard mStream Velvet auth).
 
 ---
 

@@ -1,11 +1,11 @@
 # YouTube Download
 
-mStream can download audio from YouTube URLs directly from the web interface, saving files to a dedicated YouTube downloads folder.
+mStream Velvet can download audio from YouTube URLs directly from the web interface, saving files to a dedicated YouTube downloads folder.
 
 ## How it works
 
 1. Paste a YouTube URL into the YouTube view and click **Preview**
-2. mStream fetches metadata (title, artist, thumbnail, upload year) via yt-dlp — album field is left blank for you to fill in
+2. mStream Velvet fetches metadata (title, artist, thumbnail, upload year) via yt-dlp — album field is left blank for you to fill in
 3. Edit the tags if needed, choose a format (Opus or MP3), and click **Download**
 4. The file is saved to your configured YouTube or recordings folder
 5. **▶ Play now** and **+ Add to queue** buttons appear immediately after download
@@ -43,11 +43,11 @@ Filenames are saved as `Artist - Title.opus` (or `Title.opus` if no artist).
 
 ## yt-dlp binary management
 
-mStream uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) under the hood. The binary lives at `bin/yt-dlp/yt-dlp` and is **not** committed to git.
+mStream Velvet uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) under the hood. The binary lives at `bin/yt-dlp/yt-dlp` and is **not** committed to git.
 
 ### Automatic download on first run
 
-**No setup is needed.** On every startup, mStream:
+**No setup is needed.** On every startup, mStream Velvet:
 
 1. Checks whether `bin/yt-dlp/yt-dlp` exists
 2. If missing — downloads the correct build for your platform automatically from the GitHub releases page
@@ -56,7 +56,7 @@ mStream uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) under the hood. The bina
 This means:
 - Cloning the repo and starting the server is all that's required
 - YouTube compatibility is maintained automatically — when YouTube changes their player and yt-dlp releases a fix, it is picked up on the next server restart
-- The current/new version is visible in the mStream logs: `yt-dlp update: Updated yt-dlp to 2025.03.27` or `yt-dlp is up to date (2025.03.15)`
+- The current/new version is visible in the mStream Velvet logs: `yt-dlp update: Updated yt-dlp to 2025.03.27` or `yt-dlp is up to date (2025.03.15)`
 
 ### Docker
 
@@ -66,7 +66,7 @@ The `Dockerfile` downloads yt-dlp at **image build time** (architecture-aware: x
 
 If the server has no outbound internet access, place the binary manually (see [bin/yt-dlp/README.md](../bin/yt-dlp/README.md)). Once placed, `--update` will fail silently and the existing binary will be used as-is.
 
-As a further fallback, if the binary is missing entirely and cannot be downloaded, mStream will attempt to use a system-installed `yt-dlp` on `$PATH`.
+As a further fallback, if the binary is missing entirely and cannot be downloaded, mStream Velvet will attempt to use a system-installed `yt-dlp` on `$PATH`.
 
 ---
 

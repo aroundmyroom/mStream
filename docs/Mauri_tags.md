@@ -17,11 +17,11 @@ TXXX : EDITION = Deluxe Edition
        (you name it)  (you fill it)
 ```
 
-In mStream's config list you write it as `TXXX:EDITION` — the colon separates the frame type from the description you chose.
+In mStream Velvet's config list you write it as `TXXX:EDITION` — the colon separates the frame type from the description you chose.
 
 ### Practical examples — what to set in your tagger
 
-| You want to tag | Tagger field name | mStream config entry | Example value |
+| You want to tag | Tagger field name | mStream Velvet config entry | Example value |
 |---|---|---|---|
 | Edition type | `TXXX` → description `EDITION` | `TXXX:EDITION` | `Deluxe Edition` |
 | Version label | `TXXX` → description `VERSION` | `TXXX:VERSION` | `2016 Remaster` |
@@ -44,11 +44,11 @@ In mStream's config list you write it as `TXXX:EDITION` — the colon separates 
 | **M4A / AAC** | iTunes custom atom `----:com.apple.iTunes:EDITION` |
 | **WavPack / APE** | APE tag `Edition = Deluxe Edition` |
 
-mStream's scanner handles all four formats. The config entry `TXXX:EDITION` tells it to look for `EDITION` in whatever format the file uses — it maps automatically.
+mStream Velvet's scanner handles all four formats. The config entry `TXXX:EDITION` tells it to look for `EDITION` in whatever format the file uses — it maps automatically.
 
 ### The default field priority order
 
-mStream tries these fields in this order, stopping at the first non-empty value:
+mStream Velvet tries these fields in this order, stopping at the first non-empty value:
 
 ```
 1. TIT3           — MP3 subtitle frame (dBpoweramp, EAC default)
@@ -81,7 +81,7 @@ A user has two copies of *The Division Bell* by Pink Floyd:
 | `Music/Pink Floyd/The Division Bell/` | 16× FLAC 16bit | `ALBUM = The Division Bell`, `TIT3 = 2016 remaster` |
 | `Music/Pink Floyd/The Division Bell [HiRes]/` | 16× FLAC 24bit-96kHz | `ALBUM = The Division Bell`, `TIT3 = HiRes 24bit-96kHz` |
 
-mStream already stores them as two separate album groups (different folder → different `dir` key in `getArtistAlbumsMulti`). But the artist view album cards only show `album.name` and `album.year` — both identical. The user cannot tell which is which.
+mStream Velvet already stores them as two separate album groups (different folder → different `dir` key in `getArtistAlbumsMulti`). But the artist view album cards only show `album.name` and `album.year` — both identical. The user cannot tell which is which.
 
 **Critical observation**: the user in the example above uses `TIT3` (subtitle). But the real world is far messier — users tag their files with dozens of different keys depending on which ripper, tagger, or convention they follow. A hardcoded list of three or four "preferred" tag names would silently miss the majority of real libraries.
 
@@ -709,7 +709,7 @@ ORDER BY cnt DESC;
 3. Add/remove fields, reset-to-defaults button
 4. Save via new API endpoint
 
-**Deliverable**: admins can point mStream at their specific tag keys without touching config files.
+**Deliverable**: admins can point mStream Velvet at their specific tag keys without touching config files.
 
 ### Phase 3 — Album card badges + sibling grouping
 1. Artist profile album grid — version badge + `.alb-sibling-group` visual grouping for same-name albums

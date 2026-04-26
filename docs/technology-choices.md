@@ -6,7 +6,7 @@ Every external service, library, and binary used in mStream Velvet was a deliber
 
 ## FFmpeg
 
-**What it does in mStream:** Four distinct jobs:
+**What it does in mStream Velvet:** Four distinct jobs:
 
 1. **Transcoding** — Re-encodes any audio file on-the-fly to MP3, Opus, or AAC at the bitrate the client requests. This is how a FLAC file on your server plays on a phone with limited bandwidth: the server decodes FLAC and pipes compressed audio directly to the browser.
 2. **Waveform generation** — Decodes audio to raw PCM (32-bit floilat, 8000 Hz mono) via a pipe. Server-side JavaScript then computes 600 RMS values with a γ=0.7 perceptual curve and caches the result. This gives the seek bar its waveform display.
@@ -99,7 +99,7 @@ Last.fm's artist similarity data is mature, well-populated, and requires only a 
 
 ## Syncthing — Library Sync (Federation)
 
-**What it does:** The Federation feature lets you sync your music library between two mStream instances — for example, keeping a home server and a travel laptop in sync. mStream bundles the Syncthing binary, spawns it as a background process, and exposes a simplified setup UI in the admin panel. The Syncthing web UI is proxied through mStream so you do not need to open a separate port.
+**What it does:** The Federation feature lets you sync your music library between two mStream Velvet instances — for example, keeping a home server and a travel laptop in sync. mStream Velvet bundles the Syncthing binary, spawns it as a background process, and exposes a simplified setup UI in the admin panel. The Syncthing web UI is proxied through mStream Velvet so you do not need to open a separate port.
 
 **Why Syncthing and not Dropbox, rsync, or others?**
 
@@ -111,7 +111,7 @@ Last.fm's artist similarity data is mature, well-populated, and requires only a 
 | Nextcloud | Yes | Yes | Yes | Heavy; requires a full web stack installation |
 | rclone | Yes | Yes | Yes | CLI-only; complex setup for non-technical users |
 
-Syncthing is the only option that is entirely self-hosted, encrypted, peer-to-peer (no files go through any external server), cross-platform, and bundleable as a single binary. The mStream Federation system automates the Syncthing configuration so users do not need to understand Syncthing at all — it just works from the admin panel.
+Syncthing is the only option that is entirely self-hosted, encrypted, peer-to-peer (no files go through any external server), cross-platform, and bundleable as a single binary. The mStream Velvet Federation system automates the Syncthing configuration so users do not need to understand Syncthing at all — it just works from the admin panel.
 
 ---
 
@@ -131,7 +131,7 @@ The preset library is bundled in `webapp/assets/js/lib/` so it works fully offli
 
 ## audioMotion-analyzer — Spectrum Visualizer
 
-**What it does:** Renders a configurable real-time frequency spectrum analyser in the full-screen visualizer. mStream ships 6 hand-curated presets: Mirror Peaks, LED Dual, Radial, Octave Reflex, Velvet, and Line Stereo.
+**What it does:** Renders a configurable real-time frequency spectrum analyser in the full-screen visualizer. mStream Velvet ships 6 hand-curated presets: Mirror Peaks, LED Dual, Radial, Octave Reflex, Velvet, and Line Stereo.
 
 **Why audioMotion-analyzer and not a custom canvas implementation?**
 
@@ -153,7 +153,7 @@ Building all of this correctly from scratch (especially the logarithmic binning 
 
 **Why SQLite and not PostgreSQL, MySQL, or MongoDB?**
 
-mStream is a personal self-hosted music server. It is designed to run on a Raspberry Pi, a home NAS, or a low-spec VPS — not a managed database tier. SQLite is:
+mStream Velvet is a personal self-hosted music server. It is designed to run on a Raspberry Pi, a home NAS, or a low-spec VPS — not a managed database tier. SQLite is:
 
 - **Zero-install** — no separate database server process
 - **Built into Node.js v22** via the `node:sqlite` module (`DatabaseSync`) — no native addon or third-party driver needed
@@ -193,11 +193,11 @@ No JavaScript audio library provides gapless playback, crossfade, a full EQ, Rep
 
 ## Subsonic Protocol
 
-**What it does:** mStream Velvet exposes a Subsonic REST API (version 1.16.1 + Open Subsonic extensions) in addition to its own native API. This lets any Subsonic-compatible mobile app (DSub, Symfonium, Substreamer, Ultrasonic) connect to mStream as if it were a Subsonic or Navidrome server.
+**What it does:** mStream Velvet exposes a Subsonic REST API (version 1.16.1 + Open Subsonic extensions) in addition to its own native API. This lets any Subsonic-compatible mobile app (DSub, Symfonium, Substreamer, Ultrasonic) connect to mStream Velvet as if it were a Subsonic or Navidrome server.
 
 **Why implement Subsonic rather than building a native app?**
 
-Building a polished native mobile app for iOS and Android is a significant ongoing engineering and maintenance effort.The Subsonic protocol is a well-established open standard with many mature, actively maintained third-party clients. By implementing the protocol server-side, mStream users get the benefit of those clients for free — each with their own UI, caching strategies, offline sync features, and platform-native experiences.
+Building a polished native mobile app for iOS and Android is a significant ongoing engineering and maintenance effort.The Subsonic protocol is a well-established open standard with many mature, actively maintained third-party clients. By implementing the protocol server-side, mStream Velvet users get the benefit of those clients for free — each with their own UI, caching strategies, offline sync features, and platform-native experiences.
 
 The Open Subsonic extension layer (`openSubsonic: true`) allows newer clients to detect extended capabilities beyond what classic Subsonic defined.
 
@@ -209,7 +209,7 @@ The Open Subsonic extension layer (`openSubsonic: true`) allows newer clients to
 
 **Why this library?**
 
-`music-metadata` is the best-maintained, most format-comprehensive audio tag parser in the Node.js ecosystem. It is actively maintained by a single dedicated author who responds to issues, handles edge cases from real-world files, and supports every audio container in mStream's list. Alternatives like `node-id3` cover only MP3/ID3; `taglib-node` requires native compiled bindings; and format hand-rolling would introduce a maintenance burden for every obscure tag variant in real music collections.
+`music-metadata` is the best-maintained, most format-comprehensive audio tag parser in the Node.js ecosystem. It is actively maintained by a single dedicated author who responds to issues, handles edge cases from real-world files, and supports every audio container in mStream Velvet's list. Alternatives like `node-id3` cover only MP3/ID3; `taglib-node` requires native compiled bindings; and format hand-rolling would introduce a maintenance burden for every obscure tag variant in real music collections.
 
 ---
 

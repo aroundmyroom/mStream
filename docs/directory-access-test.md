@@ -7,7 +7,7 @@
 
 ## What it does
 
-When you click **Test Access** in the Directories card, mStream immediately checks every configured vpath directory for read *and* write access, then shows the results in a modal — no server restart needed.
+When you click **Test Access** in the Directories card, mStream Velvet immediately checks every configured vpath directory for read *and* write access, then shows the results in a modal — no server restart needed.
 
 For each directory the server:
 1. Opens the directory for reading (`fs.access R_OK`)
@@ -31,7 +31,7 @@ Any OS error code (e.g. `EACCES`, `EROFS`, `ENOENT`) is shown alongside the indi
 
 ## Storage-type badge
 
-mStream auto-detects the storage type from the path and running platform:
+mStream Velvet auto-detects the storage type from the path and running platform:
 
 | Badge | Detected when |
 |---|---|
@@ -55,7 +55,7 @@ sudo chown -R $(whoami) /path/to/music
 chmod -R u+rw /path/to/music
 ```
 
-If mStream runs as a systemd service under a dedicated user (e.g. `mstream`):
+If mStream Velvet runs as a systemd service under a dedicated user (e.g. `mstream`):
 
 ```bash
 sudo chown -R mstream:mstream /path/to/music
@@ -67,14 +67,14 @@ After fixing permissions, click **Test Access** again — no restart needed.
 ### Windows — read-only or no access
 
 1. Right-click the music folder → **Properties** → **Security** tab
-2. Select the user account or service account that runs mStream
+2. Select the user account or service account that runs mStream Velvet
 3. Click **Edit** → check **Modify** (which includes Read + Write + Delete)
 4. Click **OK / Apply**
 
 ### Mounted / network drives
 
-- The drive must be mounted *before* mStream starts. If it was mounted after startup, restart the service: `systemctl restart music.service`
-- Network shares require the mStream service account to have credentials for the share; anonymous mounts are often read-only by default
+- The drive must be mounted *before* mStream Velvet starts. If it was mounted after startup, restart the service: `systemctl restart music.service`
+- Network shares require the mStream Velvet service account to have credentials for the share; anonymous mounts are often read-only by default
 
 ---
 

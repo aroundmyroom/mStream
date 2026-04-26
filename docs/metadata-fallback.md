@@ -30,7 +30,7 @@ The title is the filename without extension, with leading track numbers removed 
 
 ## Important: DB only — audio files are not modified
 
-> **This feature only writes to the mStream SQLite database.**  
+> **This feature only writes to the mStream Velvet SQLite database.**  
 > The audio files on disk are **never modified**. ID3, Vorbis Comment, and other embedded tags remain untouched.
 
 If you want the tags written into the files themselves (so other applications like Foobar2000, Plex, or Beets also see the values), you will need to use an external tagging tool.

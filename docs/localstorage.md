@@ -1,4 +1,4 @@
-# mStream v2 — localStorage Key Reference
+# mStream Velvet v2 — localStorage Key Reference
 
 All keys are written and read exclusively by `webapp/v2/app.js`.
 
@@ -134,7 +134,7 @@ A no-auth server still gets its own isolated slot (suffix `_`).
 
 ## Multi-server isolation *(v6.5.2-velvet)*
 
-localStorage is scoped by the browser to the page origin (protocol + hostname + port). Without additional protection, two mStream servers behind the same origin — or a reinstall of the same server — would share all `ms2_*` keys, including `ms2_token` and `ms2_user`.
+localStorage is scoped by the browser to the page origin (protocol + hostname + port). Without additional protection, two mStream Velvet servers behind the same origin — or a reinstall of the same server — would share all `ms2_*` keys, including `ms2_token` and `ms2_user`.
 
 **The `ms2_server_id` guard solves this**: on every page load, before any settings or credentials are read, the app fetches `GET /api/v1/ping/public` (no auth) and compares the returned `instanceId` to the stored `ms2_server_id`. A mismatch means a different or reinstalled server is now at this origin — `localStorage.clear()` is called immediately and the page reloads cleanly.
 

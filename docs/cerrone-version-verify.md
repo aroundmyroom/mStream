@@ -8,7 +8,7 @@ The album version system is now **installed but not yet populated**. All existin
 
 ## Step 1 — Trigger a rescan (small test first)
 
-In the mStream **Admin** panel → **Database** tab → click **Start Scan** (or select a specific vpath if you want to test a subset first). The scanner will now run `deriveAlbumVersion()` for every file.
+In the mStream Velvet **Admin** panel → **Database** tab → click **Start Scan** (or select a specific vpath if you want to test a subset first). The scanner will now run `deriveAlbumVersion()` for every file.
 
 ---
 
