@@ -329,6 +329,13 @@ export async function editMaxConcurrentTasks(val) {
   config.program.scanOptions.maxConcurrentTasks = val;
 }
 
+export async function editAlbumVersionTags(val) {
+  const loadConfig = await loadFile(config.configFile);
+  loadConfig.albumVersionTags = val;
+  await saveFile(loadConfig, config.configFile);
+  config.program.albumVersionTags = val;
+}
+
 export async function editCompressImages(val) {
   const loadConfig = await loadFile(config.configFile);
   if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }

@@ -84,7 +84,7 @@ GET /media/<vpath>/<path/to/song.mp3>?token=<jwt>
 | Method | Endpoint | Body / Params | Description |
 |---|---|---|---|
 | `GET` | `/api/v1/db/status` | — | Total track count + scan lock state + vpaths. |
-| `POST` | `/api/v1/db/metadata` | `{ filepath }` | Full metadata for one track. |
+| `POST` | `/api/v1/db/metadata` | `{ filepath }` | Full metadata for one track. Response includes `album-version` (edition string, e.g. `"Deluxe Edition"`) and `bit-depth` (bitsPerSample) when available. *(Velvet)* |
 | `POST` | `/api/v1/db/metadata/batch` | `["filepath1", …]` | Metadata for multiple tracks. Returns map of filepath → metadata. |
 | `GET` | `/api/v1/db/artists` | — | All artist names, case-insensitive sort. |
 | `POST` | `/api/v1/db/artists` | `{ ignoreVPaths? }` | Same, with optional vpath filter. |
@@ -115,7 +115,7 @@ GET /media/<vpath>/<path/to/song.mp3>?token=<jwt>
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/v1/albums/browse` | All albums grouped into albums + series. Returns `{ albums[], series[] }`. |
+| `GET` | `/api/v1/albums/browse` | All albums grouped into albums + series. Returns `{ albums[], series[] }`. Each album object includes `album_version` (edition string) and `bit_depth`. |
 | `GET` | `/api/v1/albums/art-file` | Serve an on-disk `cover.jpg` by relative path. |
 
 ---
@@ -594,6 +594,8 @@ GET /media/<vpath>/<path/to/song.mp3>?token=<jwt>
 | `POST` | `/api/v1/admin/db/params/album-art-services` | `{ albumArtServices: ["musicbrainz","itunes","deezer"] }` | Select which services to query for art. |
 | `POST` | `/api/v1/admin/db/force-compress-images` | — | Re-run thumbnail compressor over the whole library. |
 | `POST` | `/api/v1/admin/db/generate-waveforms` | — | Generate waveform data for every track. |
+| `GET` | `/api/v1/admin/db/album-version-inventory` | — | Count of files grouped by `album_version_source` (which tag or method produced the version value). Returns `[{ source, count }]`. *(Velvet)* |
+| `POST` | `/api/v1/admin/db/params/album-version-tags` | `{ tags: ["TIT3", "TXXX:EDITION", …] }` | Update the ordered list of tag fields the scanner uses to detect album version/edition. Max 20 entries. *(Velvet)* |
 
 ---
 

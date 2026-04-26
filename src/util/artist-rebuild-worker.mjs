@@ -67,10 +67,12 @@ try {
   const exclude = excludePrefixClauses(excludeFilepathPrefixes);
 
   const rawRows = db.prepare(
-    `SELECT artist, vpath, COUNT(*) AS count
+    `SELECT COALESCE(album_artist, artist) AS artist, vpath, COUNT(*) AS count
      FROM files
-     WHERE artist IS NOT NULL AND artist != '' AND ${vpIn.sql}${include.sql}${exclude.sql}
-     GROUP BY artist, vpath`
+     WHERE COALESCE(album_artist, artist) IS NOT NULL
+       AND COALESCE(album_artist, artist) != ''
+       AND ${vpIn.sql}${include.sql}${exclude.sql}
+     GROUP BY COALESCE(album_artist, artist), vpath`
   ).all(...vpIn.params, ...include.params, ...exclude.params);
 
   const countMap = new Map();

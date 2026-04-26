@@ -1567,6 +1567,9 @@
   "player.albums.sortTitle": "Sort order (click to cycle)",
   "player.albums.densityComfy": "Comfortable grid",
   "player.albums.densityCompact": "Compact grid",
+  "player.albums.densityList": "List view",
+  "player.albums.filterVersionLabel": "Edition:",
+  "player.albums.filterVersionStandard": "Standard",
   "player.home.shelfRadio": "Radio Stations",
   "player.home.variousArtists": "Various Artists",
   "player.home.shelfPodcasts": "Podcasts",
@@ -1997,5 +2000,7 @@
   "player.pnow.noAlbums": "No albums found in library",
   "player.pnow.readMore": "Read more",
   "player.pnow.readLess": "Read less",
-  "player.pnow.listeners": "{{n}} listeners on Last.fm"
+  "player.pnow.listeners": "{{n}} listeners on Last.fm",
+  "admin.acoustid.btnRetryErrors": "Retry {{count}} Errors",
+  "admin.acoustid.toastErrorsReset": "{{count}} errors queued for retry"
 }

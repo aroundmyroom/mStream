@@ -29,6 +29,10 @@ import { getReleaseCoverBuf } from './discogs.js';
 const DISC_RE         = /^(cd|disc)\s*[-–]?\s*\d/i;
 const NUMERIC_DISC_RE = /^\d{1,2}$/;
 
+// Shared collators — created once, reused. Avoids per-call locale lookup which is 40-50× slower.
+const _collBase    = new Intl.Collator(undefined, { sensitivity: 'base' });             // accent+case-insensitive
+const _collNumeric = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true }); // same + numeric order
+
 const ART_NAMES = [
   'cover.jpg', 'Cover.jpg', 'front.jpg', 'Front.jpg',
   'Folder.jpg', 'folder.jpg',
@@ -56,12 +60,14 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 //     contains an Albums/ subdirectory.
 
 let _sourcesCache = null;
-let _cache        = null;
+let _cache        = null;   // slim browse response: { albums (no discs), series }
+let _cacheFull    = null;   // Map<albumId, fullAlbum> — used by /api/v1/albums/detail
 let _cacheTs      = 0;
 
 export function invalidateCache() {
-  _cache = null;
-  _cacheTs = 0;
+  _cache     = null;
+  _cacheFull = null;
+  _cacheTs   = 0;
   _sourcesCache = null;
 }
 
@@ -189,7 +195,7 @@ function buildTrackListFromEntries(entries, source) {
   return entries
     .sort((a, b) =>
       ((a.row.track || 999) - (b.row.track || 999)) ||
-      a.parts.at(-1).localeCompare(b.parts.at(-1), undefined, { numeric: true })
+      _collNumeric.compare(a.parts.at(-1), b.parts.at(-1))
     )
     .map(e => {
       let cuepoints = [];
@@ -242,7 +248,7 @@ function buildAlbumFromEntries(albumPath, entries, partsBase, vpathName, seriesI
 
   if (subMap.size > 0) {
     const sorted = [...subMap.entries()].sort((a, b) =>
-      a[0].localeCompare(b[0], undefined, { numeric: true })
+      _collNumeric.compare(a[0], b[0])
     );
     let discIdx = directEntries.length > 0 ? 2 : 1;
     for (const [subName, subEntries] of sorted) {
@@ -254,18 +260,19 @@ function buildAlbumFromEntries(albumPath, entries, partsBase, vpathName, seriesI
     }
   }
 
-  // Pick aaFile and cover_file from any row that has one
-  let aaFile = null, coverFile = null;
+  // Pick aaFile, cover_file and album_version from any row that has one
+  let aaFile = null, coverFile = null, albumVersion = null;
   for (const e of entries) {
-    if (!aaFile && e.row.aaFile)        aaFile    = e.row.aaFile;
-    if (!coverFile && e.row.cover_file) coverFile = e.row.cover_file;
-    if (aaFile && coverFile) break;
+    if (!aaFile && e.row.aaFile)               aaFile       = e.row.aaFile;
+    if (!coverFile && e.row.cover_file)        coverFile    = e.row.cover_file;
+    if (!albumVersion && e.row.album_version)  albumVersion = e.row.album_version;
+    if (aaFile && coverFile && albumVersion) break;
   }
 
   // artFile built from DB cover_file — no NFS access needed
   const artFile = coverFile ? albumPath + '/' + coverFile : null;
 
-  return { id, path: albumPath, displayName, artist, year, artFile, aaFile, seriesId: seriesId || null, discs, sourceVpath: vpathName || null, _artRoot: source?.artRoot || null, _artPrefix: source?.prefix || null };
+  return { id, path: albumPath, displayName, artist, year, artFile, aaFile, album_version: albumVersion || null, seriesId: seriesId || null, discs, sourceVpath: vpathName || null, _artRoot: source?.artRoot || null, _artPrefix: source?.prefix || null };
 }
 
 function buildTreeFromDB(dbRows, source) {
@@ -292,7 +299,7 @@ function buildTreeFromDB(dbRows, source) {
   const albums = [];
   const series = [];
 
-  for (const [l1, entries] of [...byL1.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: 'base' }))) {
+  for (const [l1, entries] of [...byL1.entries()].sort((a, b) => _collBase.compare(a[0], b[0]))) {
     // l1Path is the display/art path (relative to artRoot)
     const l1Path = source.prefix
       ? source.prefix.replace(/\/$/, '') + '/' + l1
@@ -323,7 +330,7 @@ function buildTreeFromDB(dbRows, source) {
         const seriesId = md5(l1Path);
         const seriesAlbumIds = [];
 
-        for (const [l2, l2Entries] of [...l2Map.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: 'base' }))) {
+        for (const [l2, l2Entries] of [...l2Map.entries()].sort((a, b) => _collBase.compare(a[0], b[0]))) {
           const l2Path = l1Path + '/' + l2;
           const album  = buildAlbumFromEntries(l2Path, l2Entries, 2, vpathName, seriesId, source);
           albums.push(album);
@@ -346,51 +353,62 @@ function buildTreeFromDB(dbRows, source) {
 // ── Art resolution (parallel filesystem checks) ────────────────────────────────
 // artRoot per album comes from source.artRoot stored in album._artRoot
 async function resolveArt(albums, series) {
-  // Check art for all albums in parallel — each album tries ART_NAMES sequentially
+  // Build O(1) ID → album map
+  const byId = new Map(albums.map(a => [a.id, a]));
+
+  // ── Step 1: Propagate series art directly from member DB data (zero FS calls) ──
+  // Series cards in the browser only need one image — take it from the first member
+  // that already has aaFile or artFile in the DB, no filesystem probing required.
+  for (const s of series) {
+    const firstWithArt = s.albumIds.map(id => byId.get(id)).find(a => a?.aaFile || a?.artFile);
+    s.aaFile  = firstWithArt?.aaFile  || null;
+    s.artFile = firstWithArt?.artFile || null;
+  }
+
+  // ── Step 2: FS art checks — standalone albums only, and only if they have no DB art ──
+  // Series members are excluded entirely: their individual art is irrelevant in the
+  // browse view (only the series-level art shown above matters).
+  const seriesMemberIds = new Set(series.flatMap(s => s.albumIds));
+
   await Promise.allSettled(
-    albums.map(async album => {
-      const artRoot = album._artRoot;
-      if (!artRoot) return;
-      // Strip source prefix before joining with artRoot to avoid double-segment path.
-      // e.g. artRoot=/media/music/Albums, album.path="Albums/Artist" → strip "Albums/" → "Artist"
-      const relPath    = (album._artPrefix && album.path.startsWith(album._artPrefix))
-        ? album.path.slice(album._artPrefix.length)
-        : album.path;
-      const folderPath = path.join(artRoot, relPath);
-      for (const name of ART_NAMES) {
-        try {
-          await fsp.access(path.join(folderPath, name), fs.constants.R_OK);
-          album.artFile = album.path + '/' + name;
-          return;
-        } catch { /* next */ }
-      }
-      // Try art inside first disc sub-folder (for multi-disc albums with no root art)
-      const firstDisc = album.discs.find(d => d.label);
-      if (firstDisc) {
-        const discPath = path.join(folderPath, firstDisc.label);
+    albums
+      .filter(a => !seriesMemberIds.has(a.id) && !a.aaFile && !a.artFile && a._artRoot)
+      .map(async album => {
+        // Strip source prefix before joining with artRoot to avoid double-segment path.
+        // e.g. artRoot=/media/music/Albums, album.path="Albums/Artist" → strip "Albums/" → "Artist"
+        const relPath    = (album._artPrefix && album.path.startsWith(album._artPrefix))
+          ? album.path.slice(album._artPrefix.length)
+          : album.path;
+        const folderPath = path.join(album._artRoot, relPath);
         for (const name of ART_NAMES) {
           try {
-            await fsp.access(path.join(discPath, name), fs.constants.R_OK);
-            album.artFile = album.path + '/' + firstDisc.label + '/' + name;
+            await fsp.access(path.join(folderPath, name), fs.constants.R_OK);
+            album.artFile = album.path + '/' + name;
             return;
           } catch { /* next */ }
         }
-      }
-    })
+        // Try art inside first disc sub-folder (for multi-disc albums with no root art)
+        const firstDisc = album.discs.find(d => d.label);
+        if (firstDisc) {
+          const discPath = path.join(folderPath, firstDisc.label);
+          for (const name of ART_NAMES) {
+            try {
+              await fsp.access(path.join(discPath, name), fs.constants.R_OK);
+              album.artFile = album.path + '/' + firstDisc.label + '/' + name;
+              return;
+            } catch { /* next */ }
+          }
+        }
+      })
   );
-
-  // Propagate art to series from first member album that has any
-  for (const s of series) {
-    const first = s.albumIds.map(id => albums.find(a => a.id === id)).find(a => a?.artFile || a?.aaFile);
-    s.artFile = first?.artFile || null;
-    s.aaFile  = first?.aaFile  || null;
-  }
 }
 
 // ── Setup ──────────────────────────────────────────────────────────────────────
 
 export function setup(mstream) {
   // ── GET /api/v1/albums/browse ──────────────────────────────────────────────
+  // Returns slim album objects (no track lists) for fast initial load.
+  // Track data is fetched on demand via /api/v1/albums/detail?id=<albumId>.
   mstream.get('/api/v1/albums/browse', async (req, res) => {
     try {
       const now = Date.now();
@@ -417,14 +435,66 @@ export function setup(mstream) {
       // Resolve art files in parallel across all albums
       await resolveArt(allAlbums, allSeries);
 
-      // Strip internal fields before sending to client
-      const albums = allAlbums.map(({ _artRoot, _artPrefix, ...a }) => a);
+      // Build full detail cache (id → album) including disc/track data
+      const fullAlbums = allAlbums.map(({ _artRoot, _artPrefix, ...a }) => a);
+      _cacheFull = new Map(fullAlbums.map(a => [a.id, a]));
+
+      // Slim browse response: strip discs array, keep discCount + totalTracks only
+      const albums = fullAlbums.map(({ discs, ...a }) => ({
+        ...a,
+        discCount   : discs.length,
+        totalTracks : discs.reduce((n, d) => n + d.tracks.length, 0),
+      }));
       const series = allSeries;
 
       _cache   = { albums, series };
       _cacheTs = Date.now();
 
       res.json(_cache);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── GET /api/v1/albums/detail ──────────────────────────────────────────────
+  // Returns the full album object including disc/track lists for a single album.
+  // Called client-side when the user opens an album detail view.
+  mstream.get('/api/v1/albums/detail', async (req, res) => {
+    try {
+      const id = req.query.id;
+      if (!id || typeof id !== 'string') return res.status(400).json({ error: 'Missing id' });
+
+      // Rebuild cache if needed (e.g. after restart before first browse call)
+      if (!_cacheFull) {
+        const now = Date.now();
+        if (!_cache || now - _cacheTs >= CACHE_TTL) {
+          // Trigger a full rebuild by making an internal browse call
+          const sources = await resolveAlbumsSources();
+          if (sources.length) {
+            const allAlbums = [];
+            const allSeries = [];
+            for (const source of sources) {
+              const rows = db.getFilesForAlbumsBrowse([{ vpath: source.dbVpath, prefix: source.prefix }]);
+              const { albums, series } = buildTreeFromDB(rows, source);
+              allAlbums.push(...albums);
+              allSeries.push(...series);
+            }
+            await resolveArt(allAlbums, allSeries);
+            const fullAlbums = allAlbums.map(({ _artRoot, _artPrefix, ...a }) => a);
+            _cacheFull = new Map(fullAlbums.map(a => [a.id, a]));
+            if (!_cache) {
+              const albums = fullAlbums.map(({ discs, ...a }) => ({ ...a, discCount: discs.length, totalTracks: discs.reduce((n, d) => n + d.tracks.length, 0) }));
+              _cache = { albums, series: allSeries };
+              _cacheTs = Date.now();
+            }
+          }
+        }
+      }
+
+      if (!_cacheFull || !_cacheFull.has(id)) {
+        return res.status(404).json({ error: 'Album not found' });
+      }
+      res.json(_cacheFull.get(id));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

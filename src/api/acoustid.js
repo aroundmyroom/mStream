@@ -224,6 +224,18 @@ export function setup(mstream) {
     res.json({ ok: true });
   });
 
+  // POST /api/v1/acoustid/reset-errors
+  // Clears acoustid_status='error' so those files are retried on the next worker pass.
+  mstream.post('/api/v1/acoustid/reset-errors', (req, res) => {
+    try {
+      const count = db.resetAcoustidErrors();
+      winston.info(`[acoustid] reset-errors: cleared ${count} error rows`);
+      res.json({ ok: true, reset: count });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Auto-start on server boot only if user had previously started it
   const bootApiKey = config.program.acoustid?.apiKey?.trim() || '';
   if (config.program.acoustid?.enabled === true && bootApiKey.length >= 4 && config.program.acoustid?.autostart === true) {

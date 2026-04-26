@@ -123,13 +123,25 @@ function selectRelease(releases) {
 }
 
 /** Fetch recording data from MusicBrainz. Returns parsed JSON or throws. */
-function mbLookup(mbid) {
+function mbLookup(mbid, _redirects = 0) {
   return new Promise((resolve, reject) => {
     const url = `https://musicbrainz.org/ws/2/recording/${encodeURIComponent(mbid)}?inc=artists%2Breleases%2Brelease-groups%2Bmedia&fmt=json`;
     const timer = setTimeout(() => { req.destroy(new Error('MB timeout')); }, HTTP_TIMEOUT_MS);
     const req = https.get(url, { headers: { 'User-Agent': USER_AGENT } }, res => {
       clearTimeout(timer);
       if (res.statusCode === 404) { res.resume(); return resolve(null); }
+      // MusicBrainz returns 301 when a recording MBID has been merged into another.
+      // Follow the redirect up to 3 times to reach the canonical MBID.
+      if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) {
+        res.resume();
+        if (_redirects >= 3) return reject(new Error(`MB too many redirects`));
+        const loc = res.headers['location'] || '';
+        // Extract new MBID from e.g. /ws/2/recording/<new-mbid>?...
+        const match = loc.match(/\/recording\/([0-9a-f-]{36})/i);
+        if (!match) return reject(new Error(`MB redirect ${res.statusCode} without usable Location`));
+        resolve(mbLookup(match[1], _redirects + 1));
+        return;
+      }
       if (res.statusCode !== 200) {
         res.resume();
         return reject(new Error(`MB HTTP ${res.statusCode}`));

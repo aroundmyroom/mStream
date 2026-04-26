@@ -51,10 +51,13 @@ export function setup(mstream) {
     if (dbFileInfo.cuepoints === null || dbFileInfo.cuepoints === undefined) { flags._needsCue = true; }
     // signal duration-only update if duration was never stored (NULL)
     if (dbFileInfo.duration === null || dbFileInfo.duration === undefined) { flags._needsDuration = true; }
-    // signal tech-meta update if bitrate was never stored (NULL)
-    if (dbFileInfo.bitrate === null || dbFileInfo.bitrate === undefined) { flags._needsBitrate = true; }
+    // signal tech-meta update if bitrate or bit_depth was never stored (NULL)
+    if (dbFileInfo.bitrate === null || dbFileInfo.bitrate === undefined ||
+        dbFileInfo.bit_depth === null || dbFileInfo.bit_depth === undefined) { flags._needsBitrate = true; }
+    // signal album-version update if album_version has never been derived (NULL)
+    if (dbFileInfo.album_version === null || dbFileInfo.album_version === undefined) { flags._needsAlbumVersion = true; }
 
-    if (flags._needsArt || flags._needsCue || flags._needsDuration || flags._needsBitrate) {
+    if (flags._needsArt || flags._needsCue || flags._needsDuration || flags._needsBitrate || flags._needsAlbumVersion) {
       return res.json({ ...flags, filepath: dbFileInfo.filepath, vpath: dbFileInfo.vpath });
     }
 
@@ -126,9 +129,11 @@ export function setup(mstream) {
         }
         if (dbFileInfo.cuepoints === null || dbFileInfo.cuepoints === undefined) { flags._needsCue = true; }
         if (dbFileInfo.duration === null || dbFileInfo.duration === undefined) { flags._needsDuration = true; }
-        if (dbFileInfo.bitrate === null || dbFileInfo.bitrate === undefined) { flags._needsBitrate = true; }
+        if (dbFileInfo.bitrate === null || dbFileInfo.bitrate === undefined ||
+            dbFileInfo.bit_depth === null || dbFileInfo.bit_depth === undefined) { flags._needsBitrate = true; }
+        if (dbFileInfo.album_version === null || dbFileInfo.album_version === undefined) { flags._needsAlbumVersion = true; }
 
-        if (flags._needsArt || flags._needsCue || flags._needsDuration || flags._needsBitrate) {
+        if (flags._needsArt || flags._needsCue || flags._needsDuration || flags._needsBitrate || flags._needsAlbumVersion) {
           // Needs work — update scanId now so it survives finish-scan pruning
           db.updateFileScanId(dbFileInfo, scanId);
           results[item.filepath] = { ...flags, filepath: dbFileInfo.filepath, vpath: dbFileInfo.vpath };
@@ -167,10 +172,15 @@ export function setup(mstream) {
   });
 
   mstream.post('/api/v1/scanner/update-tech-meta', (req, res) => {
-    const changes = db.updateFileTechMeta(req.body.filepath, req.body.vpath, req.body.bitrate ?? null, req.body.sample_rate ?? null, req.body.channels ?? null);
+    const changes = db.updateFileTechMeta(req.body.filepath, req.body.vpath, req.body.bitrate ?? null, req.body.sample_rate ?? null, req.body.channels ?? null, req.body.bit_depth ?? null);
     if (changes === 0) {
       import('winston').then(w => w.default.warn(`[tech-meta] 0 rows updated — fp="${req.body.filepath}" vp="${req.body.vpath}" bitrate=${req.body.bitrate}`));
     }
+    res.json({});
+  });
+
+  mstream.post('/api/v1/scanner/update-album-version', (req, res) => {
+    db.updateFileAlbumVersion(req.body.filepath, req.body.vpath, req.body.album_version ?? null, req.body.album_version_source ?? null);
     res.json({});
   });
 

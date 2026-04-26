@@ -228,8 +228,14 @@ async function _setResultNull(status, row) {
 async function processFile(row) {
   const rootDir = folders[row.vpath];
   if (!rootDir) {
-    // vpath not in folders config — skip
-    await _setResultNull('error', row);
+    // vpath not in folders config — treat as permanent no-match, not an error
+    await _setResultNull('not_found', row);
+    return;
+  }
+
+  // Very short clips (< 7 s) can never be fingerprinted reliably — skip immediately
+  if (row.duration !== null && row.duration < 7) {
+    await _setResultNull('not_found', row);
     return;
   }
 
@@ -246,7 +252,9 @@ async function processFile(row) {
     duration    = fp.duration;
     fingerprint = fp.fingerprint;
   } catch (err) {
-    await _setResultNull('error', row);
+    // fpcalc failed: corrupt file, unsupported encoding, or decode error.
+    // These are permanent failures — mark not_found so they are never retried.
+    await _setResultNull('not_found', row);
     return;
   }
 

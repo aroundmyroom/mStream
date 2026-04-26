@@ -80,6 +80,7 @@ function runScan(scanObj) {
       .filter(v => v !== scanObj.vpath && isChildOf(scanObj.vpath, v) && config.program.folders[v].type === 'excluded')
       .map(v => config.program.folders[v].root),
     ffprobePath: ffprobeBin(),
+    ...(Array.isArray(config.program.albumVersionTags) ? { albumVersionTags: config.program.albumVersionTags } : {}),
   };
 
   const baseline = db.countFilesByVpath(scanObj.vpath) || 0;

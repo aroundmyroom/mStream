@@ -31,6 +31,9 @@ const ADMINDATA = (() => {
   // db stuff
   module.dbParams = {};
   module.dbParamsUpdated = { ts: 0 };
+  // album version tag config
+  module.albumVersionTags = [];
+  module.albumVersionInventory = [];
   // server settings
   module.serverParams = {};
   module.serverParamsUpdated = { ts: 0 };
@@ -1314,11 +1317,7 @@ const foldersView = Vue.component('folders-view', {
         </div>
       </div>
 
-      <div v-show="foldersTS.ts === 0 && Object.keys(folders).length === 0" style="display:flex;justify-content:center;padding:2rem;">
-        <svg class="spinner" width="48" height="48" viewBox="0 0 66 66" xmlns="http://www.w3.org/2000/svg"><circle class="spinner-path" fill="none" stroke-width="6" stroke-linecap="round" cx="33" cy="33" r="30"></circle></svg>
-      </div>
-
-      <div v-show="foldersTS.ts > 0 || Object.keys(folders).length > 0" class="card">
+      <div class="card">
         <div class="card-content">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;">
             <span class="card-title" style="margin-bottom:0;">{{ t('admin.folders.listTitle') }}</span>
@@ -2378,6 +2377,21 @@ const dbView = Vue.component('db-view', {
                     </tr>
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Album Version Tag Fields card -->
+        <div class="row">
+          <div class="col s12">
+            <div class="card">
+              <div class="card-content">
+                <span class="card-title">Album Version Tag Fields</span>
+                <p style="color:var(--t2);font-size:.88rem;margin-bottom:12px;">
+                  Ordered list of tag field names checked during scanning to find album version/edition text.
+                  First non-empty match wins. After changing this list, rescan your library to apply.
+                </p>
+                <album-version-tags-card></album-version-tags-card>
               </div>
             </div>
           </div>
@@ -4777,7 +4791,8 @@ const acoustidView = Vue.component('acoustid-view', {
     };
   },
   computed: {
-    fingerprinted() { return (this.stats.found || 0) + (this.stats.not_found || 0); },
+    fingerprinted() { return (this.stats.found || 0) + (this.stats.not_found || 0) + (this.stats.errors || 0); },
+    noMatch()        { return (this.stats.not_found || 0) + (this.stats.errors || 0); },
     pct() {
       const t = this.stats.total || 0;
       if (!t) return 0;
@@ -4909,11 +4924,7 @@ const acoustidView = Vue.component('acoustid-view', {
                   </tr>
                   <tr>
                     <td style="padding:2px 12px 2px 0;color:#888;">{{ t('admin.acoustid.statsNotFound') }}</td>
-                    <td><b>{{ (stats.not_found||0).toLocaleString() }}</b></td>
-                  </tr>
-                  <tr>
-                    <td style="padding:2px 12px 2px 0;color:#e57373;">{{ t('admin.acoustid.statsErrors') }}</td>
-                    <td><b>{{ (stats.errors||0).toLocaleString() }}</b></td>
+                    <td><b>{{ noMatch.toLocaleString() }}</b></td>
                   </tr>
                   <tr>
                     <td style="padding:2px 12px 2px 0;color:#aaa;">{{ t('admin.acoustid.statsQueued') }}</td>
@@ -4930,12 +4941,15 @@ const acoustidView = Vue.component('acoustid-view', {
               </div>
               <p style="margin-top:0.5rem;font-size:0.78rem;color:#666;">{{ t('admin.acoustid.rateNote') }}</p>
             </div>
-            <div class="card-action" style="display:flex;gap:0.5rem;">
+            <div class="card-action" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
               <button class="btn" v-on:click="startScan()" :disabled="!canStart">
                 {{ t('admin.acoustid.btnStart') }}
               </button>
               <button class="btn btn-flat" v-on:click="stopScan()" :disabled="!canStop" style="margin-left:0;">
                 {{ stopping ? t('admin.acoustid.btnStopping') : t('admin.acoustid.btnStop') }}
+              </button>
+              <button v-if="stats.errors > 0" class="btn btn-flat" v-on:click="resetErrors()" style="margin-left:0;border-color:#e57373;color:#e57373;">
+                {{ t('admin.acoustid.btnRetryErrors', { count: stats.errors }) }}
               </button>
             </div>
           </div>
@@ -5011,6 +5025,15 @@ const acoustidView = Vue.component('acoustid-view', {
         await API.axios({ method: 'POST', url: `${API.url()}/api/v1/acoustid/stop` });
         this.stopping = true;
       } catch(_err) {}
+    },
+    async resetErrors() {
+      try {
+        const res = await API.axios({ method: 'POST', url: `${API.url()}/api/v1/acoustid/reset-errors` });
+        iziToast.success({ title: this.t('admin.acoustid.toastErrorsReset', { count: res.data.reset || 0 }), position: 'topCenter', timeout: 3000 });
+        await this.loadStatus();
+      } catch(err) {
+        iziToast.error({ title: err?.response?.data?.error || err.message || 'Failed', position: 'topCenter', timeout: 3000 });
+      }
     },
   }
 });
@@ -7637,6 +7660,161 @@ const federationGenerateInvite = Vue.component('federation-generate-invite-modal
 const nullModal = Vue.component('null-modal', {
   template: '<div>NULL MODAL ERROR: How did you get here?</div>'
 });
+
+// ── Album Version Tags component ─────────────────────────────────────────────
+Vue.component('album-version-tags-card', {
+  data() {
+    return {
+      tags: [...ADMINDATA.albumVersionTags],
+      inventory: ADMINDATA.albumVersionInventory,
+      newTag: '',
+      saving: false,
+      loadingInv: false,
+      inventoryLoaded: false,
+    };
+  },
+  mounted() {
+    this.loadTags();
+  },
+  methods: {
+    async loadTags() {
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/db/params` });
+        const raw = res.data.albumVersionTags;
+        if (Array.isArray(raw)) {
+          this.tags = [...raw];
+          ADMINDATA.albumVersionTags.splice(0, ADMINDATA.albumVersionTags.length, ...raw);
+        } else {
+          // Server has none configured — show the default list
+          this.tags = [
+            'TIT3','SUBTITLE','DISCSUBTITLE',
+            'TXXX:EDITION','TXXX:VERSION','TXXX:ALBUMVERSION',
+            'TXXX:QUALITY','TXXX:REMASTER','TXXX:DESCRIPTION',
+            'EDITION','VERSION','ALBUMVERSION','QUALITY','REMASTER'
+          ];
+        }
+      } catch(e) { /* ignore */ }
+    },
+    async loadInventory() {
+      if (this.loadingInv) return;
+      this.loadingInv = true;
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/db/album-version-inventory` });
+        this.inventory = res.data;
+        ADMINDATA.albumVersionInventory.splice(0, ADMINDATA.albumVersionInventory.length, ...res.data);
+        this.inventoryLoaded = true;
+      } catch(e) {
+        iziToast.error({ title: 'Failed to load inventory', position: 'topCenter', timeout: 2500 });
+      } finally {
+        this.loadingInv = false;
+      }
+    },
+    addTag() {
+      const v = this.newTag.trim().toUpperCase();
+      if (!v || this.tags.includes(v)) { this.newTag = ''; return; }
+      this.tags.push(v);
+      this.newTag = '';
+    },
+    removeTag(i) {
+      this.tags.splice(i, 1);
+    },
+    moveUp(i) {
+      if (i === 0) return;
+      const t = this.tags.splice(i, 1)[0];
+      this.tags.splice(i-1, 0, t);
+    },
+    moveDown(i) {
+      if (i >= this.tags.length - 1) return;
+      const t = this.tags.splice(i, 1)[0];
+      this.tags.splice(i+1, 0, t);
+    },
+    async save() {
+      this.saving = true;
+      try {
+        await API.axios({
+          method: 'POST',
+          url: `${API.url()}/api/v1/admin/db/params/album-version-tags`,
+          data: { tags: this.tags }
+        });
+        ADMINDATA.albumVersionTags.splice(0, ADMINDATA.albumVersionTags.length, ...this.tags);
+        iziToast.success({ title: 'Album version tags saved', position: 'topCenter', timeout: 2500 });
+      } catch(e) {
+        iziToast.error({ title: 'Save failed', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.saving = false;
+      }
+    }
+  },
+  template: `
+    <div>
+      <details style="margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px 12px;">
+        <summary style="cursor:pointer;font-size:.85rem;font-weight:600;color:var(--t2);user-select:none;">Field name reference — what to enter here</summary>
+        <div style="margin-top:10px;font-size:.83rem;color:var(--t1);line-height:1.6;">
+          <p style="margin:0 0 8px"><b>TIT3 / SUBTITLE / DISCSUBTITLE</b> — Standard subtitle fields. Many rippers (EAC, dBpoweramp, MusicBrainz Picard) write the edition text here automatically.<br>
+          <span style="color:var(--t3)">Example value: <code>2016 Remaster</code></span></p>
+
+          <p style="margin:0 0 6px"><b>What is TXXX?</b><br>
+          <code>TXXX</code> is a <em>user-defined</em> text frame in MP3 files (ID3v2 standard). Because the ID3 standard cannot cover every possible piece of metadata, it provides one open-ended slot where you choose both the name and the value. Each TXXX frame has two parts:</p>
+          <pre style="margin:4px 0 10px;padding:6px 10px;background:var(--bg2);border-radius:4px;font-size:.8rem;overflow-x:auto;">TXXX : EDITION  =  Deluxe Edition
+       ↑ name        ↑ value you fill in
+       (you choose)</pre>
+          <p style="margin:0 0 8px">In this field list you write it as <code>TXXX:EDITION</code> — the colon separates the frame type from the name you chose. <b>TXXX only exists in MP3.</b> For FLAC/Opus/WavPack the scanner reads the same key as a plain Vorbis/APE tag automatically.</p>
+
+          <table style="border-collapse:collapse;width:100%;max-width:560px;margin-bottom:10px;">
+            <thead><tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:3px 8px;color:var(--t2);">Goal</th>
+              <th style="text-align:left;padding:3px 8px;color:var(--t2);">Enter in tagger</th>
+              <th style="text-align:left;padding:3px 8px;color:var(--t2);">Add here as</th>
+              <th style="text-align:left;padding:3px 8px;color:var(--t2);">Example value</th>
+            </tr></thead>
+            <tbody>
+              <tr style="border-top:1px solid var(--border)"><td style="padding:3px 8px">Edition label</td><td style="padding:3px 8px;font-family:monospace;font-size:.8rem">TXXX → EDITION</td><td style="padding:3px 8px;font-family:monospace;font-size:.8rem">TXXX:EDITION</td><td style="padding:3px 8px;color:var(--t3)">Deluxe Edition</td></tr>
+              <tr style="border-top:1px solid var(--border)"><td style="padding:3px 8px">Version string</td><td style="padding:3px 8px;font-family:monospace;font-size:.8rem">TXXX → VERSION</td><td style="padding:3px 8px;font-family:monospace;font-size:.8rem">TXXX:VERSION</td><td style="padding:3px 8px;color:var(--t3)">2016 Remaster</td></tr>
+              <tr style="border-top:1px solid var(--border)"><td style="padding:3px 8px">Audio quality</td><td style="padding:3px 8px;font-family:monospace;font-size:.8rem">TXXX → QUALITY</td><td style="padding:3px 8px;font-family:monospace;font-size:.8rem">TXXX:QUALITY</td><td style="padding:3px 8px;color:var(--t3)">24bit/96kHz</td></tr>
+              <tr style="border-top:1px solid var(--border)"><td style="padding:3px 8px">Remaster info</td><td style="padding:3px 8px;font-family:monospace;font-size:.8rem">TXXX → REMASTER</td><td style="padding:3px 8px;font-family:monospace;font-size:.8rem">TXXX:REMASTER</td><td style="padding:3px 8px;color:var(--t3)">2003 Remaster</td></tr>
+            </tbody>
+          </table>
+
+          <p style="margin:0 0 4px"><b>How to set TXXX in your tagger:</b></p>
+          <ul style="margin:0 0 6px;padding-left:18px;">
+            <li><b>Mp3tag</b>: Tag panel → click <code>+</code> → field name <code>TXXX:EDITION</code> → value <code>Deluxe Edition</code></li>
+            <li><b>foobar2000</b>: Properties → <code>…</code> button → New field → name <code>EDITION</code> → value <code>Deluxe Edition</code></li>
+            <li><b>MusicBrainz Picard</b>: Writes <code>DISCSUBTITLE</code> automatically for releases tagged as remasters</li>
+          </ul>
+          <p style="margin:0;color:var(--t3);font-size:.8rem">Fields are tried top-to-bottom. First non-empty value wins. If nothing matches, the scanner falls back to keyword detection on the album title and folder name.</p>
+        </div>
+      </details>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;align-items:center;">
+        <span v-for="(tag, i) in tags" :key="i" style="display:inline-flex;align-items:center;gap:2px;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:2px 6px;font-size:.82rem;font-family:monospace;">
+          <span>{{tag}}</span>
+          <button @click="moveUp(i)" style="background:none;border:none;cursor:pointer;color:var(--t2);padding:0 2px;" title="Move up">↑</button>
+          <button @click="moveDown(i)" style="background:none;border:none;cursor:pointer;color:var(--t2);padding:0 2px;" title="Move down">↓</button>
+          <button @click="removeTag(i)" style="background:none;border:none;cursor:pointer;color:var(--red,#c00);padding:0 2px;" title="Remove">✕</button>
+        </span>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <input v-model="newTag" @keyup.enter="addTag" type="text" placeholder="e.g. TXXX:EDITION" style="flex:1;min-width:0;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--t1);font-family:monospace;font-size:.85rem;">
+        <button @click="addTag" class="btn-sm">Add</button>
+        <button @click="save" class="btn-sm" :disabled="saving">{{ saving ? 'Saving…' : 'Save Order' }}</button>
+      </div>
+      <div>
+        <button @click="loadInventory" class="btn-sm" :disabled="loadingInv" style="margin-bottom:8px;">
+          {{ loadingInv ? 'Loading…' : 'Show Version Source Breakdown' }}
+        </button>
+        <table v-if="inventoryLoaded && inventory.length > 0" style="font-size:.83rem;border-collapse:collapse;width:100%;max-width:500px;">
+          <thead><tr><th style="text-align:left;padding:3px 8px;color:var(--t2);">Source</th><th style="text-align:right;padding:3px 8px;color:var(--t2);">Files</th></tr></thead>
+          <tbody>
+            <tr v-for="row in inventory" :key="row.album_version_source" style="border-top:1px solid var(--border)">
+              <td style="padding:3px 8px;font-family:monospace;">{{row.album_version_source}}</td>
+              <td style="padding:3px 8px;text-align:right;">{{row.cnt}}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else-if="inventoryLoaded" style="font-size:.85rem;color:var(--t3);">No version data yet — rescan your library first.</p>
+      </div>
+    </div>`
+});
+
 
 const modVM = new Vue({
   el: '#admin-modal-wrapper',

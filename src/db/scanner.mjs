@@ -6,6 +6,247 @@ function calculateAudioHash(songInfo) {
   return crypto.createHash('sha256').update(audioId).digest('hex');
 }
 
+// ── Album version detection ───────────────────────────────────────────────────
+// Default ordered list of tag fields to try for album_version.
+// Resolved first-non-empty wins; heuristic fallback runs if all yield nothing.
+const DEFAULT_ALBUM_VERSION_TAGS = [
+  'TIT3', 'SUBTITLE', 'DISCSUBTITLE',
+  'TXXX:EDITION', 'TXXX:VERSION', 'TXXX:ALBUMVERSION',
+  'TXXX:QUALITY', 'TXXX:REMASTER', 'TXXX:DESCRIPTION',
+  'EDITION', 'VERSION', 'ALBUMVERSION', 'QUALITY', 'REMASTER',
+  // COMMENT intentionally excluded from default — too noisy; add via admin config if desired
+];
+
+/** Flatten raw music-metadata native tag arrays into lookup maps by format. */
+function buildNativeMap(native) {
+  const map = { txxx: {}, vorbis: {}, ape: {}, itunesCustom: {} };
+  for (const [format, tags] of Object.entries(native || {})) {
+    if (!Array.isArray(tags)) continue;
+    for (const tag of tags) {
+      if (!tag || !tag.id) continue;
+      if (tag.id === 'TXXX' && tag.value?.description) {
+        map.txxx[tag.value.description.toUpperCase()] = tag.value.text;
+      } else if (format === 'vorbis') {
+        map.vorbis[tag.id.toUpperCase()] = Array.isArray(tag.value) ? tag.value[0] : tag.value;
+      } else if (format === 'APEv2') {
+        map.ape[tag.id.toUpperCase()] = tag.value;
+      } else if (tag.id.startsWith('----:com.apple.iTunes:')) {
+        const k = tag.id.replace('----:com.apple.iTunes:', '').toUpperCase();
+        map.itunesCustom[k] = tag.value;
+      }
+    }
+  }
+  return map;
+}
+
+function _firstOf(v) {
+  if (v == null) return null;
+  if (Array.isArray(v)) return v[0] ?? null;
+  if (typeof v === 'object' && 'text' in v) return v.text ?? null;
+  return String(v);
+}
+
+/** Resolve one configured field name against all tag formats. Returns string or null. */
+function resolveTagField(fieldName, songInfo, nativeMap) {
+  const key = fieldName.toUpperCase().trim();
+
+  // TXXX:KEY — ID3v2 user-defined text frame
+  if (key.startsWith('TXXX:')) {
+    const desc = key.slice(5);
+    const val = nativeMap.txxx?.[desc];
+    return val != null ? String(val).trim() || null : null;
+  }
+
+  // music-metadata normalised common fields
+  const commonAlias = {
+    'TIT3':        () => _firstOf(songInfo.subtitle),
+    'SUBTITLE':    () => _firstOf(songInfo.subtitle),
+    'DISCSUBTITLE':() => _firstOf(songInfo.discsubtitle),
+    'COMMENT':     () => {
+      const c = songInfo.comment;
+      if (!c) return null;
+      const arr = Array.isArray(c) ? c : [c];
+      for (const item of arr) {
+        const t = (typeof item === 'object') ? (item.text ?? item) : item;
+        if (t && String(t).trim()) return String(t).trim();
+      }
+      return null;
+    },
+  };
+  if (commonAlias[key]) return commonAlias[key]() ?? null;
+
+  // Raw Vorbis / APE / iTunes custom atom by exact key name
+  const raw = nativeMap.vorbis?.[key] ?? nativeMap.ape?.[key] ?? nativeMap.itunesCustom?.[key];
+  if (raw != null) return String(raw).trim() || null;
+  return null;
+}
+
+// ── Heuristic fallback ────────────────────────────────────────────────────────
+/** Normalise a string for reliable regex matching: strip diacritics, lowercase, unify dashes. */
+function normaliseForHeuristic(s) {
+  return String(s)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')       // strip diacritics
+    .toLowerCase()
+    .replace(/[–—\u2012-\u2015]/g, '-')    // normalise all dashes to hyphen
+    .replace(/[^\x20-\x7e]/g, ' ')         // replace remaining non-ASCII with space
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Minimal Levenshtein distance (edit distance) between two strings. */
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i-1] === b[j-1]
+        ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+
+const FUZZY_WORDS = {
+  'deluxe':       'Deluxe Edition',
+  'dleuxe':       'Deluxe Edition',   // common typo
+  'expanded':     'Expanded Edition',
+  'remaster':     'Remaster',
+  'remastered':   'Remaster',
+  'anniversary':  'Anniversary Edition',
+};
+
+function fuzzyMatch(normalised) {
+  const words = normalised.split(/[\s\-\[\]()\{\}]+/).filter(w => w.length >= 4);
+  for (const [target, label] of Object.entries(FUZZY_WORDS)) {
+    for (const word of words) {
+      if (Math.abs(word.length - target.length) <= 1 && levenshtein(word, target) <= 1) {
+        return label;
+      }
+    }
+  }
+  return null;
+}
+
+// Confidence gate: only run heuristics if at least one known keyword/bracket is present
+const HAS_BRACKET_OR_KEYWORD = /[\[\](]|remast|deluxe|hi.?res|\d{2,3}.?bit|\d{3,6}.?k?hz|dsd|sacd|expanded|anniversary|bonus\s|live\b|mono\b|stereo\b/i;
+
+function matchEdition(s) {
+  // Order matters: more specific patterns before generic ones
+  if (/anni?ver\w*/.test(s))                           return 'Anniversary Edition';
+  if (/expan\w*/.test(s))                              return 'Expanded Edition';
+  if (/d[e]?luxe/.test(s))                            return 'Deluxe Edition';
+  if (/complet\w+\s*(edition|ed\.?|coll\w+)?/.test(s)) return 'Complete Edition';
+  if (/box\s*set|boxset/.test(s))                      return 'Box Set';
+  if (/bonus\s*(track|disc|edition|cd)?/.test(s))      return 'Bonus Edition';
+  if (/\blive\b(?!\s*remast)/.test(s))                return 'Live';
+  if (/\bmono\b/.test(s))                              return 'Mono';
+  if (/\bstereo\b/.test(s))                            return 'Stereo';
+  if (/\bsacd\b/.test(s))                              return 'SACD';
+
+  // Remaster — capture optional year
+  const rmYear1 = s.match(/(\d{4})\s*(?:digital\s+)?remast\w*/);
+  if (rmYear1) return `${rmYear1[1]} Remaster`;
+  const rmYear2 = s.match(/remast\w*\s*(\d{4})/);
+  if (rmYear2) return `Remaster ${rmYear2[1]}`;
+  if (/remast\w*/.test(s)) return 'Remaster';
+
+  return null;
+}
+
+function matchQuality(s) {
+  const parts = [];
+
+  // Hi-Res marker
+  if (/hi.?res/.test(s)) parts.push('Hi-Res');
+
+  // DSD
+  const dsd = s.match(/\bdsd\s*(\d+)?/);
+  if (dsd) parts.push(dsd[1] ? `DSD${dsd[1]}` : 'DSD');
+
+  // Bit depth
+  const bits = s.match(/(\d{2,3})\s*-?\s*bit/);
+  if (bits) parts.push(`${bits[1]}bit`);
+
+  // Sample rate — match e.g. 96khz, 96kHz, 192.0 kHz, 44100hz
+  const hz = s.match(/(\d{2,6}(?:\.\d)?)\s*k?hz/);
+  if (hz) {
+    const val = parseFloat(hz[1]);
+    // If the raw value looks like Hz (>= 1000), convert to kHz label
+    const khz = val >= 1000 ? Math.round(val / 1000) : val;
+    if (khz >= 44) parts.push(`${khz}kHz`);
+  }
+
+  return parts.length ? parts.join('/') : null;
+}
+
+function parseVersionHeuristic(rawInput) {
+  if (!rawInput) return null;
+  const s = normaliseForHeuristic(rawInput);
+  if (!HAS_BRACKET_OR_KEYWORD.test(s)) return null;  // plain name, skip heuristics
+
+  const editionMatch = matchEdition(s);
+  const qualityMatch = matchQuality(s);
+
+  if (!editionMatch && !qualityMatch) {
+    const fuzzy = fuzzyMatch(s);
+    return fuzzy || null;
+  }
+
+  const parts = [];
+  if (editionMatch) parts.push(editionMatch);
+  if (qualityMatch) parts.push(qualityMatch);
+  return parts.join(' · ');
+}
+
+// Module-level variable so deriveAlbumVersion can communicate the source
+let _lastAlbumVersionSource = null;
+
+/** Main orchestrator: walk configured tag fields, fall back to heuristics, infer from audio. */
+function deriveAlbumVersion(songInfo, native, fmtInfo, configuredFields) {
+  _lastAlbumVersionSource = null;
+  const fields = Array.isArray(configuredFields) && configuredFields.length > 0
+    ? configuredFields : DEFAULT_ALBUM_VERSION_TAGS;
+  const nativeMap = buildNativeMap(native);
+
+  for (const field of fields) {
+    const val = resolveTagField(field, songInfo, nativeMap);
+    if (val && val.trim()) {
+      _lastAlbumVersionSource = field;
+      return val.trim();
+    }
+  }
+
+  // Heuristic: album title string
+  const fromTitle = parseVersionHeuristic(songInfo.album || '');
+  if (fromTitle) {
+    _lastAlbumVersionSource = 'heuristic:title';
+    return fromTitle;
+  }
+
+  // Heuristic: parent folder name
+  const folder = (songInfo.filePath || '').split('/').slice(-2, -1)[0] || '';
+  const fromFolder = parseVersionHeuristic(folder);
+  if (fromFolder) {
+    _lastAlbumVersionSource = 'heuristic:folder';
+    return fromFolder;
+  }
+
+  // Infer from audio technical properties
+  const bits = fmtInfo.bitsPerSample ?? 0;
+  const sr   = fmtInfo.sampleRate   ?? 0;
+  if (bits >= 24 && sr >= 88200) {
+    const khz = Math.round(sr / 1000);
+    _lastAlbumVersionSource = 'inferred:audio';
+    return `Hi-Res ${bits}bit/${khz}kHz`;
+  }
+
+  return null;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { parseFile } from 'music-metadata';
 import fs from 'fs';
 import fsp from 'node:fs/promises';
@@ -54,7 +295,8 @@ const schema = Joi.object({
   ).required(),
   otherRoots: Joi.array().items(Joi.string()).required(),
   excludedPaths: Joi.array().items(Joi.string()).default([]),
-  ffprobePath: Joi.string().optional().allow('', null)
+  ffprobePath: Joi.string().optional().allow('', null),
+  albumVersionTags: Joi.array().items(Joi.string()).optional(),
 });
 
 const { error: validationError } = schema.validate(loadJson);
@@ -78,6 +320,7 @@ async function insertEntries(song) {
   const data = {
     "title": song.title ? String(song.title) : null,
     "artist": song.artist ? String(song.artist) : null,
+    "albumArtist": song.albumartist ? String(song.albumartist) : null,
     "year": song.year ? song.year : null,
     "album": song.album ? String(song.album) : null,
     "filepath": song.filePath,
@@ -92,9 +335,6 @@ async function insertEntries(song) {
     "art_source": song._artSource || null,
     "cover_file": song._coverFile || null,
     "vpath": loadJson.vpath,
-    // _preserveTs = original ts from DB (re-index); new files get ts = wall-clock time of scan.
-    // We intentionally do NOT use file mtime (song.modified) because users copy files with
-    // old mtimes and expect them to show up in "Recently Added" from the moment they drop them in.
     "ts": song._preserveTs || (song._isReindex ? null : Math.floor(Date.now() / 1000)) || null,
     "sID": loadJson.scanId,
     "replaygainTrackDb": song.replaygain_track_gain ? song.replaygain_track_gain.dB : null,
@@ -104,6 +344,9 @@ async function insertEntries(song) {
     "bitrate":     song._bitrate     ?? null,
     "sample_rate": song._sampleRate  ?? null,
     "channels":    song._channels    ?? null,
+    "bit_depth":   song._bitDepth    ?? null,
+    "album_version":        song._albumVersion       ?? null,
+    "album_version_source": song._albumVersionSource ?? null,
     "artist_id": _makeArtistId(song.artist ? String(song.artist) : null),
     "album_id": _makeAlbumId(song.artist ? String(song.artist) : null, song.album ? String(song.album) : null),
     "_oldHash": song._oldHash || null
@@ -368,7 +611,7 @@ async function processFileResult(absPath, relPath, modTime, data) {
 
     if (data._needsBitrate) {
       try {
-        let bitrate = null, sampleRate = null, channels = null;
+        let bitrate = null, sampleRate = null, channels = null, bitDepth = null;
         try {
           // Use duration:true so FLAC/WAV files return accurate bitrate and duration
           const parsed = await parseFile(absPath, { skipCovers: true, duration: true });
@@ -378,6 +621,7 @@ async function processFileResult(absPath, relPath, modTime, data) {
           }
           sampleRate = fmt.sampleRate || null;
           channels   = fmt.numberOfChannels || null;
+          bitDepth   = fmt.bitsPerSample || null;
           // Fallback: calculate bitrate from filesize / duration for lossless files
           // where music-metadata does not embed a bitrate value (e.g. some FLAC, WAV)
           if (bitrate == null && fmt.duration > 0) {
@@ -394,12 +638,41 @@ async function processFileResult(absPath, relPath, modTime, data) {
           url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-tech-meta`,
           headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
           responseType: 'json',
-          data: { filepath: data.filepath, vpath: loadJson.vpath, bitrate, sample_rate: sampleRate, channels }
+          data: { filepath: data.filepath, vpath: loadJson.vpath, bitrate, sample_rate: sampleRate, channels, bit_depth: bitDepth }
         });
       } catch (_techErr) {
         await reportError(absPath, 'bitrate', `Tech-meta update failed: ${_techErr.message}`, _techErr.stack);
       }
     }
+
+    if (data._needsAlbumVersion) {
+      try {
+        let albumVersion = null, albumVersionSource = null;
+        try {
+          const parsed = await parseFile(absPath, { skipCovers: true });
+          const common = parsed.common || {};
+          const native = parsed.native || {};
+          const fmt    = parsed.format || {};
+          // relPath must be set on common so the folder-name heuristic works
+          common.filePath = relPath;
+          const cfgFields = Array.isArray(loadJson.albumVersionTags) ? loadJson.albumVersionTags : null;
+          albumVersion       = deriveAlbumVersion(common, native, fmt, cfgFields);
+          albumVersionSource = _lastAlbumVersionSource;
+        } catch (_e) {
+          await reportError(absPath, 'album-version', `Album version parse failed: ${_e.message}`, _e.stack);
+        }
+        await ax({
+          method: 'POST',
+          url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/update-album-version`,
+          headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+          responseType: 'json',
+          data: { filepath: data.filepath, vpath: loadJson.vpath, album_version: albumVersion, album_version_source: albumVersionSource }
+        });
+      } catch (_avErr) {
+        await reportError(absPath, 'album-version', `Album version update failed: ${_avErr.message}`, _avErr.stack);
+      }
+    }
+
     await confirmOk(absPath);
   }
 }
@@ -555,7 +828,7 @@ function withTimeout(promise, ms) {
 const PARSE_TIMEOUT_MS = 30000; // 30 s — enough for any normal file; hangs abort cleanly
 
 async function parseMyFile(thisSong, modified) {
-  let songInfo, fmtInfo = {};
+  let songInfo, fmtInfo = {}, nativeInfo = {};
   try {
     const parsed = await withTimeout(
       parseFile(thisSong, { skipCovers: loadJson.skipImg }),
@@ -563,6 +836,7 @@ async function parseMyFile(thisSong, modified) {
     );
     songInfo = parsed.common;
     fmtInfo = parsed.format || {};
+    nativeInfo = parsed.native || {};
   } catch (err) {
     // If the error is in the embedded picture block, retry without covers to
     // still recover text tags (title, artist, album, year, track, etc.)
@@ -574,6 +848,7 @@ async function parseMyFile(thisSong, modified) {
         );
         songInfo = fallback.common;
         fmtInfo = fallback.format || {};
+        nativeInfo = fallback.native || {};
         console.error(`Warning: metadata parse error (covers skipped) on ${thisSong}: ${err.message}`);
         await reportError(thisSong, 'parse', err.message, err.stack);
       } catch (err2) {
@@ -600,6 +875,7 @@ async function parseMyFile(thisSong, modified) {
     ? Math.round(fmtInfo.bitrate / 1000) : null;
   songInfo._sampleRate = fmtInfo.sampleRate || null;
   songInfo._channels   = fmtInfo.numberOfChannels || null;
+  songInfo._bitDepth   = fmtInfo.bitsPerSample || null;
 
   // ── Folder-name fallback for missing tags ─────────────────────────────────
   // When a file has no embedded artist/album/title tags the parent folder name
@@ -694,6 +970,21 @@ async function parseMyFile(thisSong, modified) {
   }
 
   await getAlbumArt(songInfo);
+
+  // ── Album version detection ───────────────────────────────────────────────
+  // Derive album_version from tags, heuristics, or audio properties.
+  // Uses the user-configured albumVersionTags list (or built-in default).
+  try {
+    songInfo._albumVersion = deriveAlbumVersion(
+      songInfo, nativeInfo, fmtInfo,
+      loadJson.albumVersionTags || DEFAULT_ALBUM_VERSION_TAGS
+    );
+    songInfo._albumVersionSource = _lastAlbumVersionSource;
+  } catch (_avErr) {
+    songInfo._albumVersion = null;
+    songInfo._albumVersionSource = null;
+  }
+
   return songInfo;
 }
 

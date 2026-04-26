@@ -35,6 +35,8 @@ function renderMetadataObj(row) {
       'bitrate':             row.bitrate     != null ? row.bitrate     : null,
       'sample-rate':         row.sample_rate != null ? row.sample_rate : null,
       'channels':            row.channels    != null ? row.channels    : null,
+      'bit-depth':           row.bit_depth   != null ? row.bit_depth   : null,
+      'album-version':       row.album_version || null,
     },
   };
 }
@@ -61,6 +63,8 @@ const FULL_ROW = {
   bitrate:           320,
   sample_rate:       44100,
   channels:          2,
+  bit_depth:         16,
+  album_version:     null,
 };
 
 describe('renderMetadataObj', () => {

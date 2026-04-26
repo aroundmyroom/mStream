@@ -61,6 +61,7 @@ export function getAcoustidQueue(limit, retryAfterSec) { return backend.getAcous
 export function setAcoustidPending(filepath, vpath) { return backend.setAcoustidPending(filepath, vpath); }
 export function setAcoustidResult(filepath, vpath, result) { return backend.setAcoustidResult(filepath, vpath, result); }
 export function resetAcoustidPending() { return backend.resetAcoustidPending(); }
+export function resetAcoustidErrors()  { return backend.resetAcoustidErrors(); }
 export function getAcoustidStats() { return backend.getAcoustidStats(); }
 
 // Tag Workshop — MB enrichment + tag review
@@ -87,7 +88,8 @@ export function updateFileArt(filepath, vpath, aaFile, scanId, artSource) { retu
 export function countArtUsage(aaFile) { return backend.countArtUsage(aaFile); }
 export function updateFileCue(filepath, vpath, cuepoints) { return backend.updateFileCue(filepath, vpath, cuepoints); }
 export function updateFileDuration(filepath, vpath, duration) { return backend.updateFileDuration(filepath, vpath, duration); }
-export function updateFileTechMeta(filepath, vpath, bitrate, sampleRate, channels) { return backend.updateFileTechMeta(filepath, vpath, bitrate, sampleRate, channels); }
+export function updateFileTechMeta(filepath, vpath, bitrate, sampleRate, channels, bitDepth) { return backend.updateFileTechMeta(filepath, vpath, bitrate, sampleRate, channels, bitDepth); }
+export function updateFileAlbumVersion(filepath, vpath, albumVersion, albumVersionSource) { return backend.updateFileAlbumVersion(filepath, vpath, albumVersion, albumVersionSource); }
 export function getFileDuration(filepath) { return backend.getFileDuration(filepath); }
 export function updateFileTags(filepath, vpath, tags) { return backend.updateFileTags(filepath, vpath, tags); }
 export function updateFileModified(filepath, vpath, modifiedMs) { return backend.updateFileModified(filepath, vpath, modifiedMs); }
@@ -100,6 +102,7 @@ export function getAlbumSongs(album, vpaths, username, opts) { return backend.ge
 export function getFilesForAlbumsBrowse(sources) { return backend.getFilesForAlbumsBrowse(sources); }
 export function getDB() { return backend.getDB(); }
 export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
+export function getAlbumVersionInventory() { return backend.getAlbumVersionInventory(); }
 export function searchAlbumsByArtist(searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchAlbumsByArtist(searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }
 export function listAllSongs(vpaths, ignoreVPaths, excludeFilepathPrefixes, filepathPrefix, offset, limit) { return backend.listAllSongs(vpaths, ignoreVPaths, excludeFilepathPrefixes, filepathPrefix, offset, limit); }
 export function searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms) { return backend.searchFilesAllWords(tokens, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms); }

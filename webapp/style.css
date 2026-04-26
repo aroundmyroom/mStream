@@ -560,17 +560,32 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 .play-ov{position:absolute;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .18s;}
 .album-card:hover .play-ov{opacity:1;}
 .album-meta{padding:11px 12px 13px;}
-.album-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--t1);}
+.album-name{font-size:13px;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;line-height:1.35;color:var(--t1);}
 .album-year{font-size:12px;color:var(--t2);margin-top:3px;}
 /* Compact density — more albums per row, tighter metadata */
 .album-grid--compact{grid-template-columns:repeat(auto-fill,minmax(115px,1fr));gap:12px;}
 .album-grid--compact .album-meta{padding:7px 8px 8px;}
-.album-grid--compact .album-name{font-size:11px;}
+.album-grid--compact .album-name{font-size:11px;-webkit-line-clamp:2;}
 .album-grid--compact .album-year{font-size:10px;margin-top:2px;}
+/* List density — single column, horizontal rows */
+.album-grid--list{display:flex;flex-direction:column;gap:2px;}
+.album-grid--list .album-card{display:flex;flex-direction:row;align-items:center;gap:12px;border-radius:var(--r1);overflow:visible;padding:5px 10px;min-height:54px;}
+.album-grid--list .album-card:hover{transform:none;box-shadow:none;background:var(--raised);}
+.album-grid--list .album-card .album-art{width:44px;height:44px;min-width:44px;border-radius:5px;aspect-ratio:1;overflow:hidden;}
+.album-grid--list .album-card .album-art .play-ov{display:none;}
+.album-grid--list .album-card .album-meta{flex:1;min-width:0;padding:0;display:flex;flex-direction:row;align-items:baseline;gap:10px;flex-wrap:wrap;}
+.album-grid--list .album-card .album-name{font-size:13px;display:block;-webkit-line-clamp:unset;white-space:normal;overflow:visible;flex-shrink:1;}
+.album-grid--list .album-card .album-year{margin-top:0;font-size:12px;flex-shrink:0;white-space:nowrap;}
 /* Album library toolbar — sort + density toggles */
 .allib-view-controls{display:flex;align-items:center;gap:5px;flex-shrink:0;margin-left:4px;}
 .allib-sort-btn{font-size:12px;font-weight:600;letter-spacing:.01em;padding:0 10px;width:auto;min-width:62px;white-space:nowrap;border:1px solid var(--border) !important;color:var(--t2);transition:border-color .15s,color .15s;}
 .allib-sort-btn:hover{border-color:var(--primary) !important;color:var(--t1);}
+/* Album version filter pills */
+.allib-ver-pills{display:flex;flex-wrap:wrap;align-items:center;gap:5px;padding:2px 2px 12px;}
+.allib-ver-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);width:100%;margin-bottom:2px;}
+.allib-ver-pill{padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600;border:1.5px solid var(--border2);color:var(--t3);background:transparent;cursor:pointer;white-space:nowrap;transition:background .14s,border-color .14s,color .14s;}
+.allib-ver-pill:hover{color:var(--t1);border-color:var(--green);}
+.allib-ver-pill.on{background:var(--green);border-color:var(--green);color:#fff;}
 .allib-density-btn{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid transparent;color:var(--t3);cursor:pointer;background:none;transition:background .14s,color .14s;}
 .allib-density-btn:hover{color:var(--t1);}
 .allib-density-btn.active{background:rgba(139,92,246,.15);color:var(--primary);border-color:rgba(139,92,246,.35);}
@@ -2654,4 +2669,33 @@ body.audiobook-mode #ab-speed-btn{color:var(--primary);}
 .artpro-body{
   border-top:1px solid var(--border);
   padding-top:22px;
+}
+
+/* ── Album version badges ───────────────────────────────────────────────── */
+.alb-version-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg2, rgba(128,128,128,0.15));
+  color: var(--t3, #888);
+  vertical-align: middle;
+  margin-left: 4px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.alb-version-header-badge {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: var(--bg2, rgba(128,128,128,0.15));
+  color: var(--t3, #888);
+  display: inline-block;
+  margin-bottom: 10px;
+}
+.alb-sibling-group {
+  outline: 1px solid color-mix(in srgb, var(--accent, #4a9cf6) 30%, transparent);
+  border-radius: 6px;
 }

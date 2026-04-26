@@ -353,6 +353,8 @@ export function init(dbDirectory) {
   try { db.exec('ALTER TABLE files ADD COLUMN bitrate INTEGER'); }             catch (_e) {}
   try { db.exec('ALTER TABLE files ADD COLUMN sample_rate INTEGER'); }         catch (_e) {}
   try { db.exec('ALTER TABLE files ADD COLUMN channels INTEGER'); }            catch (_e) {}
+  // Migration: album_artist tag (ID3 TPE2 / ALBUMARTIST) — stored separately from track artist
+  try { db.exec('ALTER TABLE files ADD COLUMN album_artist TEXT'); }           catch (_e) {}
   // Backfill mb_album_dir for all existing enriched rows (idempotent)
   try {
     const _bfDir = db.prepare(
@@ -393,11 +395,18 @@ export function init(dbDirectory) {
     db.exec('COMMIT');
   }
 
+  // ── album_version columns (added post-initial-release) ─────────────────────
+  try { db.exec('ALTER TABLE files ADD COLUMN album_version TEXT'); }        catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN album_version_source TEXT'); } catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN bit_depth INTEGER'); }         catch (_e) {}
+
   // ── Additional migration indexes (idempotent, safe on every startup) ──────
   // aaFile: used by countArtUsage (per-file during art cleanup) and getLiveArtFilenames
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_aaFile ON files(aaFile)');
   // (vpath, sID): used by getStaleFileHashes and removeStaleFiles after every scan pass
   db.exec('CREATE INDEX IF NOT EXISTS idx_files_vpath_sID ON files(vpath, sID)');
+  // Effective artist: COALESCE(album_artist, artist) — used by artist browse and artist rebuild
+  db.exec('CREATE INDEX IF NOT EXISTS idx_files_effective_artist ON files(COALESCE(album_artist, artist))');
   // user_metadata sort/filter indexes: Recently Played, Most Played, Rated, Starred
   db.exec('CREATE INDEX IF NOT EXISTS idx_um_user_lp      ON user_metadata(user, lp)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_um_user_pc      ON user_metadata(user, pc)');
@@ -405,19 +414,28 @@ export function init(dbDirectory) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_um_user_starred ON user_metadata(user, starred)');
 
   // ── FTS5 full-text index (songs) ─────────────────────────────────────────
-  // External-content table: FTS5 tokenises title/artist/album/filepath columns
+  // External-content table: FTS5 tokenises title/artist/album/album_version/filepath
   // from the `files` table without duplicating the raw data.
   // unicode61 tokenizer with remove_diacritics=1: café == cafe, case-insensitive.
-  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS fts_files USING fts5(
-    title, artist, album, filepath,
-    content='files', content_rowid='rowid',
-    tokenize='unicode61 remove_diacritics 1'
-  )`);
-  // Rebuild the FTS index if it is empty (first start after introducing FTS).
-  // External-content tables report COUNT(*) == files count even when hollow,
-  // so we check fts_files_data (the real B-tree backing store) instead.
-  const _ftsDataRows = db.prepare('SELECT COUNT(*) AS cnt FROM fts_files_data').get().cnt;
-  if (_ftsDataRows < 5) {
+  //
+  // Migration: if fts_files exists but lacks album_version (old schema), drop and
+  // recreate it — external-content tables cannot be ALTER TABLE'd. Data lives in
+  // `files`; a rebuild restores everything with zero data loss.
+  try {
+    db.prepare('SELECT album_version FROM fts_files LIMIT 0').run();
+    // New schema already in place — standard empty-index check
+    const _ftsDataRows = db.prepare('SELECT COUNT(*) AS cnt FROM fts_files_data').get().cnt;
+    if (_ftsDataRows < 5) {
+      db.exec("INSERT INTO fts_files(fts_files) VALUES ('rebuild')");
+    }
+  } catch (_ftsE) {
+    // Old schema (no album_version column) or fresh install — recreate the table.
+    db.exec('DROP TABLE IF EXISTS fts_files');
+    db.exec(`CREATE VIRTUAL TABLE fts_files USING fts5(
+      title, artist, album, album_version, filepath,
+      content='files', content_rowid='rowid',
+      tokenize='unicode61 remove_diacritics 1'
+    )`);
     db.exec("INSERT INTO fts_files(fts_files) VALUES ('rebuild')");
   }
 
@@ -482,7 +500,8 @@ export function init(dbDirectory) {
     countArtUsage:  db.prepare('SELECT COUNT(*) AS cnt FROM files WHERE aaFile = ?'),
     updateCue:      db.prepare('UPDATE files SET cuepoints = ? WHERE filepath = ? AND vpath = ?'),
     updateDuration: db.prepare('UPDATE files SET duration = ? WHERE filepath = ? AND vpath = ?'),
-    updateTechMeta: db.prepare('UPDATE files SET bitrate = ?, sample_rate = ?, channels = ? WHERE filepath = ? AND vpath = ?'),
+    updateTechMeta: db.prepare('UPDATE files SET bitrate = ?, sample_rate = ?, channels = ?, bit_depth = ? WHERE filepath = ? AND vpath = ?'),
+    updateAlbumVersion: db.prepare('UPDATE files SET album_version = ?, album_version_source = ? WHERE filepath = ? AND vpath = ?'),
     liveArt:        db.prepare('SELECT DISTINCT aaFile FROM files WHERE aaFile IS NOT NULL'),
     liveHashes:     db.prepare('SELECT DISTINCT hash FROM files WHERE hash IS NOT NULL'),
     staleHashes:    db.prepare('SELECT hash FROM files WHERE vpath = ? AND sID != ? AND hash IS NOT NULL'),
@@ -492,11 +511,11 @@ export function init(dbDirectory) {
     getLastScanRun: db.prepare('SELECT MAX(finished_at) AS ts FROM scan_runs'),
     insertFileTs:   db.prepare('SELECT ts FROM files WHERE hash = ? AND ts IS NOT NULL LIMIT 1'),
     insertFileRow:  db.prepare(
-      'INSERT INTO files (title, artist, year, album, filepath, format, track, trackOf, disk, modified, hash, audio_hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration, artist_id, album_id, cover_file, bitrate, sample_rate, channels) ' +
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+      'INSERT INTO files (title, artist, album_artist, year, album, filepath, format, track, trackOf, disk, modified, hash, audio_hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration, artist_id, album_id, cover_file, bitrate, sample_rate, channels, album_version, album_version_source, bit_depth) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     // FTS5 write statements — used in insert / remove / tag-update paths
-    ftsInsert:  db.prepare('INSERT INTO fts_files(rowid, title, artist, album, filepath) VALUES (?, ?, ?, ?, ?)'),
-    ftsDel:     db.prepare("INSERT INTO fts_files(fts_files, rowid, title, artist, album, filepath) VALUES ('delete', ?, ?, ?, ?, ?)"),
+    ftsInsert:  db.prepare('INSERT INTO fts_files(rowid, title, artist, album, album_version, filepath) VALUES (?, ?, ?, ?, ?, ?)'),
+    ftsDel:     db.prepare("INSERT INTO fts_files(fts_files, rowid, title, artist, album, album_version, filepath) VALUES ('delete', ?, ?, ?, ?, ?, ?)"),
     ftsRebuild: db.prepare("INSERT INTO fts_files(fts_files) VALUES ('rebuild')"),
     // Metadata lookup — called on every queue restore; caching avoids repeated prepare overhead
     getFileWithMeta: db.prepare(`
@@ -856,8 +875,13 @@ export function updateFileDuration(filepath, vpath, duration) {
   _s.updateDuration.run(duration, filepath, vpath);
 }
 
-export function updateFileTechMeta(filepath, vpath, bitrate, sampleRate, channels) {
-  const r = _s.updateTechMeta.run(bitrate ?? null, sampleRate ?? null, channels ?? null, filepath, vpath);
+export function updateFileTechMeta(filepath, vpath, bitrate, sampleRate, channels, bitDepth) {
+  const r = _s.updateTechMeta.run(bitrate ?? null, sampleRate ?? null, channels ?? null, bitDepth ?? null, filepath, vpath);
+  return r.changes;
+}
+
+export function updateFileAlbumVersion(filepath, vpath, albumVersion, albumVersionSource) {
+  const r = _s.updateAlbumVersion.run(albumVersion ?? null, albumVersionSource ?? null, filepath, vpath);
   return r.changes;
 }
 
@@ -887,16 +911,16 @@ export function updateFileTags(filepath, vpath, tags) {
   const ftsAffected = 'title' in tags || 'artist' in tags || 'album' in tags;
   let ftsOld = null;
   if (ftsAffected) {
-    ftsOld = db.prepare('SELECT rowid, title, artist, album, filepath FROM files WHERE filepath = ? AND vpath = ?').get(filepath, vpath);
+    ftsOld = db.prepare('SELECT rowid, title, artist, album, album_version, filepath FROM files WHERE filepath = ? AND vpath = ?').get(filepath, vpath);
   }
   values.push(filepath, vpath);
   db.prepare(`UPDATE files SET ${fields.join(', ')} WHERE filepath = ? AND vpath = ?`).run(...values);
   // Keep FTS index in sync: delete old entry, insert updated one
   if (ftsAffected && ftsOld) {
-    const updated = db.prepare('SELECT rowid, title, artist, album, filepath FROM files WHERE filepath = ? AND vpath = ?').get(filepath, vpath);
+    const updated = db.prepare('SELECT rowid, title, artist, album, album_version, filepath FROM files WHERE filepath = ? AND vpath = ?').get(filepath, vpath);
     if (updated) {
-      _s.ftsDel.run(ftsOld.rowid, ftsOld.title ?? null, ftsOld.artist ?? null, ftsOld.album ?? null, ftsOld.filepath);
-      _s.ftsInsert.run(updated.rowid, updated.title ?? null, updated.artist ?? null, updated.album ?? null, updated.filepath);
+      _s.ftsDel.run(ftsOld.rowid, ftsOld.title ?? null, ftsOld.artist ?? null, ftsOld.album ?? null, ftsOld.album_version ?? null, ftsOld.filepath);
+      _s.ftsInsert.run(updated.rowid, updated.title ?? null, updated.artist ?? null, updated.album ?? null, updated.album_version ?? null, updated.filepath);
     }
   }
 }
@@ -922,25 +946,26 @@ export function insertFile(fileData) {
     if (existing) { ts = normalizeEpochSec(existing.ts); }
   }
   const result = _s.insertFileRow.run(
-    fileData.title ?? null, fileData.artist ?? null, fileData.year ?? null, fileData.album ?? null,
+    fileData.title ?? null, fileData.artist ?? null, fileData.albumArtist ?? null, fileData.year ?? null, fileData.album ?? null,
     fileData.filepath, fileData.format ?? null, fileData.track ?? null, fileData.trackOf ?? null, fileData.disk ?? null,
     fileData.modified ?? null, fileData.hash ?? null, fileData.audio_hash ?? null, fileData.aaFile ?? null, fileData.vpath,
     ts, fileData.sID ?? null, fileData.replaygainTrackDb ?? null, fileData.genre ?? null, fileData.cuepoints ?? null,
     fileData.art_source ?? null, fileData.duration ?? null,
     fileData.artist_id ?? _makeArtistId(fileData.artist), fileData.album_id ?? _makeAlbumId(fileData.artist, fileData.album),
     fileData.cover_file ?? null,
-    fileData.bitrate ?? null, fileData.sample_rate ?? null, fileData.channels ?? null
+    fileData.bitrate ?? null, fileData.sample_rate ?? null, fileData.channels ?? null,
+    fileData.album_version ?? null, fileData.album_version_source ?? null, fileData.bit_depth ?? null
   );
   const rowId = Number(result.lastInsertRowid);
-  _s.ftsInsert.run(rowId, fileData.title ?? null, fileData.artist ?? null, fileData.album ?? null, fileData.filepath);
+  _s.ftsInsert.run(rowId, fileData.title ?? null, fileData.artist ?? null, fileData.album ?? null, fileData.album_version ?? null, fileData.filepath);
   return { ...fileData, id: rowId };
 }
 
 export function removeFileByPath(filepath, vpath) {
   // Delete from FTS before removing the row (we need the old values)
-  const old = db.prepare('SELECT rowid, title, artist, album, filepath FROM files WHERE filepath = ? AND vpath = ?').get(filepath, vpath);
+  const old = db.prepare('SELECT rowid, title, artist, album, album_version, filepath FROM files WHERE filepath = ? AND vpath = ?').get(filepath, vpath);
   if (old) {
-    _s.ftsDel.run(old.rowid, old.title ?? null, old.artist ?? null, old.album ?? null, old.filepath);
+    _s.ftsDel.run(old.rowid, old.title ?? null, old.artist ?? null, old.album ?? null, old.album_version ?? null, old.filepath);
   }
   _s.removeByPath.run(filepath, vpath);
 }
@@ -1165,7 +1190,8 @@ export function getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilep
   const vIn = inClause('vpath', filtered);
   const ep  = excludePrefixClauses(excludeFilepathPrefixes);
   const ip  = includePrefixClauses(includeFilepathPrefixes);
-  const aIn = inClause('artist', artists.map(String));
+  const artistList = artists.map(String);
+  const placeholders = artistList.map(() => '?').join(',');
   // GROUP BY album + physical dir so different pressings of the same album
   // each get their own entry. CD1/CD2 grouping is handled in JS via _normaliseAlbumDir.
   // MAX(aaFile) ensures we pick a non-null art file when SQLite's indeterminate row
@@ -1174,21 +1200,22 @@ export function getArtistAlbumsMulti(artists, vpaths, ignoreVPaths, excludeFilep
     SELECT album AS name, MAX(year) AS year,
       MAX(aaFile) AS album_art_file,
       MAX(cover_file) AS cover_file,
+      MAX(album_version) AS album_version,
       rtrim(filepath, replace(filepath, '/', '')) AS dir
     FROM files
-    WHERE ${vIn.sql}${ep.sql}${ip.sql} AND ${aIn.sql}
+    WHERE ${vIn.sql}${ep.sql}${ip.sql} AND COALESCE(album_artist, artist) IN (${placeholders})
     GROUP BY album, rtrim(filepath, replace(filepath, '/', ''))
     ORDER BY MAX(year) DESC
-  `).all(...vIn.params, ...ep.params, ...ip.params, ...aIn.params);
+  `).all(...vIn.params, ...ep.params, ...ip.params, ...artistList);
   const albums = [], store = {};
   for (const row of rows) {
     if (row.name === null) {
       const key = 'null\x00' + _normaliseAlbumDir(row.dir);
-      if (!store[key]) { albums.push({ name: null, year: null, album_art_file: row.album_art_file || null, dir: row.dir || '', normDir: _normaliseAlbumDir(row.dir) }); store[key] = true; }
+      if (!store[key]) { albums.push({ name: null, year: null, album_art_file: row.album_art_file || null, album_version: row.album_version || null, dir: row.dir || '', normDir: _normaliseAlbumDir(row.dir) }); store[key] = true; }
     } else {
       const key = row.name + '\x00' + _normaliseAlbumDir(row.dir);
       if (!store[key]) {
-        albums.push({ name: row.name, year: row.year, album_art_file: row.album_art_file || null, dir: row.dir || '', normDir: _normaliseAlbumDir(row.dir) });
+        albums.push({ name: row.name, year: row.year, album_art_file: row.album_art_file || null, album_version: row.album_version || null, dir: row.dir || '', normDir: _normaliseAlbumDir(row.dir) });
         store[key] = true;
       }
     }
@@ -1206,9 +1233,10 @@ export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPre
     SELECT album AS name, MAX(year) AS year,
       MAX(aaFile) AS album_art_file,
       MAX(cover_file) AS cover_file,
+      MAX(album_version) AS album_version,
       rtrim(filepath, replace(filepath, '/', '')) AS dir
     FROM files
-    WHERE ${vIn.sql}${ep.sql}${ip.sql} AND artist = ?
+    WHERE ${vIn.sql}${ep.sql}${ip.sql} AND COALESCE(album_artist, artist) = ?
     GROUP BY album, rtrim(filepath, replace(filepath, '/', ''))
     ORDER BY MAX(year) DESC
   `).all(...vIn.params, ...ep.params, ...ip.params, String(artist));
@@ -1218,11 +1246,11 @@ export function getArtistAlbums(artist, vpaths, ignoreVPaths, excludeFilepathPre
   for (const row of rows) {
     if (row.name === null) {
       const key = 'null\x00' + _normaliseAlbumDir(row.dir);
-      if (!store[key]) { albums.push({ name: null, year: null, album_art_file: row.album_art_file || null }); store[key] = true; }
+      if (!store[key]) { albums.push({ name: null, year: null, album_art_file: row.album_art_file || null, album_version: null }); store[key] = true; }
     } else {
       const key = row.name + '\x00' + _normaliseAlbumDir(row.dir);
       if (!store[key]) {
-        albums.push({ name: row.name, year: row.year, album_art_file: row.album_art_file || null });
+        albums.push({ name: row.name, year: row.year, album_art_file: row.album_art_file || null, album_version: row.album_version || null });
         store[key] = true;
       }
     }
@@ -1237,7 +1265,8 @@ export function getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, include
   const ep = excludePrefixClauses(excludeFilepathPrefixes);
   const ip = includePrefixClauses(includeFilepathPrefixes);
   const rows = db.prepare(`
-    SELECT album AS name, aaFile AS album_art_file, year,
+    SELECT album AS name, MAX(aaFile) AS album_art_file, MAX(year) AS year,
+      MAX(album_version) AS album_version,
       rtrim(filepath, replace(filepath, '/', '')) AS dir
     FROM files
     WHERE ${vIn.sql}${ep.sql}${ip.sql} AND album IS NOT NULL
@@ -1250,7 +1279,7 @@ export function getAlbums(vpaths, ignoreVPaths, excludeFilepathPrefixes, include
   for (const row of rows) {
     const key = row.name + '\x00' + _normaliseAlbumDir(row.dir);
     if (!store[key]) {
-      albums.push({ name: row.name, album_art_file: row.album_art_file, year: row.year });
+      albums.push({ name: row.name, album_art_file: row.album_art_file, year: row.year, album_version: row.album_version || null });
       store[key] = true;
     }
   }
@@ -1271,7 +1300,7 @@ export function getFilesForAlbumsBrowse(sources) {
     if (s.prefix) params.push(s.prefix.replace(/\/$/, '') + '/%');
   }
   return db.prepare(
-    `SELECT filepath, title, artist, album, track, disk, year, duration, aaFile, vpath, cuepoints, cover_file
+    `SELECT filepath, title, artist, album, track, disk, year, duration, aaFile, vpath, cuepoints, cover_file, album_version
      FROM files WHERE ${clauses.join(' OR ')}`
   ).all(...params);
 }
@@ -1674,14 +1703,15 @@ export function getArtistFiles(rawVariants, vpaths, ignoreVPaths) {
   if (filtered.length === 0 || rawVariants.length === 0) return [];
 
   const vIn = inClause('vpath', filtered);
-  const aIn = inClause('artist', rawVariants);
+  const variantList = rawVariants.map(String);
+  const placeholders = variantList.map(() => '?').join(',');
   return db.prepare(`
-    SELECT filepath, vpath, title, artist, album, track, trackOf, disk, year,
+    SELECT filepath, vpath, title, artist, album_artist, album, track, trackOf, disk, year,
            duration, aaFile, cover_file, genre, cuepoints
     FROM files
-    WHERE ${vIn.sql} AND ${aIn.sql}
+    WHERE ${vIn.sql} AND COALESCE(album_artist, artist) IN (${placeholders})
     ORDER BY filepath
-  `).all(...vIn.params, ...aIn.params);
+  `).all(...vIn.params, ...variantList);
 }
 
 // Saves bio + image info fetched from an external service.
@@ -1831,6 +1861,16 @@ export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepat
 // (giving only the albums with the most tracks), this query groups at the SQL
 // level so LIMIT 50 counts unique albums. This way "Cerrone" returns 50 Cerrone
 // albums instead of the same 3-5 albums that happen to have the most tracks.
+export function getAlbumVersionInventory() {
+  return _prepare(`
+    SELECT album_version_source, COUNT(*) AS cnt
+    FROM files
+    WHERE album_version_source IS NOT NULL
+    GROUP BY album_version_source
+    ORDER BY cnt DESC
+  `).all();
+}
+
 export function searchAlbumsByArtist(searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms = []) {
   const filtered = vpathFilter(vpaths, ignoreVPaths);
   if (filtered.length === 0) { return []; }
@@ -1844,7 +1884,7 @@ export function searchAlbumsByArtist(searchTerm, vpaths, ignoreVPaths, filepathP
   const params = [...vIn.params, ...ep.params, ftsQuery];
   // GROUP BY album at SQL level: LIMIT 50 counts distinct albums, not rows.
   // MAX(aaFile) / MAX(cover_file) picks a non-null art file from the group.
-  let sql = `SELECT f.album, MAX(f.aaFile) AS aaFile, MAX(f.cover_file) AS cover_file
+  let sql = `SELECT f.album, MAX(f.aaFile) AS aaFile, MAX(f.cover_file) AS cover_file, MAX(f.album_version) AS album_version
     FROM fts_files ft
     JOIN files f ON f.rowid = ft.rowid
     WHERE ${vIn.sql.replace(/\bvpath\b/g, 'f.vpath')}${ep.sql.replace(/\bvpath\b/g, 'f.vpath').replace(/\bfilepath\b/g, 'f.filepath')}
@@ -3306,6 +3346,12 @@ export function setAcoustidResult(filepath, vpath, { acoustid_id, mbid, score, s
 /** Reset any 'pending' rows back to NULL so they are retried on next worker start. */
 export function resetAcoustidPending() {
   db.prepare(`UPDATE files SET acoustid_status = NULL WHERE acoustid_status = 'pending'`).run();
+}
+
+/** Reset all 'error' rows back to NULL so they are retried immediately on the next worker pass. */
+export function resetAcoustidErrors() {
+  const info = db.prepare(`UPDATE files SET acoustid_status = NULL, acoustid_ts = NULL WHERE acoustid_status = 'error'`).run();
+  return info.changes;
 }
 
 /** Return aggregate fingerprinting statistics for the admin UI. */

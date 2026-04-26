@@ -1,5 +1,57 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.13.0-velvet — April 2026 — The Tagged Albums
+
+### feat: Album version / edition tag system — scanner, DB, admin UI, frontend
+- New DB columns `album_version TEXT`, `album_version_source TEXT`, `bit_depth INTEGER` on the `files` table (auto-migrated on startup via idempotent ALTER TABLE)
+- FTS5 table (`fts_files`) extended with `album_version` column — migrated by DROP+CREATE+rebuild when old schema lacks the column
+- Scanner (`src/db/scanner.mjs`) gains full album-version detection pipeline:
+  - `buildNativeMap()` — flattens TXXX, Vorbis, APE, iTunes custom atoms into per-format lookup maps
+  - `resolveTagField()` — resolves one configured field name across all formats (handles `TXXX:` prefix, `common.*` aliases, raw format maps)
+  - `parseVersionHeuristic()` — regex battery for edition/quality keywords with Levenshtein fuzzy fallback; gated on `HAS_BRACKET_OR_KEYWORD` confidence check
+  - `deriveAlbumVersion()` — orchestrator: tries configured fields in order, then heuristic on album title, then heuristic on folder name, then infers `Hi-Res Nbit/NkHz` from audio properties
+  - `bit_depth` (bitsPerSample from format info) added to scan data
+- Configurable tag field list — default order: `TIT3, SUBTITLE, DISCSUBTITLE, TXXX:EDITION, TXXX:VERSION, TXXX:ALBUMVERSION, TXXX:QUALITY, TXXX:REMASTER, TXXX:DESCRIPTION, EDITION, VERSION, ALBUMVERSION, QUALITY, REMASTER`
+- Admin UI card ("Album Version Tag Fields") in the DB Settings tab: add/remove/reorder fields, save to config, show per-source breakdown inventory
+- `GET /api/v1/admin/db/album-version-inventory` — groups files by `album_version_source` with count
+- `POST /api/v1/admin/db/params/album-version-tags` — updates the tag field list in config
+- `renderMetadataObj()` now includes `"album-version"` and `"bit-depth"` in every track API response
+- `album_version` flows through all album query functions: `getArtistAlbums`, `getArtistAlbumsMulti`, `getAlbums`, `searchAlbumsByArtist`, `byArtist` search, `searchByX`
+- `GET /api/v1/albums/browse` response albums now include `album_version` and `bit_depth`
+
+### feat: Album Library — version badges on 4 surfaces + Edition filter pills
+- **Frontend badges** (4 surfaces):
+  - Artist profile album grid — version badge next to year; sibling albums (same name, different versions) get `alb-sibling-group` outline highlight
+  - Albums Library browse grid — version badge on each card
+  - "Now Playing" pane album grid — same badge treatment
+  - Search results albums tab — version badge inline with album name
+  - Album songs view — version header badge injected at top of track list
+- **Edition filter pills** above the Album Library grid:
+  - Pills start off — no filtering active by default (opt-in, not opt-out)
+  - Clicking a pill filters to albums with that version; multiple pills = OR logic
+  - Series cards also filtered: hidden when no member album matches any selected version
+  - Filter state (active source filters + version pills) persists across Back navigation via module-level `_albActiveSources` / `_albActiveVersions`
+- **Series view** (`viewAlbumSeries`) fully upgraded:
+  - Density controls (List / Comfy / Compact) using shared `_densityKey` localStorage preference
+  - Version pills pre-selected from the library-level filter when entering a series
+  - Version badges on every album card inside the series
+
+### fix: AcoustID — short clips and fpcalc failures → not_found (not error)
+- Files with `duration < 7s` → `not_found` immediately (no fingerprint attempt)
+- `fpcalc` failures → `not_found` (permanent, no retry); only API/network errors remain as `error`
+- Admin UI: "No match" row now includes both `not_found` and `error` rows; separate "Error" row removed
+
+### fix: MusicBrainz enrichment — follow HTTP 301/302/307/308 redirects
+- `mbLookup(mbid, _redirects=0)`: on redirect, extracts new MBID from `Location` header, retries up to 3 hops
+- Fixes `MB HTTP 301` errors for recording MBIDs that MusicBrainz has merged into a canonical replacement
+
+### docs: New tags.md reference document
+- Full ID3v2 spec overview (TXXX frames, Vorbis/APE/iTunes equivalents)
+- Scanner pipeline internals, heuristic pattern table, admin config guide, tagging guides for foobar2000 / Mp3tag / MusicBrainz Picard / EAC / dBpoweramp
+- API endpoints documented; see `docs/tags.md`
+
+---
+
 ## v6.12.10-velvet — April 2026 — Search completeness & accuracy
 
 ### fix: Search — all result categories now return complete unfiltered counts

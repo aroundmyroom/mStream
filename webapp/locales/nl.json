@@ -1573,6 +1573,9 @@
   "player.albums.sortTitle": "Sorteervolgorde (klik om te wisselen)",
   "player.albums.densityComfy": "Normaal raster",
   "player.albums.densityCompact": "Compact raster",
+  "player.albums.densityList": "Lijstweergave",
+  "player.albums.filterVersionLabel": "Editie:",
+  "player.albums.filterVersionStandard": "Standaard",
   "player.home.shelfRadio": "Radiostations",
   "player.home.variousArtists": "Diverse Artiesten",
   "player.home.shelfPodcasts": "Podcasts",
@@ -2003,5 +2006,7 @@
   "player.pnow.noAlbums": "Geen albums gevonden in bibliotheek",
   "player.pnow.readMore": "Meer lezen",
   "player.pnow.readLess": "Minder lezen",
-  "player.pnow.listeners": "{{n}} luisteraars op Last.fm"
+  "player.pnow.listeners": "{{n}} luisteraars op Last.fm",
+  "admin.acoustid.btnRetryErrors": "{{count}} fouten opnieuw proberen",
+  "admin.acoustid.toastErrorsReset": "{{count}} fouten in de wachtrij voor nieuwe poging"
 }

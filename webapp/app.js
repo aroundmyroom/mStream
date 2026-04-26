@@ -2050,15 +2050,16 @@ function renderSongRowsWithPath(songs) {
 // On slow browsers (CleverTouch) each image triggers a network round-trip +
 // decode + layout reflow; 50 images in one innerHTML write stalls the CPU for
 // 10-30 s and stops music playback. Plain text rows render ~10x faster.
-function renderSearchRows(songs) {
+function renderSearchRows(songs, offset = 0) {
   return songs.map((s, i) => {
+    const ci = offset + i;
     const title  = s.title  || s.filepath?.split('/').pop() || 'Unknown';
     const artist = s.artist || '';
     const album  = s.album  ? ` · ${s.album}` : '';
     const pathDir = s.filepath ? s.filepath.split('/').slice(0, -1).join('\\') : '';
-    return `<div class="song-row search-row" data-ci="${i}">
+    return `<div class="song-row search-row" data-ci="${ci}">
       <div class="row-num">
-        <span class="num-val">${i + 1}</span>
+        <span class="num-val">${ci + 1}</span>
         <svg class="row-play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
       </div>
       <div class="song-info search-row-info">
@@ -2067,10 +2068,10 @@ function renderSearchRows(songs) {
         ${pathDir ? `<div class="song-path" title="${esc(s.filepath)}">📁 ${esc(pathDir)}</div>` : ''}
       </div>
       <div class="row-actions">
-        <button class="row-act-btn add-btn" data-ci="${i}" title="${t('player.ctrl.addToQueue')}">
+        <button class="row-act-btn add-btn" data-ci="${ci}" title="${t('player.ctrl.addToQueue')}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
-        <button class="row-act-btn ctx-btn" data-ci="${i}" title="${t('player.ctrl.moreOptions')}">
+        <button class="row-act-btn ctx-btn" data-ci="${ci}" title="${t('player.ctrl.moreOptions')}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
         </button>
       </div>
@@ -5858,14 +5859,18 @@ async function viewArtistProfile(artistKey, displayName, variants, backFn) {
   const albumsTitle = document.getElementById('artpro-albums-title');
   const albums = albumsRes.status === 'fulfilled' ? (albumsRes.value?.albums || []) : [];
   if (albums.length && albumsEl) {
-    albumsEl.innerHTML = albums.map(alb => {
+    albumsEl.innerHTML = albums.map((alb, i) => {
       const albArtU = artUrl(alb.album_art_file, 's');
       const albArtHtml = albArtU
         ? `<img src="${albArtU}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`
         : noArtHtml();
-      return `<div class="album-card" data-alb-idx="${albums.indexOf(alb)}">
+      const prevName = i > 0 ? albums[i-1].name : null;
+      const nextName = i < albums.length-1 ? albums[i+1].name : null;
+      const isSibling = alb.name === prevName || alb.name === nextName;
+      const verBadge = alb.album_version ? `<span class="alb-version-badge" title="${esc(alb.album_version)}">${esc(alb.album_version)}</span>` : '';
+      return `<div class="album-card${isSibling ? ' alb-sibling-group' : ''}" data-alb-idx="${i}">
         <div class="album-art">${albArtHtml}<div class="play-ov"><svg width="24" height="24" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div>
-        <div class="album-meta"><div class="album-name">${esc(alb.name || '—')}</div>${alb.year ? `<div class="album-year">${alb.year}</div>` : ''}</div>
+        <div class="album-meta"><div class="album-name">${esc(alb.name || '—')}</div>${alb.year ? `<div class="album-year">${alb.year}${verBadge}</div>` : verBadge ? `<div class="album-year">${verBadge}</div>` : ''}</div>
       </div>`;
     }).join('');
     albumsEl.querySelectorAll('.album-card').forEach((card, i) => {
@@ -5939,6 +5944,10 @@ async function viewArtistProfile(artistKey, displayName, variants, backFn) {
 let _albLib      = null;   // { albums: [], series: [], byId: {}, bySeriesId: {} }
 let _albArtBust  = '';     // bumped after art save to force browser cache refresh
 let _pendingCueSeek = null; // seconds to seek to at start of next playAt (for CUE track rows)
+
+// Persistent filter state — survives navigation to detail views and back
+let _albActiveSources  = null;  // Set<string> | null (null = not yet initialized)
+let _albActiveVersions = null;  // Set<string> | null (null = not yet initialized)
 
 function _albArtUrl(artFile, aaFile) {
   if (aaFile) return artUrl(aaFile, 'l');
@@ -6018,7 +6027,25 @@ async function viewAlbumLibrary() {
       ...series.map(s => s.sourceVpath),
     ].filter(Boolean))].sort();
     const showSourcePills = sourcesInData.length >= 2;
-    const activeSources = new Set(sourcesInData);
+    // Restore previous selection if returning from a detail view; otherwise default to all-on
+    if (_albActiveSources === null) _albActiveSources = new Set(sourcesInData);
+    const activeSources = _albActiveSources;
+
+    // Collect distinct album_version values from ALL albums.
+    const versionValues = [...new Set(albums.map(a => a.album_version).filter(Boolean))].sort();
+    const showVersionPills = versionValues.length >= 1;
+    // Restore previous version filter; default to empty (no filter)
+    if (_albActiveVersions === null) _albActiveVersions = new Set();
+    const activeVersions = _albActiveVersions;
+
+    // Build a lookup: seriesId → Set of album_version values present in its members.
+    // Used to decide whether a series card should show when a version filter is active.
+    const _seriesVersions = new Map();
+    albums.forEach(a => {
+      if (!a.seriesId || !a.album_version) return;
+      if (!_seriesVersions.has(a.seriesId)) _seriesVersions.set(a.seriesId, new Set());
+      _seriesVersions.get(a.seriesId).add(a.album_version);
+    });
 
     // View preferences — sort order and density — persisted in localStorage
     const _sortKey    = 'ms2_alb_sort_'    + S.username;
@@ -6037,9 +6064,11 @@ async function viewAlbumLibrary() {
           <button id="allib-sort" class="allib-density-btn allib-sort-btn" title="${t('player.albums.sortTitle')}"></button>
           <button class="allib-density-btn" data-density="comfy" title="${t('player.albums.densityComfy')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="6" height="6" rx="1"/><rect x="8" y="0" width="6" height="6" rx="1"/><rect x="0" y="8" width="6" height="6" rx="1"/><rect x="8" y="8" width="6" height="6" rx="1"/></svg></button>
           <button class="allib-density-btn" data-density="compact" title="${t('player.albums.densityCompact')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="4" height="4" rx=".5"/><rect x="5" y="0" width="4" height="4" rx=".5"/><rect x="10" y="0" width="4" height="4" rx=".5"/><rect x="0" y="5" width="4" height="4" rx=".5"/><rect x="5" y="5" width="4" height="4" rx=".5"/><rect x="10" y="5" width="4" height="4" rx=".5"/><rect x="0" y="10" width="4" height="4" rx=".5"/><rect x="5" y="10" width="4" height="4" rx=".5"/><rect x="10" y="10" width="4" height="4" rx=".5"/></svg></button>
+          <button class="allib-density-btn" data-density="list" title="${t('player.albums.densityList')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="1" width="14" height="2" rx="1"/><rect x="0" y="6" width="14" height="2" rx="1"/><rect x="0" y="11" width="14" height="2" rx="1"/></svg></button>
         </div>
       </div>
-      ${showSourcePills ? `<div class="search-vpath-pills" id="allib-source-pills">${sourcesInData.map(v => `<button class="dj-vpath-pill on" data-alb-source="${esc(v)}">${esc(v)}</button>`).join('')}</div>` : ''}
+      ${showSourcePills ? `<div class="search-vpath-pills" id="allib-source-pills">${sourcesInData.map(v => `<button class="dj-vpath-pill${activeSources.has(v) ? ' on' : ''}" data-alb-source="${esc(v)}">${esc(v)}</button>`).join('')}</div>` : ''}
+      ${showVersionPills ? `<div class="allib-ver-pills" id="allib-version-pills"><span class="allib-ver-label">${t('player.albums.filterVersionLabel')}</span>${versionValues.map(v => `<button class="allib-ver-pill" data-alb-ver="${esc(v)}">${esc(v)}</button>`).join('')}</div>` : ''}
       <div id="allib-grid" class="album-grid"></div>`;
 
     const filterInput = body.querySelector('#allib-filter');
@@ -6067,24 +6096,27 @@ async function viewAlbumLibrary() {
     // Build card HTML for a standalone album
     function albumCard(a) {
       const art = _albArtUrl(a.artFile, a.aaFile);
-      const totalTracks = (a.discs || []).reduce((n, d) => n + d.tracks.length, 0);
-      const multiDisc   = (a.discs || []).length > 1;
+      const multiDisc   = (a.discCount || (a.discs || []).length) > 1;
+      const discCnt     = a.discCount || (a.discs || []).length;
+      const verBadge    = a.album_version ? `<span class="alb-version-badge" title="${esc(a.album_version)}">${esc(a.album_version)}</span>` : '';
       return `<div class="album-card" data-album-id="${esc(a.id)}">
         <div class="album-art" style="position:relative;">
           ${art ? `<img src="${esc(art)}" alt="${esc(a.displayName)}" loading="lazy" onerror="this.style.display='none'">` : noArtHtml()}
-          <div class="alb-badges">${multiDisc ? `<span class="alb-badge alb-badge--disc">${a.discs.length} discs</span>` : ''}</div>
+          <div class="alb-badges">${multiDisc ? `<span class="alb-badge alb-badge--disc">${discCnt} discs</span>` : ''}</div>
           <div class="play-ov"><svg width="30" height="30" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div>
         </div>
         <div class="album-meta">
           <div class="album-name">${esc(a.displayName)}</div>
-          <div class="album-year">${a.year || '&nbsp;'}</div>
+          ${a.year ? `<div class="album-year">${a.year}${verBadge}</div>` : verBadge ? `<div class="album-year">${verBadge}</div>` : '<div class="album-year">&nbsp;</div>'}
         </div>
       </div>`;
     }
 
     function render(filter) {
       // Apply density class to grid
-      grid.className = 'album-grid' + (curDensity === 'compact' ? ' album-grid--compact' : '');
+      grid.className = 'album-grid' +
+        (curDensity === 'compact' ? ' album-grid--compact' :
+         curDensity === 'list'    ? ' album-grid--list'    : '');
       // Build unified list of all items (series + standalone) so sorting affects everything
       const allItems = [
         ...series.map(s => ({ type: 'ser', item: s, name: s.displayName, year: _seriesYear.get(s.id) || 0 })),
@@ -6107,10 +6139,18 @@ async function viewAlbumLibrary() {
         if (showSourcePills && !activeSources.has(item.sourceVpath)) continue;
         if (type === 'ser') {
           if (lc && !item.displayName.toLowerCase().includes(lc)) continue;
+          // Version filter: only show series if at least one member has a matching version
+          if (activeVersions.size > 0) {
+            const sv = _seriesVersions.get(item.id);
+            if (!sv || ![...activeVersions].some(v => sv.has(v))) continue;
+          }
           html += seriesCard(item);
           count++;
         } else {
           if (lc && !item.displayName.toLowerCase().includes(lc) && !(item.artist || '').toLowerCase().includes(lc)) continue;
+          // Version filter: when any pill is active, show only albums matching one of the
+          // selected versions. With no pills active (activeVersions empty) all albums show.
+          if (activeVersions.size > 0 && !activeVersions.has(item.album_version)) continue;
           html += albumCard(item);
           count++;
         }
@@ -6172,48 +6212,120 @@ async function viewAlbumLibrary() {
       });
     }
 
+    // Version filter pills — opt-in: clicking a pill activates that filter;
+    // with nothing selected all albums are shown.
+    if (showVersionPills) {
+      document.getElementById('allib-version-pills').addEventListener('click', e => {
+        const pill = e.target.closest('[data-alb-ver]');
+        if (!pill) return;
+        const v = pill.dataset.albVer;
+        if (activeVersions.has(v)) activeVersions.delete(v);
+        else activeVersions.add(v);
+        pill.classList.toggle('on', activeVersions.has(v));
+        render(filterInput.value);
+      });
+    }
+
     // Click: series → drill-down; album → detail
     grid.addEventListener('click', e => {
       const seriesCard = e.target.closest('[data-series-id]');
       const albumCard  = e.target.closest('[data-album-id]');
-      if (seriesCard) viewAlbumSeries(seriesCard.dataset.seriesId);
+      if (seriesCard) viewAlbumSeries(seriesCard.dataset.seriesId, new Set(activeVersions));
       else if (albumCard) viewAlbumDetail(albumCard.dataset.albumId, 0);
     });
 
   } catch(e) { setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
-async function viewAlbumSeries(seriesId) {
+async function viewAlbumSeries(seriesId, inheritedVersions = new Set()) {
   setTitle('…'); setBack(viewAlbumLibrary); setNavActive('album-library'); S.view = 'album-library';
   setBody('<div class="loading-state"></div>');
   try {
     await _loadAlbLib();
-    const series   = _albLib.series.find(s => s.id === seriesId);
+    const series = _albLib.series.find(s => s.id === seriesId);
     if (!series) { setBody('<div class="empty-state">Series not found</div>'); return; }
-    const albums   = (_albLib.bySeriesId[seriesId] || [])
+    const allAlbums = (_albLib.bySeriesId[seriesId] || [])
       .slice().sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }));
 
     setTitle(series.displayName);
 
+    // Collect version values present in this series' albums
+    const seriesVersionValues = [...new Set(allAlbums.map(a => a.album_version).filter(Boolean))].sort();
+    const showVersionPills    = seriesVersionValues.length >= 1;
+    // Pre-select any versions that were active in the library view (and exist in this series)
+    const activeVersions = new Set([...inheritedVersions].filter(v => seriesVersionValues.includes(v)));
+
+    const _densityKey = 'ms2_alb_density_' + S.username;
+    let curDensity = localStorage.getItem(_densityKey) || 'comfy';
+
     const body = document.getElementById('content-body');
-    body.innerHTML = `<div id="allib-grid" class="album-grid"></div>`;
+    body.innerHTML = `
+      <div class="fe-filter-row" style="justify-content:flex-end;">
+        <div class="allib-view-controls">
+          <button class="allib-density-btn" data-density="comfy"  title="${t('player.albums.densityComfy')}" ><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="6" height="6" rx="1"/><rect x="8" y="0" width="6" height="6" rx="1"/><rect x="0" y="8" width="6" height="6" rx="1"/><rect x="8" y="8" width="6" height="6" rx="1"/></svg></button>
+          <button class="allib-density-btn" data-density="compact" title="${t('player.albums.densityCompact')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="4" height="4" rx=".5"/><rect x="5" y="0" width="4" height="4" rx=".5"/><rect x="10" y="0" width="4" height="4" rx=".5"/><rect x="0" y="5" width="4" height="4" rx=".5"/><rect x="5" y="5" width="4" height="4" rx=".5"/><rect x="10" y="5" width="4" height="4" rx=".5"/><rect x="0" y="10" width="4" height="4" rx=".5"/><rect x="5" y="10" width="4" height="4" rx=".5"/><rect x="10" y="10" width="4" height="4" rx=".5"/></svg></button>
+          <button class="allib-density-btn" data-density="list"    title="${t('player.albums.densityList')}"   ><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="1" width="14" height="2" rx="1"/><rect x="0" y="6" width="14" height="2" rx="1"/><rect x="0" y="11" width="14" height="2" rx="1"/></svg></button>
+        </div>
+      </div>
+      ${showVersionPills ? `<div class="allib-ver-pills" id="allib-version-pills"><span class="allib-ver-label">${t('player.albums.filterVersionLabel')}</span>${seriesVersionValues.map(v => `<button class="allib-ver-pill${activeVersions.has(v) ? ' on' : ''}" data-alb-ver="${esc(v)}">${esc(v)}</button>`).join('')}</div>` : ''}
+      <div id="allib-grid" class="album-grid"></div>`;
+
     const grid = body.querySelector('#allib-grid');
 
-    grid.innerHTML = albums.map(a => {
+    function seriesAlbumCard(a) {
       const art = _albArtUrl(a.artFile, a.aaFile);
-      const multiDisc = (a.discs || []).length > 1;
+      const multiDisc = (a.discCount || (a.discs || []).length) > 1;
+      const discCnt   = a.discCount || (a.discs || []).length;
+      const verBadge  = a.album_version ? `<span class="alb-version-badge" title="${esc(a.album_version)}">${esc(a.album_version)}</span>` : '';
       return `<div class="album-card" data-album-id="${esc(a.id)}">
         <div class="album-art" style="position:relative;">
           ${art ? `<img src="${esc(art)}" alt="${esc(a.displayName)}" loading="lazy" onerror="this.style.display='none'">` : noArtHtml()}
-          <div class="alb-badges">${multiDisc ? `<span class="alb-badge alb-badge--disc">${a.discs.length} discs</span>` : ''}</div>
+          <div class="alb-badges">${multiDisc ? `<span class="alb-badge alb-badge--disc">${discCnt} discs</span>` : ''}</div>
           <div class="play-ov"><svg width="30" height="30" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div>
         </div>
         <div class="album-meta">
           <div class="album-name">${esc(a.displayName)}</div>
-          <div class="album-year">${a.year || '&nbsp;'}</div>
+          ${a.year ? `<div class="album-year">${a.year}${verBadge}</div>` : verBadge ? `<div class="album-year">${verBadge}</div>` : '<div class="album-year">&nbsp;</div>'}
         </div>
       </div>`;
-    }).join('') || '<div class="empty-state">No albums in series</div>';
+    }
+
+    function render() {
+      grid.className = 'album-grid' +
+        (curDensity === 'compact' ? ' album-grid--compact' :
+         curDensity === 'list'    ? ' album-grid--list'    : '');
+      let html = '';
+      for (const a of allAlbums) {
+        if (activeVersions.size > 0 && !activeVersions.has(a.album_version)) continue;
+        html += seriesAlbumCard(a);
+      }
+      grid.innerHTML = html || '<div class="empty-state">No albums found</div>';
+    }
+
+    render();
+
+    // Density buttons
+    body.querySelectorAll('.allib-density-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.density === curDensity);
+      btn.addEventListener('click', () => {
+        curDensity = btn.dataset.density;
+        localStorage.setItem(_densityKey, curDensity);
+        body.querySelectorAll('.allib-density-btn').forEach(b => b.classList.toggle('active', b === btn));
+        render();
+      });
+    });
+
+    // Version pills
+    if (showVersionPills) {
+      document.getElementById('allib-version-pills').addEventListener('click', e => {
+        const pill = e.target.closest('[data-alb-ver]');
+        if (!pill) return;
+        const v = pill.dataset.albVer;
+        if (activeVersions.has(v)) activeVersions.delete(v); else activeVersions.add(v);
+        pill.classList.toggle('on', activeVersions.has(v));
+        render();
+      });
+    }
 
     grid.addEventListener('click', e => {
       const card = e.target.closest('[data-album-id]');
@@ -6388,7 +6500,8 @@ async function _albSetArt(opts) {
     }
     // Invalidate full library cache so the grid reloads fresh art on next open
     _albLib = null;
-    // Update the displayed art image in the detail header (live update)
+    _albActiveSources  = null;  // reset filters when library data is refreshed
+    _albActiveVersions = null;
     const newUrl = `/api/v1/albums/art-file?p=${encodeURIComponent(result.artFile)}&token=${S.token}&_v=${Date.now()}`;
     const artEl  = document.querySelector('.alb-detail-art');
     if (artEl) {
@@ -6419,8 +6532,16 @@ async function viewAlbumDetail(albumId, activeDiscIdx) {
   setBody('<div class="loading-state"></div>');
   try {
     await _loadAlbLib();
-    const album = _albLib.byId[albumId];
-    if (!album) { setBody('<div class="empty-state">Album not found</div>'); return; }
+    const albumSlim = _albLib.byId[albumId];
+    if (!albumSlim) { setBody('<div class="empty-state">Album not found</div>'); return; }
+
+    // Fetch full album (with discs + tracks) lazily on first click — browse response is slim
+    let album = albumSlim;
+    if (!albumSlim.discs) {
+      const full = await api('GET', `api/v1/albums/detail?id=${encodeURIComponent(albumId)}`);
+      if (!full || !full.discs) { setBody('<div class="empty-state">Album detail not found</div>'); return; }
+      album = Object.assign(albumSlim, full);   // merge into cached entry for next time
+    }
 
     _albDetailAlbum = album;
     setTitle(album.displayName);
@@ -6793,6 +6914,7 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants, _parentRestoreFn
     const a    = albumsClean[item.idx];
     const name = a.cleanName;
     const art  = artUrl(a.album_art_file, 'l');
+    const verBadge = a.album_version ? `<span class="alb-version-badge" title="${esc(a.album_version)}">${esc(a.album_version)}</span>` : '';
     return `<div class="album-card" data-i="${item.idx}">
       <div class="album-art">
         ${art
@@ -6802,7 +6924,7 @@ function renderAlbumGrid(albums, defaultArtist, artistVariants, _parentRestoreFn
       </div>
       <div class="album-meta">
         <div class="album-name">${esc(name)}</div>
-        ${a.year ? `<div class="album-year">${a.year}</div>` : '<div class="album-year">&nbsp;</div>'}
+        ${a.year ? `<div class="album-year">${a.year}${verBadge}</div>` : verBadge ? `<div class="album-year">${verBadge}</div>` : '<div class="album-year">&nbsp;</div>'}
       </div>
     </div>`;
   }
@@ -7008,6 +7130,17 @@ async function viewAlbumSongs(albumName, artist, backFn, opts = {}) {
     }
     const d = await api('POST', 'api/v1/db/album-songs', body, sig);
     showSongs(d.map(norm), null, albumName || 'album');
+    // Inject album version badge at top of track list if present
+    const ver = d.find(s => s.metadata?.['album-version'])?.metadata?.['album-version'];
+    if (ver) {
+      const bodyEl = document.getElementById('content-body');
+      if (bodyEl) {
+        const badge = document.createElement('div');
+        badge.className = 'alb-version-header-badge';
+        badge.textContent = ver;
+        bodyEl.insertBefore(badge, bodyEl.firstChild);
+      }
+    }
   } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
@@ -7157,11 +7290,12 @@ async function doSearch(q) {
       html += `<div class="search-section" data-section="albums"><h3>${t('player.search.sectionAlbums', { count: d.albums.length })}</h3><div class="artist-list">${
         d.albums.map(a => {
           const au = artUrl(a.album_art_file, 's');
+          const verBadge = a.album_version ? `<span class="alb-version-badge" title="${esc(a.album_version)}">${esc(a.album_version)}</span>` : '';
           return `<div class="artist-row" data-album="${esc(a.name)}">
             <div class="artist-av" style="border-radius:6px;overflow:hidden">
               ${au ? `<img src="${au}" style="width:38px;height:38px;object-fit:cover" loading="lazy" onerror="this.parentNode.innerHTML='♪'">` : '♪'}
             </div>
-            <div class="artist-name">${esc(a.name)}</div>
+            <div class="artist-name">${esc(a.name)}${verBadge}</div>
           </div>`;
         }).join('')
       }</div></div>`;
@@ -7187,19 +7321,13 @@ async function doSearch(q) {
         'album-art': f.album_art_file || null,
       }));
     const allSongs = [...titleSongs, ...fileSongs];
-    // Cap at 50 songs — rendering 500+ rows at once causes OOM on CleverTouch.
-    // If there are more, we show a hint to refine the search.
-    const displaySongs = allSongs.slice(0, 50);
-    const overflow = allSongs.length - displaySongs.length;
-    if (displaySongs.length) {
+    const SEARCH_BATCH = 50;
+    const firstBatch = allSongs.slice(0, SEARCH_BATCH);
+    if (firstBatch.length) {
       _tabs.push({ key: 'tracks', label: t('player.search.tabTracks'), count: allSongs.length });
-      const overflowNote = overflow > 0
-        ? `<div class="search-overflow-note">${t('player.search.overflow', { total: allSongs.length })}</div>`
-        : '';
-      // Text-only rows for search: no album-art <img> tags.
-      // On CleverTouch, each img triggers a network fetch + decode + layout
-      // reflow. 50 images saturates the CPU and stalls music playback.
-      html += `<div class="search-section" data-section="tracks"><h3>${t('player.search.sectionSongs', { count: allSongs.length })}</h3><div class="song-list">${renderSearchRows(displaySongs)}</div>${overflowNote}</div>`;
+      // Text-only rows: no album-art <img> tags — lightweight for CleverTouch.
+      // Remaining rows beyond the first batch load lazily as the user scrolls.
+      html += `<div class="search-section" data-section="tracks"><h3>${t('player.search.sectionSongs', { count: allSongs.length })}</h3><div class="song-list search-lazy-list">${renderSearchRows(firstBatch)}</div></div>`;
     }
     if (!html) html = `<div class="empty-state">${t('player.search.noResults', { query: esc(q) })}</div>`;
 
@@ -7251,8 +7379,34 @@ async function doSearch(q) {
       viewFiles(r.dataset.browsePath, false);
     }));
     res.querySelectorAll('.artist-row[data-album]').forEach(r => r.addEventListener('click', () => viewAlbumSongs(r.dataset.album, null, () => viewSearch(), { skipAOFilter: true })));
-    attachSongListEvents(res, displaySongs);
-    S.curSongs = displaySongs;
+    attachSongListEvents(res, allSongs);
+    S.curSongs = allSongs;
+
+    // Lazy-load remaining tracks as the user scrolls into the sentinel.
+    if (allSongs.length > SEARCH_BATCH) {
+      const lazyList = res.querySelector('.search-lazy-list');
+      if (lazyList) {
+        let loadedCount = SEARCH_BATCH;
+        const sentinel = document.createElement('div');
+        sentinel.className = 'search-track-sentinel';
+        lazyList.appendChild(sentinel);
+        const observer = new IntersectionObserver(entries => {
+          if (!entries[0].isIntersecting) return;
+          if (!sentinel.isConnected) return; // search view changed — stale observer
+          observer.unobserve(sentinel);
+          const batch = allSongs.slice(loadedCount, loadedCount + SEARCH_BATCH);
+          if (!batch.length) { sentinel.remove(); return; }
+          const tmp = document.createElement('div');
+          tmp.innerHTML = renderSearchRows(batch, loadedCount);
+          attachSongListEvents(tmp, allSongs);
+          tmp.querySelectorAll('.song-row').forEach(row => lazyList.insertBefore(row, sentinel));
+          loadedCount += batch.length;
+          if (loadedCount >= allSongs.length) { sentinel.remove(); return; }
+          observer.observe(sentinel);
+        }, { rootMargin: '300px' });
+        observer.observe(sentinel);
+      }
+    }
   } catch(e) {
     if (e.name === 'AbortError' || gen !== _searchGen) return; // cancelled — ignore silently
     res.innerHTML = `<div class="empty-state">${t('player.search.failed', { error: esc(e.message) })}</div>`;
@@ -7482,14 +7636,18 @@ async function _pnowLoadArtistData(artist, forFp) {
       if (_pnowSongFp !== forFp) return;
       const albums = d.albums || [];
       if (albums.length && albumsEl) {
-        albumsEl.innerHTML = albums.map(alb => {
+        albumsEl.innerHTML = albums.map((alb, i) => {
           const albArtU = artUrl(alb.album_art_file, 's');
           const albArtHtml = albArtU
             ? `<img src="${albArtU}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`
             : noArtHtml();
-          return `<div class="album-card" data-alb-artist="${esc(alb.artist||artist)}" data-alb-name="${esc(alb.name||'')}">
+          const prevName = i > 0 ? albums[i-1].name : null;
+          const nextName = i < albums.length-1 ? albums[i+1].name : null;
+          const isSibling = alb.name === prevName || alb.name === nextName;
+          const verBadge = alb.album_version ? `<span class="alb-version-badge" title="${esc(alb.album_version)}">${esc(alb.album_version)}</span>` : '';
+          return `<div class="album-card${isSibling ? ' alb-sibling-group' : ''}" data-alb-artist="${esc(alb.artist||artist)}" data-alb-name="${esc(alb.name||'')}">
             <div class="album-art">${albArtHtml}<div class="play-ov"><svg width="24" height="24" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div>
-            <div class="album-meta"><div class="album-name">${esc(alb.name || '—')}</div>${alb.year ? `<div class="album-year">${alb.year}</div>` : ''}</div>
+            <div class="album-meta"><div class="album-name">${esc(alb.name || '—')}</div>${alb.year ? `<div class="album-year">${alb.year}${verBadge}</div>` : verBadge ? `<div class="album-year">${verBadge}</div>` : ''}</div>
           </div>`;
         }).join('');
         // Click album card → open that specific album's songs

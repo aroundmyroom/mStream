@@ -61,7 +61,9 @@ function renderMetadataObj(row) {
       "duration": row.duration != null ? row.duration : null,
       "bitrate": row.bitrate != null ? row.bitrate : null,
       "sample-rate": row.sample_rate != null ? row.sample_rate : null,
-      "channels": row.channels != null ? row.channels : null
+      "channels": row.channels != null ? row.channels : null,
+      "bit-depth": row.bit_depth != null ? row.bit_depth : null,
+      "album-version": row.album_version || null
     }
   };
 }
@@ -254,6 +256,7 @@ export function setup(mstream) {
           albums.push({
             name: a.album,
             album_art_file: a.aaFile || null,
+            album_version: a.album_version || null,
             filepath: false
           });
         }
@@ -309,6 +312,7 @@ export function setup(mstream) {
         returnThis.push({
           name: name,
           album_art_file: row.aaFile ? row.aaFile : null,
+          album_version: (searchCol === 'album') ? (row.album_version || null) : null,
           filepath
         });
         store[row[resCol]] = true;

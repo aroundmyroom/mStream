@@ -238,6 +238,23 @@ export function setup(mstream) {
     res.json({});
   });
 
+  mstream.post("/api/v1/admin/db/params/album-version-tags", async (req, res) => {
+    const schema = Joi.object({
+      tags: Joi.array()
+        .items(Joi.string().max(60).pattern(/^[\w:.\-\s]+$/))
+        .max(20)
+        .required()
+    });
+    const input = joiValidate(schema, req.body);
+    await admin.editAlbumVersionTags(input.tags);
+    res.json({});
+  });
+
+  mstream.get("/api/v1/admin/db/album-version-inventory", (req, res) => {
+    const rows = db.getAlbumVersionInventory();
+    res.json(rows);
+  });
+
   mstream.get("/api/v1/admin/users", (req, res) => {
     // Scrub passwords and salts before sending to frontend
     const memClone = JSON.parse(JSON.stringify(config.program.users));
