@@ -5531,10 +5531,10 @@ async function viewArtists() {
     // ── artist card helper (HOME-shelf style) ──────────────────────────────
     function artistCard(a) {
       if (!a.canonicalName) return '';
-      const placeholder = `<div class="artist-home-ph" aria-hidden="true"><div class="artist-home-ph-head"></div><div class="artist-home-ph-body"></div></div>`;
+      const fallbackSrc = 'api/v1/artists/placeholder';
       const artInner = a.imageFile
-        ? `${placeholder}<img class="artist-home-img" src="api/v1/artists/images/${encodeURIComponent(a.imageFile)}" alt="" loading="lazy" onerror="this.onerror=null;this.remove()">`
-        : placeholder;
+        ? `<img class="artist-home-img" src="api/v1/artists/images/${encodeURIComponent(a.imageFile)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${fallbackSrc}'">`
+        : `<img class="artist-home-img" src="${fallbackSrc}" alt="">`;
       const sub = Number.isFinite(a.playCount) && a.playCount > 0
         ? `${a.playCount} play${a.playCount !== 1 ? 's' : ''}`
         : (a.songCount ? `${a.songCount} song${a.songCount !== 1 ? 's' : ''}` : '');
@@ -5685,12 +5685,11 @@ async function viewArtists() {
       return artists.filter(a => a.canonicalName).map(a => {
         const av = a.canonicalName.replace(/^The\s+/i, '').charAt(0).toUpperCase() || '?';
         const sub = a.songCount ? `${a.songCount} song${a.songCount !== 1 ? 's' : ''}` : '';
-        const imgUrl = a.imageFile ? `/api/v1/artists/images/${encodeURIComponent(a.imageFile)}` : '';
+        const imgSrc = a.imageFile
+          ? `/api/v1/artists/images/${encodeURIComponent(a.imageFile)}`
+          : 'api/v1/artists/placeholder';
         return `<div class="artist-row" data-akey="${esc(a.artistKey)}" data-aname="${esc(a.canonicalName)}">
-          <div class="artist-av">${imgUrl
-            ? `<img class="artist-av-img" src="${esc(imgUrl)}" alt="${esc(a.canonicalName)}" loading="lazy" onerror="this.remove()">`
-            : ''
-          }<span class="artist-av-fallback">${esc(av)}</span></div>
+          <div class="artist-av"><img class="artist-av-img" src="${esc(imgSrc)}" alt="${esc(a.canonicalName)}" loading="lazy" onerror="this.onerror=null;this.src='api/v1/artists/placeholder'"><span class="artist-av-fallback">${esc(av)}</span></div>
           <div class="artist-col">
             <div class="artist-name">${esc(a.canonicalName)}</div>
             ${sub ? `<div class="artist-sub">${sub}</div>` : ''}
@@ -5869,7 +5868,7 @@ async function viewArtistProfile(artistKey, displayName, variants, backFn) {
   const body = document.getElementById('content-body');
   body.innerHTML = `<div class="artpro-view pnow-view pnow-fading">
     <div class="artpro-header">
-      <div class="artpro-img-wrap" id="artpro-img-wrap"><div class="artpro-img-ph"></div></div>
+      <div class="artpro-img-wrap" id="artpro-img-wrap"><img class="artpro-img" src="api/v1/artists/placeholder" alt=""></div>
       <div class="artpro-info">
         <div class="artpro-name">${esc(displayName)}</div>
         <div class="pnow-bio" id="artpro-bio"></div>
@@ -5903,8 +5902,11 @@ async function viewArtistProfile(artistKey, displayName, variants, backFn) {
 
   // ── Artist image ────────────────────────────────────────────────────────
   const wrap = document.getElementById('artpro-img-wrap');
-  if (wrap && profile?.imageFile) {
-    wrap.innerHTML = `<img class="artpro-img" src="api/v1/artists/images/${encodeURIComponent(profile.imageFile)}" alt="${esc(displayName)}" loading="lazy" onerror="this.parentNode.innerHTML=''">`;
+  if (wrap) {
+    const imgSrc = profile?.imageFile
+      ? `api/v1/artists/images/${encodeURIComponent(profile.imageFile)}`
+      : 'api/v1/artists/placeholder';
+    wrap.innerHTML = `<img class="artpro-img" src="${imgSrc}" alt="${esc(displayName)}" loading="lazy" onerror="this.onerror=null;this.src='api/v1/artists/placeholder'">`;
   }
 
   // ── Bio helper ──────────────────────────────────────────────────────────
@@ -7687,12 +7689,14 @@ async function _pnowLoadArtistData(artist, forFp) {
 
   // ── 0. Artist image from local cache (TheAudioDB/Discogs/Last.fm, stored server-side) ─
   if (artist) {
+    const wrap = document.getElementById('pnow-artist-img-wrap');
+    if (wrap) wrap.innerHTML = `<img class="pnow-tadb-img" src="api/v1/artists/placeholder" alt="" loading="lazy">`;
     api('GET', `api/v1/artists/image?artist=${encodeURIComponent(artist)}`)
       .then(d => {
         if (_pnowSongFp !== forFp) return;
-        const wrap = document.getElementById('pnow-artist-img-wrap');
-        if (d?.imageFile && wrap) {
-          wrap.innerHTML = `<img class="pnow-tadb-img" src="api/v1/artists/images/${encodeURIComponent(d.imageFile)}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=''">`;
+        const wrap2 = document.getElementById('pnow-artist-img-wrap');
+        if (wrap2) {
+          wrap2.innerHTML = `<img class="pnow-tadb-img" src="${d?.imageFile ? `api/v1/artists/images/${encodeURIComponent(d.imageFile)}` : 'api/v1/artists/placeholder'}" alt="" loading="lazy" onerror="this.onerror=null;this.src='api/v1/artists/placeholder'">`;
         }
       })
       .catch(() => {});

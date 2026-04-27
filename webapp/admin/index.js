@@ -6162,11 +6162,15 @@ const artistsAdminView = Vue.component('artists-admin-view', {
       seedPending: false,
       seedTadbPending: false,
       pollTimer: null,
+      placeholderHasCustom: false,
+      placeholderPreviewKey: Date.now(),
+      placeholderUploading: false,
     };
   },
   mounted() {
     this.load('missing');
     this.startPolling();
+    this.checkPlaceholder();
   },
   beforeDestroy() {
     this.stopPolling();
@@ -6347,7 +6351,46 @@ const artistsAdminView = Vue.component('artists-admin-view', {
     },
     imgSrc(imageFile) {
       return `${API.url()}/api/v1/artists/images/${encodeURIComponent(imageFile)}`;
-    }
+    },
+    async checkPlaceholder() {
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/artists/placeholder-info` });
+        this.placeholderHasCustom = !!(res.data && res.data.hasCustom);
+      } catch (_e) {
+        this.placeholderHasCustom = false;
+      }
+    },
+    placeholderSrc() {
+      return `${API.url()}/api/v1/artists/placeholder?t=${this.placeholderPreviewKey}`;
+    },
+    async uploadPlaceholder(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      this.placeholderUploading = true;
+      try {
+        const formData = new FormData();
+        formData.append('image', file);
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/artists/placeholder`, data: formData });
+        this.placeholderHasCustom = true;
+        this.placeholderPreviewKey = Date.now();
+        iziToast.success({ title: this.t('admin.artists.placeholderUploaded'), position: 'topCenter', timeout: 2000 });
+      } catch (e) {
+        iziToast.error({ title: this.t('admin.artists.placeholderUploadFailed'), message: e.message || '', position: 'topCenter', timeout: 3000 });
+      } finally {
+        this.placeholderUploading = false;
+        event.target.value = '';
+      }
+    },
+    async resetPlaceholder() {
+      try {
+        await API.axios({ method: 'DELETE', url: `${API.url()}/api/v1/admin/artists/placeholder` });
+        this.placeholderHasCustom = false;
+        this.placeholderPreviewKey = Date.now();
+        iziToast.success({ title: this.t('admin.artists.placeholderReset'), position: 'topCenter', timeout: 2000 });
+      } catch (e) {
+        iziToast.error({ title: e.message || 'Failed', position: 'topCenter', timeout: 3000 });
+      }
+    },
   },
   template: `
   <div>
@@ -6383,6 +6426,25 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         <span>{{ t('admin.artists.noImageHint', { count: counts.noImage || 0 }) }}</span>
         <button class="btn-flat btn-small" @click="seedTadbRetry(500)" :disabled="seedTadbPending" style="font-size:.78rem;padding:3px 10px;">{{ seedTadbPending ? t('admin.artists.btnQueueing') : t('admin.artists.btnRetryTadb') }}</button>
         <button class="btn-flat btn-small" @click="seedTadbRetry(counts.noImage || 9999)" :disabled="seedTadbPending" style="font-size:.78rem;padding:3px 10px;">{{ t('admin.artists.btnRetryTadbAll', { count: counts.noImage || 0 }) }}</button>
+      </div>
+    </div>
+
+    <!-- ── Placeholder image ───────────────────────────────────────────────────────────────────────── -->
+    <div class="card z-depth-1" style="padding:14px 18px;margin-top:12px;">
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <img :src="placeholderSrc()" alt="placeholder" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:1px solid var(--border);flex-shrink:0;" />
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:600;font-size:.95rem;">{{ t('admin.artists.placeholderTitle') }}</div>
+          <div style="font-size:.82rem;color:var(--t2);margin-top:2px;">{{ placeholderHasCustom ? t('admin.artists.placeholderCustomActive') : t('admin.artists.placeholderDefaultActive') }}</div>
+          <div style="font-size:.78rem;color:var(--t2);margin-top:3px;">{{ t('admin.artists.placeholderCacheHint') }}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <label class="btn-flat" style="cursor:pointer;display:inline-flex;align-items:center;gap:5px;" :style="placeholderUploading ? 'opacity:.5;pointer-events:none;' : ''">
+            {{ placeholderUploading ? t('admin.artists.placeholderUploading') : t('admin.artists.placeholderUploadBtn') }}
+            <input type="file" accept="image/*" style="display:none;" @change="uploadPlaceholder($event)" :disabled="placeholderUploading" />
+          </label>
+          <button v-if="placeholderHasCustom" class="btn-flat" style="color:var(--warn,#b45309);border-color:var(--warn,#b45309);" @click="resetPlaceholder()">{{ t('admin.artists.placeholderResetBtn') }}</button>
+        </div>
       </div>
     </div>
 

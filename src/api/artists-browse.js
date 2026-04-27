@@ -28,9 +28,11 @@ import { joiValidate } from '../util/validation.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const CACHE_TTL      = 5 * 60 * 1000; // 5 minutes
-const ARTIST_IMG_DIR = path.join(process.cwd(), 'image-cache', 'artists');
-const ARTIST_IMG_SIZE = 400; // square JPEG size for stored artist images
+const CACHE_TTL              = 5 * 60 * 1000; // 5 minutes
+const ARTIST_IMG_DIR         = path.join(process.cwd(), 'image-cache', 'artists');
+const ARTIST_PLACEHOLDER_FILE = path.join(process.cwd(), 'image-cache', 'artist-placeholder.jpg');
+const ARTIST_PLACEHOLDER_DEFAULT = path.join(process.cwd(), 'webapp', 'assets', 'img', 'unknownartist.webp');
+const ARTIST_IMG_SIZE        = 400; // square JPEG size for stored artist images
 const HYDRATE_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours
 const HYDRATE_QUEUE_LIMIT = 2000;
 const HYDRATE_DELAY_OK_MS = 1400;
@@ -849,6 +851,72 @@ export function setup(mstream) {
     db.setArtistImageWrongFlag(artistRow.canonicalName, !!wrong);
     invalidateArtistCache();
     res.json({ ok: true, artistKey: artistRow.artistKey, wrong: !!wrong });
+  });
+
+  // ── POST /api/v1/admin/artists/placeholder ────────────────────────────────
+  // Admin only. Accept a multipart image upload, resize to 400×400 JPEG, save
+  // as the custom placeholder shown for artists without a photo.
+  mstream.post('/api/v1/admin/artists/placeholder', (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    let settled = false;
+    const bb = busboy({ headers: req.headers, limits: { files: 1, fileSize: 10 * 1024 * 1024 } });
+    bb.on('file', (_field, fileStream, info) => {
+      const mime = (info.mimeType || '').toLowerCase();
+      if (!mime.startsWith('image/')) {
+        fileStream.resume();
+        if (!settled) { settled = true; res.status(400).json({ error: 'Only image files are allowed' }); }
+        return;
+      }
+      const chunks = [];
+      fileStream.on('data', d => chunks.push(d));
+      fileStream.on('end', async () => {
+        if (settled) return;
+        try {
+          const buf = Buffer.concat(chunks);
+          const processed = await sharp(buf)
+            .resize(ARTIST_IMG_SIZE, ARTIST_IMG_SIZE, { fit: 'cover', position: 'top' })
+            .jpeg({ quality: 85 })
+            .toBuffer();
+          await fsp.mkdir(path.dirname(ARTIST_PLACEHOLDER_FILE), { recursive: true });
+          await fsp.writeFile(ARTIST_PLACEHOLDER_FILE, processed);
+          settled = true;
+          res.json({ ok: true });
+        } catch (err) {
+          if (!settled) { settled = true; res.status(500).json({ error: err.message }); }
+        }
+      });
+      fileStream.on('error', err => {
+        if (!settled) { settled = true; res.status(500).json({ error: err.message }); }
+      });
+    });
+    bb.on('error', err => {
+      if (!settled) { settled = true; res.status(500).json({ error: err.message }); }
+    });
+    bb.on('close', () => {
+      if (!settled) { settled = true; res.status(400).json({ error: 'No image file received' }); }
+    });
+    req.pipe(bb);
+  });
+
+  // ── DELETE /api/v1/admin/artists/placeholder ──────────────────────────────
+  // Admin only. Remove the custom placeholder — reverts to the built-in default.
+  mstream.delete('/api/v1/admin/artists/placeholder', async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    try {
+      if (fs.existsSync(ARTIST_PLACEHOLDER_FILE)) {
+        await fsp.unlink(ARTIST_PLACEHOLDER_FILE);
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── GET /api/v1/admin/artists/placeholder-info ───────────────────────────
+  // Admin only. Returns whether a custom placeholder is active.
+  mstream.get('/api/v1/admin/artists/placeholder-info', (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    res.json({ hasCustom: fs.existsSync(ARTIST_PLACEHOLDER_FILE) });
   });
 
   // ── GET /api/v1/admin/artists/image-audit?kind=missing|no-image|wrong|with-image&limit=200 ───

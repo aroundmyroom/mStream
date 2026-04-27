@@ -1,5 +1,26 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.13.5-velvet — April 2026 — Regression Fix: Custom Artist Placeholder Image
+
+### fix: Restore custom artist placeholder image feature (regression from v6.13.4)
+- v6.13.4 silently deleted the entire custom artist placeholder feature introduced in v6.13.3, across three files (386+163+415 net lines removed)
+- Restored backend routes: `POST /api/v1/admin/artists/placeholder` (upload), `DELETE` (reset), `GET /api/v1/admin/artists/placeholder-info` (status check)
+- Restored constants `ARTIST_PLACEHOLDER_FILE` and `ARTIST_PLACEHOLDER_DEFAULT` in `src/api/artists-browse.js`
+- Restored Admin panel placeholder card: circular preview, Upload / Delete buttons, status text, cache-refresh hint
+- Restored `placeholderHasCustom`, `placeholderPreviewKey`, `placeholderUploading` state; `checkPlaceholder()` / `uploadPlaceholder()` / `resetPlaceholder()` / `placeholderSrc()` methods; `mounted()` call
+- Restored player `artistCard()` to use `<img src="api/v1/artists/placeholder">` instead of CSS skeleton div
+- Restored player `renderArtistRows()` to show placeholder for artists without an image (was showing nothing)
+- Restored artist profile page initial HTML to use placeholder img instead of `artpro-img-ph` CSS div
+- Restored artist profile data-load path to always set img and fall back to placeholder (was only setting img if `imageFile` existed)
+- Restored Playing Now panel to show placeholder immediately, then replace when API returns an image
+- Restored 10 `admin.artists.placeholder*` i18n keys in all 12 locale files (NL from git history; other 10 synced from EN)
+
+### process: Mandatory regression safeguards added to development instructions
+- Pre-commit changelog check: `grep "^## v" changes-fork-velvet.md | head -3` must confirm current version has a header before every `git commit`
+- Regression check: before touching `webapp/app.js`, `src/api/artists-browse.js`, or `webapp/admin/index.js`, always run `git diff HEAD~1 HEAD -- <file>` and verify the previous commit's additions are still present after editing
+
+---
+
 ## v6.13.4-velvet — April 2026 — Audio Output & Queue Fixes
 
 ### feat: Audio output device selector — route playback to any speaker/device
@@ -32,6 +53,83 @@
 ### fix: Admin Stats — totalAlbums now counts only albums-only directories
 - `totalAlbums` in the Admin → Stats panel previously counted every distinct `album` tag across all vpaths, inflating the number far beyond the actual album library size
 - Stats route now resolves `albumsOnly` sources via `resolveAlbumsSources()` and counts distinct albums within those vpaths/prefixes only using the new `countAlbumsForSources()` function
+
+---
+
+## v6.13.3-velvet — April 2026 — Custom Placeholder, Similar Artists & Queue Performance
+
+### feat: Customisable artist placeholder image
+- Upload your own placeholder via Admin → Artist Images — resized to 400×400 JPEG, stored as `image-cache/artist-placeholder.jpg`
+- New public endpoint `GET /api/v1/artists/placeholder` used by all four artist image surfaces (Playing Now, Artist Library, Artist Profile, Artist Home)
+- Click **Delete custom** to revert to the built-in default
+
+### feat: Recently Added — album-art grid + compact view
+- Three density modes: **List** (default), **Compact** (tighter, no thumbnails), **Grid** (album cards, click to open album)
+- Persisted per-user in `localStorage`
+
+### fix: feat./ft. artist tags no longer break library lookups
+- New `_primaryArtist()` helper strips `feat.`, `ft.`, `featuring`, `vs.`, `with`, `pres.`, `×` before passing to artist image, library, Last.fm bio, and similar-artist lookups
+
+### fix: Similar artist chips — deduplication of collaboration variants
+- `"Blank & Jones ft. Robert Smith"` collapses to `"Blank & Jones"` — applied in Playing Now and Artist Profile
+
+### fix: Discogs black placeholder images rejected
+- 1203-byte black 400×400 JPEG returned by Discogs for artists without a photo is now rejected (threshold: 5000 bytes)
+
+### fix: Unknown artist placeholder consistent across all surfaces
+
+### fix: Admin hydration panel — activity log count corrected
+
+### performance: Queue add no longer triggers waveform prefetch
+- `addSong`, `addAll`, `playNext` no longer call `_wfPrefetchEnqueue`
+- Adding 1,000 songs is now a pure in-memory push + one DOM re-render — eliminates background ffmpeg jobs that caused seek bar sluggishness
+
+---
+
+## v6.13.2-velvet — April 2026 — Fanart Hero, Audio Output & Enrichment Fixes
+
+### feat: Artist profile — fanart hero banner
+- Full-width 16:5 hero banner when TheAudioDB provides fanart; dark gradient overlay for legibility
+- Falls back to standard plain header when no fanart exists
+
+### feat: Artist profile — metadata chips
+- Genre, country, formed year shown as chips below the artist name — overlaid on fanart or in plain header
+
+### improved: Audio output device selector always visible
+- Section no longer hidden when only one output is detected; selector is disabled with a descriptive hint instead
+- `_applyOutputDevice()` now called on crossfade element creation, crossfade handoff, and boot sequence
+
+### fix: Bluetooth disconnect handling
+- `devicechange` event detected → stored device reset to default → `setSinkId('')` called on both audio elements → Settings page re-rendered
+
+### fix: Artist image enrichment queue — 4 bugs fixed
+- `HYDRATE_QUEUE_LIMIT` raised `2,000` → `50,000`
+- `getArtistsNeedingFetch` now filters `image_file IS NULL` (was returning artists that already had images)
+- `seedHydrationFromMissing` internal 2,000 cap removed
+- `artist-rebuild-worker.mjs` now preserves `fanart_file`, `mbid`, `genre`, `country`, `formed_year` across rebuilds (previously erased on every rescan)
+
+### feat: Admin artist enrichment — throughput per minute display
+
+### fix: Artist Library — Back navigation restores previously selected letter
+
+### fix: YouTube download — prefer release year over upload date
+
+### docs: Comprehensive scan behaviour documentation added to `docs/scan-progress.md`
+
+---
+
+## v6.13.1-velvet — April 2026 — Artist Albums Diagnostic
+
+### feat: Artist Albums Diagnostic tool (Admin UI)
+- Navigate to **Admin → Artist Albums Diagnostic**, type an artist name, click **Run Diagnostic**
+- Shows: normalised index entry, orphaned effective-artist values (the cause of "missing albums"), albums per variant
+- Export as `.txt`, `.json`, or copy to clipboard
+- API: `GET /api/v1/admin/diagnostics/artist-albums?artist=<name>`
+
+### feat: Tag Workshop — skip-equal optimisation
+- Files whose MusicBrainz tags already match what is on disk are skipped without a write
+
+### fix: CLI boot banner cosmetic update
 
 ---
 
