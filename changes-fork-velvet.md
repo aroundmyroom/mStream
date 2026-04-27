@@ -1,121 +1,39 @@
 # mStream Velvet Fork — Combined Change Log
 
-## v6.13.3-velvet — April 2026 — Custom Placeholder, Similar Artists & Queue Performance
+## v6.13.4-velvet — April 2026 — Audio Output & Queue Fixes
 
-### feat: Admin — customisable artist placeholder image
-- New section in **Admin → Artist Images** panel shows the current placeholder (built-in or custom) as a circular preview
-- **Upload your own image**: any image file is accepted, resized to 400×400 JPEG (sharp, quality 85, cover/top crop) and saved to `image-cache/artist-placeholder.jpg`
-- **Delete custom**: removes the uploaded file and reverts to the built-in `unknownartist.webp` immediately
-- Status line shows whether the built-in default or a custom image is active; a persistent cache-hint reminds users to force-refresh (Ctrl+Shift+R) after a change
-- All i18n keys added to all 12 locale files (nl.json with proper Dutch translations)
+### feat: Audio output device selector — route playback to any speaker/device
+- New section in Settings → Playback: **Audio Output Device** dropdown
+- Lists all audio outputs enumerated by `navigator.mediaDevices.enumerateDevices()` (requires microphone permission to show device labels)
+- **"Allow devices"** button triggers `getUserMedia({ audio: true })` and immediately releases the stream — this is the only way to unlock device label enumeration in Edge and Chrome without navigating to browser settings
+- Device selection is persisted to `localStorage` and restored on next page load
+- Uses `AudioContext.setSinkId()` (not `HTMLMediaElement.setSinkId()`) because `audioEl` is routed through the Web Audio graph — the MediaElement's sinkId is bypassed when a `MediaElementSourceNode` is active
+- `AudioContext` is created on first play; stored preference is applied inside `ensureAudio()` immediately after the graph is wired — so the correct device is used from the very first track
+- Plain deviceId string used for `setSinkId()` (not `AudioSinkOptions` object) — Edge rejects the object form
+- The `_sinkSwitching` flag suppresses `_onAudioError` during any temporary src manipulation
+- Crossfade element's AudioContext is also switched when it has its own context
+- `devicechange` event listener auto-refreshes the device list and re-applies the stored sink if the device reconnects
 
-### feat: Artist placeholder served via dynamic API endpoint
-- New public route `GET /api/v1/artists/placeholder` (registered before auth — usable in `<img src>` without a token): returns the custom JPEG if uploaded, otherwise the built-in webp
-- All 8 occurrences of `assets/img/unknownartist.webp` in `webapp/app.js` replaced with `api/v1/artists/placeholder` so swapping the placeholder image is reflected everywhere instantly
-- Supporting admin endpoints (all admin-only):
-  - `POST /api/v1/admin/artists/placeholder` — multipart upload, resizes and saves
-  - `DELETE /api/v1/admin/artists/placeholder` — removes custom, reverts to default
-  - `GET /api/v1/admin/artists/placeholder-info` — returns `{ hasCustom: bool }`
+### feat: Admin — collapsible sidebar sections
+- All 6 sidebar sections in the Admin panel (Config, Tools, External Services, Server, Language, Navigation) can now be collapsed and expanded by clicking the section header — matching the main player's sidebar pattern
+- Animated chevron rotates −90° when collapsed; smooth CSS transition
+- Collapse state is persisted to `localStorage` (`admin-nav-collapsed`) so sections stay collapsed across page reloads
+- The section containing the currently active view is always kept expanded on boot
 
-### fix: Hydration panel — "Recent activity" header count
-- Header showed `last {{ recentLog.length }}` (up to 20 — the full array size) but the `v-for` only rendered `.slice(0, 10)` — now hardcoded to "last 10" to match what's actually displayed
+### fix: Large queue no longer causes PayloadTooLarge error on server sync
+- Default `maxRequestSize` raised from `1MB` → `10MB` in `src/state/config.js` — Docker users and new installs now handle large queues without 413 errors
+- Client-side queue sync capped at 2,000 songs (centred around the current track) — at ~400 bytes/track this keeps payloads well under 1 MB; the full queue remains in memory and `localStorage`
 
-### perf: Remove waveform prefetch on queue add
-- `addSong`, `addAll`, and `playNext` were each calling `_wfPrefetchEnqueue` for every song added, filling `_wfPrefetchPending` with up to 1,000 entries and triggering continuous background HTTP + ffmpeg jobs
-- Waveform prefetch removed from all three functions — waveforms are now only fetched when a song actually starts playing (`_fetchWaveform`) or via the existing `_WF_AHEAD=3` look-ahead in `playAll`
-- Result: adding 1,000 songs to the queue is now a pure in-memory push + single DOM re-render; the waveform seek/mousemove interaction no longer competes with background network activity
+### fix: Sidebar nav-chevron arrows more visible in dark/velvet mode
+- Rest opacity raised from `0.4` → `0.65` so the collapse/expand chevrons are clearly readable against the dark sidebar background
+- Hover opacity raised from `0.75` → `1.0` (fully opaque on hover)
+- Arrow size increased from `10×10 px` → `13×13 px` via CSS override (no HTML changes required)
 
-### feat: Recently Added — album-art grid + compact view toggle
-- Three density modes, persisted per user in localStorage (`ms2_recent_density_<user>`):
-  - **List** (default): existing song rows with album art thumbnails
-  - **Compact**: song rows without art thumbnails — tighter, no reflow cost
-  - **Grid**: groups songs by album, shows album cards in the same grid used by the Album Library; clicking opens the album, the play overlay plays immediately without navigating
-- Toggle buttons use the same icons/style as the Album Library density control
-- CSS: `.song-list--compact` hides `.row-art`, reduces row height to 5px padding
+### fix: Admin Stats — totalAlbums now counts only albums-only directories
+- `totalAlbums` in the Admin → Stats panel previously counted every distinct `album` tag across all vpaths, inflating the number far beyond the actual album library size
+- Stats route now resolves `albumsOnly` sources via `resolveAlbumsSources()` and counts distinct albums within those vpaths/prefixes only using the new `countAlbumsForSources()` function
 
-### fix: Playing Now — feat./ft./with tag no longer breaks library lookup
-- When the current song's artist tag includes a collaboration suffix (e.g. `"Calvin Harris feat. Ellie Goulding"`), Playing Now was using the full string for all lookups — finding only 1 song instead of the full Calvin Harris catalogue
-- New `_primaryArtist()` helper strips `feat./ft./featuring/vs./with/pres./×` suffixes before any lookup
-- Applied to: artist image, "In Your Library" album list, Last.fm bio, and similar artists
-- The display name in the song header is unchanged (still shows the full tag value)
-
-### fix: Reject Discogs black placeholder images
-- Discogs API returns a 1203-byte black 400×400 JPEG when an artist has no image; these were being saved to disk and shown in the UI
-- `saveArtistImage()` now rejects any downloaded buffer below 5000 bytes — the placeholder is silently dropped; the artist falls back to `unknownartist.webp` instead
-- 1,710 previously stored black placeholder files cleaned from `/image-cache/artists/`; corresponding DB records (`image_file`, `image_source`, `last_fetched`) reset so those artists are eligible for re-hydration via TheAudioDB
-
-### fix: Similar artists — collapse ft./feat./with/vs. variants into one chip
-- New `_deduplicateSimArtists()` helper strips collaboration suffixes (`ft.`, `feat.`, `featuring`, `vs.`, `with`, `pres.`, `×`) from each artist name to derive a base name
-- Only one chip is shown per base: the canonical form (e.g. "Blank & Jones") is preferred over variants ("Blank & Jones ft. Robert Smith"); if no canonical form exists, the first variant is kept
-- Applied in both the **Playing Now** view and the **Artist Profile** similar artists section
-- Auto-DJ continues to receive the full unfiltered list (all variants match files in the DB — needed for correct track selection)
-
-### feat: Unknown artist placeholder image
-- `webapp/assets/img/unknownartist.webp` — shown when an artist has no image yet, on all 4 surfaces:
-  - **Playing Now** sidebar — shown immediately while the artist image API call is in flight, replaced once the real image loads
-  - **Artist Profile** image panel — shown when `imageFile` is null; onerror fallback on load failure
-  - **Artist Library** letter-browse rows — shown as avatar when no image on file (was previously empty); onerror fallback
-  - **Artist Home** carousel cards — shown when no image on file (was previously a CSS silhouette placeholder); onerror fallback
-- All `onerror` handlers on artist `<img>` elements now fall back to `unknownartist.webp` instead of removing the element or clearing the parent
-
-## v6.13.2-velvet — April 2026 — Fanart Hero, Audio Output & Enrichment Fixes
-
-### feat: Artist profile — fanart hero banner + metadata chips
-- When `fanartFile` is set, the artist profile now opens with a full-width 16:5 hero banner using the fanart image (`object-position: center top`)
-- Dark gradient overlay keeps artist name readable over any image
-- Metadata chips (genre, country, formed year) rendered below the name — inside the hero when fanart is present, in the standard header when not
-- CSS: `.artpro-hero`, `.artpro-hero-img`, `.artpro-hero-grad`, `.artpro-hero-overlay`, `.artpro-meta-chips`, `.artpro-meta-chip`
-- Responsive: narrower aspect ratio + tighter padding on mobile
-
-### feat: Audio output device selector — full wiring + Bluetooth disconnect handling
-- `_applyOutputDevice()` now called on crossfade element creation, crossfade swap, and boot sequence — selected device honoured on all playback paths
-- `devicechange` listener: detects removed Bluetooth/USB device, resets stored preference to `''`, calls `setSinkId('')` on both audio elements, re-renders Settings page if open
-- Audio output section always visible (previously hidden when only 1 device) — disabled select + hint "Connect a Bluetooth speaker or second audio device to enable" when no choice available
-- Section hidden only when `setSinkId` is not supported by the browser
-
-### fix: Artist image enrichment queue — 4 bugs
-- `HYDRATE_QUEUE_LIMIT` raised from 2,000 to 50,000
-- `getArtistsNeedingFetch()` now filters to `image_file IS NULL AND last_fetched IS NULL`, ordered by `song_count DESC`, with configurable limit param — previously returned artists that already had images
-- `seedHydrationFromMissing` internal re-cap at 2,000 removed — passes limit straight to DB
-- `artist-rebuild-worker.mjs` now preserves `fanart_file`, `mbid`, `genre`, `country`, `formed_year` on every rescan rebuild — previously wiped these fields
-
-### feat: Admin artist enrichment — throughput display
-- `hydrationStatusSnapshot()` now calculates and returns `throughputPerMin` (processed / elapsed min, 1 decimal)
-- Admin enrichment stats grid shows "Throughput X /min" below the "dropped" counter
-
-### feat: Artist Library — back navigation restores letter
-- Navigating back from an artist profile to the letter browse view now re-expands the previously selected letter automatically (`S._restoreArtistLetter` state)
-
-### fix: YouTube download — prefer release year over upload date
-- `/api/v1/ytdl/info` now checks `release_year` → `release_date` → `upload_date` in order
-
-### fix: Admin DB — new enrichment helper functions
-- `deriveArtistMbidFromFiles(artistClean)` — derives MBID from scanned files
-- `resetUnenrichedArtistFetch()` — resets `last_fetched` for artists never enriched
-- `getArtistsForTadbEnrichment(limit)` — returns artists eligible for fanart/genre/country/formedYear enrichment
-
-### docs: Comprehensive scan behaviour documentation
-- `docs/scan-progress.md` — new detailed intro section: scan triggers, per-file decision table, "date/time modified" explanation, album art sources, tag update scenarios, artist index rebuild
-
-### docs: Branding cleanup
-- 30+ docs files corrected from bare "mStream" to "mStream Velvet"; code blocks, git URLs, and paths preserved
-
-## v6.13.1-velvet — April 2026 — Artist Albums Diagnostic
-
-### fix: Tag Workshop — skip disk write when tags already match
-- `_tagsHaveDiff(t, finalTags)` helper compares proposed tags against current DB values (case-insensitive, whitespace-normalised)
-- If tags are already equal: track is marked accepted in the review queue but the audio file is **not written** (mtime preserved, no unnecessary re-scan, reduced SSD wear)
-- Applies to both bulk-accept and single-accept endpoints; response now includes `skippedEqual` counter
-
-### feat: Artist Albums Diagnostic tool (Admin UI)
-- New Admin panel **Artist Albums Diagnostic** — helps diagnose why albums are missing from an artist's page without shell/SQLite access (aimed at Docker users)
-- New endpoint `GET /api/v1/admin/diagnostics/artist-albums?artist=<name>` (admin-only) — queries DB directly and returns: `normalizedEntry` (canonical name, rawVariants, vpaths, songCount), `effectiveArtistValues`, `albumsByVariant`, `orphanAlbums` (values NOT in rawVariants with their hidden albums), and a `summary` counter object
-- Admin UI component `artistAlbumsDiagView` added to `webapp/admin/index.js` — input + Run Diagnostic button, summary banner, Normalized Index Entry card, Orphaned Values red card (root cause), Albums Per Variant card
-- Export options: **↓ Export .txt** (human-readable report), **↓ Export .json** (raw response), **Copy JSON** (clipboard with 2s feedback) — all named from the artist query, e.g. `artist-diag-Ben_Liebrand.txt`
-- Nav item "Artist Albums Diagnostic" added to Admin sidebar (`webapp/admin/index.html`)
-
-### feat: CLI boot banner — "Velvet" signature
-- `cli-boot-wrapper.js` startup banner now also prints a small ASCII-art "Velvet" word below the mStream logo
+---
 
 ## v6.13.0-velvet — April 2026 — The Tagged Albums
 

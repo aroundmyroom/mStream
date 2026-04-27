@@ -120,13 +120,10 @@ export function setArtistNameOverride(artistClean, newName) { return backend.set
 export function setArtistImage(artistClean, imageFile, imageSource) { return backend.setArtistImage(artistClean, imageFile, imageSource); }
 export function setArtistImageWrongFlag(artistClean, isWrong) { return backend.setArtistImageWrongFlag(artistClean, isWrong); }
 export function markArtistFetchAttempt(artistClean) { return backend.markArtistFetchAttempt(artistClean); }
-export function deriveArtistMbidFromFiles(artistClean) { return backend.deriveArtistMbidFromFiles(artistClean); }
-export function resetUnenrichedArtistFetch() { return backend.resetUnenrichedArtistFetch(); }
 export function getArtistImageAudit(kind, limit) { return backend.getArtistImageAudit(kind, limit); }
 export function getArtistImageAuditCounts() { return backend.getArtistImageAuditCounts(); }
-export function getArtistsNeedingFetch(limit) { return backend.getArtistsNeedingFetch(limit); }
+export function getArtistsNeedingFetch() { return backend.getArtistsNeedingFetch(); }
 export function getArtistsForTadbRetry(limit) { return backend.getArtistsForTadbRetry(limit); }
-export function getArtistsForTadbEnrichment(limit) { return backend.getArtistsForTadbEnrichment(limit); }
 export function getRatedSongs(vpaths, username, ignoreVPaths) { return backend.getRatedSongs(vpaths, username, ignoreVPaths); }
 export function getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyAdded(vpaths, username, limit, ignoreVPaths, opts); }
 export function getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts) { return backend.getRecentlyPlayed(vpaths, username, limit, ignoreVPaths, opts); }

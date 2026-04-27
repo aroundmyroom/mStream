@@ -84,7 +84,13 @@ p { margin: 0 0 .75rem; color: var(--t2); }
 .side-nav-section-label {
   font-size: .68rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
   color: var(--t3); padding: 1rem .75rem .25rem;
+  display: flex; justify-content: space-between; align-items: center;
+  cursor: pointer; user-select: none;
 }
+.nav-group-chevron { flex-shrink: 0; opacity: .65; transition: transform .2s ease; margin-right: 2px; }
+.side-nav-group.collapsed .nav-group-chevron { transform: rotate(-90deg); }
+.side-nav-group-body { overflow: hidden; }
+.side-nav-group.collapsed .side-nav-group-body { display: none; }
 .side-nav-item {
   display: flex; align-items: center; gap: .6rem; padding: .55rem .75rem;
   cursor: pointer; border-radius: var(--r); margin: 1px .4rem;

@@ -527,7 +527,6 @@ const artistAlbumsDiagView = Vue.component('artist-albums-diag-view', {
       loading: false,
       result: null,
       error: null,
-      copied: false,
     };
   },
   methods: {
@@ -537,7 +536,6 @@ const artistAlbumsDiagView = Vue.component('artist-albums-diag-view', {
       this.loading = true;
       this.result = null;
       this.error = null;
-      this.copied = false;
       try {
         const r = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/diagnostics/artist-albums`, params: { artist: q } });
         this.result = r.data;
@@ -547,77 +545,6 @@ const artistAlbumsDiagView = Vue.component('artist-albums-diag-view', {
         this.loading = false;
       }
     },
-    exportJson() {
-      if (!this.result) return;
-      const blob = new Blob([JSON.stringify(this.result, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `artist-diag-${this.result.query.replace(/[^a-z0-9]/gi, '_')}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    },
-    exportText() {
-      if (!this.result) return;
-      const r = this.result;
-      const lines = [];
-      lines.push(`Artist Albums Diagnostic — ${r.query}`);
-      lines.push('='.repeat(60));
-      lines.push('');
-      lines.push('SUMMARY');
-      lines.push(`  Distinct effective-artist values : ${r.summary.totalEffectiveValues}`);
-      lines.push(`  Covered by normalised variants   : ${r.summary.coveredByVariants}`);
-      lines.push(`  Orphaned values (not covered)    : ${r.summary.orphanedValues}`);
-      lines.push(`  Hidden albums (orphaned)         : ${r.summary.orphanedAlbumCount}`);
-      lines.push('');
-      if (r.normalizedEntry) {
-        lines.push('NORMALIZED INDEX ENTRY');
-        lines.push(`  Canonical name : ${r.normalizedEntry.canonicalName}`);
-        lines.push(`  Song count     : ${r.normalizedEntry.songCount}`);
-        lines.push(`  Known vpaths   : ${r.normalizedEntry.vpaths.join(', ') || '(none)'}`);
-        lines.push('  Raw variants:');
-        for (const v of r.normalizedEntry.rawVariants) lines.push(`    ${v}`);
-        lines.push('');
-      } else {
-        lines.push('NORMALIZED INDEX ENTRY');
-        lines.push('  Not found.');
-        lines.push('');
-      }
-      if (r.orphanAlbums.length) {
-        lines.push('ORPHANED ARTIST VALUES (albums hidden from artist view)');
-        for (const o of r.orphanAlbums) {
-          lines.push(`  ${o.effective}  (${o.track_count} tracks)`);
-          for (const a of o.albums) {
-            lines.push(`    ${a.album || '(no album tag)'}  —  ${a.vpath}/${a.dir}`);
-          }
-        }
-        lines.push('');
-        lines.push('  Fix: retag album_artist on these files to one of the rawVariants above,');
-        lines.push('  then re-scan.');
-        lines.push('');
-      }
-      lines.push('ALBUMS PER NORMALIZED VARIANT');
-      for (const [variant, albums] of Object.entries(r.albumsByVariant)) {
-        lines.push(`  ${variant}`);
-        if (!albums.length) { lines.push('    (no albums)'); continue; }
-        for (const a of albums) lines.push(`    ${a.album || '(no album tag)'}  [${a.vpath}]`);
-      }
-      const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `artist-diag-${r.query.replace(/[^a-z0-9]/gi, '_')}.txt`;
-      a.click();
-      URL.revokeObjectURL(url);
-    },
-    async copyJson() {
-      if (!this.result) return;
-      try {
-        await navigator.clipboard.writeText(JSON.stringify(this.result, null, 2));
-        this.copied = true;
-        setTimeout(() => { this.copied = false; }, 2000);
-      } catch (_) {}
-    },
   },
   template: `
     <div class="admin-panel-wrap">
@@ -625,7 +552,7 @@ const artistAlbumsDiagView = Vue.component('artist-albums-diag-view', {
       <p class="admin-desc" style="margin-bottom:12px">
         Enter an artist name to find out why some albums may be missing from their artist view.
       </p>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:18px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px">
         <input
           v-model="artistQuery"
           class="admin-input"
@@ -636,17 +563,6 @@ const artistAlbumsDiagView = Vue.component('artist-albums-diag-view', {
         <button class="admin-btn" :disabled="loading || !artistQuery.trim()" @click="runDiag">
           {{ loading ? 'Running…' : 'Run Diagnostic' }}
         </button>
-        <template v-if="result">
-          <button class="admin-btn admin-btn-secondary" @click="exportText" title="Download as plain text file">
-            ↓ Export .txt
-          </button>
-          <button class="admin-btn admin-btn-secondary" @click="exportJson" title="Download as JSON file">
-            ↓ Export .json
-          </button>
-          <button class="admin-btn admin-btn-secondary" @click="copyJson" title="Copy full JSON to clipboard">
-            {{ copied ? '✓ Copied!' : 'Copy JSON' }}
-          </button>
-        </template>
       </div>
 
       <div v-if="error" style="color:var(--danger);margin-bottom:12px">{{ error }}</div>
@@ -721,6 +637,7 @@ const artistAlbumsDiagView = Vue.component('artist-albums-diag-view', {
     </div>
   `,
 });
+
 // ── Scan Error Audit View ──────────────────────────────────────────────────
 const scanErrorsView = Vue.component('scan-errors-view', {
   data() {
@@ -6245,15 +6162,11 @@ const artistsAdminView = Vue.component('artists-admin-view', {
       seedPending: false,
       seedTadbPending: false,
       pollTimer: null,
-      placeholderHasCustom: false,
-      placeholderPreviewKey: Date.now(),
-      placeholderUploading: false,
     };
   },
   mounted() {
     this.load('missing');
     this.startPolling();
-    this.checkPlaceholder();
   },
   beforeDestroy() {
     this.stopPolling();
@@ -6434,48 +6347,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
     },
     imgSrc(imageFile) {
       return `${API.url()}/api/v1/artists/images/${encodeURIComponent(imageFile)}`;
-    },
-    async checkPlaceholder() {
-      // HEAD check: 200 means a custom placeholder exists (custom JPEG);
-      // 404 means the server is serving the built-in default.
-      try {
-        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/artists/placeholder-info` });
-        this.placeholderHasCustom = !!(res.data && res.data.hasCustom);
-      } catch (_e) {
-        this.placeholderHasCustom = false;
-      }
-    },
-    placeholderSrc() {
-      return `${API.url()}/api/v1/artists/placeholder?t=${this.placeholderPreviewKey}`;
-    },
-    async uploadPlaceholder(event) {
-      const file = event.target.files && event.target.files[0];
-      if (!file) return;
-      this.placeholderUploading = true;
-      try {
-        const formData = new FormData();
-        formData.append('image', file);
-        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/artists/placeholder`, data: formData });
-        this.placeholderHasCustom = true;
-        this.placeholderPreviewKey = Date.now();
-        iziToast.success({ title: this.t('admin.artists.placeholderUploaded'), position: 'topCenter', timeout: 2000 });
-      } catch (e) {
-        iziToast.error({ title: this.t('admin.artists.placeholderUploadFailed'), message: e.message || '', position: 'topCenter', timeout: 3000 });
-      } finally {
-        this.placeholderUploading = false;
-        event.target.value = '';
-      }
-    },
-    async resetPlaceholder() {
-      try {
-        await API.axios({ method: 'DELETE', url: `${API.url()}/api/v1/admin/artists/placeholder` });
-        this.placeholderHasCustom = false;
-        this.placeholderPreviewKey = Date.now();
-        iziToast.success({ title: this.t('admin.artists.placeholderReset'), position: 'topCenter', timeout: 2000 });
-      } catch (e) {
-        iziToast.error({ title: e.message || 'Failed', position: 'topCenter', timeout: 3000 });
-      }
-    },
+    }
   },
   template: `
   <div>
@@ -6502,17 +6374,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationSessionFixed') }} <b>{{ hydratedThisSession == null ? 0 : hydratedThisSession }}</b></div>
         <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationSuccessRate') }} <b>{{ hydration.stats.succeeded || 0 }}</b> / {{ hydration.stats.noImage || 0 }} / {{ hydration.stats.failed || 0 }}</div>
         <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationDropped') }} <b>{{ hydration.stats.dropped || 0 }}</b></div>
-        <div v-if="hydration.throughputPerMin != null" style="font-size:.82rem;color:var(--t2);">Throughput <b>{{ hydration.throughputPerMin }}</b> /min</div>
         <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationDiscogs') }} <b :style="discogsReady ? 'color:var(--ok,#16a34a);' : 'color:var(--warn,#b45309);'">{{ discogsReady ? t('admin.artists.discogsReady') : t('admin.artists.discogsNotReady') }}</b></div>
-        <div v-if="hydration.stats.lastArtist" style="font-size:.82rem;color:var(--t2);grid-column:1/-1;">Now processing: <b style="color:var(--t1);">{{ hydration.stats.lastArtist }}</b></div>
-        <div v-if="hydration.stats.lastError" style="font-size:.82rem;color:var(--warn,#b45309);grid-column:1/-1;">Last error: {{ hydration.stats.lastError }}</div>
-      </div>
-      <div v-if="hydration.stats.recentLog && hydration.stats.recentLog.length" style="margin-top:8px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);">
-        <div style="font-size:.78rem;font-weight:600;color:var(--t2);margin-bottom:4px;">Recent activity (last 10)</div>
-        <div v-for="entry in [...hydration.stats.recentLog].reverse().slice(0,10)" :key="entry.ts" style="font-size:.78rem;display:flex;gap:8px;align-items:center;padding:1px 0;">
-          <span :style="entry.result==='success' ? 'color:var(--ok,#16a34a);' : entry.result==='no-image' ? 'color:var(--t2);' : 'color:var(--warn,#b45309);'" style="min-width:60px;">{{ entry.result }}</span>
-          <span style="color:var(--t1);">{{ entry.name }}</span>
-        </div>
       </div>
       <div v-if="!hydration.running && (hydration.queueLength || 0) === 0 && (counts.missing || 0) > 0" style="margin-top:8px;font-size:.82rem;color:var(--t2);">
         {{ t('admin.artists.hydrationIdleHint') }}
@@ -6521,25 +6383,6 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         <span>{{ t('admin.artists.noImageHint', { count: counts.noImage || 0 }) }}</span>
         <button class="btn-flat btn-small" @click="seedTadbRetry(500)" :disabled="seedTadbPending" style="font-size:.78rem;padding:3px 10px;">{{ seedTadbPending ? t('admin.artists.btnQueueing') : t('admin.artists.btnRetryTadb') }}</button>
         <button class="btn-flat btn-small" @click="seedTadbRetry(counts.noImage || 9999)" :disabled="seedTadbPending" style="font-size:.78rem;padding:3px 10px;">{{ t('admin.artists.btnRetryTadbAll', { count: counts.noImage || 0 }) }}</button>
-      </div>
-    </div>
-
-    <!-- ── Placeholder image ──────────────────────────────────────────────── -->
-    <div class="card z-depth-1" style="padding:14px 18px;margin-top:12px;">
-      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-        <img :src="placeholderSrc()" alt="placeholder" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:1px solid var(--border);flex-shrink:0;" />
-        <div style="flex:1;min-width:0;">
-          <div style="font-weight:600;font-size:.95rem;">{{ t('admin.artists.placeholderTitle') }}</div>
-          <div style="font-size:.82rem;color:var(--t2);margin-top:2px;">{{ placeholderHasCustom ? t('admin.artists.placeholderCustomActive') : t('admin.artists.placeholderDefaultActive') }}</div>
-          <div style="font-size:.78rem;color:var(--t2);margin-top:3px;">{{ t('admin.artists.placeholderCacheHint') }}</div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <label class="btn-flat" style="cursor:pointer;display:inline-flex;align-items:center;gap:5px;" :style="placeholderUploading ? 'opacity:.5;pointer-events:none;' : ''">
-            {{ placeholderUploading ? t('admin.artists.placeholderUploading') : t('admin.artists.placeholderUploadBtn') }}
-            <input type="file" accept="image/*" style="display:none;" @change="uploadPlaceholder($event)" :disabled="placeholderUploading" />
-          </label>
-          <button v-if="placeholderHasCustom" class="btn-flat" style="color:var(--warn,#b45309);border-color:var(--warn,#b45309);" @click="resetPlaceholder()">{{ t('admin.artists.placeholderResetBtn') }}</button>
-        </div>
       </div>
     </div>
 

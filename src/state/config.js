@@ -123,7 +123,7 @@ const schema = Joi.object({
   rpn: rpnOptions.default(rpnOptions.validate({}).value),
   transcode: transcodeOptions.default(transcodeOptions.validate({}).value),
   secret: Joi.string().optional(),
-  maxRequestSize: Joi.string().pattern(/[0-9]+(KB|MB)/i).default('1MB'),
+  maxRequestSize: Joi.string().pattern(/[0-9]+(KB|MB)/i).default('10MB'),
   db: dbOptions.default(dbOptions.validate({}).value),
   folders: Joi.object().pattern(
     Joi.string(),

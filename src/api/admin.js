@@ -18,7 +18,7 @@ import { getVPathInfo } from '../util/vpath.js';
 
 import { getTransAlgos, getTransCodecs, getTransBitrates } from '../api/transcode.js';
 import * as scanProgress from '../state/scan-progress.js';
-import { invalidateCache as invalidateAlbumsCache } from './albums-browse.js';
+import { invalidateCache as invalidateAlbumsCache, resolveAlbumsSources } from './albums-browse.js';
 import { invalidateArtistCache } from './artists-browse.js';
 import * as scrobblerApi from './scrobbler.js';
 import { mergeGenreRows } from '../util/genre-merge.js';
@@ -500,8 +500,13 @@ export function setup(mstream) {
     res.json({});
   });
 
-  mstream.get("/api/v1/admin/db/scan/stats", (req, res) => {
+  mstream.get("/api/v1/admin/db/scan/stats", async (req, res) => {
     const stats = db.getStats();
+    // Override totalAlbums to count only albums from albumsOnly directories.
+    try {
+      const sources = await resolveAlbumsSources();
+      stats.totalAlbums = db.countAlbumsForSources(sources);
+    } catch (_e) { /* keep original count on error */ }
     // Count cached waveform files (filesystem — not tracked in DB)
     try {
       const wfDir = config.program.storage?.waveformDirectory;

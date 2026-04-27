@@ -20,9 +20,7 @@ import fsp from 'fs/promises';
 import http from 'http';
 import https from 'https';
 import path from 'path';
-import { Readable } from 'stream';
 import sharp from 'sharp';
-import busboy from 'busboy';
 import Joi from 'joi';
 import * as config from '../state/config.js';
 import * as db from '../db/manager.js';
@@ -30,13 +28,11 @@ import { joiValidate } from '../util/validation.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const CACHE_TTL              = 5 * 60 * 1000; // 5 minutes
-const ARTIST_IMG_DIR         = path.join(process.cwd(), 'image-cache', 'artists');
-const ARTIST_PLACEHOLDER_FILE = path.join(process.cwd(), 'image-cache', 'artist-placeholder.jpg');
-const ARTIST_PLACEHOLDER_DEFAULT = path.join(process.cwd(), 'webapp', 'assets', 'img', 'unknownartist.webp');
-const ARTIST_IMG_SIZE        = 400; // square JPEG size for stored artist images
+const CACHE_TTL      = 5 * 60 * 1000; // 5 minutes
+const ARTIST_IMG_DIR = path.join(process.cwd(), 'image-cache', 'artists');
+const ARTIST_IMG_SIZE = 400; // square JPEG size for stored artist images
 const HYDRATE_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours
-const HYDRATE_QUEUE_LIMIT = 50000;
+const HYDRATE_QUEUE_LIMIT = 2000;
 const HYDRATE_DELAY_OK_MS = 1400;
 const HYDRATE_DELAY_IDLE_MS = 2200;
 const HYDRATE_DELAY_ERR_MS = 4000;
@@ -64,8 +60,6 @@ const _imgHydrateStats = {
   lastSuccessAt: 0,
   lastErrorAt: 0,
   lastError: null,
-  lastArtist: null,   // name of artist currently being processed
-  recentLog: [],      // rolling last-20 [{name, result, ts}]
 };
 
 export function invalidateArtistCache() {
@@ -165,19 +159,10 @@ function stripHtml(str) {
   return (str || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
 }
 
-function downloadBuffer(url, _redirects = 0) {
+function downloadBuffer(url) {
   return new Promise((resolve, reject) => {
-    if (_redirects > 5) return reject(new Error('Too many redirects'));
     const mod = url.startsWith('https') ? https : http;
     mod.get(url, res => {
-      // Follow 301/302/307/308 redirects
-      if ([301, 302, 307, 308].includes(res.statusCode)) {
-        const location = res.headers.location;
-        res.resume();
-        if (!location) return reject(new Error(`Redirect with no Location from ${url}`));
-        const next = location.startsWith('http') ? location : new URL(location, url).href;
-        return resolve(downloadBuffer(next, _redirects + 1));
-      }
       if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
       const chunks = [];
       res.on('data', c => chunks.push(c));
@@ -347,61 +332,12 @@ async function fetchFromLastfm(artistName) {
   }
 }
 
-// Parse a TADB artist object into our enrichment shape
-function _parseTadbArtist(a) {
-  if (!a) return null;
-  let bio = null;
-  if (a.strBiographyEN) {
-    bio = a.strBiographyEN
-      .replace(/\s*See also:.*$/is, '')
-      .replace(/\s*Read more at Last\.fm.*$/is, '')
-      .trim() || null;
-  }
-  return {
-    imageUrl:   a.strArtistThumb   || null,
-    fanartUrl:  a.strArtistFanart  || a.strArtistFanart2 || a.strArtistFanart3 || null,
-    bio,
-    genre:      a.strGenre         || null,
-    country:    a.strCountry       || null,
-    formedYear: a.intFormedYear    ? parseInt(a.intFormedYear, 10) || null : null,
-    mbid:       a.strMusicBrainzID || null,
-  };
-}
-
-// Fetch artist data from TheAudioDB.
-// Strategy: if mbid is provided, try the precise MBID endpoint first
-// (artist-mb.php?i=<mbid>) — no name ambiguity. Fall back to name search.
-async function fetchFromTheAudioDB(artistName, mbid = null) {
+async function fetchFromTheAudioDB(artistName) {
   try {
-    // 1. MBID-first: precise lookup
-    if (mbid) {
-      const url = `https://www.theaudiodb.com/api/v1/json/2/artist-mb.php?i=${encodeURIComponent(mbid)}`;
-      const data = await downloadJson(url);
-      const a = data?.artists?.[0];
-      if (a) return _parseTadbArtist(a);
-      // MBID not found in TADB — fall through to name search
-    }
-    // 2. Name-based fallback
     const url = `https://www.theaudiodb.com/api/v1/json/2/search.php?s=${encodeURIComponent(artistName)}`;
     const data = await downloadJson(url);
-    return _parseTadbArtist(data?.artists?.[0]);
-  } catch (_e) {
-    return null;
-  }
-}
-
-async function saveFanartImage(artistKey, fanartUrl) {
-  try {
-    const buf     = await downloadBuffer(fanartUrl);
-    const outName = artistKey.replace(/[^a-z0-9_-]/g, '_') + '_fanart.jpg';
-    const outPath = path.join(ARTIST_IMG_DIR, outName);
-    // Preserve wide aspect ratio — resize to 1280 wide, crop height to 480 (16:5)
-    // Use 'top' so heads/faces at the top of the image are not cropped out
-    await sharp(buf)
-      .resize(1280, 480, { fit: 'cover', position: 'top' })
-      .jpeg({ quality: 88 })
-      .toFile(outPath);
-    return outName;
+    const imgUrl = data?.artists?.[0]?.strArtistThumb || null;
+    return imgUrl || null;
   } catch (_e) {
     return null;
   }
@@ -428,21 +364,14 @@ async function fetchFromMusicBrainz(artistName) {
   }
 }
 
-// Discogs returns a 1203-byte black 400×400 JPEG as a placeholder when an artist
-// has no real image. Reject any download below this threshold.
-const MIN_ARTIST_IMG_BYTES = 5000;
-
 async function saveArtistImage(artistKey, imageUrl) {
   try {
     const buf     = await downloadBuffer(imageUrl);
-    if (buf.length < MIN_ARTIST_IMG_BYTES) return null;
     const outName = artistKey.replace(/[^a-z0-9_-]/g, '_') + '.jpg';
     const outPath = path.join(ARTIST_IMG_DIR, outName);
     await sharp(buf).resize(ARTIST_IMG_SIZE, ARTIST_IMG_SIZE, { fit: 'cover', position: 'top' }).jpeg({ quality: 85 }).toFile(outPath);
     return outName;
   } catch (_e) {
-    _imgHydrateStats.lastError = `saveArtistImage(${artistKey}): ${_e.message}`;
-    _imgHydrateStats.lastErrorAt = Date.now();
     return null;
   }
 }
@@ -460,58 +389,37 @@ async function _hydrateArtistImage(artistKey, canonicalName) {
   if (!row || row.imageFile) return 'skip';
   if (row.lastFetched) return 'skip';
 
-  // Derive MBID on-demand if not yet stored (uses per-song AcoustID data)
-  const mbid = row.mbid || db.deriveArtistMbidFromFiles(row.canonicalName);
-  if (mbid && !row.mbid) db.saveArtistInfo(row.canonicalName, { mbid });
-
-  // Fetch from all sources in parallel; TADB uses MBID-first lookup when available
-  const [discogsUrl, tadb, lfm] = await Promise.all([
-    fetchArtistImageFromDiscogs(row.canonicalName),
-    fetchFromTheAudioDB(row.canonicalName, mbid),
-    fetchFromLastfm(row.canonicalName),
-  ]);
-
-  // Bio priority: Last.fm > TheAudioDB (Last.fm bio is crowdsourced; TADB from Wikipedia)
-  const bio = lfm?.bio || tadb?.bio || null;
-
-  // Fanart: only from TADB
-  let fanartFile = null;
-  if (tadb?.fanartUrl) {
-    fanartFile = await saveFanartImage(row.artistKey, tadb.fanartUrl);
+  // Prefer Discogs for artist photos; use TheAudioDB and Last.fm as fallbacks.
+  let imageUrl = await fetchArtistImageFromDiscogs(row.canonicalName);
+  let source = 'discogs';
+  if (!imageUrl) {
+    imageUrl = await fetchFromTheAudioDB(row.canonicalName);
+    source = 'theaudiodb';
   }
-
-  if (!discogsUrl && !tadb?.imageUrl && !lfm?.imageUrl && !bio && !fanartFile && !tadb?.genre) {
+  if (!imageUrl) {
+    const result = await fetchFromLastfm(row.canonicalName);
+    imageUrl = result?.imageUrl || null;
+    source = 'lastfm';
+  }
+  if (!imageUrl) {
+    // Persist attempt to avoid repeatedly hammering upstream sources for no-image artists.
     db.markArtistFetchAttempt(row.canonicalName);
     return 'no-image';
   }
 
-  // Image priority: Discogs > TADB > Last.fm — try each in order until one saves successfully.
-  // If a source returns a URL but the download is rejected (e.g. Discogs black placeholder),
-  // fall through to the next source rather than giving up.
-  let imageFile = null;
-  let source    = null;
-  const imageCandidates = [
-    tadb?.imageUrl ? { url: tadb.imageUrl,   src: 'theaudiodb'  } : null,
-    discogsUrl    ? { url: discogsUrl,       src: 'discogs'     } : null,
-    lfm?.imageUrl  ? { url: lfm.imageUrl,    src: 'lastfm'      } : null,
-  ].filter(Boolean);
-  for (const candidate of imageCandidates) {
-    imageFile = await saveArtistImage(row.artistKey, candidate.url);
-    if (imageFile) { source = candidate.src; break; }
+  const imageFile = await saveArtistImage(row.artistKey, imageUrl);
+  if (!imageFile) {
+    db.markArtistFetchAttempt(row.canonicalName);
+    return 'failed';
   }
 
   db.saveArtistInfo(row.canonicalName, {
-    bio:        bio || row.bio || null,
-    imageFile:  imageFile || null,
-    imageSource: source || null,
-    fanartFile,
-    mbid:       tadb?.mbid || null,
-    genre:      tadb?.genre || null,
-    country:    tadb?.country || null,
-    formedYear: tadb?.formedYear || null,
+    bio: row.bio || null,
+    imageFile,
+    imageSource: source,
   });
   invalidateArtistCache();
-  return imageFile ? 'success' : 'no-image';
+  return 'success';
 }
 
 function _enqueueHydration(artistKey, canonicalName) {
@@ -544,9 +452,6 @@ function _enqueueHydrationTadb(artistKey, canonicalName) {
 }
 
 // Retry artists that previously got no-image, using TheAudioDB only.
-// Retry / enrichment pass: TheAudioDB only.
-// Used for artists that previously had no image, or that need the new enrichment
-// fields (bio, fanart, genre, country, formedYear, mbid) added retroactively.
 async function _hydrateArtistImageTadb(artistKey, canonicalName) {
   const key = String(artistKey || '').toLowerCase().trim();
   if (!key) return 'skip';
@@ -557,44 +462,27 @@ async function _hydrateArtistImageTadb(artistKey, canonicalName) {
   _imgHydrateLastTry.set('tadb:' + key, now);
 
   const row = db.getArtistRow(canonicalName || artistKey);
-  if (!row) return 'skip';
+  if (!row || row.imageFile) return 'skip'; // already has image now
 
-  // Use MBID for precise TADB lookup when available
-  const mbid = row.mbid || db.deriveArtistMbidFromFiles(row.canonicalName);
-  if (mbid && !row.mbid) db.saveArtistInfo(row.canonicalName, { mbid });
-
-  const tadb = await fetchFromTheAudioDB(row.canonicalName, mbid);
-  if (!tadb || (!tadb.imageUrl && !tadb.bio && !tadb.fanartUrl && !tadb.genre)) {
-    db.markArtistFetchAttempt(row.canonicalName);
+  const imageUrl = await fetchFromTheAudioDB(row.canonicalName);
+  if (!imageUrl) {
+    db.markArtistFetchAttempt(row.canonicalName); // update lastFetched timestamp
     return 'no-image';
   }
 
-  // Only download a new thumb if the artist doesn't already have an image
-  let imageFile = row.imageFile || null;
-  let source    = row.imageSource || null;
-  if (!imageFile && tadb.imageUrl) {
-    imageFile = await saveArtistImage(row.artistKey, tadb.imageUrl);
-    if (imageFile) source = 'theaudiodb';
-  }
-
-  // Always download fanart if not yet cached
-  let fanartFile = row.fanartFile || null;
-  if (!fanartFile && tadb.fanartUrl) {
-    fanartFile = await saveFanartImage(row.artistKey, tadb.fanartUrl);
+  const imageFile = await saveArtistImage(row.artistKey, imageUrl);
+  if (!imageFile) {
+    db.markArtistFetchAttempt(row.canonicalName);
+    return 'failed';
   }
 
   db.saveArtistInfo(row.canonicalName, {
-    bio:        tadb.bio || row.bio || null,
-    imageFile:  imageFile || null,
-    imageSource: source || null,
-    fanartFile,
-    mbid:       tadb.mbid   || null,
-    genre:      tadb.genre  || null,
-    country:    tadb.country || null,
-    formedYear: tadb.formedYear || null,
+    bio: row.bio || null,
+    imageFile,
+    imageSource: 'theaudiodb',
   });
   invalidateArtistCache();
-  return imageFile ? 'success' : 'no-image';
+  return 'success';
 }
 
 function _queueHomeImageHydration(stats) {
@@ -634,8 +522,6 @@ async function _drainHydrationQueue() {
       const item = _imgHydrateQueue.shift();
       if (!item) continue;
       _imgHydrateQueued.delete(item.artistKey);
-      const displayName = item.canonicalName || item.artistKey;
-      _imgHydrateStats.lastArtist = displayName;
       try {
         const result = item.tadbOnly
           ? await _hydrateArtistImageTadb(item.artistKey, item.canonicalName)
@@ -651,9 +537,6 @@ async function _drainHydrationQueue() {
           _imgHydrateStats.lastErrorAt = Date.now();
           _imgHydrateStats.lastError = 'image processing failed';
         }
-        // Rolling log — keep last 20 entries
-        _imgHydrateStats.recentLog.push({ name: displayName, result: result || 'skip', ts: Date.now() });
-        if (_imgHydrateStats.recentLog.length > 20) _imgHydrateStats.recentLog.shift();
         const waitMs = (result === 'success')
           ? HYDRATE_DELAY_OK_MS
           : (result === 'no-image' || result === 'skip')
@@ -676,33 +559,22 @@ async function _drainHydrationQueue() {
 
 function hydrationStatusSnapshot() {
   const discogs = discogsStatus();
-  const elapsedMin = (_imgHydrateStats.startedAt > 0)
-    ? Math.max(1, (Date.now() - _imgHydrateStats.startedAt) / 60000)
-    : null;
-  const throughput = elapsedMin && _imgHydrateStats.processed > 0
-    ? Math.round(_imgHydrateStats.processed / elapsedMin * 10) / 10
-    : null;
   return {
     running: _imgHydrateRunning,
     queueLength: _imgHydrateQueue.length,
     queueLimit: HYDRATE_QUEUE_LIMIT,
-    throughputPerMin: throughput,
     delayMs: {
       ok: HYDRATE_DELAY_OK_MS,
       noImage: HYDRATE_DELAY_IDLE_MS,
       error: HYDRATE_DELAY_ERR_MS,
     },
     discogs,
-    stats: {
-      ..._imgHydrateStats,
-      recentLog: [..._imgHydrateStats.recentLog],
-    },
+    stats: { ..._imgHydrateStats },
   };
 }
 
 function seedHydrationFromMissing(limit = 500) {
-  const cap = Math.max(1, Math.min(100000, Number(limit) || 500));
-  const rows = db.getArtistsNeedingFetch(cap);
+  const rows = db.getArtistsNeedingFetch().slice(0, Math.max(1, Math.min(2000, Number(limit) || 500)));
   let enqueued = 0;
   for (const a of rows) {
     const before = _imgHydrateQueue.length;
@@ -752,72 +624,6 @@ export function setup(mstream) {
       return res.status(400).json({ error: 'Invalid path' });
     }
     res.sendFile(resolved);
-  });
-
-  // ── POST /api/v1/admin/artists/placeholder ────────────────────────────────
-  // Admin only. Accept a multipart image upload, resize to 400×400 JPEG, save
-  // as the custom placeholder shown for artists without a photo.
-  mstream.post('/api/v1/admin/artists/placeholder', (req, res) => {
-    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
-    let settled = false;
-    const bb = busboy({ headers: req.headers, limits: { files: 1, fileSize: 10 * 1024 * 1024 } });
-    bb.on('file', (_field, fileStream, info) => {
-      const mime = (info.mimeType || '').toLowerCase();
-      if (!mime.startsWith('image/')) {
-        fileStream.resume();
-        if (!settled) { settled = true; res.status(400).json({ error: 'Only image files are allowed' }); }
-        return;
-      }
-      const chunks = [];
-      fileStream.on('data', d => chunks.push(d));
-      fileStream.on('end', async () => {
-        if (settled) return;
-        try {
-          const buf = Buffer.concat(chunks);
-          const processed = await sharp(buf)
-            .resize(ARTIST_IMG_SIZE, ARTIST_IMG_SIZE, { fit: 'cover', position: 'top' })
-            .jpeg({ quality: 85 })
-            .toBuffer();
-          await fsp.mkdir(path.dirname(ARTIST_PLACEHOLDER_FILE), { recursive: true });
-          await fsp.writeFile(ARTIST_PLACEHOLDER_FILE, processed);
-          settled = true;
-          res.json({ ok: true });
-        } catch (err) {
-          if (!settled) { settled = true; res.status(500).json({ error: err.message }); }
-        }
-      });
-      fileStream.on('error', err => {
-        if (!settled) { settled = true; res.status(500).json({ error: err.message }); }
-      });
-    });
-    bb.on('error', err => {
-      if (!settled) { settled = true; res.status(500).json({ error: err.message }); }
-    });
-    bb.on('close', () => {
-      if (!settled) { settled = true; res.status(400).json({ error: 'No image file received' }); }
-    });
-    req.pipe(bb);
-  });
-
-  // ── DELETE /api/v1/admin/artists/placeholder ──────────────────────────────
-  // Admin only. Remove the custom placeholder — reverts to the built-in default.
-  mstream.delete('/api/v1/admin/artists/placeholder', async (req, res) => {
-    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
-    try {
-      if (fs.existsSync(ARTIST_PLACEHOLDER_FILE)) {
-        await fsp.unlink(ARTIST_PLACEHOLDER_FILE);
-      }
-      res.json({ ok: true });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // ── GET /api/v1/admin/artists/placeholder-info ───────────────────────────
-  // Admin only. Returns whether a custom placeholder is active.
-  mstream.get('/api/v1/admin/artists/placeholder-info', (req, res) => {
-    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
-    res.json({ hasCustom: fs.existsSync(ARTIST_PLACEHOLDER_FILE) });
   });
 
   // ── GET /api/v1/artists/home ──────────────────────────────────────────────
@@ -905,34 +711,15 @@ export function setup(mstream) {
   });
 
   // ── GET /api/v1/artists/profile?key= ──────────────────────────────────────
-  mstream.get('/api/v1/artists/profile', async (req, res) => {
+  mstream.get('/api/v1/artists/profile', (req, res) => {
     try {
       const key = req.query.key;
       if (!key || typeof key !== 'string') {
         return res.status(400).json({ error: 'Missing key' });
       }
 
-      let artistRow = db.getArtistRow(key);
+      const artistRow = db.getArtistRow(key);
       if (!artistRow) return res.status(404).json({ error: 'Artist not found' });
-
-      // On-demand MBID derivation: if not stored yet, derive from per-song data
-      let mbid = artistRow.mbid || null;
-      if (!mbid) {
-        mbid = db.deriveArtistMbidFromFiles(artistRow.canonicalName);
-        if (mbid) db.saveArtistInfo(artistRow.canonicalName, { mbid });
-      }
-
-      // On-demand TADB enrichment: fetch if fanart is missing OR all enrichment fields are missing.
-      // Using OR ensures a missing fanartFile is re-fetched even when genre/country are already stored.
-      const needsEnrich = !artistRow.fanartFile || (!artistRow.genre && !artistRow.bio && !artistRow.country);
-      if (needsEnrich) {
-        try {
-          await _hydrateArtistImageTadb(artistRow.artistKey, artistRow.canonicalName);
-          // Re-read the row so we return freshly saved enrichment data
-          artistRow = db.getArtistRow(key) || artistRow;
-          mbid = mbid || artistRow.mbid || null;
-        } catch (_e) { /* enrichment failure is non-fatal */ }
-      }
 
       const vpaths   = getAllowedVpaths(req);
       const fileRows = db.getArtistFiles(artistRow.rawVariants, vpaths, null);
@@ -944,11 +731,6 @@ export function setup(mstream) {
         bio           : artistRow.bio || null,
         imageFile     : artistRow.imageFile || null,
         imageSource   : artistRow.imageSource || null,
-        fanartFile    : artistRow.fanartFile || null,
-        mbid,
-        genre         : artistRow.genre || null,
-        country       : artistRow.country || null,
-        formedYear    : artistRow.formedYear || null,
         lastFetched   : artistRow.lastFetched || null,
         releaseCategories,
       });
@@ -958,7 +740,7 @@ export function setup(mstream) {
   });
 
   // ── POST /api/v1/artists/fetch-info ─────────────────────────────────────────
-  // Admin only. Fetches bio + image from Last.fm, TheAudioDB, and MusicBrainz.
+  // Admin only. Fetches bio + image from Last.fm (then MusicBrainz fallback).
   mstream.post('/api/v1/artists/fetch-info', async (req, res) => {
     if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
 
@@ -970,54 +752,29 @@ export function setup(mstream) {
     if (!artistRow) return res.status(404).json({ error: 'Artist not found' });
 
     try {
-      // Fetch all sources in parallel; TADB uses MBID-first when available
-      const fetchMbid = artistRow.mbid || db.deriveArtistMbidFromFiles(artistRow.canonicalName);
-      if (fetchMbid && !artistRow.mbid) db.saveArtistInfo(artistRow.canonicalName, { mbid: fetchMbid });
-      const [lfm, tadb, discogsUrl] = await Promise.all([
-        fetchFromLastfm(artistRow.canonicalName),
-        fetchFromTheAudioDB(artistRow.canonicalName, fetchMbid),
-        fetchArtistImageFromDiscogs(artistRow.canonicalName),
-      ]);
-      const mb = (!lfm?.bio && !tadb?.bio)
-        ? await fetchFromMusicBrainz(artistRow.canonicalName)
-        : null;
+      const lfm = await fetchFromLastfm(artistRow.canonicalName);
+      const mb  = (!lfm || !lfm.bio) ? await fetchFromMusicBrainz(artistRow.canonicalName) : null;
 
-      // Bio: Last.fm > TheAudioDB > MusicBrainz minimal
-      const bio = lfm?.bio || tadb?.bio || mb?.bio || null;
+      let imageUrl = await fetchArtistImageFromDiscogs(artistRow.canonicalName);
+      let source = imageUrl ? 'discogs' : 'lastfm';
+      if (!imageUrl) imageUrl = lfm?.imageUrl || null;
 
-      // Image: Discogs > TADB > Last.fm
-      let imageUrl = discogsUrl || tadb?.imageUrl || lfm?.imageUrl || null;
-      let source   = discogsUrl ? 'discogs' : (tadb?.imageUrl ? 'theaudiodb' : (lfm?.imageUrl ? 'lastfm' : null));
-
-      if (!bio && !imageUrl && !tadb?.fanartUrl && !tadb?.genre) {
-        return res.status(502).json({ error: 'No data from Discogs, Last.fm, TheAudioDB, or MusicBrainz' });
-      }
+      const bio = lfm?.bio || mb?.bio || null;
+      if (!bio && !imageUrl) return res.status(502).json({ error: 'No data from Discogs, Last.fm, or MusicBrainz' });
 
       let imageFile = null;
       if (imageUrl) {
         imageFile = await saveArtistImage(artistRow.artistKey, imageUrl);
-        if (!imageFile) source = null;
-      }
-
-      // Fanart from TADB
-      let fanartFile = artistRow.fanartFile || null;
-      if (!fanartFile && tadb?.fanartUrl) {
-        fanartFile = await saveFanartImage(artistRow.artistKey, tadb.fanartUrl);
       }
 
       db.saveArtistInfo(artistRow.canonicalName, {
-        bio,
+        bio         : bio,
         imageFile   : imageFile || null,
-        imageSource : source || (mb ? 'musicbrainz' : null),
-        fanartFile,
-        mbid:         tadb?.mbid    || null,
-        genre:        tadb?.genre   || null,
-        country:      tadb?.country || null,
-        formedYear:   tadb?.formedYear || null,
+        imageSource : imageFile ? source : (mb ? 'musicbrainz' : 'lastfm'),
       });
 
       invalidateArtistCache();
-      res.json({ ok: true, bio, imageFile, imageSource: source, fanartFile, genre: tadb?.genre || null, country: tadb?.country || null, formedYear: tadb?.formedYear || null, mbid: tadb?.mbid || null });
+      res.json({ ok: true, bio, imageFile, imageSource: imageFile ? source : (mb ? 'musicbrainz' : 'lastfm') });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -1219,33 +976,6 @@ export function setup(mstream) {
       db.setArtistImageWrongFlag(artistRow.canonicalName, false);
       invalidateArtistCache();
       res.json({ ok: true, imageFile, imageSource: source || 'custom' });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // ── POST /api/v1/admin/artists/enrich-tadb ────────────────────────────────
-  // Admin: re-enrich artists that are missing TADB fields (bio, fanart, genre, etc.)
-  // — resets last_fetched for artists without any enrichment so they re-enter the
-  // normal hydration queue, and seeds the tadb-only queue for artists that
-  // already have an image but are missing the enrichment fields.
-  mstream.post('/api/v1/admin/artists/enrich-tadb', (req, res) => {
-    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
-    try {
-      // 1. Reset fetch flag for artists with no image and no enrichment
-      const reset = db.resetUnenrichedArtistFetch();
-
-      // 2. Seed tadb-only queue for artists WITH images but no enrichment data
-      const toEnrich = db.getArtistsForTadbEnrichment(2000);
-      let enqueued = 0;
-      for (const name of toEnrich) {
-        const before = _imgHydrateQueue.length;
-        _enqueueHydrationTadb(name, name);
-        if (_imgHydrateQueue.length > before) enqueued++;
-      }
-      _drainHydrationQueue().catch(() => {});
-
-      res.json({ ok: true, reset, enqueued, message: `${reset} artist(s) queued for normal re-fetch; ${enqueued} artist(s) queued for TADB enrichment` });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

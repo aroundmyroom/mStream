@@ -479,12 +479,6 @@ export function init(dbDirectory) {
   try { db.exec("ALTER TABLE artists_normalized ADD COLUMN image_flag_wrong INTEGER DEFAULT 0"); } catch (_e) { /* already exists */ }
   try { db.exec("ALTER TABLE artists_normalized ADD COLUMN name_override INTEGER DEFAULT 0"); } catch (_e) { /* already exists */ }
   try { db.exec("ALTER TABLE artists_normalized ADD COLUMN song_count    INTEGER DEFAULT 0"); } catch (_e) { /* already exists */ }
-  // Migration: TheAudioDB enrichment — fanart, MBID, genre, country, formed_year
-  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN fanart_file  TEXT"); }             catch (_e) { /* already exists */ }
-  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN mbid         TEXT"); }             catch (_e) { /* already exists */ }
-  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN genre        TEXT"); }             catch (_e) { /* already exists */ }
-  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN country      TEXT"); }             catch (_e) { /* already exists */ }
-  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN formed_year  INTEGER"); }          catch (_e) { /* already exists */ }
 
   // ── Missing indexes (added post-initial-release) ──────────────────────────
   // Artist Home page: ORDER BY song_count DESC LIMIT 20 — was a full 18k-row
@@ -515,10 +509,7 @@ export function init(dbDirectory) {
     removeByPath:   db.prepare('DELETE FROM files WHERE filepath = ? AND vpath = ?'),
     insertScanRun:  db.prepare('INSERT INTO scan_runs (scan_id, vpath, started_at, finished_at) VALUES (?, ?, ?, ?)'),
     getLastScanRun: db.prepare('SELECT MAX(finished_at) AS ts FROM scan_runs'),
-    // Only inherit ts from a row in a DIFFERENT vpath — this prevents a new vpath
-    // creation from flooding Recently Added, but lets within-vpath file moves get
-    // a fresh ts so they correctly appear as recently added.
-    insertFileTs:   db.prepare('SELECT ts FROM files WHERE hash = ? AND vpath != ? AND ts IS NOT NULL LIMIT 1'),
+    insertFileTs:   db.prepare('SELECT ts FROM files WHERE hash = ? AND ts IS NOT NULL LIMIT 1'),
     insertFileRow:  db.prepare(
       'INSERT INTO files (title, artist, album_artist, year, album, filepath, format, track, trackOf, disk, modified, hash, audio_hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration, artist_id, album_id, cover_file, bitrate, sample_rate, channels, album_version, album_version_source, bit_depth) ' +
       'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
@@ -949,10 +940,9 @@ export function insertFile(fileData) {
 
   // If this hash already exists under a different vpath, inherit that ts so the
   // file doesn't appear as "newly added" just because a new vpath was created.
-  // Within-vpath moves (same vpath, new filepath) intentionally get a fresh ts.
   let ts = normalizeEpochSec(fileData.ts);
-  if (fileData.hash && fileData.vpath) {
-    const existing = _s.insertFileTs.get(fileData.hash, fileData.vpath);
+  if (fileData.hash) {
+    const existing = _s.insertFileTs.get(fileData.hash);
     if (existing) { ts = normalizeEpochSec(existing.ts); }
   }
   const result = _s.insertFileRow.run(
@@ -1617,11 +1607,6 @@ export function getArtistRow(artistClean) {
     bio:          row.bio || null,
     imageFile:    row.image_file || null,
     imageSource:  row.image_source || null,
-    fanartFile:   row.fanart_file || null,
-    mbid:         row.mbid || null,
-    genre:        row.genre || null,
-    country:      row.country || null,
-    formedYear:   row.formed_year || null,
     lastFetched:  row.last_fetched || null,
     nameOverride: row.name_override || 0,
     songCount:    row.song_count || 0,
@@ -1652,11 +1637,6 @@ export function getArtistRowByName(name) {
     bio:          row.bio || null,
     imageFile:    row.image_file || null,
     imageSource:  row.image_source || null,
-    fanartFile:   row.fanart_file || null,
-    mbid:         row.mbid || null,
-    genre:        row.genre || null,
-    country:      row.country || null,
-    formedYear:   row.formed_year || null,
     lastFetched:  row.last_fetched || null,
     nameOverride: row.name_override || 0,
     songCount:    row.song_count || 0,
@@ -1736,22 +1716,12 @@ export function getArtistFiles(rawVariants, vpaths, ignoreVPaths) {
 
 // Saves bio + image info fetched from an external service.
 // Never overwrites name_override.
-export function saveArtistInfo(artistClean, { bio, imageFile, imageSource, fanartFile, mbid, genre, country, formedYear } = {}) {
+export function saveArtistInfo(artistClean, { bio, imageFile, imageSource }) {
   db.prepare(`
     UPDATE artists_normalized
-    SET bio = ?, image_file = ?, image_source = ?, last_fetched = ?,
-        image_flag_wrong = CASE WHEN ? IS NOT NULL THEN 0 ELSE image_flag_wrong END,
-        fanart_file  = COALESCE(?, fanart_file),
-        mbid         = COALESCE(?, mbid),
-        genre        = COALESCE(?, genre),
-        country      = COALESCE(?, country),
-        formed_year  = COALESCE(?, formed_year)
+    SET bio = ?, image_file = ?, image_source = ?, last_fetched = ?, image_flag_wrong = CASE WHEN ? IS NOT NULL THEN 0 ELSE image_flag_wrong END
     WHERE lower(artist_clean) = lower(?)
-  `).run(
-    bio || null, imageFile || null, imageSource || null, Date.now(), imageFile || null,
-    fanartFile || null, mbid || null, genre || null, country || null, formedYear || null,
-    artistClean
-  );
+  `).run(bio || null, imageFile || null, imageSource || null, Date.now(), imageFile || null, artistClean);
 }
 
 // Admin: override the canonical display name for an artist.
@@ -1786,43 +1756,6 @@ export function markArtistFetchAttempt(artistClean) {
     SET last_fetched = ?
     WHERE lower(artist_clean) = lower(?)
   `).run(Date.now(), artistClean);
-}
-
-/**
- * Derive the artist-level MusicBrainz ID from per-song mb_artist_id data.
- * Returns the most frequently seen mb_artist_id among all songs attributed to
- * this artist, or null if none exist.
- */
-export function deriveArtistMbidFromFiles(artistClean) {
-  const row = db.prepare(`
-    SELECT mb_artist_id, COUNT(*) AS cnt
-    FROM files
-    WHERE mb_artist_id IS NOT NULL
-      AND (lower(COALESCE(album_artist, artist)) = lower(?) OR lower(artist) = lower(?))
-    GROUP BY mb_artist_id
-    ORDER BY cnt DESC
-    LIMIT 1
-  `).get(artistClean, artistClean);
-  return row?.mb_artist_id || null;
-}
-
-/**
- * Reset last_fetched for artists that were fetched before the TADB enrichment
- * fields (fanart, bio, genre, country, formed_year) were added — i.e. artists
- * with last_fetched set but none of the new fields populated yet.
- * Returns count of rows reset so they re-enter the hydration queue.
- */
-export function resetUnenrichedArtistFetch() {
-  const result = db.prepare(`
-    UPDATE artists_normalized
-    SET last_fetched = NULL
-    WHERE last_fetched IS NOT NULL
-      AND fanart_file IS NULL
-      AND genre IS NULL
-      AND country IS NULL
-      AND formed_year IS NULL
-  `).run();
-  return result.changes;
 }
 
 export function getArtistImageAudit(kind, limit = 200) {
@@ -1875,13 +1808,10 @@ export function getArtistImageAuditCounts() {
 
 // Returns artist_clean values where last_fetched IS NULL (never fetched) — used
 // by the auto-fetch queue after a scan completes.
-export function getArtistsNeedingFetch(limit = 50000) {
+export function getArtistsNeedingFetch() {
   return db.prepare(
-    `SELECT artist_clean FROM artists_normalized
-     WHERE (image_file IS NULL OR image_file = '') AND last_fetched IS NULL
-     ORDER BY song_count DESC NULLS LAST, artist_clean COLLATE NOCASE
-     LIMIT ?`
-  ).all(Math.max(1, Math.min(100000, Number(limit) || 50000))).map(r => r.artist_clean);
+    "SELECT artist_clean FROM artists_normalized WHERE last_fetched IS NULL ORDER BY artist_clean COLLATE NOCASE"
+  ).all().map(r => r.artist_clean);
 }
 
 export function getArtistsForTadbRetry(limit = 500) {
@@ -1893,21 +1823,6 @@ export function getArtistsForTadbRetry(limit = 500) {
      ORDER BY song_count DESC NULLS LAST, artist_clean COLLATE NOCASE
      LIMIT ?`
   ).all(Math.max(1, Math.min(2000, Number(limit) || 500))).map(r => r.artist_clean);
-}
-
-export function getArtistsForTadbEnrichment(limit = 2000) {
-  // Returns artists that already have an image but are missing TADB enrichment fields.
-  // These will be sent through a TADB-only pass to pick up bio, fanart, genre, etc.
-  return db.prepare(
-    `SELECT artist_clean FROM artists_normalized
-     WHERE image_file IS NOT NULL
-       AND fanart_file IS NULL
-       AND genre IS NULL
-       AND country IS NULL
-       AND formed_year IS NULL
-     ORDER BY song_count DESC NULLS LAST, artist_clean COLLATE NOCASE
-     LIMIT ?`
-  ).all(Math.max(1, Math.min(20000, Number(limit) || 2000))).map(r => r.artist_clean);
 }
 
 export function searchFiles(searchCol, searchTerm, vpaths, ignoreVPaths, filepathPrefix, excludeFilepathPrefixes, negativeTerms = []) {
