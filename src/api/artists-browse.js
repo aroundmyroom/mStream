@@ -20,7 +20,9 @@ import fsp from 'fs/promises';
 import http from 'http';
 import https from 'https';
 import path from 'path';
+import { Readable } from 'stream';
 import sharp from 'sharp';
+import busboy from 'busboy';
 import Joi from 'joi';
 import * as config from '../state/config.js';
 import * as db from '../db/manager.js';
@@ -28,9 +30,11 @@ import { joiValidate } from '../util/validation.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const CACHE_TTL      = 5 * 60 * 1000; // 5 minutes
-const ARTIST_IMG_DIR = path.join(process.cwd(), 'image-cache', 'artists');
-const ARTIST_IMG_SIZE = 400; // square JPEG size for stored artist images
+const CACHE_TTL              = 5 * 60 * 1000; // 5 minutes
+const ARTIST_IMG_DIR         = path.join(process.cwd(), 'image-cache', 'artists');
+const ARTIST_PLACEHOLDER_FILE = path.join(process.cwd(), 'image-cache', 'artist-placeholder.jpg');
+const ARTIST_PLACEHOLDER_DEFAULT = path.join(process.cwd(), 'webapp', 'assets', 'img', 'unknownartist.webp');
+const ARTIST_IMG_SIZE        = 400; // square JPEG size for stored artist images
 const HYDRATE_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours
 const HYDRATE_QUEUE_LIMIT = 50000;
 const HYDRATE_DELAY_OK_MS = 1400;
@@ -60,6 +64,8 @@ const _imgHydrateStats = {
   lastSuccessAt: 0,
   lastErrorAt: 0,
   lastError: null,
+  lastArtist: null,   // name of artist currently being processed
+  recentLog: [],      // rolling last-20 [{name, result, ts}]
 };
 
 export function invalidateArtistCache() {
@@ -159,10 +165,19 @@ function stripHtml(str) {
   return (str || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
 }
 
-function downloadBuffer(url) {
+function downloadBuffer(url, _redirects = 0) {
   return new Promise((resolve, reject) => {
+    if (_redirects > 5) return reject(new Error('Too many redirects'));
     const mod = url.startsWith('https') ? https : http;
     mod.get(url, res => {
+      // Follow 301/302/307/308 redirects
+      if ([301, 302, 307, 308].includes(res.statusCode)) {
+        const location = res.headers.location;
+        res.resume();
+        if (!location) return reject(new Error(`Redirect with no Location from ${url}`));
+        const next = location.startsWith('http') ? location : new URL(location, url).href;
+        return resolve(downloadBuffer(next, _redirects + 1));
+      }
       if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
       const chunks = [];
       res.on('data', c => chunks.push(c));
@@ -413,14 +428,21 @@ async function fetchFromMusicBrainz(artistName) {
   }
 }
 
+// Discogs returns a 1203-byte black 400×400 JPEG as a placeholder when an artist
+// has no real image. Reject any download below this threshold.
+const MIN_ARTIST_IMG_BYTES = 5000;
+
 async function saveArtistImage(artistKey, imageUrl) {
   try {
     const buf     = await downloadBuffer(imageUrl);
+    if (buf.length < MIN_ARTIST_IMG_BYTES) return null;
     const outName = artistKey.replace(/[^a-z0-9_-]/g, '_') + '.jpg';
     const outPath = path.join(ARTIST_IMG_DIR, outName);
     await sharp(buf).resize(ARTIST_IMG_SIZE, ARTIST_IMG_SIZE, { fit: 'cover', position: 'top' }).jpeg({ quality: 85 }).toFile(outPath);
     return outName;
   } catch (_e) {
+    _imgHydrateStats.lastError = `saveArtistImage(${artistKey}): ${_e.message}`;
+    _imgHydrateStats.lastErrorAt = Date.now();
     return null;
   }
 }
@@ -449,10 +471,6 @@ async function _hydrateArtistImage(artistKey, canonicalName) {
     fetchFromLastfm(row.canonicalName),
   ]);
 
-  // Image priority: Discogs (highest quality) > TADB thumb > Last.fm
-  let imageUrl = discogsUrl || tadb?.imageUrl || lfm?.imageUrl || null;
-  let source   = discogsUrl ? 'discogs' : (tadb?.imageUrl ? 'theaudiodb' : (lfm?.imageUrl ? 'lastfm' : null));
-
   // Bio priority: Last.fm > TheAudioDB (Last.fm bio is crowdsourced; TADB from Wikipedia)
   const bio = lfm?.bio || tadb?.bio || null;
 
@@ -462,15 +480,24 @@ async function _hydrateArtistImage(artistKey, canonicalName) {
     fanartFile = await saveFanartImage(row.artistKey, tadb.fanartUrl);
   }
 
-  if (!imageUrl && !bio && !fanartFile && !tadb?.genre) {
+  if (!discogsUrl && !tadb?.imageUrl && !lfm?.imageUrl && !bio && !fanartFile && !tadb?.genre) {
     db.markArtistFetchAttempt(row.canonicalName);
     return 'no-image';
   }
 
+  // Image priority: Discogs > TADB > Last.fm — try each in order until one saves successfully.
+  // If a source returns a URL but the download is rejected (e.g. Discogs black placeholder),
+  // fall through to the next source rather than giving up.
   let imageFile = null;
-  if (imageUrl) {
-    imageFile = await saveArtistImage(row.artistKey, imageUrl);
-    if (!imageFile) source = null;
+  let source    = null;
+  const imageCandidates = [
+    tadb?.imageUrl ? { url: tadb.imageUrl,   src: 'theaudiodb'  } : null,
+    discogsUrl    ? { url: discogsUrl,       src: 'discogs'     } : null,
+    lfm?.imageUrl  ? { url: lfm.imageUrl,    src: 'lastfm'      } : null,
+  ].filter(Boolean);
+  for (const candidate of imageCandidates) {
+    imageFile = await saveArtistImage(row.artistKey, candidate.url);
+    if (imageFile) { source = candidate.src; break; }
   }
 
   db.saveArtistInfo(row.canonicalName, {
@@ -607,6 +634,8 @@ async function _drainHydrationQueue() {
       const item = _imgHydrateQueue.shift();
       if (!item) continue;
       _imgHydrateQueued.delete(item.artistKey);
+      const displayName = item.canonicalName || item.artistKey;
+      _imgHydrateStats.lastArtist = displayName;
       try {
         const result = item.tadbOnly
           ? await _hydrateArtistImageTadb(item.artistKey, item.canonicalName)
@@ -622,6 +651,9 @@ async function _drainHydrationQueue() {
           _imgHydrateStats.lastErrorAt = Date.now();
           _imgHydrateStats.lastError = 'image processing failed';
         }
+        // Rolling log — keep last 20 entries
+        _imgHydrateStats.recentLog.push({ name: displayName, result: result || 'skip', ts: Date.now() });
+        if (_imgHydrateStats.recentLog.length > 20) _imgHydrateStats.recentLog.shift();
         const waitMs = (result === 'success')
           ? HYDRATE_DELAY_OK_MS
           : (result === 'no-image' || result === 'skip')
@@ -661,7 +693,10 @@ function hydrationStatusSnapshot() {
       error: HYDRATE_DELAY_ERR_MS,
     },
     discogs,
-    stats: { ..._imgHydrateStats },
+    stats: {
+      ..._imgHydrateStats,
+      recentLog: [..._imgHydrateStats.recentLog],
+    },
   };
 }
 
@@ -717,6 +752,72 @@ export function setup(mstream) {
       return res.status(400).json({ error: 'Invalid path' });
     }
     res.sendFile(resolved);
+  });
+
+  // ── POST /api/v1/admin/artists/placeholder ────────────────────────────────
+  // Admin only. Accept a multipart image upload, resize to 400×400 JPEG, save
+  // as the custom placeholder shown for artists without a photo.
+  mstream.post('/api/v1/admin/artists/placeholder', (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    let settled = false;
+    const bb = busboy({ headers: req.headers, limits: { files: 1, fileSize: 10 * 1024 * 1024 } });
+    bb.on('file', (_field, fileStream, info) => {
+      const mime = (info.mimeType || '').toLowerCase();
+      if (!mime.startsWith('image/')) {
+        fileStream.resume();
+        if (!settled) { settled = true; res.status(400).json({ error: 'Only image files are allowed' }); }
+        return;
+      }
+      const chunks = [];
+      fileStream.on('data', d => chunks.push(d));
+      fileStream.on('end', async () => {
+        if (settled) return;
+        try {
+          const buf = Buffer.concat(chunks);
+          const processed = await sharp(buf)
+            .resize(ARTIST_IMG_SIZE, ARTIST_IMG_SIZE, { fit: 'cover', position: 'top' })
+            .jpeg({ quality: 85 })
+            .toBuffer();
+          await fsp.mkdir(path.dirname(ARTIST_PLACEHOLDER_FILE), { recursive: true });
+          await fsp.writeFile(ARTIST_PLACEHOLDER_FILE, processed);
+          settled = true;
+          res.json({ ok: true });
+        } catch (err) {
+          if (!settled) { settled = true; res.status(500).json({ error: err.message }); }
+        }
+      });
+      fileStream.on('error', err => {
+        if (!settled) { settled = true; res.status(500).json({ error: err.message }); }
+      });
+    });
+    bb.on('error', err => {
+      if (!settled) { settled = true; res.status(500).json({ error: err.message }); }
+    });
+    bb.on('close', () => {
+      if (!settled) { settled = true; res.status(400).json({ error: 'No image file received' }); }
+    });
+    req.pipe(bb);
+  });
+
+  // ── DELETE /api/v1/admin/artists/placeholder ──────────────────────────────
+  // Admin only. Remove the custom placeholder — reverts to the built-in default.
+  mstream.delete('/api/v1/admin/artists/placeholder', async (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    try {
+      if (fs.existsSync(ARTIST_PLACEHOLDER_FILE)) {
+        await fsp.unlink(ARTIST_PLACEHOLDER_FILE);
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── GET /api/v1/admin/artists/placeholder-info ───────────────────────────
+  // Admin only. Returns whether a custom placeholder is active.
+  mstream.get('/api/v1/admin/artists/placeholder-info', (req, res) => {
+    if (req.user.admin !== true) return res.status(403).json({ error: 'Admin only' });
+    res.json({ hasCustom: fs.existsSync(ARTIST_PLACEHOLDER_FILE) });
   });
 
   // ── GET /api/v1/artists/home ──────────────────────────────────────────────

@@ -1,5 +1,63 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.13.3-velvet — April 2026 — Custom Placeholder, Similar Artists & Queue Performance
+
+### feat: Admin — customisable artist placeholder image
+- New section in **Admin → Artist Images** panel shows the current placeholder (built-in or custom) as a circular preview
+- **Upload your own image**: any image file is accepted, resized to 400×400 JPEG (sharp, quality 85, cover/top crop) and saved to `image-cache/artist-placeholder.jpg`
+- **Delete custom**: removes the uploaded file and reverts to the built-in `unknownartist.webp` immediately
+- Status line shows whether the built-in default or a custom image is active; a persistent cache-hint reminds users to force-refresh (Ctrl+Shift+R) after a change
+- All i18n keys added to all 12 locale files (nl.json with proper Dutch translations)
+
+### feat: Artist placeholder served via dynamic API endpoint
+- New public route `GET /api/v1/artists/placeholder` (registered before auth — usable in `<img src>` without a token): returns the custom JPEG if uploaded, otherwise the built-in webp
+- All 8 occurrences of `assets/img/unknownartist.webp` in `webapp/app.js` replaced with `api/v1/artists/placeholder` so swapping the placeholder image is reflected everywhere instantly
+- Supporting admin endpoints (all admin-only):
+  - `POST /api/v1/admin/artists/placeholder` — multipart upload, resizes and saves
+  - `DELETE /api/v1/admin/artists/placeholder` — removes custom, reverts to default
+  - `GET /api/v1/admin/artists/placeholder-info` — returns `{ hasCustom: bool }`
+
+### fix: Hydration panel — "Recent activity" header count
+- Header showed `last {{ recentLog.length }}` (up to 20 — the full array size) but the `v-for` only rendered `.slice(0, 10)` — now hardcoded to "last 10" to match what's actually displayed
+
+### perf: Remove waveform prefetch on queue add
+- `addSong`, `addAll`, and `playNext` were each calling `_wfPrefetchEnqueue` for every song added, filling `_wfPrefetchPending` with up to 1,000 entries and triggering continuous background HTTP + ffmpeg jobs
+- Waveform prefetch removed from all three functions — waveforms are now only fetched when a song actually starts playing (`_fetchWaveform`) or via the existing `_WF_AHEAD=3` look-ahead in `playAll`
+- Result: adding 1,000 songs to the queue is now a pure in-memory push + single DOM re-render; the waveform seek/mousemove interaction no longer competes with background network activity
+
+### feat: Recently Added — album-art grid + compact view toggle
+- Three density modes, persisted per user in localStorage (`ms2_recent_density_<user>`):
+  - **List** (default): existing song rows with album art thumbnails
+  - **Compact**: song rows without art thumbnails — tighter, no reflow cost
+  - **Grid**: groups songs by album, shows album cards in the same grid used by the Album Library; clicking opens the album, the play overlay plays immediately without navigating
+- Toggle buttons use the same icons/style as the Album Library density control
+- CSS: `.song-list--compact` hides `.row-art`, reduces row height to 5px padding
+
+### fix: Playing Now — feat./ft./with tag no longer breaks library lookup
+- When the current song's artist tag includes a collaboration suffix (e.g. `"Calvin Harris feat. Ellie Goulding"`), Playing Now was using the full string for all lookups — finding only 1 song instead of the full Calvin Harris catalogue
+- New `_primaryArtist()` helper strips `feat./ft./featuring/vs./with/pres./×` suffixes before any lookup
+- Applied to: artist image, "In Your Library" album list, Last.fm bio, and similar artists
+- The display name in the song header is unchanged (still shows the full tag value)
+
+### fix: Reject Discogs black placeholder images
+- Discogs API returns a 1203-byte black 400×400 JPEG when an artist has no image; these were being saved to disk and shown in the UI
+- `saveArtistImage()` now rejects any downloaded buffer below 5000 bytes — the placeholder is silently dropped; the artist falls back to `unknownartist.webp` instead
+- 1,710 previously stored black placeholder files cleaned from `/image-cache/artists/`; corresponding DB records (`image_file`, `image_source`, `last_fetched`) reset so those artists are eligible for re-hydration via TheAudioDB
+
+### fix: Similar artists — collapse ft./feat./with/vs. variants into one chip
+- New `_deduplicateSimArtists()` helper strips collaboration suffixes (`ft.`, `feat.`, `featuring`, `vs.`, `with`, `pres.`, `×`) from each artist name to derive a base name
+- Only one chip is shown per base: the canonical form (e.g. "Blank & Jones") is preferred over variants ("Blank & Jones ft. Robert Smith"); if no canonical form exists, the first variant is kept
+- Applied in both the **Playing Now** view and the **Artist Profile** similar artists section
+- Auto-DJ continues to receive the full unfiltered list (all variants match files in the DB — needed for correct track selection)
+
+### feat: Unknown artist placeholder image
+- `webapp/assets/img/unknownartist.webp` — shown when an artist has no image yet, on all 4 surfaces:
+  - **Playing Now** sidebar — shown immediately while the artist image API call is in flight, replaced once the real image loads
+  - **Artist Profile** image panel — shown when `imageFile` is null; onerror fallback on load failure
+  - **Artist Library** letter-browse rows — shown as avatar when no image on file (was previously empty); onerror fallback
+  - **Artist Home** carousel cards — shown when no image on file (was previously a CSS silhouette placeholder); onerror fallback
+- All `onerror` handlers on artist `<img>` elements now fall back to `unknownartist.webp` instead of removing the element or clearing the parent
+
 ## v6.13.2-velvet — April 2026 — Fanart Hero, Audio Output & Enrichment Fixes
 
 ### feat: Artist profile — fanart hero banner + metadata chips

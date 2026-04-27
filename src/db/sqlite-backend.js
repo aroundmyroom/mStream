@@ -515,7 +515,10 @@ export function init(dbDirectory) {
     removeByPath:   db.prepare('DELETE FROM files WHERE filepath = ? AND vpath = ?'),
     insertScanRun:  db.prepare('INSERT INTO scan_runs (scan_id, vpath, started_at, finished_at) VALUES (?, ?, ?, ?)'),
     getLastScanRun: db.prepare('SELECT MAX(finished_at) AS ts FROM scan_runs'),
-    insertFileTs:   db.prepare('SELECT ts FROM files WHERE hash = ? AND ts IS NOT NULL LIMIT 1'),
+    // Only inherit ts from a row in a DIFFERENT vpath — this prevents a new vpath
+    // creation from flooding Recently Added, but lets within-vpath file moves get
+    // a fresh ts so they correctly appear as recently added.
+    insertFileTs:   db.prepare('SELECT ts FROM files WHERE hash = ? AND vpath != ? AND ts IS NOT NULL LIMIT 1'),
     insertFileRow:  db.prepare(
       'INSERT INTO files (title, artist, album_artist, year, album, filepath, format, track, trackOf, disk, modified, hash, audio_hash, aaFile, vpath, ts, sID, replaygainTrackDb, genre, cuepoints, art_source, duration, artist_id, album_id, cover_file, bitrate, sample_rate, channels, album_version, album_version_source, bit_depth) ' +
       'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
@@ -946,9 +949,10 @@ export function insertFile(fileData) {
 
   // If this hash already exists under a different vpath, inherit that ts so the
   // file doesn't appear as "newly added" just because a new vpath was created.
+  // Within-vpath moves (same vpath, new filepath) intentionally get a fresh ts.
   let ts = normalizeEpochSec(fileData.ts);
-  if (fileData.hash) {
-    const existing = _s.insertFileTs.get(fileData.hash);
+  if (fileData.hash && fileData.vpath) {
+    const existing = _s.insertFileTs.get(fileData.hash, fileData.vpath);
     if (existing) { ts = normalizeEpochSec(existing.ts); }
   }
   const result = _s.insertFileRow.run(

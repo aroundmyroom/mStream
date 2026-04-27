@@ -847,7 +847,6 @@ const Player = {
   },
   addSong(song) {
     S.queue.push(song);
-    _wfPrefetchEnqueue(song.filepath);
     toast(t('player.toast.added', { title: song.title || song.filepath.split('/').pop() }));
     refreshQueueUI();
     persistQueue();
@@ -855,7 +854,6 @@ const Player = {
   },
   addAll(songs) {
     S.queue.push(...songs);
-    songs.forEach(s => _wfPrefetchEnqueue(s.filepath));
     toast(t('player.toast.addedSongs', { count: songs.length }));
     refreshQueueUI();
     persistQueue();
@@ -864,7 +862,6 @@ const Player = {
   playNext(song) {
     const insertAt = S.idx + 1;
     S.queue.splice(insertAt, 0, song);
-    _wfPrefetchEnqueue(song.filepath);
     toast(t('player.toast.playingNext', { title: song.title || song.filepath.split('/').pop() }));
     refreshQueueUI();
     persistQueue();
@@ -5436,12 +5433,135 @@ async function viewRecent() {
   setBody('<div class="loading-state"></div>');
   try {
     const abEx = _audioBookExclusions();
-    const d = await api('POST', 'api/v1/db/recent/added', {
+    const raw = await api('POST', 'api/v1/db/recent/added', {
       limit: 200,
       ...(abEx.ignoreVPaths.length ? { ignoreVPaths: abEx.ignoreVPaths } : {}),
       ...(abEx.excludeFilepathPrefixes.length ? { excludeFilepathPrefixes: abEx.excludeFilepathPrefixes } : {}),
     }, sig);
-    showSongs(d.map(norm));
+    const songs = raw.map(norm);
+
+    // ── Density preference (comfy | compact | list) — matches Albums order ──────
+    const _densityKey = 'ms2_recent_density_' + (S.username || '');
+    let curDensity = localStorage.getItem(_densityKey) || 'comfy';
+
+    // Wire play-all / add-all (like showSongs does)
+    S.curSongs = songs;
+    document.getElementById('play-all-btn').onclick = () => {
+      if (songs.length) { _setPlaySource(null); Player.setQueue(songs, 0); toast(`Playing ${songs.length} songs`); }
+    };
+    document.getElementById('add-all-btn').onclick = () => { if (songs.length) Player.addAll(songs); };
+    document.getElementById('zip-dl-btn')?.classList.add('hidden');
+    document.getElementById('select-mode-btn')?.classList.add('hidden');
+
+    if (!songs.length) { setBody('<div class="empty-state">No songs found</div>'); return; }
+
+    const body = document.getElementById('content-body');
+    body.innerHTML = `
+      <div class="fe-filter-row recent-view-bar">
+        <span class="fe-match-count" style="margin-right:auto;">${t('player.recent.gridHint')}</span>
+        <div class="allib-view-controls" style="margin-left:0;">
+          <button class="allib-density-btn" data-density="comfy"   title="${t('player.albums.densityComfy')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="6" height="6" rx="1"/><rect x="8" y="0" width="6" height="6" rx="1"/><rect x="0" y="8" width="6" height="6" rx="1"/><rect x="8" y="8" width="6" height="6" rx="1"/></svg></button>
+          <button class="allib-density-btn" data-density="compact" title="${t('player.albums.densityCompact')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="4" height="4" rx=".5"/><rect x="5" y="0" width="4" height="4" rx=".5"/><rect x="10" y="0" width="4" height="4" rx=".5"/><rect x="0" y="5" width="4" height="4" rx=".5"/><rect x="5" y="5" width="4" height="4" rx=".5"/><rect x="10" y="5" width="4" height="4" rx=".5"/><rect x="0" y="10" width="4" height="4" rx=".5"/><rect x="5" y="10" width="4" height="4" rx=".5"/><rect x="10" y="10" width="4" height="4" rx=".5"/></svg></button>
+          <button class="allib-density-btn" data-density="list"    title="${t('player.albums.densityList')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="1" width="14" height="2" rx="1"/><rect x="0" y="6" width="14" height="2" rx="1"/><rect x="0" y="11" width="14" height="2" rx="1"/></svg></button>
+        </div>
+      </div>
+      <div class="recent-view-content"></div>`;
+
+    function renderView() {
+      body.querySelectorAll('.allib-density-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.density === curDensity));
+
+      const wrap = body.querySelector('.recent-view-content');
+
+      if (curDensity === 'comfy' || curDensity === 'compact') {
+        // ── Album-art grid ────────────────────────────────────────────────
+        // Songs WITH an album name → grouped by album+artist (one card per album)
+        // Songs WITHOUT album name → each song gets its own individual card
+        // Use a plain array + numeric data-recent-idx to avoid null-byte key issues in DOM attrs
+        const groups = [];
+        const _albumIdx = new Map(); // "album\0artist" → groups index
+        for (const s of songs) {
+          if (s.album) {
+            const k = s.album + '\x00' + (s.artist || '');
+            if (!_albumIdx.has(k)) {
+              _albumIdx.set(k, groups.length);
+              groups.push({ album: s.album, artist: s.artist, art: s['album-art'], songs: [], single: false });
+            }
+            const g = groups[_albumIdx.get(k)];
+            if (!g.art && s['album-art']) g.art = s['album-art'];
+            g.songs.push(s);
+          } else {
+            groups.push({ album: null, artist: s.artist, title: s.title || s.filepath, art: s['album-art'], songs: [s], single: true });
+          }
+        }
+        const cards = groups.map((g, idx) => {
+          const art = artUrl(g.art, 'm');
+          const label = g.single ? (g.title || '—') : (g.album || '—');
+          const sub   = g.artist || '';
+          return `<div class="album-card" data-recent-idx="${idx}">
+            <div class="album-art">
+              ${art ? `<img src="${esc(art)}" alt="${esc(label)}" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">` : noArtHtml()}
+            </div>
+            <div class="album-meta">
+              <div class="album-name">${esc(label)}</div>
+              ${sub ? `<div class="album-year">${esc(sub)}</div>` : ''}
+            </div>
+          </div>`;
+        });
+        const gridClass = 'album-grid' + (curDensity === 'compact' ? ' album-grid--compact' : '');
+        wrap.innerHTML = `<div class="${gridClass}">${cards.join('')}</div>`;
+
+        wrap.querySelectorAll('.album-card[data-recent-idx]').forEach(card => {
+          const g = groups[+card.dataset.recentIdx];
+          if (!g) return;
+          // Click card → show the songs we already have (no DB re-query)
+          card.addEventListener('click', () => {
+            const title = g.single ? (g.title || g.artist || '') : (g.album || '');
+            setTitle(title);
+            setBack(() => viewRecent());
+            showSongs(g.songs, title);
+          });
+        });
+
+        // On-demand art: fetch embedded art for cards with no scanned art
+        groups.forEach((g, idx) => {
+          const fp = g.songs[0]?.filepath;
+          if (g.art || !fp) return;
+          api('GET', `api/v1/files/art?fp=${encodeURIComponent(fp)}`)
+            .then(d => {
+              if (!d?.aaFile) return;
+              const card = wrap.querySelector(`.album-card[data-recent-idx="${idx}"]`);
+              if (!card) return;
+              const artDiv = card.querySelector('.album-art');
+              if (artDiv && !artDiv.querySelector('img')) {
+                artDiv.insertAdjacentHTML('afterbegin', `<img src="${artUrl(d.aaFile,'m')}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=noArtHtml()">`);
+              }
+            })
+            .catch(() => {});
+        });
+
+      } else {
+        // ── List: song rows with art thumbnails ───────────────────────────
+        const listEl = document.createElement('div');
+        listEl.className = 'song-list';
+        listEl.innerHTML = renderSongRows(songs);
+        wrap.innerHTML = '';
+        wrap.appendChild(listEl);
+        attachSongListEvents(wrap, songs);
+        highlightRow();
+        _fetchMissingArt(songs, listEl, '.row-art', 'data-ci');
+      }
+    }
+
+    body.querySelectorAll('.allib-density-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        curDensity = btn.dataset.density;
+        localStorage.setItem(_densityKey, curDensity);
+        renderView();
+      });
+    });
+
+    renderView();
   } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
 }
 
@@ -5499,10 +5619,10 @@ async function viewArtists() {
     // ── artist card helper (HOME-shelf style) ──────────────────────────────
     function artistCard(a) {
       if (!a.canonicalName) return '';
-      const placeholder = `<div class="artist-home-ph" aria-hidden="true"><div class="artist-home-ph-head"></div><div class="artist-home-ph-body"></div></div>`;
+      const fallbackSrc = 'api/v1/artists/placeholder';
       const artInner = a.imageFile
-        ? `${placeholder}<img class="artist-home-img" src="api/v1/artists/images/${encodeURIComponent(a.imageFile)}" alt="" loading="lazy" onerror="this.onerror=null;this.remove()">`
-        : placeholder;
+        ? `<img class="artist-home-img" src="api/v1/artists/images/${encodeURIComponent(a.imageFile)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${fallbackSrc}'">`
+        : `<img class="artist-home-img" src="${fallbackSrc}" alt="">`;
       const sub = Number.isFinite(a.playCount) && a.playCount > 0
         ? `${a.playCount} play${a.playCount !== 1 ? 's' : ''}`
         : (a.songCount ? `${a.songCount} song${a.songCount !== 1 ? 's' : ''}` : '');
@@ -5568,9 +5688,9 @@ async function viewArtists() {
           <span id="art-match-count" class="fe-match-count"></span>
           <button id="art-search-clear" class="fe-filter-clear hidden" title="${t('player.ctrl.clear')}">✕</button>
           <div class="allib-view-controls">
-            <button class="allib-density-btn" data-art-density="list" title="${t('player.artists.densityList')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="1" width="14" height="2" rx="1"/><rect x="0" y="6" width="14" height="2" rx="1"/><rect x="0" y="11" width="14" height="2" rx="1"/></svg></button>
             <button class="allib-density-btn" data-art-density="comfy" title="${t('player.artists.densityComfy')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="6" height="6" rx="1"/><rect x="8" y="0" width="6" height="6" rx="1"/><rect x="0" y="8" width="6" height="6" rx="1"/><rect x="8" y="8" width="6" height="6" rx="1"/></svg></button>
             <button class="allib-density-btn" data-art-density="compact" title="${t('player.artists.densityCompact')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="4" height="4" rx=".5"/><rect x="5" y="0" width="4" height="4" rx=".5"/><rect x="10" y="0" width="4" height="4" rx=".5"/><rect x="0" y="5" width="4" height="4" rx=".5"/><rect x="5" y="5" width="4" height="4" rx=".5"/><rect x="10" y="5" width="4" height="4" rx=".5"/><rect x="0" y="10" width="4" height="4" rx=".5"/><rect x="5" y="10" width="4" height="4" rx=".5"/><rect x="10" y="10" width="4" height="4" rx=".5"/></svg></button>
+            <button class="allib-density-btn" data-art-density="list" title="${t('player.artists.densityList')}"><svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="1" width="14" height="2" rx="1"/><rect x="0" y="6" width="14" height="2" rx="1"/><rect x="0" y="11" width="14" height="2" rx="1"/></svg></button>
           </div>
         </div>
         <div id="art-letter-results"></div>
@@ -5653,12 +5773,11 @@ async function viewArtists() {
       return artists.filter(a => a.canonicalName).map(a => {
         const av = a.canonicalName.replace(/^The\s+/i, '').charAt(0).toUpperCase() || '?';
         const sub = a.songCount ? `${a.songCount} song${a.songCount !== 1 ? 's' : ''}` : '';
-        const imgUrl = a.imageFile ? `/api/v1/artists/images/${encodeURIComponent(a.imageFile)}` : '';
+        const imgSrc = a.imageFile
+          ? `/api/v1/artists/images/${encodeURIComponent(a.imageFile)}`
+          : 'api/v1/artists/placeholder';
         return `<div class="artist-row" data-akey="${esc(a.artistKey)}" data-aname="${esc(a.canonicalName)}">
-          <div class="artist-av">${imgUrl
-            ? `<img class="artist-av-img" src="${esc(imgUrl)}" alt="${esc(a.canonicalName)}" loading="lazy" onerror="this.remove()">`
-            : ''
-          }<span class="artist-av-fallback">${esc(av)}</span></div>
+          <div class="artist-av"><img class="artist-av-img" src="${esc(imgSrc)}" alt="${esc(a.canonicalName)}" loading="lazy" onerror="this.onerror=null;this.src='api/v1/artists/placeholder'"><span class="artist-av-fallback">${esc(av)}</span></div>
           <div class="artist-col">
             <div class="artist-name">${esc(a.canonicalName)}</div>
             ${sub ? `<div class="artist-sub">${sub}</div>` : ''}
@@ -5863,7 +5982,7 @@ async function viewArtistProfile(artistKey, displayName, variants, backFn) {
       </div>
     </div>
     <div class="artpro-header" id="artpro-header">
-      <div class="artpro-img-wrap" id="artpro-img-wrap"><div class="artpro-img-ph"></div></div>
+      <div class="artpro-img-wrap" id="artpro-img-wrap"><img class="artpro-img" src="api/v1/artists/placeholder" alt=""></div>
       <div class="artpro-info">
         <div class="artpro-name" id="artpro-header-name">${esc(displayName)}</div>
         <div class="artpro-meta-chips hidden" id="artpro-chips"></div>
@@ -5898,8 +6017,11 @@ async function viewArtistProfile(artistKey, displayName, variants, backFn) {
 
   // ── Artist image ────────────────────────────────────────────────────────
   const wrap = document.getElementById('artpro-img-wrap');
-  if (wrap && profile?.imageFile) {
-    wrap.innerHTML = `<img class="artpro-img" src="api/v1/artists/images/${encodeURIComponent(profile.imageFile)}" alt="${esc(displayName)}" loading="lazy" onerror="this.parentNode.innerHTML=''">`;
+  if (wrap) {
+    const imgSrc = profile?.imageFile
+      ? `api/v1/artists/images/${encodeURIComponent(profile.imageFile)}`
+      : 'api/v1/artists/placeholder';
+    wrap.innerHTML = `<img class="artpro-img" src="${imgSrc}" alt="${esc(displayName)}" loading="lazy" onerror="this.onerror=null;this.src='api/v1/artists/placeholder'">`;
   }
 
   // ── Fanart hero banner ──────────────────────────────────────────────────
@@ -6008,7 +6130,7 @@ async function viewArtistProfile(artistKey, displayName, variants, backFn) {
     }
 
     // Similar artists chips
-    const simArtists = simData?.artists || [];
+    const simArtists = _deduplicateSimArtists(simData?.artists || []);
     const simEl    = document.getElementById('artpro-sim');
     const simTitle = document.getElementById('artpro-sim-title');
     if (simArtists.length && simEl && simTitle) {
@@ -7700,8 +7822,40 @@ async function _renderPlayingNow(fade) {
   _pnowLoadArtistData(s.artist, s.filepath);
 }
 
+// Collapse collaboration variants into one chip per base artist.
+// "Blank & Jones ft. Robert Smith" and "Blank & Jones feat. Bernard Sumner" both
+// reduce to base "Blank & Jones" — only one entry is kept (the canonical form if
+// it appears in the list, otherwise the first encountered variant).
+function _deduplicateSimArtists(artists) {
+  const COLLAB_RE = /\s+(?:ft\.?|feat(?:uring)?\.?|vs\.?|with|pres(?:ents)?\.?|×)\s+.*/i;
+  const seen = new Map(); // baseLower → { bestName, isExact }
+  for (const name of artists) {
+    const base     = name.replace(COLLAB_RE, '').trim();
+    const baseLower = base.toLowerCase();
+    const isExact  = name.trim().toLowerCase() === baseLower;
+    if (!seen.has(baseLower)) {
+      seen.set(baseLower, { bestName: name, isExact });
+    } else if (isExact && !seen.get(baseLower).isExact) {
+      // Upgrade to the canonical form when we find the exact base name
+      seen.set(baseLower, { bestName: name, isExact: true });
+    }
+  }
+  return [...seen.values()].map(v => v.bestName);
+}
+
+// Extract the primary artist from a feat./ft./with/vs. tag, e.g.
+// "Calvin Harris feat. Ellie Goulding" → "Calvin Harris"
+const _FEAT_RE = /\s*[([{]?\s*(?:ft\.?|feat(?:uring)?\.?|vs\.?|with|pres(?:ents)?\.?|×)\s+.*/i;
+function _primaryArtist(name) {
+  if (!name) return name;
+  return name.replace(_FEAT_RE, '').trim() || name;
+}
+
 async function _pnowLoadArtistData(artist, forFp) {
   if (S.view !== 'playing-now' || _pnowSongFp !== forFp) return;
+
+  // Strip feat./ft./with/vs. — use the primary artist for all library/image/bio lookups
+  const primaryArtist = _primaryArtist(artist);
 
   const bioEl      = document.getElementById('pnow-bio');
   const bioTitle   = document.getElementById('pnow-bio-title');
@@ -7713,23 +7867,25 @@ async function _pnowLoadArtistData(artist, forFp) {
   if (!bioEl || !albumsEl) return;
 
   // ── 0. Artist image from local cache (TheAudioDB/Discogs/Last.fm, stored server-side) ─
-  if (artist) {
-    api('GET', `api/v1/artists/image?artist=${encodeURIComponent(artist)}`)
+  if (primaryArtist) {
+    const wrap = document.getElementById('pnow-artist-img-wrap');
+    if (wrap) wrap.innerHTML = `<img class="pnow-tadb-img" src="api/v1/artists/placeholder" alt="" loading="lazy">`;
+    api('GET', `api/v1/artists/image?artist=${encodeURIComponent(primaryArtist)}`)
       .then(d => {
         if (_pnowSongFp !== forFp) return;
-        const wrap = document.getElementById('pnow-artist-img-wrap');
-        if (d?.imageFile && wrap) {
-          wrap.innerHTML = `<img class="pnow-tadb-img" src="api/v1/artists/images/${encodeURIComponent(d.imageFile)}" alt="" loading="lazy" onerror="this.parentNode.innerHTML=''">`;
+        const wrap2 = document.getElementById('pnow-artist-img-wrap');
+        if (d?.imageFile && wrap2) {
+          wrap2.innerHTML = `<img class="pnow-tadb-img" src="api/v1/artists/images/${encodeURIComponent(d.imageFile)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='api/v1/artists/placeholder'">`;
         }
       })
       .catch(() => {});
   }
 
   // ── 1. Library albums for this artist ───────────────────────────────────
-  if (artist) {
+  if (primaryArtist) {
     if (albumsTitle) albumsTitle.textContent = t('player.pnow.inYourLibrary');
     try {
-      const d = await api('POST', 'api/v1/db/artists-albums-multi', { artists: [artist] });
+      const d = await api('POST', 'api/v1/db/artists-albums-multi', { artists: [primaryArtist] });
       if (_pnowSongFp !== forFp) return;
       const albums = d.albums || [];
       if (albums.length && albumsEl) {
@@ -7742,7 +7898,7 @@ async function _pnowLoadArtistData(artist, forFp) {
           const nextName = i < albums.length-1 ? albums[i+1].name : null;
           const isSibling = alb.name === prevName || alb.name === nextName;
           const verBadge = alb.album_version ? `<span class="alb-version-badge" title="${esc(alb.album_version)}">${esc(alb.album_version)}</span>` : '';
-          return `<div class="album-card${isSibling ? ' alb-sibling-group' : ''}" data-alb-artist="${esc(alb.artist||artist)}" data-alb-name="${esc(alb.name||'')}">
+          return `<div class="album-card${isSibling ? ' alb-sibling-group' : ''}" data-alb-artist="${esc(alb.artist||primaryArtist)}" data-alb-name="${esc(alb.name||'')}">
             <div class="album-art">${albArtHtml}<div class="play-ov"><svg width="24" height="24" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div>
             <div class="album-meta"><div class="album-name">${esc(alb.name || '—')}</div>${alb.year ? `<div class="album-year">${alb.year}${verBadge}</div>` : verBadge ? `<div class="album-year">${verBadge}</div>` : ''}</div>
           </div>`;
@@ -7751,9 +7907,9 @@ async function _pnowLoadArtistData(artist, forFp) {
         albumsEl.querySelectorAll('.album-card').forEach((card, i) => {
           card.addEventListener('click', () => {
             const alb = albums[i];
-            viewAlbumSongs(alb.name, artist, () => viewPlayingNow(), {
+            viewAlbumSongs(alb.name, primaryArtist, () => viewPlayingNow(), {
               albumDir: alb.dir,
-              artistVariants: [artist],
+              artistVariants: [primaryArtist],
               skipAOFilter: true,
             });
           });
@@ -7765,15 +7921,15 @@ async function _pnowLoadArtistData(artist, forFp) {
   }
 
   // ── 2. Last.fm: bio + similar artists (only if API key configured) ───────
-  if (!artist || !S.lastfmHasApiKey) {
+  if (!primaryArtist || !S.lastfmHasApiKey) {
     if (bioTitle) bioTitle.textContent = '';
     return;
   }
 
   try {
     const [bioData, simData] = await Promise.all([
-      api('GET', `api/v1/lastfm/artist-info?artist=${encodeURIComponent(artist)}`),
-      api('GET', `api/v1/lastfm/similar-artists?artist=${encodeURIComponent(artist)}`),
+      api('GET', `api/v1/lastfm/artist-info?artist=${encodeURIComponent(primaryArtist)}`),
+      api('GET', `api/v1/lastfm/similar-artists?artist=${encodeURIComponent(primaryArtist)}`),
     ]);
     if (_pnowSongFp !== forFp) return;
 
@@ -7803,7 +7959,7 @@ async function _pnowLoadArtistData(artist, forFp) {
     }
 
     // Similar artists chips
-    const simArtists = simData?.artists || [];
+    const simArtists = _deduplicateSimArtists(simData?.artists || []);
     if (simArtists.length && simEl && simTitle) {
       simTitle.textContent = t('player.pnow.similarArtists');
       // Check which similar artists exist in the local library

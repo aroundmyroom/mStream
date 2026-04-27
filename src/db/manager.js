@@ -124,7 +124,7 @@ export function deriveArtistMbidFromFiles(artistClean) { return backend.deriveAr
 export function resetUnenrichedArtistFetch() { return backend.resetUnenrichedArtistFetch(); }
 export function getArtistImageAudit(kind, limit) { return backend.getArtistImageAudit(kind, limit); }
 export function getArtistImageAuditCounts() { return backend.getArtistImageAuditCounts(); }
-export function getArtistsNeedingFetch() { return backend.getArtistsNeedingFetch(); }
+export function getArtistsNeedingFetch(limit) { return backend.getArtistsNeedingFetch(limit); }
 export function getArtistsForTadbRetry(limit) { return backend.getArtistsForTadbRetry(limit); }
 export function getArtistsForTadbEnrichment(limit) { return backend.getArtistsForTadbEnrichment(limit); }
 export function getRatedSongs(vpaths, username, ignoreVPaths) { return backend.getRatedSongs(vpaths, username, ignoreVPaths); }

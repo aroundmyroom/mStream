@@ -191,6 +191,16 @@ export async function serveIt(configFile) {
     res.json({ enabled: config.program.languages?.enabled || _ALL_LANG_CODES });
   });
 
+  // Public — artist placeholder image (no auth: used in <img src> throughout the player)
+  const _ARTIST_PLACEHOLDER_FILE    = path.join(process.cwd(), 'image-cache', 'artist-placeholder.jpg');
+  const _ARTIST_PLACEHOLDER_DEFAULT = path.join(config.program.webAppDirectory, 'assets', 'img', 'unknownartist.webp');
+  mstream.get('/api/v1/artists/placeholder', (_req, res) => {
+    if (fs.existsSync(_ARTIST_PLACEHOLDER_FILE)) {
+      return res.sendFile(_ARTIST_PLACEHOLDER_FILE);
+    }
+    res.sendFile(_ARTIST_PLACEHOLDER_DEFAULT);
+  });
+
   // Everything below this line requires authentication
   authApi.setup(mstream);
 

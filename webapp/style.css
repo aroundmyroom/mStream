@@ -486,6 +486,13 @@ button, a, .song-row, .artist-row, .album-card, .album-row,
 
 /* ── SONG ROWS ─────────────────────────────────────────────── */
 .song-list{display:flex;flex-direction:column;gap:1px;}
+
+/* Compact song list: hides album art thumbnail, reduces row height */
+.song-list--compact .row-art{display:none;}
+.song-list--compact .song-row{grid-template-columns:32px 1fr auto auto;padding:5px 10px;}
+.song-list--compact .row-num{width:32px;height:32px;}
+.song-list--compact .song-title{font-size:13px;}
+.song-list--compact .song-sub{font-size:11px;margin-top:1px;}
 .song-row{
   display:grid;grid-template-columns:36px 48px 1fr auto auto;
   align-items:center;gap:10px;padding:8px 10px;border-radius:var(--r);
