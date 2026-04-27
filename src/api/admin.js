@@ -154,7 +154,7 @@ export function setup(mstream) {
   });
 
   mstream.get("/api/v1/admin/db/params", (req, res) => {
-    res.json({ ...config.program.scanOptions });
+    res.json({ ...config.program.scanOptions, nextScanAt: dbQueue.getNextScanMs() });
   });
 
   mstream.post("/api/v1/admin/db/params/scan-interval", async (req, res) => {
@@ -164,7 +164,17 @@ export function setup(mstream) {
     joiValidate(schema, req.body);
 
     await admin.editScanInterval(req.body.scanInterval);
-    res.json({});
+    res.json({ nextScanAt: dbQueue.getNextScanMs() });
+  });
+
+  mstream.post("/api/v1/admin/db/params/scan-start-time", async (req, res) => {
+    const schema = Joi.object({
+      scanStartTime: Joi.string().pattern(/^\d{1,2}:\d{2}$/).allow(null, '').required()
+    });
+    joiValidate(schema, req.body);
+
+    await admin.editScanStartTime(req.body.scanStartTime);
+    res.json({ nextScanAt: dbQueue.getNextScanMs() });
   });
 
   mstream.post("/api/v1/admin/db/params/skip-img", async (req, res) => {

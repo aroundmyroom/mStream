@@ -293,6 +293,20 @@ export async function editScanInterval(val) {
   dbQueue.resetScanInterval();
 }
 
+export async function editScanStartTime(val) {
+  // val is "HH:MM" string or null/empty to clear
+  const normalised = (val && /^\d{1,2}:\d{2}$/.test(val.trim())) ? val.trim() : null;
+  const loadConfig = await loadFile(config.configFile);
+  if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }
+  loadConfig.scanOptions.scanStartTime = normalised;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.scanOptions.scanStartTime = normalised;
+
+  // reset timer with new start time
+  dbQueue.resetScanInterval();
+}
+
 export async function editSkipImg(val) {
   const loadConfig = await loadFile(config.configFile);
   if (!loadConfig.scanOptions) { loadConfig.scanOptions = {}; }

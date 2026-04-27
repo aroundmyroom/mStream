@@ -17,6 +17,37 @@ const runningTasks = new Set();
 const vpathLimiter = new Set();
 const currentScanDirs = new Map(); // vpath → { dir: string, root: string }
 let scanIntervalTimer = null; // This gets set after the server boots
+let _nextScanAt = null; // epoch ms of next scheduled scan (for countdown)
+
+/**
+ * Parse "HH:MM" into { h, m }. Returns null if invalid.
+ */
+function _parseStartTime(str) {
+  if (!str) return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(str.trim());
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return { h, min };
+}
+
+/**
+ * Return the next Date object representing the upcoming HH:MM.
+ * If that time has already passed today, returns tomorrow's occurrence.
+ */
+function _nextOccurrence(h, min) {
+  const now = new Date();
+  const candidate = new Date(now);
+  candidate.setHours(h, min, 0, 0);
+  if (candidate <= now) {
+    candidate.setDate(candidate.getDate() + 1);
+  }
+  return candidate;
+}
+
+/** Exposed for the API countdown endpoint */
+export function getNextScanMs() { return _nextScanAt; }
 
 function addScanTask(vpath) {
   const scanObj = { task: 'scan', vpath: vpath, id: nanoid(8) };
@@ -196,20 +227,47 @@ export function getScanningVpaths() {
 
 export function runAfterBoot() {
   setTimeout(() => {
-    // This only gets run once after boot. Will not be run on server restart b/c scanIntervalTimer is already set
-    if (config.program.scanOptions.scanInterval > 0 && scanIntervalTimer === null) {
+    // Guard: only set up once
+    if (scanIntervalTimer !== null) return;
+    if (config.program.scanOptions.scanInterval <= 0) return;
+
+    const parsed = _parseStartTime(config.program.scanOptions.scanStartTime);
+
+    if (parsed) {
+      // ── Clock-aligned daily mode ────────────────────────────────────────
+      // Schedule the first fire at the next occurrence of HH:MM, then repeat
+      // daily by rescheduling inside the callback.
+      const scheduleNext = () => {
+        const next = _nextOccurrence(parsed.h, parsed.min);
+        _nextScanAt = next.getTime();
+        const delay = _nextScanAt - Date.now();
+        scanIntervalTimer = setTimeout(() => {
+          _nextScanAt = null;
+          // Skip if a scan is already running (e.g. manual scan in progress)
+          if (runningTasks.size === 0) {
+            scanAll();
+          }
+          // Schedule next day's occurrence
+          scheduleNext();
+        }, delay);
+      };
+      scheduleNext();
+    } else {
+      // ── Legacy interval mode ────────────────────────────────────────────
       const intervalMs = config.program.scanOptions.scanInterval * 60 * 60 * 1000;
 
-      // Always run a scan on boot if: explicitly enabled OR last scan was more
-      // than one interval ago (catches the case where the server was restarted
-      // and the setInterval clock reset, leaving a gap > the configured interval).
-      const lastScan  = db.getLastScannedMs();
-      const overdue   = lastScan == null || (Date.now() - lastScan) >= intervalMs;
+      // Run on boot if explicitly enabled OR last scan was more than one interval ago
+      const lastScan = db.getLastScannedMs();
+      const overdue  = lastScan == null || (Date.now() - lastScan) >= intervalMs;
       if (config.program.scanOptions.bootScanEnabled === true || overdue) {
         scanAll();
       }
 
-      scanIntervalTimer = setInterval(() => scanAll(), intervalMs);
+      _nextScanAt = Date.now() + intervalMs;
+      scanIntervalTimer = setInterval(() => {
+        _nextScanAt = Date.now() + intervalMs;
+        scanAll();
+      }, intervalMs);
     }
   }, config.program.scanOptions.bootScanDelay * 1000);
 }
@@ -231,13 +289,37 @@ export function reset() {
   runningTasks.clear();
   vpathLimiter.clear();
   taskQueue.length = 0;
-  if (scanIntervalTimer) { clearInterval(scanIntervalTimer); }
+  if (scanIntervalTimer) { clearInterval(scanIntervalTimer); clearTimeout(scanIntervalTimer); }
   scanIntervalTimer = null;
+  _nextScanAt = null;
 }
 
 export function resetScanInterval() {
-  if (scanIntervalTimer) { clearInterval(scanIntervalTimer); }
-  if (config.program.scanOptions.scanInterval > 0) {
-    scanIntervalTimer = setInterval(() => scanAll(), config.program.scanOptions.scanInterval * 60 * 60 * 1000);
+  if (scanIntervalTimer) { clearInterval(scanIntervalTimer); clearTimeout(scanIntervalTimer); }
+  scanIntervalTimer = null;
+  _nextScanAt = null;
+
+  if (config.program.scanOptions.scanInterval <= 0) return;
+
+  const parsed = _parseStartTime(config.program.scanOptions.scanStartTime);
+  if (parsed) {
+    const scheduleNext = () => {
+      const next = _nextOccurrence(parsed.h, parsed.min);
+      _nextScanAt = next.getTime();
+      const delay = _nextScanAt - Date.now();
+      scanIntervalTimer = setTimeout(() => {
+        _nextScanAt = null;
+        if (runningTasks.size === 0) { scanAll(); }
+        scheduleNext();
+      }, delay);
+    };
+    scheduleNext();
+  } else {
+    const intervalMs = config.program.scanOptions.scanInterval * 60 * 60 * 1000;
+    _nextScanAt = Date.now() + intervalMs;
+    scanIntervalTimer = setInterval(() => {
+      _nextScanAt = Date.now() + intervalMs;
+      scanAll();
+    }, intervalMs);
   }
 }

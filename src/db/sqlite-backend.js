@@ -479,6 +479,11 @@ export function init(dbDirectory) {
   try { db.exec("ALTER TABLE artists_normalized ADD COLUMN image_flag_wrong INTEGER DEFAULT 0"); } catch (_e) { /* already exists */ }
   try { db.exec("ALTER TABLE artists_normalized ADD COLUMN name_override INTEGER DEFAULT 0"); } catch (_e) { /* already exists */ }
   try { db.exec("ALTER TABLE artists_normalized ADD COLUMN song_count    INTEGER DEFAULT 0"); } catch (_e) { /* already exists */ }
+  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN mbid          TEXT"); }             catch (_e) { /* already exists */ }
+  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN fanart_file   TEXT"); }             catch (_e) { /* already exists */ }
+  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN genre         TEXT"); }             catch (_e) { /* already exists */ }
+  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN country       TEXT"); }             catch (_e) { /* already exists */ }
+  try { db.exec("ALTER TABLE artists_normalized ADD COLUMN formed_year   INTEGER"); }          catch (_e) { /* already exists */ }
 
   // ── Missing indexes (added post-initial-release) ──────────────────────────
   // Artist Home page: ORDER BY song_count DESC LIMIT 20 — was a full 18k-row
@@ -1607,9 +1612,14 @@ export function getArtistRow(artistClean) {
     bio:          row.bio || null,
     imageFile:    row.image_file || null,
     imageSource:  row.image_source || null,
+    fanartFile:   row.fanart_file || null,
+    genre:        row.genre || null,
+    country:      row.country || null,
+    formedYear:   row.formed_year || null,
     lastFetched:  row.last_fetched || null,
     nameOverride: row.name_override || 0,
     songCount:    row.song_count || 0,
+    mbid:         row.mbid || null,
     rawVariants:  (() => { try { return JSON.parse(row.artist_raw_variants); } catch { return [row.artist_clean]; } })(),
   };
 }
@@ -1637,6 +1647,10 @@ export function getArtistRowByName(name) {
     bio:          row.bio || null,
     imageFile:    row.image_file || null,
     imageSource:  row.image_source || null,
+    fanartFile:   row.fanart_file || null,
+    genre:        row.genre || null,
+    country:      row.country || null,
+    formedYear:   row.formed_year || null,
     lastFetched:  row.last_fetched || null,
     nameOverride: row.name_override || 0,
     songCount:    row.song_count || 0,
@@ -1716,12 +1730,44 @@ export function getArtistFiles(rawVariants, vpaths, ignoreVPaths) {
 
 // Saves bio + image info fetched from an external service.
 // Never overwrites name_override.
-export function saveArtistInfo(artistClean, { bio, imageFile, imageSource }) {
+export function saveArtistInfo(artistClean, { bio, imageFile, imageSource, fanartFile, genre, country, formedYear, mbid } = {}) {
   db.prepare(`
     UPDATE artists_normalized
-    SET bio = ?, image_file = ?, image_source = ?, last_fetched = ?, image_flag_wrong = CASE WHEN ? IS NOT NULL THEN 0 ELSE image_flag_wrong END
+    SET bio = ?, image_file = ?, image_source = ?, last_fetched = ?,
+        image_flag_wrong = CASE WHEN ? IS NOT NULL THEN 0 ELSE image_flag_wrong END,
+        fanart_file  = COALESCE(?, fanart_file),
+        genre        = COALESCE(?, genre),
+        country      = COALESCE(?, country),
+        formed_year  = COALESCE(?, formed_year),
+        mbid         = COALESCE(?, mbid)
     WHERE lower(artist_clean) = lower(?)
-  `).run(bio || null, imageFile || null, imageSource || null, Date.now(), imageFile || null, artistClean);
+  `).run(
+    bio || null, imageFile || null, imageSource || null, Date.now(),
+    imageFile || null,
+    fanartFile  || null,
+    genre       || null,
+    country     || null,
+    formedYear  || null,
+    mbid        || null,
+    artistClean
+  );
+}
+
+/** Derive a MusicBrainz artist ID from file-level AcoustID data.
+ *  Finds the most common mb_artist_id in files whose artist tag matches the
+ *  canonical name (case-insensitive). Returns null if nothing is found. */
+export function deriveArtistMbidFromFiles(canonicalName) {
+  if (!canonicalName) return null;
+  const row = db.prepare(`
+    SELECT mb_artist_id, COUNT(*) AS cnt
+    FROM files
+    WHERE mb_artist_id IS NOT NULL
+      AND lower(COALESCE(mb_artist, artist, '')) = lower(?)
+    GROUP BY mb_artist_id
+    ORDER BY cnt DESC
+    LIMIT 1
+  `).get(canonicalName);
+  return row?.mb_artist_id || null;
 }
 
 // Admin: override the canonical display name for an artist.
@@ -1808,10 +1854,12 @@ export function getArtistImageAuditCounts() {
 
 // Returns artist_clean values where last_fetched IS NULL (never fetched) — used
 // by the auto-fetch queue after a scan completes.
-export function getArtistsNeedingFetch() {
+export function getArtistsNeedingFetch(limit = 500) {
   return db.prepare(
-    "SELECT artist_clean FROM artists_normalized WHERE last_fetched IS NULL ORDER BY artist_clean COLLATE NOCASE"
-  ).all().map(r => r.artist_clean);
+    `SELECT artist_clean FROM artists_normalized WHERE last_fetched IS NULL
+     ORDER BY song_count DESC NULLS LAST, artist_clean COLLATE NOCASE
+     LIMIT ?`
+  ).all(Math.max(1, Math.min(100000, Number(limit) || 500))).map(r => r.artist_clean);
 }
 
 export function getArtistsForTadbRetry(limit = 500) {

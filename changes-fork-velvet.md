@@ -1,5 +1,27 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.13.6-velvet — April 2026 — Artist Fan Art + Scan Scheduler
+
+### fix: Artist fan art not displaying (regression from v6.13.4)
+- `fanart_file`, `genre`, `country`, `formed_year` DB columns were silently dropped from `src/db/sqlite-backend.js` in v6.13.4
+- Added 4 DB migrations to ensure columns exist; `saveArtistInfo()` now persists all 4 fields; `getArtistRow()`/`getArtistRowByName()` return them
+- Backfilled 398 existing cached fan art files into the DB via one-time update
+
+### fix: Artist profile CSS missing (regression from v6.13.4)
+- Entire `.artpro-hero`, `.artpro-hero-img`, `.artpro-hero-grad`, `.artpro-hero-overlay`, `.artpro-meta-chips`, `.artpro-meta-chip` CSS block deleted from `webapp/style.css`; restored
+- Added `.artpro-header-no-img { grid-template-columns:1fr }` so bio takes full width when artist image is hidden
+
+### feat: Fan art takes priority over square artist image
+- When a fan art banner is available, the square artist photo is hidden and `.artpro-header-no-img` applied so the bio panel uses full width
+- Hero banner includes genre/country/formed-year chips from DB
+
+### feat: Scan start time scheduler
+- New config option `scanOptions.scanStartTime` (string `"HH:MM"`, 24h format, nullable)
+- When set, the scanner fires at that exact clock time daily using a `setTimeout` chain instead of a fixed interval
+- `getNextScanMs()` exported from `src/db/task-queue.js`; `resetScanInterval()` handles both timer modes
+- Admin API: `GET /api/v1/admin/db/params` now returns `nextScanAt`; new `POST /api/v1/admin/db/params/scan-start-time` endpoint
+- Admin UI: scan settings table row shows configured start time and countdown to next scan; edit modal has both interval and start-time fields
+
 ## v6.13.5-velvet — April 2026 — Regression Fix: Custom Artist Placeholder Image
 
 ### fix: Restore custom artist placeholder image feature (regression from v6.13.4)

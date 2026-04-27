@@ -527,6 +527,7 @@ const artistAlbumsDiagView = Vue.component('artist-albums-diag-view', {
       loading: false,
       result: null,
       error: null,
+      copied: false,
     };
   },
   methods: {
@@ -536,6 +537,7 @@ const artistAlbumsDiagView = Vue.component('artist-albums-diag-view', {
       this.loading = true;
       this.result = null;
       this.error = null;
+      this.copied = false;
       try {
         const r = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/diagnostics/artist-albums`, params: { artist: q } });
         this.result = r.data;
@@ -545,6 +547,77 @@ const artistAlbumsDiagView = Vue.component('artist-albums-diag-view', {
         this.loading = false;
       }
     },
+    exportJson() {
+      if (!this.result) return;
+      const blob = new Blob([JSON.stringify(this.result, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `artist-diag-${this.result.query.replace(/[^a-z0-9]/gi, '_')}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    exportText() {
+      if (!this.result) return;
+      const r = this.result;
+      const lines = [];
+      lines.push(`Artist Albums Diagnostic — ${r.query}`);
+      lines.push('='.repeat(60));
+      lines.push('');
+      lines.push('SUMMARY');
+      lines.push(`  Distinct effective-artist values : ${r.summary.totalEffectiveValues}`);
+      lines.push(`  Covered by normalised variants   : ${r.summary.coveredByVariants}`);
+      lines.push(`  Orphaned values (not covered)    : ${r.summary.orphanedValues}`);
+      lines.push(`  Hidden albums (orphaned)         : ${r.summary.orphanedAlbumCount}`);
+      lines.push('');
+      if (r.normalizedEntry) {
+        lines.push('NORMALIZED INDEX ENTRY');
+        lines.push(`  Canonical name : ${r.normalizedEntry.canonicalName}`);
+        lines.push(`  Song count     : ${r.normalizedEntry.songCount}`);
+        lines.push(`  Known vpaths   : ${r.normalizedEntry.vpaths.join(', ') || '(none)'}`);
+        lines.push('  Raw variants:');
+        for (const v of r.normalizedEntry.rawVariants) lines.push(`    ${v}`);
+        lines.push('');
+      } else {
+        lines.push('NORMALIZED INDEX ENTRY');
+        lines.push('  Not found.');
+        lines.push('');
+      }
+      if (r.orphanAlbums.length) {
+        lines.push('ORPHANED ARTIST VALUES (albums hidden from artist view)');
+        for (const o of r.orphanAlbums) {
+          lines.push(`  ${o.effective}  (${o.track_count} tracks)`);
+          for (const a of o.albums) {
+            lines.push(`    ${a.album || '(no album tag)'}  —  ${a.vpath}/${a.dir}`);
+          }
+        }
+        lines.push('');
+        lines.push('  Fix: retag album_artist on these files to one of the rawVariants above,');
+        lines.push('  then re-scan.');
+        lines.push('');
+      }
+      lines.push('ALBUMS PER NORMALIZED VARIANT');
+      for (const [variant, albums] of Object.entries(r.albumsByVariant)) {
+        lines.push(`  ${variant}`);
+        if (!albums.length) { lines.push('    (no albums)'); continue; }
+        for (const a of albums) lines.push(`    ${a.album || '(no album tag)'}  [${a.vpath}]`);
+      }
+      const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `artist-diag-${r.query.replace(/[^a-z0-9]/gi, '_')}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    async copyJson() {
+      if (!this.result) return;
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(this.result, null, 2));
+        this.copied = true;
+        setTimeout(() => { this.copied = false; }, 2000);
+      } catch (_) {}
+    },
   },
   template: `
     <div class="admin-panel-wrap">
@@ -552,7 +625,7 @@ const artistAlbumsDiagView = Vue.component('artist-albums-diag-view', {
       <p class="admin-desc" style="margin-bottom:12px">
         Enter an artist name to find out why some albums may be missing from their artist view.
       </p>
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:18px">
         <input
           v-model="artistQuery"
           class="admin-input"
@@ -563,6 +636,17 @@ const artistAlbumsDiagView = Vue.component('artist-albums-diag-view', {
         <button class="admin-btn" :disabled="loading || !artistQuery.trim()" @click="runDiag">
           {{ loading ? 'Running…' : 'Run Diagnostic' }}
         </button>
+        <template v-if="result">
+          <button class="admin-btn admin-btn-secondary" @click="exportText" title="Download as plain text file">
+            ↓ Export .txt
+          </button>
+          <button class="admin-btn admin-btn-secondary" @click="exportJson" title="Download as JSON file">
+            ↓ Export .json
+          </button>
+          <button class="admin-btn admin-btn-secondary" @click="copyJson" title="Copy full JSON to clipboard">
+            {{ copied ? '✓ Copied!' : 'Copy JSON' }}
+          </button>
+        </template>
       </div>
 
       <div v-if="error" style="color:var(--danger);margin-bottom:12px">{{ error }}</div>
@@ -2446,7 +2530,11 @@ const dbView = Vue.component('db-view', {
                 <table>
                   <tbody>
                     <tr>
-                      <td><b>{{ t('admin.db.labelScanInterval') }}</b> {{dbParams.scanInterval}} {{ t('admin.db.scanIntervalUnit') }}</td>
+                      <td>
+                        <b>{{ t('admin.db.labelScanInterval') }}</b> {{dbParams.scanInterval}} {{ t('admin.db.scanIntervalUnit') }}
+                        <span v-if="dbParams.scanStartTime" style="margin-left:10px;color:var(--t3);font-size:12px;">{{ t('admin.db.labelScanStartTime') }}: <b>{{dbParams.scanStartTime}}</b></span>
+                        <div v-if="dbParams.nextScanAt" style="margin-top:4px;font-size:12px;color:var(--t3);">{{ t('admin.db.nextScanCountdown') }}: <b>{{_scanCountdown(dbParams.nextScanAt)}}</b></div>
+                      </td>
                       <td>
                         <a v-on:click="openModal('edit-scan-interval-modal')" class="btn-sm btn-sm-edit">{{ t('admin.common.edit') }}</a>
                       </td>
@@ -2734,6 +2822,16 @@ const dbView = Vue.component('db-view', {
       </div>
     </div>`,
   methods: {
+    _scanCountdown(ms) {
+      if (!ms) return '';
+      const diff = Math.max(0, ms - Date.now());
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      if (h > 0) return `${h}h ${String(m).padStart(2,'0')}m`;
+      if (m > 0) return `${m}m ${String(s).padStart(2,'0')}s`;
+      return `${s}s`;
+    },
     async doRebuildArtists() {
       this.rebuildingArtists = true;
       try {
@@ -6161,6 +6259,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
       },
       seedPending: false,
       seedTadbPending: false,
+      seedTotal: 0,
       pollTimer: null,
       placeholderHasCustom: false,
       placeholderPreviewKey: Date.now(),
@@ -6210,6 +6309,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
           url: `${API.url()}/api/v1/admin/artists/hydration-status`
         });
         this.hydration = res.data || this.hydration;
+        if (!this.hydration.queueLength) this.seedTotal = 0;
         const c = res.data?.counts || null;
         if (c) {
           this.counts = c;
@@ -6250,6 +6350,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         });
         this.hydration = res.data || this.hydration;
         this.counts = res.data?.counts || this.counts;
+        if (res.data?.enqueued) this.seedTotal = res.data.enqueued;
         iziToast.success({ title: this.t('admin.artists.toastQueued', { count: res.data?.enqueued || 0 }), position: 'topCenter', timeout: 1800 });
       } catch (e) {
         iziToast.error({ title: this.t('admin.artists.toastFailedQueue'), message: e.message || '', position: 'topCenter', timeout: 2500 });
@@ -6268,6 +6369,7 @@ const artistsAdminView = Vue.component('artists-admin-view', {
         });
         this.hydration = res.data || this.hydration;
         this.counts = res.data?.counts || this.counts;
+        if (res.data?.enqueued) this.seedTotal = res.data.enqueued;
         iziToast.success({ title: this.t('admin.artists.toastTadbQueued', { count: res.data?.enqueued || 0 }), position: 'topCenter', timeout: 1800 });
       } catch (e) {
         iziToast.error({ title: this.t('admin.artists.toastFailedQueue'), message: e.message || '', position: 'topCenter', timeout: 2500 });
@@ -6413,11 +6515,21 @@ const artistsAdminView = Vue.component('artists-admin-view', {
 
       <div style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface);display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;">
         <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationStatus') }} <b :style="hydration.running ? 'color:var(--ok,#16a34a);' : 'color:var(--t2);'">{{ hydration.running ? t('admin.artists.hydrationRunning') : t('admin.artists.hydrationIdle') }}</b></div>
-        <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationQueue') }} <b>{{ hydration.queueLength || 0 }}</b> / {{ hydration.queueLimit || 0 }}</div>
+        <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationQueue') }} <b>{{ hydration.queueLength || 0 }}</b>{{ seedTotal ? ' / ' + seedTotal : '' }}</div>
         <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationSessionFixed') }} <b>{{ hydratedThisSession == null ? 0 : hydratedThisSession }}</b></div>
         <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationSuccessRate') }} <b>{{ hydration.stats.succeeded || 0 }}</b> / {{ hydration.stats.noImage || 0 }} / {{ hydration.stats.failed || 0 }}</div>
         <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationDropped') }} <b>{{ hydration.stats.dropped || 0 }}</b></div>
+        <div v-if="hydration.throughputPerMin != null" style="font-size:.82rem;color:var(--t2);">Throughput <b>{{ hydration.throughputPerMin }}</b> /min</div>
         <div style="font-size:.82rem;color:var(--t2);">{{ t('admin.artists.hydrationDiscogs') }} <b :style="discogsReady ? 'color:var(--ok,#16a34a);' : 'color:var(--warn,#b45309);'">{{ discogsReady ? t('admin.artists.discogsReady') : t('admin.artists.discogsNotReady') }}</b></div>
+        <div v-if="hydration.stats.lastArtist" style="font-size:.82rem;color:var(--t2);grid-column:1/-1;">Now processing: <b style="color:var(--t1);">{{ hydration.stats.lastArtist }}</b></div>
+        <div v-if="hydration.stats.lastError" style="font-size:.82rem;color:var(--warn,#b45309);grid-column:1/-1;">Last error: {{ hydration.stats.lastError }}</div>
+      </div>
+      <div v-if="hydration.stats.recentLog && hydration.stats.recentLog.length" style="margin-top:8px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);">
+        <div style="font-size:.78rem;font-weight:600;color:var(--t2);margin-bottom:4px;">Recent activity (last 10)</div>
+        <div v-for="entry in [...hydration.stats.recentLog].reverse().slice(0,10)" :key="entry.ts" style="font-size:.78rem;display:flex;gap:8px;align-items:center;padding:1px 0;">
+          <span :style="entry.result==='success' ? 'color:var(--ok,#16a34a);' : entry.result==='no-image' ? 'color:var(--t2);' : 'color:var(--warn,#b45309);'" style="min-width:60px;">{{ entry.result }}</span>
+          <span style="color:var(--t1);">{{ entry.name }}</span>
+        </div>
       </div>
       <div v-if="!hydration.running && (hydration.queueLength || 0) === 0 && (counts.missing || 0) > 0" style="margin-top:8px;font-size:.82rem;color:var(--t2);">
         {{ t('admin.artists.hydrationIdleHint') }}
@@ -7379,54 +7491,52 @@ const editBootScanView = Vue.component('edit-boot-scan-delay-modal', {
 const editScanIntervalView = Vue.component('edit-scan-interval-modal', {
   data() {
     return {
-      params: ADMINDATA.dbParams,
       submitPending: false,
-      editValue: ADMINDATA.dbParams.scanInterval
+      editInterval: ADMINDATA.dbParams.scanInterval,
+      editStartTime: ADMINDATA.dbParams.scanStartTime || ''
     };
+  },
+  computed: {
+    startTimeValid() {
+      if (!this.editStartTime) return true; // empty = clear, valid
+      return /^\d{1,2}:\d{2}$/.test(this.editStartTime.trim());
+    }
   },
   template: `
     <form @submit.prevent="updateParam">
-      ${mHead('Scan Interval', 'Automatic library scan frequency (hours)')}
+      ${mHead('Scan Settings', 'Automatic library scan frequency and schedule')}
       <div class="modal-body">
         <div class="field-group">
-          <label for="edit-scan-interval">Interval (hours)</label>
-          <input v-model="editValue" id="edit-scan-interval" required type="number" min="0">
-          <span class="field-hint">Set to 0 to disable automatic scans.</span>
+          <label for="edit-scan-interval">{{ t('admin.db.labelScanInterval') }}</label>
+          <input v-model="editInterval" id="edit-scan-interval" required type="number" min="0">
+          <span class="field-hint">{{ t('admin.db.scanIntervalHint') }}</span>
+        </div>
+        <div class="field-group" style="margin-top:16px">
+          <label for="edit-scan-start-time">{{ t('admin.db.labelScanStartTime') }}</label>
+          <input v-model="editStartTime" id="edit-scan-start-time" type="text" placeholder="e.g. 01:13 or 14:45">
+          <span class="field-hint" :style="!startTimeValid ? 'color:var(--danger)' : ''">{{ t('admin.db.scanStartTimeHint') }}</span>
         </div>
       </div>
       ${mFoot('Update', 'Updating')}
     </form>`,
-  mounted: function () {
-  },
   methods: {
     updateParam: async function() {
+      if (!this.startTimeValid) return;
       try {
         this.submitPending = true;
 
-        await API.axios({
-          method: 'POST',
-          url: `${API.url()}/api/v1/admin/db/params/scan-interval`,
-          data: { scanInterval: this.editValue }
-        });
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/db/params/scan-interval`, data: { scanInterval: Number(this.editInterval) } });
+        const stRes = await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/db/params/scan-start-time`, data: { scanStartTime: this.editStartTime || null } });
 
-        // update frontend data
-        Vue.set(ADMINDATA.dbParams, 'scanInterval', this.editValue);
-  
-        // close & reset the modal
+        Vue.set(ADMINDATA.dbParams, 'scanInterval', Number(this.editInterval));
+        Vue.set(ADMINDATA.dbParams, 'scanStartTime', this.editStartTime || null);
+        Vue.set(ADMINDATA.dbParams, 'nextScanAt', stRes.data.nextScanAt || null);
+
         modVM.closeModal();
-
-        iziToast.success({
-          title: 'Updated Successfully',
-          position: 'topCenter',
-          timeout: 3500
-        });
+        iziToast.success({ title: 'Updated Successfully', position: 'topCenter', timeout: 3500 });
       } catch(err) {
-        iziToast.error({
-          title: 'Update Failed',
-          position: 'topCenter',
-          timeout: 3500
-        });
-      }finally {
+        iziToast.error({ title: 'Update Failed', position: 'topCenter', timeout: 3500 });
+      } finally {
         this.submitPending = false;
       }
     }
