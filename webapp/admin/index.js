@@ -1568,6 +1568,7 @@ const foldersView = Vue.component('folders-view', {
                     {{v.artistsOn !== false ? t('admin.folders.btnArtistsOn') : t('admin.folders.btnArtistsOff')}}
                   </button>
                   <button class="btn-small red" type="button" @click="removeFolder(k, v.root)">{{ t('admin.folders.btnRemove') }}</button>
+                  <button v-if="v.type !== 'excluded' && !isChildVpath(k)" class="btn-small" type="button" :title="t('admin.folders.btnResetSentinelTitle')" @click="resetSentinel(k)">{{ t('admin.folders.btnResetSentinel') }}</button>
                 </div>
               </div>
 
@@ -1928,6 +1929,22 @@ const foldersView = Vue.component('folders-view', {
           this.editingFolder = null;
         } else if (errors.length < 3) {
           iziToast.warning({ title: this.t('admin.folders.toastSomeChangesFailed', { fields: errors.join(', ') }), position: 'topCenter', timeout: 4000 });
+        }
+      },
+      isChildVpath: function(k) {
+        const myRoot = (this.folders[k].root || '').replace(/\/?$/, '/');
+        return Object.keys(this.folders).some(other => {
+          if (other === k) return false;
+          const otherRoot = (this.folders[other].root || '').replace(/\/?$/, '/');
+          return myRoot.startsWith(otherRoot);
+        });
+      },
+      resetSentinel: async function(vpath) {
+        try {
+          await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/directory/reset-sentinel`, data: { vpath } });
+          iziToast.success({ title: this.t('admin.folders.toastSentinelReset'), position: 'topCenter', timeout: 3000 });
+        } catch (_e) {
+          iziToast.error({ title: this.t('admin.folders.toastFailedUpdate'), position: 'topCenter', timeout: 3000 });
         }
       },
       removeFolder: async function(vpath, folder) {
@@ -5198,7 +5215,11 @@ const acoustidView = Vue.component('acoustid-view', {
                   </tr>
                   <tr>
                     <td style="padding:2px 12px 2px 0;color:#888;">{{ t('admin.acoustid.statsNotFound') }}</td>
-                    <td><b>{{ noMatch.toLocaleString() }}</b></td>
+                    <td><b>{{ (stats.not_found||0).toLocaleString() }}</b></td>
+                  </tr>
+                  <tr v-if="stats.errors > 0">
+                    <td style="padding:2px 12px 2px 0;color:#e57373;">{{ t('admin.acoustid.statsErrors') }}</td>
+                    <td><b>{{ (stats.errors||0).toLocaleString() }}</b></td>
                   </tr>
                   <tr>
                     <td style="padding:2px 12px 2px 0;color:#aaa;">{{ t('admin.acoustid.statsQueued') }}</td>
@@ -5224,6 +5245,9 @@ const acoustidView = Vue.component('acoustid-view', {
               </button>
               <button v-if="stats.errors > 0" class="btn btn-flat" v-on:click="resetErrors()" style="margin-left:0;border-color:#e57373;color:#e57373;">
                 {{ t('admin.acoustid.btnRetryErrors', { count: stats.errors }) }}
+              </button>
+              <button v-if="stats.not_found > 0" class="btn btn-flat" v-on:click="resetNotFound()" style="margin-left:0;border-color:#888;color:#aaa;">
+                {{ t('admin.acoustid.btnRetryNotFound', { count: (stats.not_found||0).toLocaleString() }) }}
               </button>
             </div>
           </div>
@@ -5304,6 +5328,15 @@ const acoustidView = Vue.component('acoustid-view', {
       try {
         const res = await API.axios({ method: 'POST', url: `${API.url()}/api/v1/acoustid/reset-errors` });
         iziToast.success({ title: this.t('admin.acoustid.toastErrorsReset', { count: res.data.reset || 0 }), position: 'topCenter', timeout: 3000 });
+        await this.loadStatus();
+      } catch(err) {
+        iziToast.error({ title: err?.response?.data?.error || err.message || 'Failed', position: 'topCenter', timeout: 3000 });
+      }
+    },
+    async resetNotFound() {
+      try {
+        const res = await API.axios({ method: 'POST', url: `${API.url()}/api/v1/acoustid/reset-not-found` });
+        iziToast.success({ title: this.t('admin.acoustid.toastNotFoundReset', { count: res.data.reset || 0 }), position: 'topCenter', timeout: 3000 });
         await this.loadStatus();
       } catch(err) {
         iziToast.error({ title: err?.response?.data?.error || err.message || 'Failed', position: 'topCenter', timeout: 3000 });

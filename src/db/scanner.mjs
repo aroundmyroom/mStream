@@ -417,6 +417,50 @@ let _totalSeen = 0;
 run();
 async function run() {
   try {
+    // ── Sentinel file (mount guard) check ─────────────────────────────────────
+    // After every successful scan, mStream Velvet writes .velvet.md to the vpath
+    // root. If this file is missing when hasBaseline=true, the music share is
+    // almost certainly not mounted — abort before touching the DB.
+    //
+    // Exception: if the sentinel has never been written (e.g. first scan after
+    // upgrading from a version that predates the sentinel feature), we allow the
+    // scan to proceed. The zero-files guard below still protects against a
+    // genuinely absent mount in that case. The sentinel will be written by
+    // finish-scan at the end of this run, protecting all future scans.
+    if (loadJson.hasBaseline) {
+      const sentinelPath = path.join(loadJson.directory, '.velvet.md');
+      if (!fs.existsSync(sentinelPath)) {
+        // Check whether the directory itself is accessible and non-empty.
+        // If it has at least one entry it is almost certainly mounted —
+        // treat this as a first-time run (post-upgrade) and continue.
+        let dirEntries = [];
+        try { dirEntries = fs.readdirSync(loadJson.directory); } catch (_e) { /* fall through */ }
+        if (dirEntries.length === 0) {
+          console.error(
+            `[scanner] ABORTED scan for vpath "${loadJson.vpath}": ` +
+            `sentinel file ".velvet.md" not found in "${loadJson.directory}" ` +
+            `and the directory appears empty. Music share may not be mounted. ` +
+            `Database was NOT modified.`
+          );
+          try {
+            await ax({
+              method: 'POST',
+              url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/abort-scan`,
+              headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+              responseType: 'json',
+              data: { scanId: loadJson.scanId, vpath: loadJson.vpath, reason: 'sentinel_missing' }
+            });
+          } catch (_e) { /* non-critical */ }
+          return;
+        }
+        console.warn(
+          `[scanner] sentinel file ".velvet.md" not found in "${loadJson.directory}" ` +
+          `but directory is accessible — treating as first scan after upgrade. ` +
+          `Sentinel will be written after this scan completes.`
+        );
+      }
+    }
+
     // Prune stale error entries before starting — respects the configured retention window.
     try {
       await ax({
@@ -439,6 +483,32 @@ async function run() {
 
     const scanStartTs = Math.floor(Date.now() / 1000);
     await recursiveScan(loadJson.directory);
+
+    // ── Mount / access failure guard ──────────────────────────────────────────
+    // If this vpath had files in the DB (hasBaseline=true) but the walk found
+    // zero files, the music directory is almost certainly unreachable (NFS/SMB
+    // disconnected, Docker volume not mounted, permissions lost, etc.).
+    // Calling finish-scan in this state would wipe the entire DB for this vpath.
+    // Abort instead and log a clear warning — the existing DB rows are preserved.
+    if (loadJson.hasBaseline && _totalSeen === 0) {
+      console.error(
+        `[scanner] ABORTED scan for vpath "${loadJson.vpath}": ` +
+        `directory returned 0 files but DB has existing records. ` +
+        `The music directory may be unmounted or inaccessible. ` +
+        `Database was NOT modified.`
+      );
+      // Signal the progress tracker that this scan did not finish cleanly.
+      try {
+        await ax({
+          method: 'POST',
+          url: `http${loadJson.isHttps === true ? 's': ''}://localhost:${loadJson.port}/api/v1/scanner/abort-scan`,
+          headers: { 'accept': 'application/json', 'x-access-token': loadJson.token },
+          responseType: 'json',
+          data: { scanId: loadJson.scanId, vpath: loadJson.vpath, reason: 'mount_failure' }
+        });
+      } catch (_e) { /* non-critical — server may not have this endpoint yet */ }
+      return;
+    }
 
     // Final set-expected: after the full tree walk, _totalSeen is the true total.
     // For rescans the DB count is already set; this is only meaningful for first scans.

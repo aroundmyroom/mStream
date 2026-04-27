@@ -346,6 +346,8 @@ export function init(dbDirectory) {
   try { db.exec('ALTER TABLE files ADD COLUMN mb_enrichment_status TEXT'); }  catch (_e) {}
   try { db.exec('ALTER TABLE files ADD COLUMN mb_enriched_ts INTEGER'); }     catch (_e) {}
   try { db.exec('ALTER TABLE files ADD COLUMN mb_enrichment_error TEXT'); }   catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN mb_enrich_priority INTEGER DEFAULT 0'); } catch (_e) {}
+  try { db.exec('ALTER TABLE files ADD COLUMN acoustid_priority INTEGER DEFAULT 0'); } catch (_e) {}
   try { db.exec('ALTER TABLE files ADD COLUMN tag_status TEXT'); }            catch (_e) {}
   // Migration: Tag Workshop Phase 3 — per-physical-album grouping
   try { db.exec('ALTER TABLE files ADD COLUMN mb_album_dir TEXT'); }          catch (_e) {}
@@ -3402,6 +3404,37 @@ export function resetAcoustidErrors() {
   return info.changes;
 }
 
+/** Reset all 'not_found' rows back to NULL with priority=1 so they are retried at the front of the queue. */
+export function resetNotFoundForAcoustid() {
+  const info = db.prepare(
+    `UPDATE files SET acoustid_status = NULL, acoustid_ts = NULL, acoustid_priority = 1 WHERE acoustid_status = 'not_found'`
+  ).run();
+  return info.changes;
+}
+
+/** Re-queue specific files for AcoustID fingerprinting with priority=1.
+ *  Clears not_found/error status so they are retried even if previously failed.
+ *  Only files with a known format are eligible. Returns count queued. */
+export function resetFilesForAcoustid(files) {
+  const stmt = db.prepare(
+    `UPDATE files SET acoustid_status = NULL, acoustid_ts = NULL, acoustid_priority = 1
+     WHERE filepath = ? AND vpath = ? AND format IS NOT NULL`
+  );
+  let count = 0;
+  db.exec('BEGIN');
+  try {
+    for (const f of files) {
+      const r = stmt.run(f.filepath, f.vpath);
+      count += r.changes;
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return count;
+}
+
 /** Return aggregate fingerprinting statistics for the admin UI. */
 export function getAcoustidStats() {
   return db.prepare(`
@@ -3605,6 +3638,57 @@ export function getTrackForAccept(filepath, vpath) {
 /** Mark a single track's tag_status as accepted after a successful disk write. */
 export function markTrackAccepted(filepath, vpath) {
   db.prepare(`UPDATE files SET tag_status = 'accepted' WHERE filepath = ? AND vpath = ?`).run(filepath, vpath);
+}
+
+/**
+ * Return files in a specific folder (direct children only) with current + MB enrichment data.
+ * @param {string} vpathName - the root vpath name (e.g. 'Music')
+ * @param {string} filepathPrefix - relative path within vpath (e.g. 'Albums/ABBA/Gold'), no leading slash
+ */
+export function getTagWorkshopFolderFiles(vpathName, filepathPrefix) {
+  if (filepathPrefix) {
+    const p = filepathPrefix.endsWith('/') ? filepathPrefix : filepathPrefix + '/';
+    return db.prepare(`
+      SELECT filepath, vpath, title, artist, album, year, track, disk, genre, format,
+             mb_title, mb_artist, mb_album, mb_year, mb_track, mb_release_id, tag_status, aaFile,
+             acoustid_status, mb_enrichment_status
+      FROM files
+      WHERE vpath = ? AND filepath LIKE ? AND filepath NOT LIKE ?
+      ORDER BY COALESCE(mb_track, track, 0), COALESCE(title, filepath) COLLATE NOCASE
+    `).all(vpathName, p + '%', p + '%/%');
+  }
+  // Files directly in the vpath root (no subfolder)
+  return db.prepare(`
+    SELECT filepath, vpath, title, artist, album, year, track, disk, genre, format,
+           mb_title, mb_artist, mb_album, mb_year, mb_track, mb_release_id, tag_status, aaFile,
+           acoustid_status, mb_enrichment_status
+    FROM files
+    WHERE vpath = ? AND filepath NOT LIKE '%/%'
+    ORDER BY COALESCE(track, 0), COALESCE(title, filepath) COLLATE NOCASE
+  `).all(vpathName);
+}
+
+/** Reset enrichment status for specific files so the worker picks them up again.
+ *  Sets mb_enrich_priority=1 so the worker processes them before the backlog.
+ *  Only affects files with acoustid_status='found'. Returns count reset. */
+export function resetFilesForEnrichment(files) {
+  const stmt = db.prepare(
+    `UPDATE files SET mb_enrichment_status = NULL, mb_enrich_priority = 1
+     WHERE filepath = ? AND vpath = ? AND acoustid_status = 'found'`
+  );
+  let count = 0;
+  db.exec('BEGIN');
+  try {
+    for (const f of files) {
+      const r = stmt.run(f.filepath, f.vpath);
+      count += r.changes;
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return count;
 }
 
 /** Mark all tracks in a release as skipped. */

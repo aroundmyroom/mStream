@@ -236,6 +236,55 @@ export function setup(mstream) {
     }
   });
 
+  // POST /api/v1/acoustid/reset-not-found
+  // Re-queues all 'not_found' files with priority=1 so they are retried at the front of the queue.
+  mstream.post('/api/v1/acoustid/reset-not-found', async (req, res) => {
+    try {
+      const count = db.resetNotFoundForAcoustid();
+      winston.info(`[acoustid] reset-not-found: re-queued ${count} no-match rows with priority`);
+      const workerStarted = !_running;
+      if (!_running && count > 0) {
+        const ready = await ensureFpcalc();
+        if (ready) _spawnWorker();
+      }
+      res.json({ ok: true, reset: count, workerStarted });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/v1/acoustid/scan-files
+  // Queue specific files for AcoustID fingerprinting with priority=1 (processed before backlog).
+  // Resets not_found/error status so previously-failed files are retried.
+  // Body: { files: [{ filepath, vpath }] }
+  mstream.post('/api/v1/acoustid/scan-files', async (req, res) => {
+    const files = req.body?.files;
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ error: 'files array required' });
+    }
+    const valid = files.filter(f =>
+      typeof f.filepath === 'string' && f.filepath.length > 0 &&
+      typeof f.vpath    === 'string' && f.vpath.length    > 0
+    ).slice(0, 500);
+    if (valid.length === 0) return res.status(400).json({ error: 'No valid file entries' });
+
+    try {
+      const queued = db.resetFilesForAcoustid(valid);
+
+      // Ensure worker is running
+      const workerStarted = !_running;
+      if (!_running) {
+        const ready = await ensureFpcalc();
+        if (!ready) return res.status(503).json({ error: 'fpcalc binary not available' });
+        _spawnWorker();
+      }
+
+      res.json({ ok: true, queued, workerStarted });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Auto-start on server boot only if user had previously started it
   const bootApiKey = config.program.acoustid?.apiKey?.trim() || '';
   if (config.program.acoustid?.enabled === true && bootApiKey.length >= 4 && config.program.acoustid?.autostart === true) {

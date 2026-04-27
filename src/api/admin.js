@@ -478,6 +478,39 @@ export function setup(mstream) {
     res.json({});
   });
 
+  // POST /api/v1/admin/directory/reset-sentinel
+  // Re-writes the .velvet.md mount-guard file to the vpath root.
+  // Use this if the file was accidentally deleted and scanning is now blocked.
+  mstream.post("/api/v1/admin/directory/reset-sentinel", (req, res) => {
+    const schema = Joi.object({
+      vpath: Joi.string().pattern(/[a-zA-Z0-9-]+/).required()
+    });
+    const input = joiValidate(schema, req.body);
+    const { vpath } = input.value;
+    const folder = config.program.folders[vpath];
+    if (!folder) return res.status(404).json({ error: 'vpath not found' });
+    const rootDir = folder.root;
+    if (!rootDir) return res.status(400).json({ error: 'folder has no root path' });
+    try {
+      const sentinelPath = path.join(rootDir, '.velvet.md');
+      const sentinelContent =
+        '# mStream Velvet \u2014 Mount Guard\n\n' +
+        'This file protects your mStream Velvet database from being wiped\n' +
+        'when your music share (NFS, SMB, or Docker volume) is not mounted.\n\n' +
+        'How it works:\n' +
+        '- mStream Velvet writes this file after every successful library scan.\n' +
+        '- Before each new scan, mStream Velvet checks that this file is present.\n' +
+        '- If this file is missing when a scan starts, the scan is aborted\n' +
+        '  and your database is left untouched.\n\n' +
+        'Do NOT delete this file. It is safe to leave it in your music root.\n';
+      fs.writeFileSync(sentinelPath, sentinelContent, 'utf8');
+      winston.info(`[admin] Reset mount-guard sentinel for vpath "${vpath}" at ${sentinelPath}`);
+      res.json({ ok: true, path: sentinelPath });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   mstream.put("/api/v1/admin/users", async (req, res) => {
     const schema = Joi.object({
       username: Joi.string().required(),

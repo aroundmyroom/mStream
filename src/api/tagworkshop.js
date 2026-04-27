@@ -201,6 +201,79 @@ export function setup(mstream) {
     });
   });
 
+  // GET /api/v1/tagworkshop/folder?path=Music/Albums/...
+  // Returns all audio files (direct children only) in the given folder with
+  // both their current DB tags and any MusicBrainz enrichment data.
+  // path format: "<vpath>/<relative-path>" — same as the file explorer directory param.
+  // IMPORTANT: handles child vpaths — their files are stored in the DB under the parent
+  // ROOT vpath, so we detect the parent and adjust the filepath prefix accordingly.
+  mstream.get('/api/v1/tagworkshop/folder', (req, res) => {
+    const raw = typeof req.query.path === 'string'
+      ? req.query.path.replace(/^\/+|\/+$/g, '')
+      : '';
+    if (!raw) return res.status(400).json({ error: 'path required' });
+
+    const slash = raw.indexOf('/');
+    const vpathName  = slash === -1 ? raw : raw.slice(0, slash);
+    const userRelPath = slash === -1 ? '' : raw.slice(slash + 1);
+
+    const folders = config.program.folders || {};
+    if (!folders[vpathName]) {
+      return res.status(404).json({ error: 'Unknown vpath' });
+    }
+
+    // Detect child vpath: a vpath whose root is a strict sub-path of another vpath's root.
+    // Child vpath files are stored in the DB under the PARENT root vpath.
+    const myRoot = folders[vpathName].root;
+    const sep    = path.sep;
+    const parentEntry = Object.entries(folders).find(([name, cfg]) =>
+      name !== vpathName && cfg.root && myRoot.startsWith(cfg.root + sep)
+    );
+
+    let dbVpath, filepathPrefix;
+    if (parentEntry) {
+      // Child vpath — resolve query against the parent ROOT vpath
+      const [parentName, parentCfg] = parentEntry;
+      dbVpath = parentName;
+      // childRelPrefix = relative path from parent root to child root (e.g. "Albums")
+      const childRelPrefix = myRoot.slice(parentCfg.root.length + sep.length).replace(/\\/g, '/');
+      filepathPrefix = userRelPath ? childRelPrefix + '/' + userRelPath : childRelPrefix;
+    } else {
+      // Root vpath — query directly
+      dbVpath = vpathName;
+      filepathPrefix = userRelPath;
+    }
+
+    const files = db.getTagWorkshopFolderFiles(dbVpath, filepathPrefix);
+    res.json({ files });
+  });
+
+  // POST /api/v1/tagworkshop/enrich/files
+  // Queue specific files for MusicBrainz enrichment (resets error/no_data status)
+  // and ensures the enrichment worker is running.
+  // Body: { files: [{ filepath, vpath }] }
+  mstream.post('/api/v1/tagworkshop/enrich/files', (req, res) => {
+    const files = req.body?.files;
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ error: 'files array required' });
+    }
+    // Validate entries
+    const valid = files.filter(f =>
+      typeof f.filepath === 'string' && f.filepath.length > 0 &&
+      typeof f.vpath    === 'string' && f.vpath.length    > 0
+    ).slice(0, 500); // hard cap
+    if (valid.length === 0) return res.status(400).json({ error: 'No valid file entries' });
+
+    // Reset mb_enrichment_status for eligible files (acoustid=found only)
+    const queued = db.resetFilesForEnrichment(valid);
+
+    // Start the worker if not already running
+    const workerStarted = !_running;
+    if (!_running) _spawnWorker();
+
+    res.json({ ok: true, queued, workerStarted });
+  });
+
   // GET /api/v1/tagworkshop/enrich/errors
   mstream.get('/api/v1/tagworkshop/enrich/errors', (req, res) => {
     const rows = db.getMbEnrichErrors(200);

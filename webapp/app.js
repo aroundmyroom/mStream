@@ -8721,6 +8721,7 @@ function renderFileExplorer(d) {
       <span id="fe-match-count" class="fe-match-count"></span>
       <button id="fe-filter-clear" class="fe-filter-clear hidden" title="${t('player.fe.filterClearTitle')}">✕</button>
       ${S.canUpload && curPath !== '/' ? `<button id="fe-upload-btn" class="fe-upload-btn" title="${t('player.fe.btnUploadTitle')}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16,16 12,12 8,16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg> ${t('player.fe.btnUpload')}</button>` : ''}
+      ${S.allowId3Edit && S.isAdmin && curPath !== '/' && (d.files?.length > 0) ? `<button id="fe-tw-btn" class="fe-tw-btn" title="${t('player.tw.btnOpenTitle')}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> ${t('player.tw.btnOpen')}</button>` : ''}
     </div>
     <div id="fe-grid" class="fe-grid">${dirs}${files}</div>`;
 
@@ -8756,6 +8757,8 @@ function renderFileExplorer(d) {
 
   // Upload button
   body.querySelector('#fe-upload-btn')?.addEventListener('click', () => openUploadModal(curPath));
+  // Tag Workshop button
+  body.querySelector('#fe-tw-btn')?.addEventListener('click', () => viewTagWorkshop(S.feDir, false));
 
   // Breadcrumb navigation
   body.querySelectorAll('.fe-crumb').forEach(el => {
@@ -8858,6 +8861,481 @@ function renderFileExplorer(d) {
     });
   }
 }
+
+// ── TAG WORKSHOP ──────────────────────────────────────────────
+// Folder-based bulk tag editor. Navigate to any folder, check the files
+// you want to update, fill in the shared fields (artist/album/year/genre),
+// and hit Apply — each file is rewritten via the existing tags/write API.
+// Individual files can also be edited inline (all fields incl. title/track).
+
+let _twFiles = []; // workshop session state — array of tag objects per file
+
+async function viewTagWorkshop(dir, addToStack) {
+  if (!S.isAdmin) return;
+  setNavActive('files'); S.view = 'tagworkshop';
+  if (addToStack !== false && S.feDir !== dir) S.feDirStack.push(S.feDir);
+  S.feDir = dir || '';
+  const sig = _navCancel();
+  setBody('<div class="loading-state"></div>');
+  document.getElementById('play-all-btn').onclick = null;
+  document.getElementById('add-all-btn').onclick  = null;
+  try {
+    const pathParam = (S.feDir || '').replace(/^\//, '');
+    const [dbData, feData] = await Promise.all([
+      api('GET', 'api/v1/tagworkshop/folder?path=' + encodeURIComponent(pathParam), undefined, sig),
+      api('POST', 'api/v1/file-explorer', { directory: S.feDir, sort: true }, sig),
+    ]);
+    renderTagWorkshop(dbData.files || [], feData.directories || [], feData.path || (S.feDir || '/'));
+  } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
+}
+
+function renderTagWorkshop(dbFiles, dirs, curPath) {
+  const parts = (curPath || '/').replace(/^\/|\/$/g, '').split('/').filter(Boolean);
+
+  // Breadcrumb (stays in workshop on click)
+  let crumbs = `<span class="fe-crumb" data-dir="">${t('player.fe.rootCrumb')}</span>`;
+  let cumPath = '';
+  parts.forEach(p => {
+    crumbs += `<span class="fe-crumb-sep">/</span>`;
+    cumPath += (cumPath ? '/' : '') + p;
+    crumbs += `<span class="fe-crumb" data-dir="/${cumPath}">${esc(p)}</span>`;
+  });
+
+  // Subdirectory entries (navigate within workshop)
+  const dirsHtml = dirs.map(dir => `
+    <div class="fe-dir tw-nav-dir" data-dir="${esc(curPath + dir.name)}">
+      <svg class="fe-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      <span class="fe-name">${esc(dir.name)}</span>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--t3);flex-shrink:0"><polyline points="9,18 15,12 9,6"/></svg>
+    </div>`).join('');
+
+  // Build unified file list with MB data
+  _twFiles = dbFiles.map((f, i) => ({
+    i,
+    fp:      f.vpath + '/' + f.filepath,
+    filepath: f.filepath,
+    vpath:   f.vpath,
+    name:    f.filepath.split('/').pop(),
+    title:   String(f.title  ?? ''),
+    artist:  String(f.artist ?? ''),
+    album:   String(f.album  ?? ''),
+    year:    String(f.year   ?? ''),
+    track:   String(f.track  ?? ''),
+    disk:    String(f.disk   ?? ''),
+    genre:   String(f.genre  ?? ''),
+    mb_title:  f.mb_title  ?? null,
+    mb_artist: f.mb_artist ?? null,
+    mb_album:  f.mb_album  ?? null,
+    mb_year:   f.mb_year   != null ? String(f.mb_year) : null,
+    mb_track:  f.mb_track  != null ? String(f.mb_track) : null,
+    mb_release_id: f.mb_release_id ?? null,
+    tag_status: f.tag_status ?? null,
+    acoustid_status:      f.acoustid_status      ?? null,
+    mb_enrichment_status: f.mb_enrichment_status ?? null,
+    hasMb: f.mb_release_id != null,
+  }));
+
+  const mbFiles  = _twFiles.filter(f => f.hasMb);
+  const manFiles = _twFiles.filter(f => !f.hasMb);
+
+  // Build per-file diff (only fields that differ)
+  function getDiffs(f) {
+    const n = s => String(s ?? '').trim().toLowerCase();
+    const diffs = [];
+    if (f.mb_title  != null && n(f.mb_title)  !== n(f.title))  diffs.push({ field: t('metadata.title'),  cur: f.title,  mb: f.mb_title  });
+    if (f.mb_artist != null && n(f.mb_artist) !== n(f.artist)) diffs.push({ field: t('metadata.artist'), cur: f.artist, mb: f.mb_artist });
+    if (f.mb_album  != null && n(f.mb_album)  !== n(f.album))  diffs.push({ field: t('metadata.album'),  cur: f.album,  mb: f.mb_album  });
+    if (f.mb_year   != null && f.mb_year !== String(f.year ?? ''))   diffs.push({ field: t('metadata.year'),  cur: f.year,  mb: f.mb_year   });
+    if (f.mb_track  != null && f.mb_track !== String(f.track ?? '')) diffs.push({ field: t('metadata.track'), cur: f.track, mb: f.mb_track  });
+    return diffs;
+  }
+
+  // Inline edit form HTML (shared between MB and manual rows)
+  function inlineFormHtml(f) {
+    return `<div class="tw-inline-form hidden" data-idx="${f.i}">
+      <div class="tw-form-grid">
+        <div class="tw-form-row"><label>${t('metadata.title')}</label><input class="tw-inp" data-field="title" value="${esc(f.title)}"></div>
+        <div class="tw-form-row"><label>${t('metadata.artist')}</label><input class="tw-inp" data-field="artist" value="${esc(f.artist)}"></div>
+        <div class="tw-form-row"><label>${t('metadata.album')}</label><input class="tw-inp" data-field="album" value="${esc(f.album)}"></div>
+        <div class="tw-form-row"><label>${t('metadata.year')}</label><input class="tw-inp tw-inp-sm" data-field="year" value="${esc(f.year)}"></div>
+        <div class="tw-form-row"><label>${t('metadata.genre')}</label><input class="tw-inp" data-field="genre" value="${esc(f.genre)}"></div>
+        <div class="tw-form-row"><label>${t('metadata.track')}</label><input class="tw-inp tw-inp-sm" data-field="track" value="${esc(f.track)}"></div>
+        <div class="tw-form-row"><label>${t('metadata.disc')}</label><input class="tw-inp tw-inp-sm" data-field="disk" value="${esc(f.disk)}"></div>
+      </div>
+      <div class="tw-inline-btns">
+        <button class="tw-save-btn" data-idx="${f.i}">${t('player.tw.btnSave')}</button>
+        <button class="tw-cancel-btn" data-idx="${f.i}">${t('player.tw.btnCancel')}</button>
+        <span class="tw-inline-status"></span>
+      </div>
+    </div>`;
+  }
+
+  // ── MB section ──
+  let mbSectionHtml = '';
+  if (mbFiles.length > 0) {
+    const pendingCount = mbFiles.filter(f => f.tag_status !== 'accepted').length;
+    const mbRows = mbFiles.map(f => {
+      const diffs = getDiffs(f);
+      const isAccepted = f.tag_status === 'accepted';
+      const diffsHtml = diffs.length > 0
+        ? diffs.map(d => `<span class="tw-diff-item"><span class="tw-diff-field">${esc(d.field)}:</span> <span class="tw-diff-cur">${esc(d.cur || '—')}</span><span class="tw-diff-arrow">→</span><span class="tw-diff-mb">${esc(d.mb || '—')}</span></span>`).join('')
+        : `<span class="tw-mb-match">✓ ${t('player.tw.mbTagsOk')}</span>`;
+      const acceptBtn = isAccepted
+        ? `<span class="tw-accepted-tag">✓ ${t('player.tw.mbAccepted')}</span>`
+        : `<button class="tw-accept-mb-btn" data-idx="${f.i}">${t('player.tw.mbAcceptBtn')}</button>`;
+      return `<div class="tw-row" data-idx="${f.i}" data-mb="1">
+        <div class="tw-row-main">
+          <input type="checkbox" class="tw-check tw-mb-check" ${isAccepted ? 'disabled' : 'checked'}>
+          <div class="tw-row-info">
+            <div class="tw-row-title">${esc(f.title || f.name)}</div>
+            <div class="tw-row-path">${esc(f.name)}</div>
+            <div class="tw-diff-list">${diffsHtml}</div>
+          </div>
+          ${acceptBtn}
+          <button class="tw-edit-btn" title="${t('player.tw.btnEditTitle')}" data-idx="${f.i}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+        ${inlineFormHtml(f)}
+      </div>`;
+    }).join('');
+
+    mbSectionHtml = `
+      <div class="tw-section-header">${t('player.tw.mbSection', { n: mbFiles.length })}</div>
+      <div class="tw-bulk-bar">
+        <div class="tw-bulk-actions">
+          <button class="tw-sel-btn" id="tw-mb-sel-all">${t('player.tw.btnSelectAll')}</button>
+          <button class="tw-sel-btn" id="tw-mb-sel-none">${t('player.tw.btnSelectNone')}</button>
+          <button class="btn-sm btn-primary-sm" id="tw-mb-accept-all" ${pendingCount === 0 ? 'disabled' : ''}>${t('player.tw.mbAcceptAll', { n: pendingCount })}</button>
+        </div>
+        <div id="tw-mb-progress" class="tw-progress hidden"></div>
+      </div>
+      <div class="tw-file-list">${mbRows}</div>`;
+  }
+
+  // ── Manual section ──
+  let manSectionHtml = '';
+  if (manFiles.length > 0) {
+    // Classify per file
+    const notFingerprinted = manFiles.filter(f => f.acoustid_status !== 'found');
+    const enrichEligible   = manFiles.filter(f => f.acoustid_status === 'found');
+    const totalCanEnrich   = enrichEligible.filter(f => !f.mb_enrichment_status || f.mb_enrichment_status === 'pending' || f.mb_enrichment_status === 'no_data' || f.mb_enrichment_status === 'error').length;
+    const totalCanScan     = notFingerprinted.length;
+
+    function enrichHint(f) {
+      if (f.acoustid_status !== 'found') return `<span class="tw-enrich-hint tw-enrich-none">${t('player.tw.enrichHintNoAcoustid')}</span>`;
+      if (f.mb_enrichment_status === 'no_data') return `<span class="tw-enrich-hint tw-enrich-warn">${t('player.tw.enrichHintNoData')}</span>`;
+      if (f.mb_enrichment_status === 'error')   return `<span class="tw-enrich-hint tw-enrich-warn">${t('player.tw.enrichHintError')}</span>`;
+      return `<span class="tw-enrich-hint tw-enrich-ok">${t('player.tw.enrichHintQueued')}</span>`;
+    }
+
+    const manRows = manFiles.map(f => {
+      const tagLine = [f.artist, f.album, f.year].filter(Boolean).join(' · ');
+      return `<div class="tw-row" data-idx="${f.i}">
+        <div class="tw-row-main">
+          <input type="checkbox" class="tw-check tw-man-check" checked>
+          <div class="tw-row-info">
+            <div class="tw-row-title">${esc(f.title || f.name)}</div>
+            <div class="tw-row-path">${esc(f.name)}</div>
+            ${tagLine ? `<div class="tw-row-tags">${esc(tagLine)}</div>` : ''}
+            ${enrichHint(f)}
+          </div>
+          <button class="tw-edit-btn" title="${t('player.tw.btnEditTitle')}" data-idx="${f.i}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        </div>
+        ${inlineFormHtml(f)}
+      </div>`;
+    }).join('');
+
+    const actionBtns = [
+      totalCanScan > 0
+        ? `<button class="btn-sm btn-accent-sm" id="tw-scan-btn">${t('player.tw.scanBtn', { n: totalCanScan })}</button>`
+        : '',
+      totalCanEnrich > 0
+        ? `<button class="btn-sm btn-accent-sm" id="tw-enrich-btn">${t('player.tw.enrichBtn', { n: totalCanEnrich })}</button>`
+        : '',
+    ].filter(Boolean).join('');
+
+    manSectionHtml = `
+      ${mbFiles.length > 0 ? `<div class="tw-section-header" style="margin-top:24px">${t('player.tw.manualSection', { n: manFiles.length })}</div>` : ''}
+      <div class="tw-bulk-bar">
+        <div class="tw-bulk-hint">${t('player.tw.bulkHint')}</div>
+        ${actionBtns ? `<div class="tw-enrich-bar">${actionBtns}<span class="tw-enrich-note" id="tw-enrich-note">${t('player.tw.enrichNote')}</span></div>` : ''}
+        <div class="tw-bulk-fields">
+          <div class="tw-form-row"><label>${t('metadata.artist')}</label><input class="tw-inp tw-inp-wide" id="tw-b-artist" placeholder="${t('player.tw.bulkBlankHint')}"></div>
+          <div class="tw-form-row"><label>${t('metadata.album')}</label><input class="tw-inp tw-inp-wide" id="tw-b-album" placeholder="${t('player.tw.bulkBlankHint')}"></div>
+          <div class="tw-form-row"><label>${t('metadata.year')}</label><input class="tw-inp tw-inp-sm" id="tw-b-year" placeholder="${t('player.tw.bulkBlankHint')}"></div>
+          <div class="tw-form-row"><label>${t('metadata.genre')}</label><input class="tw-inp tw-inp-wide" id="tw-b-genre" placeholder="${t('player.tw.bulkBlankHint')}"></div>
+        </div>
+        <div class="tw-bulk-actions">
+          <button class="tw-sel-btn" id="tw-sel-all">${t('player.tw.btnSelectAll')}</button>
+          <button class="tw-sel-btn" id="tw-sel-none">${t('player.tw.btnSelectNone')}</button>
+          <button class="btn-sm btn-primary-sm" id="tw-apply-btn">${t('player.tw.btnApply', { count: manFiles.length })}</button>
+        </div>
+        <div id="tw-bulk-progress" class="tw-progress hidden"></div>
+      </div>
+      <div class="tw-file-list">${manRows}</div>`;
+  }
+
+  const isEmpty = mbFiles.length === 0 && manFiles.length === 0;
+
+  const body = document.getElementById('content-body');
+  body.innerHTML = `
+    <div class="tw-header">
+      <button class="tw-back-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg>
+        ${t('player.tw.btnBrowse')}
+      </button>
+      <div class="fe-breadcrumb" style="margin:0;padding:0;flex:1">${crumbs}</div>
+    </div>
+    ${dirsHtml ? `<div class="fe-grid" style="margin-bottom:14px">${dirsHtml}</div>` : ''}
+    ${isEmpty
+      ? `<div class="empty-state">${t('player.tw.emptyFolder')}</div>`
+      : mbSectionHtml + manSectionHtml}`;
+
+  setTitle(parts.length ? parts[parts.length - 1] : t('player.tw.title'));
+
+  // ── Wire events ──
+
+  body.querySelector('.tw-back-btn')?.addEventListener('click', () => viewFiles(S.feDir, false));
+  body.querySelectorAll('.fe-crumb').forEach(el =>
+    el.addEventListener('click', () => viewTagWorkshop(el.dataset.dir || '', false)));
+  body.querySelectorAll('.tw-nav-dir').forEach(el =>
+    el.addEventListener('click', () => viewTagWorkshop(el.dataset.dir, true)));
+
+  // MB: select all/none
+  function updateMbCount() {
+    const n = body.querySelectorAll('.tw-mb-check:checked').length;
+    const btn = body.querySelector('#tw-mb-accept-all');
+    if (btn) { btn.textContent = t('player.tw.mbAcceptAll', { n }); btn.disabled = n === 0; }
+  }
+  body.querySelectorAll('.tw-mb-check').forEach(cb => cb.addEventListener('change', updateMbCount));
+  body.querySelector('#tw-mb-sel-all')?.addEventListener('click', () => {
+    body.querySelectorAll('.tw-mb-check:not(:disabled)').forEach(cb => cb.checked = true); updateMbCount();
+  });
+  body.querySelector('#tw-mb-sel-none')?.addEventListener('click', () => {
+    body.querySelectorAll('.tw-mb-check:not(:disabled)').forEach(cb => cb.checked = false); updateMbCount();
+  });
+
+  // MB: bulk accept
+  body.querySelector('#tw-mb-accept-all')?.addEventListener('click', async () => {
+    const checked = [...body.querySelectorAll('.tw-row[data-mb]')]
+      .filter(row => row.querySelector('.tw-mb-check:checked'))
+      .map(row => parseInt(row.dataset.idx));
+    if (!checked.length) { toast(t('player.tw.toastNoneSelected')); return; }
+
+    const progressEl = body.querySelector('#tw-mb-progress');
+    const acceptAllBtn = body.querySelector('#tw-mb-accept-all');
+    acceptAllBtn.disabled = true;
+    progressEl.classList.remove('hidden');
+
+    let done = 0, errors = 0;
+    for (const idx of checked) {
+      const f = _twFiles[idx];
+      if (!f || !f.hasMb) continue;
+      progressEl.textContent = t('player.tw.progressSaving', { done, total: checked.length });
+      try {
+        await api('POST', 'api/v1/tagworkshop/accept-track', { filepath: f.filepath, vpath: f.vpath });
+        f.tag_status = 'accepted';
+        const row = body.querySelector(`.tw-row[data-idx="${idx}"]`);
+        if (row) {
+          const cb = row.querySelector('.tw-mb-check');
+          if (cb) { cb.checked = false; cb.disabled = true; }
+          const btn = row.querySelector('.tw-accept-mb-btn');
+          if (btn) btn.replaceWith(Object.assign(document.createElement('span'), { className: 'tw-accepted-tag', textContent: '✓ ' + t('player.tw.mbAccepted') }));
+        }
+        done++;
+      } catch(_) { errors++; done++; }
+    }
+
+    progressEl.textContent = errors
+      ? t('player.tw.progressDoneErrors', { done: done - errors, errors })
+      : t('player.tw.progressDone', { done });
+    updateMbCount();
+    toast(errors
+      ? t('player.tw.toastDoneErrors', { done: done - errors, errors })
+      : t('player.tw.toastDone', { done }));
+  });
+
+  // MB: per-file accept
+  body.querySelectorAll('.tw-accept-mb-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.idx);
+      const f = _twFiles[idx];
+      if (!f || !f.hasMb) return;
+      btn.disabled = true;
+      try {
+        await api('POST', 'api/v1/tagworkshop/accept-track', { filepath: f.filepath, vpath: f.vpath });
+        f.tag_status = 'accepted';
+        const cb = body.querySelector(`.tw-row[data-idx="${idx}"] .tw-mb-check`);
+        if (cb) { cb.checked = false; cb.disabled = true; }
+        btn.replaceWith(Object.assign(document.createElement('span'), { className: 'tw-accepted-tag', textContent: '✓ ' + t('player.tw.mbAccepted') }));
+        updateMbCount();
+        toast(t('player.tw.toastDone', { done: 1 }));
+      } catch(e) {
+        btn.disabled = false;
+        toast('✗ ' + (e.message || 'Error'));
+      }
+    });
+  });
+
+  // Manual: select all/none
+  function updateManCount() {
+    const n = body.querySelectorAll('.tw-man-check:checked').length;
+    const btn = body.querySelector('#tw-apply-btn');
+    if (btn) btn.textContent = t('player.tw.btnApply', { count: n });
+  }
+  body.querySelectorAll('.tw-man-check').forEach(cb => cb.addEventListener('change', updateManCount));
+  body.querySelector('#tw-sel-all')?.addEventListener('click', () => {
+    body.querySelectorAll('.tw-man-check').forEach(cb => cb.checked = true); updateManCount();
+  });
+  body.querySelector('#tw-sel-none')?.addEventListener('click', () => {
+    body.querySelectorAll('.tw-man-check').forEach(cb => cb.checked = false); updateManCount();
+  });
+
+  // Manual: scan unfingerprinted files with AcoustID
+  body.querySelector('#tw-scan-btn')?.addEventListener('click', async () => {
+    const btn = body.querySelector('#tw-scan-btn');
+    const noteEl = body.querySelector('#tw-enrich-note');
+    btn.disabled = true;
+    const filesToScan = _twFiles.filter(f => !f.hasMb && f.acoustid_status !== 'found')
+      .map(f => ({ filepath: f.filepath, vpath: f.vpath }));
+    try {
+      const r = await api('POST', 'api/v1/acoustid/scan-files', { files: filesToScan });
+      if (noteEl) noteEl.textContent = t('player.tw.scanQueued', { n: r.queued });
+      toast(t('player.tw.scanToast', { n: r.queued }));
+    } catch(e) {
+      btn.disabled = false;
+      toast('✗ ' + (e.message || 'Error'));
+    }
+  });
+
+  // Manual: enrich with MusicBrainz
+  body.querySelector('#tw-enrich-btn')?.addEventListener('click', async () => {
+    const btn = body.querySelector('#tw-enrich-btn');
+    const noteEl = body.querySelector('#tw-enrich-note');
+    btn.disabled = true;
+    const filesToEnrich = _twFiles.filter(f => !f.hasMb && f.acoustid_status === 'found')
+      .map(f => ({ filepath: f.filepath, vpath: f.vpath }));
+    try {
+      const r = await api('POST', 'api/v1/tagworkshop/enrich/files', { files: filesToEnrich });
+      if (noteEl) noteEl.textContent = t('player.tw.enrichQueued', { n: r.queued });
+      toast(t('player.tw.enrichToast', { n: r.queued }));
+    } catch(e) {
+      btn.disabled = false;
+      toast('✗ ' + (e.message || 'Error'));
+    }
+  });
+
+  // Manual: bulk apply
+  body.querySelector('#tw-apply-btn')?.addEventListener('click', async () => {
+    const artist = body.querySelector('#tw-b-artist')?.value.trim() || '';
+    const album  = body.querySelector('#tw-b-album')?.value.trim()  || '';
+    const year   = body.querySelector('#tw-b-year')?.value.trim()   || '';
+    const genre  = body.querySelector('#tw-b-genre')?.value.trim()  || '';
+    if (!artist && !album && !year && !genre) { toast(t('player.tw.toastNothingToApply')); return; }
+
+    const checked = [...body.querySelectorAll('.tw-row:not([data-mb])')]
+      .filter(row => row.querySelector('.tw-man-check:checked'))
+      .map(row => parseInt(row.dataset.idx));
+    if (!checked.length) { toast(t('player.tw.toastNoneSelected')); return; }
+
+    const progressEl = body.querySelector('#tw-bulk-progress');
+    const applyBtn   = body.querySelector('#tw-apply-btn');
+    applyBtn.disabled = true;
+    progressEl.classList.remove('hidden');
+
+    let done = 0, errors = 0;
+    for (const idx of checked) {
+      const f = _twFiles[idx];
+      if (!f) continue;
+      progressEl.textContent = t('player.tw.progressSaving', { done, total: checked.length });
+      const data = { filepath: f.fp };
+      if (artist) data.artist = artist;
+      if (album)  data.album  = album;
+      if (year)   data.year   = year;
+      if (genre)  data.genre  = genre;
+      try {
+        await api('POST', 'api/v1/admin/tags/write', data);
+        if (artist) f.artist = artist;
+        if (album)  f.album  = album;
+        if (year)   f.year   = year;
+        if (genre)  f.genre  = genre;
+        const row = body.querySelector(`.tw-row[data-idx="${idx}"]`);
+        if (row) {
+          const gEl = row.querySelector('.tw-row-tags');
+          const tl  = [f.artist, f.album, f.year].filter(Boolean).join(' · ');
+          if (gEl) gEl.textContent = tl;
+        }
+        done++;
+      } catch(_) { errors++; done++; }
+    }
+    progressEl.textContent = errors
+      ? t('player.tw.progressDoneErrors', { done: done - errors, errors })
+      : t('player.tw.progressDone', { done });
+    applyBtn.disabled = false;
+    toast(errors
+      ? t('player.tw.toastDoneErrors', { done: done - errors, errors })
+      : t('player.tw.toastDone', { done }));
+  });
+
+  // Shared: inline edit toggle
+  body.querySelectorAll('.tw-edit-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const idx  = parseInt(btn.dataset.idx);
+      const form = body.querySelector(`.tw-inline-form[data-idx="${idx}"]`);
+      if (!form) return;
+      const isOpen = !form.classList.contains('hidden');
+      body.querySelectorAll('.tw-inline-form').forEach(f => f.classList.add('hidden'));
+      body.querySelectorAll('.tw-edit-btn').forEach(b => b.classList.remove('tw-edit-active'));
+      if (!isOpen) { form.classList.remove('hidden'); btn.classList.add('tw-edit-active'); }
+    });
+  });
+
+  // Shared: inline save
+  body.querySelectorAll('.tw-save-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx  = parseInt(btn.dataset.idx);
+      const form = body.querySelector(`.tw-inline-form[data-idx="${idx}"]`);
+      const f    = _twFiles[idx];
+      if (!f || !form) return;
+      const statusEl = form.querySelector('.tw-inline-status');
+      btn.disabled = true;
+      if (statusEl) { statusEl.textContent = t('player.npId3.saving'); statusEl.className = 'tw-inline-status'; }
+      const data = { filepath: f.fp };
+      form.querySelectorAll('.tw-inp').forEach(inp => { data[inp.dataset.field] = inp.value; });
+      try {
+        await api('POST', 'api/v1/admin/tags/write', data);
+        ['title','artist','album','year','genre','track','disk'].forEach(k => { if (data[k] !== undefined) f[k] = data[k]; });
+        const row = body.querySelector(`.tw-row[data-idx="${idx}"]`);
+        if (row) {
+          const tEl = row.querySelector('.tw-row-title');
+          if (tEl && f.title) tEl.textContent = f.title;
+          const tl  = [f.artist, f.album, f.year].filter(Boolean).join(' · ');
+          const gEl = row.querySelector('.tw-row-tags');
+          if (gEl) gEl.textContent = tl;
+        }
+        if (statusEl) { statusEl.textContent = '✓ ' + t('player.tw.savedOk'); statusEl.className = 'tw-inline-status tw-status-ok'; }
+      } catch(e) {
+        if (statusEl) { statusEl.textContent = '✗ ' + (e.message || 'Error'); statusEl.className = 'tw-inline-status tw-status-err'; }
+      }
+      btn.disabled = false;
+    });
+  });
+
+  // Shared: inline cancel
+  body.querySelectorAll('.tw-cancel-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx  = parseInt(btn.dataset.idx);
+      const form = body.querySelector(`.tw-inline-form[data-idx="${idx}"]`);
+      if (form) form.classList.add('hidden');
+      body.querySelectorAll('.tw-edit-btn').forEach(b => b.classList.remove('tw-edit-active'));
+    });
+  });
+}
+
 
 // ── AUTO-DJ VIEW ──────────────────────────────────────────────
 async function viewAutoDJ() {

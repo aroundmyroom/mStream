@@ -62,6 +62,8 @@ export function setAcoustidPending(filepath, vpath) { return backend.setAcoustid
 export function setAcoustidResult(filepath, vpath, result) { return backend.setAcoustidResult(filepath, vpath, result); }
 export function resetAcoustidPending() { return backend.resetAcoustidPending(); }
 export function resetAcoustidErrors()  { return backend.resetAcoustidErrors(); }
+export function resetNotFoundForAcoustid() { return backend.resetNotFoundForAcoustid(); }
+export function resetFilesForAcoustid(files) { return backend.resetFilesForAcoustid(files); }
 export function getAcoustidStats() { return backend.getAcoustidStats(); }
 
 // Tag Workshop — MB enrichment + tag review
@@ -75,6 +77,8 @@ export function retryMbEnrichErrors() { return backend.retryMbEnrichErrors(); }
 export function getTagWorkshopStatus() { return backend.getTagWorkshopStatus(); }
 export function getTagWorkshopAlbums(filter, sort, page, search) { return backend.getTagWorkshopAlbums(filter, sort, page, search); }
 export function getTagWorkshopAlbumTracks(mb_release_id, album_dir) { return backend.getTagWorkshopAlbumTracks(mb_release_id, album_dir); }
+export function getTagWorkshopFolderFiles(vpathName, filepathPrefix) { return backend.getTagWorkshopFolderFiles(vpathName, filepathPrefix); }
+export function resetFilesForEnrichment(files) { return backend.resetFilesForEnrichment(files); }
 export function getTracksForAccept(mb_release_id, album_dir) { return backend.getTracksForAccept(mb_release_id, album_dir); }
 export function getTrackForAccept(filepath, vpath) { return backend.getTrackForAccept(filepath, vpath); }
 export function markTrackAccepted(filepath, vpath) { return backend.markTrackAccepted(filepath, vpath); }

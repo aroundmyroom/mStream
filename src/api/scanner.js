@@ -210,6 +210,18 @@ export function setup(mstream) {
     res.json({});
   });
 
+  // Called by the scanner worker when it detects a likely mount failure
+  // (hasBaseline=true but 0 files found). Cleans up progress state without
+  // touching the database — existing rows are preserved.
+  mstream.post('/api/v1/scanner/abort-scan', (req, res) => {
+    const { scanId, vpath, reason } = req.body || {};
+    if (scanId) scanProgress.finish(scanId);
+    const msg = `Scan aborted for vpath "${vpath || '?'}": ${reason || 'unknown reason'}. Database was NOT modified.`;
+    console.error(`[scanner] ${msg}`);
+    try { db.commitTransaction(); } catch (_e) { /* best effort */ }
+    res.json({ ok: true, aborted: true, reason });
+  });
+
   mstream.post('/api/v1/scanner/finish-scan', (req, res) => {
     const scanFinishedAt = Math.floor(Date.now() / 1000);
     scanProgress.finish(req.body.scanId);
@@ -250,6 +262,26 @@ export function setup(mstream) {
     // Commit any open scan transaction so the finished state is durable
     // before we return the response.
     db.commitTransaction();
+    // Write the mount-guard sentinel file to the vpath root directory.
+    // If this file is absent on the next scan start, the mount is likely gone
+    // and the scan will abort rather than wipe the database.
+    try {
+      const rootDir = config.program.folders[req.body.vpath]?.root;
+      if (rootDir) {
+        const sentinelPath = path.join(rootDir, '.velvet.md');
+        const sentinelContent =
+          '# mStream Velvet — Mount Guard\n\n' +
+          'This file protects your mStream Velvet database from being wiped\n' +
+          'when your music share (NFS, SMB, or Docker volume) is not mounted.\n\n' +
+          'How it works:\n' +
+          '- mStream Velvet writes this file after every successful library scan.\n' +
+          '- Before each new scan, mStream Velvet checks that this file is present.\n' +
+          '- If this file is missing when a scan starts, the scan is aborted\n' +
+          '  and your database is left untouched.\n\n' +
+          'Do NOT delete this file. It is safe to leave it in your music root.\n';
+        fs.writeFileSync(sentinelPath, sentinelContent, 'utf8');
+      }
+    } catch (_e) { /* non-critical — sentinel write failure must not block scan completion */ }
     // Rebuild the folder and artist search indexes after every scan.
     // These are non-critical background operations — errors must not fail the scan.
     try { db.rebuildFolderIndex(); } catch (_e) { /* non-critical */ }

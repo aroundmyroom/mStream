@@ -24,6 +24,7 @@ const _getQueue = db.prepare(`
   WHERE mbid IS NOT NULL
     AND mb_enrichment_status IS NULL
     AND acoustid_status = 'found'
+  ORDER BY COALESCE(mb_enrich_priority, 0) DESC
   LIMIT ?
 `);
 
@@ -36,7 +37,7 @@ const _setResult = db.prepare(`
   SET mb_album = ?, mb_year = ?, mb_track = ?, mb_release_id = ?,
       mb_album_dir = ?,
       mb_enrichment_status = ?, mb_enriched_ts = ?, tag_status = ?,
-      mb_enrichment_error = ?
+      mb_enrichment_error = ?, mb_enrich_priority = 0
   WHERE filepath = ? AND vpath = ?
 `);
 

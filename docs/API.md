@@ -483,6 +483,9 @@ GET /media/<vpath>/<path/to/song.mp3>?token=<jwt>
 | `GET` | `/api/v1/acoustid/status` | — | Returns fingerprinting job status and queue length. |
 | `POST` | `/api/v1/acoustid/start` | `{ vpaths? }` | Start fingerprinting all unfingerprinted tracks. |
 | `POST` | `/api/v1/acoustid/stop` | — | Stop the running job. |
+| `POST` | `/api/v1/acoustid/scan-files` | `{ files: ["vpath/rel", …] }` | Queue specific files for fingerprinting. *(Velvet)* |
+| `POST` | `/api/v1/acoustid/reset-errors` | — | Re-queue all errored files for fingerprinting. *(Velvet)* |
+| `POST` | `/api/v1/acoustid/reset-not-found` | — | Re-queue all `not_found` files for fingerprinting. Returns `{ reset, workerStarted }`. *(Velvet)* |
 
 ---
 
@@ -596,6 +599,7 @@ GET /media/<vpath>/<path/to/song.mp3>?token=<jwt>
 | `POST` | `/api/v1/admin/db/generate-waveforms` | — | Generate waveform data for every track. |
 | `GET` | `/api/v1/admin/db/album-version-inventory` | — | Count of files grouped by `album_version_source` (which tag or method produced the version value). Returns `[{ source, count }]`. *(Velvet)* |
 | `POST` | `/api/v1/admin/db/params/album-version-tags` | `{ tags: ["TIT3", "TXXX:EDITION", …] }` | Update the ordered list of tag fields the scanner uses to detect album version/edition. Max 20 entries. *(Velvet)* |
+| `POST` | `/api/v1/admin/directory/reset-sentinel` | `{ vpath }` | Re-write the `.velvet.md` mount-guard sentinel file to the vpath root. Use when scanning is blocked after the sentinel was accidentally deleted. *(Velvet)* |
 
 ---
 

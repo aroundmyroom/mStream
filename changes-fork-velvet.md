@@ -1,5 +1,43 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.13.8-velvet — April 2026 — Tag Workshop, Scanner Mount Guard & AcoustID Improvements
+
+### feat: Scanner mount guard — protect DB from NFS/SMB unmount wipe
+- Before each scan, mStream Velvet checks for a hidden `.velvet.md` sentinel file in the vpath root directory
+- If the sentinel is missing (indicating the mount is absent) and the DB already has records for that vpath, the scan is **aborted** — the database is left untouched
+- **Upgrade safe**: if the sentinel has never been written (first scan after upgrading), mStream Velvet detects that the directory is accessible and allows the scan to proceed; the sentinel is written after the first successful scan, protecting all future scans
+- A second guard aborts the scan if the filesystem walk finds zero files but the DB has existing records
+- The sentinel file is written automatically after every successful scan
+- **Admin → Directories**: new **Reset mount guard** button (shown only for root vpaths) re-writes the sentinel if it was accidentally deleted; child vpaths correctly share the parent root's sentinel and show no button
+- New API endpoint: `POST /api/v1/admin/directory/reset-sentinel`
+
+### feat: AcoustID — Retry No Match
+- AcoustID stats table now shows `not_found` and `errors` as separate rows
+- New **Retry N No Match** button re-queues all `not_found` files for fingerprint scanning and starts the worker immediately
+- New API endpoint: `POST /api/v1/acoustid/reset-not-found`
+
+### fix: Tag Workshop — admin-only access
+- `viewTagWorkshop()` in the player now returns early if the user is not an admin
+- Server-side admin guard already enforced on all tagworkshop endpoints
+
+### fix: Unknown artist placeholder image updated
+- Replaced `webapp/assets/img/unknownartist.webp` with a higher-quality image
+
+### feat: Tag Workshop — MusicBrainz comparison + bulk accept via file explorer
+- New view accessible from the file explorer: click **Tag Workshop** button in the filter bar (shown for admins with tag editing enabled, on any non-root folder)
+- **MusicBrainz section** (files with AcoustID + MB enrichment data): shows current tags vs MB-suggested tags side by side with per-field diff highlighting (current in strikethrough red → MB value in green); one-click **Accept MB** per file or **Accept MB for N checked** bulk button; accepted tracks are written to disk and marked in the DB
+- **Manual section** (files without MB data): bulk field editor (artist/album/year/genre with blank=keep) + per-file inline editor with all fields (title/artist/album/year/genre/track/disc)
+- **Filename shown on every row**: each file displays its filename below the title so you can identify files at a glance
+- **Per-file enrichment status badge** (manual section): shows whether a file is in the enrichment queue, has no AcoustID match, had a MusicBrainz error, or returned no data
+- **"Enrich N files with MusicBrainz" button**: appears in the manual section when at least one file has an AcoustID fingerprint; queues those files for background MB enrichment and starts the worker — come back to the folder to see results
+- **Folder navigation**: subdirectories are browsable within the workshop — clicking a subfolder stays in Tag Workshop
+- **Breadcrumb navigation**: full path shown at the top; click any segment to jump to that folder
+- **Progress feedback**: saving counter updates in real-time during bulk operations with final success/error summary
+- Back button returns to the file explorer at the same folder
+- New API endpoints: `GET /api/v1/tagworkshop/folder?path=<vpath/relative>` (also returns `acoustid_status`, `mb_enrichment_status`); `POST /api/v1/tagworkshop/enrich/files` — queue specific files for enrichment + start worker
+- Child vpath support: the folder endpoint correctly resolves files stored under a parent root vpath
+- i18n: all strings use `player.tw.*` keys (now 37 keys), all 12 locales updated
+
 ## v6.13.7-velvet — April 2026 — Proxy Auth Fix, Log Retention & Persistence Fixes
 
 ### fix: Auth failures behind reverse proxies that strip custom headers

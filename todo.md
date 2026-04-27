@@ -91,8 +91,7 @@ Audit completed 2026-03-26. Strategy: **Option A — separate `mobile.css`** loa
 
 ## FUTURE — Library Management
 
-### Tag Workshop — Phase 3: Manual Fallback
-- [ ] Inline edit row in Tag Workshop
+### Tag Workshop — Enhancements
 - [ ] "Use filename as title" quick-fill button
 - [ ] "Apply to similar filenames" — propagate artist/album guess to other files in same folder
 
