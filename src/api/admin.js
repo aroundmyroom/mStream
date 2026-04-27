@@ -905,6 +905,7 @@ export function setup(mstream) {
       port: config.program.port,
       noUpload: config.program.noUpload,
       writeLogs: config.program.writeLogs,
+      logRetention: config.program.logRetention || '14d',
       secret: config.program.secret.slice(-4),
       ssl: config.program.ssl,
       storage: config.program.storage,
@@ -969,6 +970,22 @@ export function setup(mstream) {
 
     await admin.editWriteLogs(req.body.writeLogs);
     res.json({});
+  });
+
+  mstream.post("/api/v1/admin/config/log-retention", async (req, res) => {
+    const schema = Joi.object({
+      logRetention: Joi.string().valid('1d', '3d', '7d', '14d', '30d').required()
+    });
+    joiValidate(schema, req.body);
+
+    await admin.editLogRetention(req.body.logRetention);
+    res.json({});
+  });
+
+  mstream.post("/api/v1/admin/logs/prune", async (req, res) => {
+    const retentionDays = parseInt(config.program.logRetention, 10) || 14;
+    const deleted = await admin.pruneOldLogs(retentionDays);
+    res.json({ deleted });
   });
 
   mstream.post("/api/v1/admin/config/secret", async (req, res) => {

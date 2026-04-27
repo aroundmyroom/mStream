@@ -4309,7 +4309,8 @@ const logsView = Vue.component('logs-view', {
   data() {
     return {
       params: ADMINDATA.serverParams,
-      paramsTS: ADMINDATA.serverParamsUpdated
+      paramsTS: ADMINDATA.serverParamsUpdated,
+      pruning: false
     };
   },
   template: `
@@ -4332,6 +4333,19 @@ const logsView = Vue.component('logs-view', {
                       </td>
                     </tr>
                     <tr>
+                      <td>
+                        <b>{{ t('admin.logs.labelRetention') }}</b>
+                        <select v-model="params.logRetention" v-on:change="saveRetention" style="display:inline-block;width:auto;margin-left:.5rem;padding:.15rem .4rem;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--t1);font-size:.9rem;">
+                          <option value="1d">{{ t('admin.logs.retention1d') }}</option>
+                          <option value="3d">{{ t('admin.logs.retention3d') }}</option>
+                          <option value="7d">{{ t('admin.logs.retention7d') }}</option>
+                          <option value="14d">{{ t('admin.logs.retention14d') }}</option>
+                          <option value="30d">{{ t('admin.logs.retention30d') }}</option>
+                        </select>
+                      </td>
+                      <td style="color:var(--t2);font-size:.82rem">{{ t('admin.logs.retentionHint') }}</td>
+                    </tr>
+                    <tr>
                       <td><b>{{ t('admin.logs.labelLogsDirectory') }}</b> {{params.storage.logsDirectory}}</td>
                       <td style="color:var(--t2);font-size:.82rem">{{ t('admin.settings.editInConfigHint') }}</td>
                     </tr>
@@ -4340,6 +4354,7 @@ const logsView = Vue.component('logs-view', {
               </div>
               <div class="card-action">
                 <a v-on:click="downloadLogs()" class="btn">{{ t('admin.logs.btnDownload') }}</a>
+                <a v-on:click="pruneNow()" class="btn" :class="pruning ? 'disabled' : ''">{{ pruning ? t('admin.logs.btnPruning') : t('admin.logs.btnPrune') }}</a>
               </div>
             </div>
           </div>
@@ -4392,6 +4407,48 @@ const logsView = Vue.component('logs-view', {
                         timeout: 3500
                       });
                     });
+      });
+    },
+    saveRetention: function() {
+      API.axios({
+        method: 'POST',
+        url: `${API.url()}/api/v1/admin/config/log-retention`,
+        data: { logRetention: this.params.logRetention }
+      }).then(() => {
+        iziToast.success({
+          title: this.t('admin.logs.toastRetentionSaved'),
+          position: 'topCenter',
+          timeout: 3000
+        });
+      }).catch(() => {
+        iziToast.error({
+          title: this.t('admin.logs.toastRetentionFailed'),
+          position: 'topCenter',
+          timeout: 3500
+        });
+      });
+    },
+    pruneNow: function() {
+      if (this.pruning) return;
+      this.pruning = true;
+      API.axios({
+        method: 'POST',
+        url: `${API.url()}/api/v1/admin/logs/prune`
+      }).then(r => {
+        const n = r.data && r.data.deleted != null ? r.data.deleted : '?';
+        iziToast.success({
+          title: this.t('admin.logs.toastPruneSuccess', { count: n }),
+          position: 'topCenter',
+          timeout: 4000
+        });
+      }).catch(() => {
+        iziToast.error({
+          title: this.t('admin.logs.toastPruneFailed'),
+          position: 'topCenter',
+          timeout: 3500
+        });
+      }).finally(() => {
+        this.pruning = false;
       });
     },
   }

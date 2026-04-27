@@ -1,5 +1,35 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.13.7-velvet — April 2026 — Proxy Auth Fix, Log Retention & Persistence Fixes
+
+### fix: Auth failures behind reverse proxies that strip custom headers
+- Root cause: `httpOnly: true` was added to the `x-access-token` cookie in v6.13.5 for XSS hardening, but it broke the proxy recovery path that had worked since earlier versions
+- The client JS has a deliberate fallback: if the proxy strips the `x-access-token` request header and the call gets 401, it falls back to a bare `fetch()` (the browser auto-sends the cookie), then reads the token back from `document.cookie` to repopulate `S.token` for WebSocket connections and subsequent API calls
+- With `httpOnly: true`, `document.cookie` no longer includes the cookie, so `S.token` would stay empty — breaking WebSockets and all code paths that check `if (S.token)` (including proxy pre-auth scenarios)
+- `httpOnly` provides no actual security benefit here because the same JWT is already stored in `localStorage` (same XSS exposure), so it was removed with an explanatory comment
+- `Authorization: Bearer` server-side acceptance retained for programmatic/API clients
+
+### fix: `/api/v1/files/art` returns 500 for files missing from disk
+- When a song that was previously in the queue no longer exists on disk (moved, deleted, or unmounted drive), the art endpoint called `parseFile()` which threw `ENOENT`, propagating as a 500 to the browser
+- `src/api/download.js`: added an `existsSync` guard before `parseFile` — if the file is absent, returns `{ aaFile: null }` (no art) instead of crashing with a 500
+- Observed in `restoreQueue` → `_fetchMissingArt` call on page load with a stale queue
+
+### feat: Configurable log file retention with on-demand pruning
+- Admin → Logging now shows a **Keep logs for** dropdown: 1 day, 3 days, 7 days, 14 days (default), 30 days
+- Setting is persisted in `save/conf/default.json` as `logRetention` and applied immediately (file transport is recreated with the new `maxFiles` value)
+- New **Delete old logs now** button triggers immediate server-side deletion of log files older than the configured retention window — deleted 33 files on first run on the production server
+- `src/logger.js`: `addFileLogger(filepath, maxFiles)` now accepts a retention param instead of hardcoding `'14d'`
+- `src/util/admin.js`: added `editLogRetention()` and `pruneOldLogs()` helpers; the prune function parses dates from filenames (`mstream-YYYY-MM-DD-HH.log`) so it doesn't rely on mtime
+- New API endpoints: `POST /api/v1/admin/config/log-retention`, `POST /api/v1/admin/logs/prune`
+- `logRetention` exposed in `GET /api/v1/admin/config`
+- i18n: 13 new `admin.logs.*` keys across all 12 locale files
+
+### fix: Custom artist placeholder image lost after reinstall or Docker container recreation
+- `artist-placeholder.jpg` was stored in `image-cache/` — a cache directory that is ephemeral on any install type (fresh clone, `git clean`, reinstall, or Docker container recreation without a persistent `image-cache` volume)
+- Moved to `save/conf/artist-placeholder.jpg` — `save/` is the designated persistent data directory for all installation types (bare-metal Linux and Docker alike)
+- One-time migration shim in `server.js` at boot: if the file exists in the old location and not the new one, it is automatically moved — existing installs are migrated transparently
+- Fixes the "placeholder reverts to default after upgrade/reinstall" bug for all users
+
 ## v6.13.6-velvet — April 2026 — Artist Fan Art + Scan Scheduler
 
 ### fix: Artist fan art not displaying (regression from v6.13.4)

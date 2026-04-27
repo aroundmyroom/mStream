@@ -448,8 +448,58 @@ export async function editWriteLogs(val) {
   if (val === false) {
     logger.reset();
   } else {
-    logger.addFileLogger(config.program.storage.logsDirectory);
+    logger.addFileLogger(config.program.storage.logsDirectory, config.program.logRetention);
   }
+}
+
+export async function editLogRetention(val) {
+  const loadConfig = await loadFile(config.configFile);
+  loadConfig.logRetention = val;
+  await saveFile(loadConfig, config.configFile);
+
+  config.program.logRetention = val;
+
+  // Re-initialise the file transport with the new maxFiles value so it takes
+  // effect immediately (DailyRotateFile reads maxFiles at creation time).
+  if (config.program.writeLogs) {
+    logger.addFileLogger(config.program.storage.logsDirectory, val);
+  }
+}
+
+/**
+ * Delete log files in the logs directory whose date (parsed from the filename
+ * `mstream-YYYY-MM-DD-HH.log`) is older than `retentionDays` days ago.
+ * Returns the number of files deleted.
+ */
+export async function pruneOldLogs(retentionDays) {
+  const dir = config.program.storage.logsDirectory;
+  let entries;
+  try {
+    entries = await fs.readdir(dir);
+  } catch (_e) {
+    return 0;
+  }
+
+  const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+  let deleted = 0;
+
+  for (const entry of entries) {
+    // Match mstream-YYYY-MM-DD-HH.log  OR  mstream-YYYY-MM-DD.log
+    const m = entry.match(/^mstream-(\d{4}-\d{2}-\d{2}(?:-\d{2})?)\.log$/);
+    if (!m) continue;
+
+    // Parse date part — pad to hour granularity so Date.parse works
+    const datePart = m[1].length === 10 ? m[1] + 'T00:00:00Z' : m[1].replace(/(\d{4}-\d{2}-\d{2})-(\d{2})/, '$1T$2:00:00Z');
+    const fileTime = Date.parse(datePart);
+    if (isNaN(fileTime) || fileTime >= cutoff) continue;
+
+    try {
+      await fs.unlink(path.join(dir, entry));
+      deleted++;
+    } catch (_e) { /* skip locked/missing */ }
+  }
+
+  return deleted;
 }
 
 export async function enableTranscode(val) {

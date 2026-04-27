@@ -28,7 +28,11 @@ winston.configure({
   exitOnError: false
 });
 
-export function addFileLogger(filepath) {
+// Valid retention values (must stay in sync with config.js validation + admin UI)
+export const VALID_RETENTIONS = ['1d', '3d', '7d', '14d', '30d'];
+export const DEFAULT_RETENTION = '14d';
+
+export function addFileLogger(filepath, maxFiles = DEFAULT_RETENTION) {
   if (fileTransport) {
     reset();
   }
@@ -39,7 +43,7 @@ export function addFileLogger(filepath) {
     extension: '.log',
     datePattern: 'YYYY-MM-DD-HH',
     maxSize: '20m',
-    maxFiles: '14d',
+    maxFiles: VALID_RETENTIONS.includes(maxFiles) ? maxFiles : DEFAULT_RETENTION,
     format: winston.format.combine(
       winston.format.timestamp(),
       winston.format.json()

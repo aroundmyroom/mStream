@@ -319,10 +319,16 @@ mStream Velvet will write logs, DB files, album art and waveform data to the fil
 
 ## Logs
 
-set `writeLogs` to `true` to enable writing logs to the filesystem
+Set `writeLogs` to `true` to enable writing logs to the filesystem.
 
-```
+Use `logRetention` to control how long log files are kept. Valid values: `"1d"`, `"3d"`, `"7d"`, `"14d"` (default), `"30d"`.
+Older files are removed automatically on each log rotation. You can also trigger immediate cleanup via Admin → Logging → **Delete old logs now**.
+
+```json
+{
   "writeLogs": true,
+  "logRetention": "7d"
+}
 ```
 
 ## UI

@@ -118,6 +118,7 @@ const schema = Joi.object({
   scanOptions: scanOptions.default(scanOptions.validate({}).value),
   noUpload: Joi.boolean().default(false),
   writeLogs: Joi.boolean().default(false),
+  logRetention: Joi.string().valid('1d', '3d', '7d', '14d', '30d').default('14d'),
   lockAdmin: Joi.boolean().default(false),
   storage: storageJoi.default(storageJoi.validate({}).value),
   webAppDirectory: Joi.string().default(path.join(__dirname, '../../webapp')),

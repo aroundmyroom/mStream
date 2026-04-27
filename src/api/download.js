@@ -234,6 +234,11 @@ export function setup(mstream) {
     }
 
     try {
+      // Guard: if the file doesn't exist on disk, return no-art rather than 500
+      if (!fsSync.existsSync(pathInfo.fullPath)) {
+        return res.json({ aaFile: null });
+      }
+
       // 1. Try embedded art first
       const meta = await parseFile(pathInfo.fullPath, { skipCovers: false, duration: false });
       const pic  = meta.common?.picture?.[0];

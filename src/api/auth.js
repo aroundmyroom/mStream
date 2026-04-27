@@ -24,7 +24,10 @@ export function setup(mstream) {
       res.cookie('x-access-token', token, {
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days in ms
         sameSite: 'Strict',
-        httpOnly: true,   // not readable by JavaScript — reduces XSS exposure
+        // NOTE: must NOT be httpOnly — the client JS needs to read this cookie
+        // to repopulate S.token when a reverse proxy strips the x-access-token
+        // request header. The token is also stored in localStorage, so httpOnly
+        // would provide no additional XSS protection here.
         secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
       });
 
@@ -54,7 +57,12 @@ export function setup(mstream) {
       return next();
     }
 
-    const token = req.body?.token || req.query?.token || req.headers?.['x-access-token'] || req.cookies?.['x-access-token'];
+    // Accept token from multiple sources; also support standard "Authorization: Bearer <token>"
+    // because some reverse proxies strip custom headers like x-access-token.
+    const bearerToken = req.headers?.authorization?.startsWith('Bearer ')
+      ? req.headers.authorization.slice(7)
+      : undefined;
+    const token = req.body?.token || req.query?.token || req.headers?.['x-access-token'] || bearerToken || req.cookies?.['x-access-token'];
     if (!token) { throw new WebError('Authentication Error', 401); }
     req.token = token;
 

@@ -71,7 +71,7 @@ export async function serveIt(configFile) {
 
   // Logging
   if (config.program.writeLogs) {
-    logger.addFileLogger(config.program.storage.logsDirectory);
+    logger.addFileLogger(config.program.storage.logsDirectory, config.program.logRetention);
   }
 
   // Set server
@@ -192,8 +192,16 @@ export async function serveIt(configFile) {
   });
 
   // Public — artist placeholder image (no auth: used in <img src> throughout the player)
-  const _ARTIST_PLACEHOLDER_FILE    = path.join(process.cwd(), 'image-cache', 'artist-placeholder.jpg');
+  const _ARTIST_PLACEHOLDER_FILE    = path.join(process.cwd(), 'save', 'conf', 'artist-placeholder.jpg');
+  const _ARTIST_PLACEHOLDER_FILE_OLD = path.join(process.cwd(), 'image-cache', 'artist-placeholder.jpg');
   const _ARTIST_PLACEHOLDER_DEFAULT = path.join(config.program.webAppDirectory, 'assets', 'img', 'unknownartist.webp');
+  // One-time migration: move placeholder from old image-cache/ location to save/conf/
+  if (!fs.existsSync(_ARTIST_PLACEHOLDER_FILE) && fs.existsSync(_ARTIST_PLACEHOLDER_FILE_OLD)) {
+    try {
+      fs.renameSync(_ARTIST_PLACEHOLDER_FILE_OLD, _ARTIST_PLACEHOLDER_FILE);
+      winston.info('Migrated artist-placeholder.jpg from image-cache/ to save/conf/');
+    } catch (_e) { /* non-fatal */ }
+  }
   mstream.get('/api/v1/artists/placeholder', (_req, res) => {
     if (fs.existsSync(_ARTIST_PLACEHOLDER_FILE)) {
       return res.sendFile(_ARTIST_PLACEHOLDER_FILE);
