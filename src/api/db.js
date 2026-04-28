@@ -41,6 +41,17 @@ function computeChildExclusions(userVpaths) {
 }
 
 function renderMetadataObj(row) {
+  // Build rg object: trackGain uses full priority chain; albumGain is the raw
+  // measured album value only (null = no album measurement, client falls back).
+  const trackR = resolveTrackGain(row, 'track');
+  const rgObj = trackR ? {
+    trackGain: trackR.gain,
+    truePeak:  trackR.peak,
+    albumGain: row.rg_album_gain_db ?? null,
+    albumPeak: row.rg_album_peak_dbfs ?? null,
+    src:       trackR.src,
+  } : null;
+
   return {
     "filepath": path.join(row.vpath, row.filepath).replace(/\\/g, '/'),
     "metadata": {
@@ -64,7 +75,8 @@ function renderMetadataObj(row) {
       "channels": row.channels != null ? row.channels : null,
       "bit-depth": row.bit_depth != null ? row.bit_depth : null,
       "album-version": row.album_version || null
-    }
+    },
+    "rg": rgObj
   };
 }
 

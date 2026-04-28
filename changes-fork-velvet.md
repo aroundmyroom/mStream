@@ -2,6 +2,12 @@
 
 ## v6.14.0-velvet — April 2026 — The Normalize Version (ReplayGain 2.0 / EBU R128)
 
+### fix: RG badge not showing — rg object missing from metadata response; lazy-fetch for restored queue
+- `renderMetadataObj` (server) now includes an `rg` object in every metadata response: `{ trackGain, truePeak, albumGain, albumPeak, src }`; priority chain: measured → R128 tag+5 dB → ReplayGain tag
+- `norm()` (client) now carries `rg` through to every queue entry
+- `_applyRGGain` now lazy-fetches metadata when `rg` is absent (e.g. queue restored from localStorage); result is cached on the song object to avoid repeat requests
+- RG badge moved to below the Auto-DJ button (`dj-rg-wrap` flex-column layout) for cleaner placement in the player controls row
+
 ### feat: ReplayGain 2.0 / EBU R128 loudness normalisation
 - New background worker measures every audio file with **rsgain** (primary) or **ffmpeg** (fallback), storing per-file EBU R128 values (`rg_integrated_lufs`, `rg_true_peak_dbfs`, `rg_track_gain_db`, `rg_lra`, `rg_album_gain_db`, `rg_album_peak_dbfs`, `rg_measured_ts`, `rg_measurement_tool`)
 - Also stores existing ReplayGain tags from files (`rg_tag_track_gain`, `rg_tag_track_peak`, `rg_tag_album_gain`, `rg_tag_album_peak`) and R128 tags (`r128_track_gain_db`, `r128_album_gain_db`) for playback reference

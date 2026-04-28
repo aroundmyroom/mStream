@@ -782,6 +782,7 @@ function norm(s) {
     bitrate:       m.bitrate        || null,
     'sample-rate': m['sample-rate'] || null,
     channels:      m.channels      || null,
+    rg:            s.rg            ?? null,
   };
 }
 
@@ -13639,6 +13640,19 @@ function _applyRGGain(s) {
   if (gainDb == null) { gainDb = s.replaygain; src = gainDb != null ? 'tag' : null; }
 
   if (gainDb == null) {
+    // No rg data on this song object (e.g. restored from localStorage before fix).
+    // Lazy-fetch metadata once to populate rg, then re-apply.
+    if (s.filepath && !s.isRadio && !s._rgFetching) {
+      s._rgFetching = true;
+      api('POST', 'api/v1/db/metadata', { filepath: s.filepath })
+        .then(meta => {
+          s._rgFetching = false;
+          if (meta?.rg) {
+            s.rg = meta.rg;
+            if (S.queue[S.idx] === s) _applyRGGain(s);
+          }
+        }).catch(() => { s._rgFetching = false; });
+    }
     _rgGainNode.gain.value = 1.0;
     if (badge) { badge.textContent = ''; badge.classList.add('hidden'); }
     return;
