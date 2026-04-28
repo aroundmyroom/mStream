@@ -3686,7 +3686,7 @@ export function getTracksForAccept(mb_release_id, album_dir = null) {
   return db.prepare(`
     SELECT filepath, vpath, mb_title, mb_artist, mb_album, mb_year, mb_track, title, artist, album, year, track, format
     FROM files
-    WHERE mb_release_id = ? AND tag_status IN ('needs_review', 'confirmed') ${dirFilter}
+    WHERE mb_release_id = ? AND tag_status IN ('needs_review', 'confirmed', 'skipped') ${dirFilter}
   `).all(mb_release_id);
 }
 
@@ -3695,7 +3695,7 @@ export function getTrackForAccept(filepath, vpath) {
   return db.prepare(`
     SELECT filepath, vpath, mb_title, mb_artist, mb_album, mb_year, mb_track, title, artist, album, year, track, format
     FROM files
-    WHERE filepath = ? AND vpath = ? AND tag_status IN ('needs_review', 'confirmed')
+    WHERE filepath = ? AND vpath = ? AND tag_status IN ('needs_review', 'confirmed', 'skipped')
   `).get(filepath, vpath);
 }
 

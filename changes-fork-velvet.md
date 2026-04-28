@@ -14,6 +14,10 @@
 - All 38 `player.tw.*` locale keys restored across all 12 locale files
 - Tag Workshop CSS (64 rules) restored in `style.css`
 
+### fix: Tag Workshop — Accept MB silently skipped previously-skipped tracks
+- `getTrackForAccept` and `getTracksForAccept` only matched `tag_status IN ('needs_review', 'confirmed')` — tracks the user had previously skipped returned `{ok: true, skipped: true}` without writing any tags to disk
+- Both queries now also include `'skipped'` so previously-skipped tracks can be re-accepted and written
+
 ### feat: ReplayGain 2.0 / EBU R128 loudness normalisation
 - New background worker measures every audio file with **rsgain** (primary) or **ffmpeg** (fallback), storing per-file EBU R128 values (`rg_integrated_lufs`, `rg_true_peak_dbfs`, `rg_track_gain_db`, `rg_lra`, `rg_album_gain_db`, `rg_album_peak_dbfs`, `rg_measured_ts`, `rg_measurement_tool`)
 - Also stores existing ReplayGain tags from files (`rg_tag_track_gain`, `rg_tag_track_peak`, `rg_tag_album_gain`, `rg_tag_album_peak`) and R128 tags (`r128_track_gain_db`, `r128_album_gain_db`) for playback reference

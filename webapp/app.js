@@ -9196,6 +9196,7 @@ function renderTagWorkshop(dbFiles, dirs, curPath) {
 
   // MB: select all/none
   function updateMbCount() {
+    const all = body.querySelectorAll('.tw-mb-check').length;
     const n = body.querySelectorAll('.tw-mb-check:checked').length;
     const btn = body.querySelector('#tw-mb-accept-all');
     if (btn) { btn.textContent = t('player.tw.mbAcceptAll', { n }); btn.disabled = n === 0; }
@@ -9226,7 +9227,7 @@ function renderTagWorkshop(dbFiles, dirs, curPath) {
       if (!f || !f.hasMb) continue;
       progressEl.textContent = t('player.tw.progressSaving', { done, total: checked.length });
       try {
-        await api('POST', 'api/v1/tagworkshop/accept-track', { filepath: f.filepath, vpath: f.vpath });
+        const r = await api('POST', 'api/v1/tagworkshop/accept-track', { filepath: f.filepath, vpath: f.vpath });
         f.tag_status = 'accepted';
         const row = body.querySelector(`.tw-row[data-idx="${idx}"]`);
         if (row) {
@@ -9256,7 +9257,7 @@ function renderTagWorkshop(dbFiles, dirs, curPath) {
       if (!f || !f.hasMb) return;
       btn.disabled = true;
       try {
-        await api('POST', 'api/v1/tagworkshop/accept-track', { filepath: f.filepath, vpath: f.vpath });
+        const r = await api('POST', 'api/v1/tagworkshop/accept-track', { filepath: f.filepath, vpath: f.vpath });
         f.tag_status = 'accepted';
         const cb = body.querySelector(`.tw-row[data-idx="${idx}"] .tw-mb-check`);
         if (cb) { cb.checked = false; cb.disabled = true; }
@@ -9347,7 +9348,7 @@ function renderTagWorkshop(dbFiles, dirs, curPath) {
       if (year)   data.year   = year;
       if (genre)  data.genre  = genre;
       try {
-        await api('POST', 'api/v1/admin/tags/write', data);
+        const r = await api('POST', 'api/v1/admin/tags/write', data);
         if (artist) f.artist = artist;
         if (album)  f.album  = album;
         if (year)   f.year   = year;
@@ -9397,7 +9398,7 @@ function renderTagWorkshop(dbFiles, dirs, curPath) {
       const data = { filepath: f.fp };
       form.querySelectorAll('.tw-inp').forEach(inp => { data[inp.dataset.field] = inp.value; });
       try {
-        await api('POST', 'api/v1/admin/tags/write', data);
+        const r = await api('POST', 'api/v1/admin/tags/write', data);
         ['title','artist','album','year','genre','track','disk'].forEach(k => { if (data[k] !== undefined) f[k] = data[k]; });
         const row = body.querySelector(`.tw-row[data-idx="${idx}"]`);
         if (row) {
