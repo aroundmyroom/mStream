@@ -63,14 +63,20 @@ export async function downloadedFFmpeg() {
 }
 
 const transCache = {};
-function spawnTranscode(inputPath, codec, bitrate) {
-  return spawn(ffmpegBin(), [
-    '-i', inputPath, '-vn',
-    '-f', codec,
-    '-acodec', codecMap[codec].codec,
-    '-ab', bitrate,
-    '-'
-  ], { stdio: ['ignore', 'pipe', 'ignore'] });
+function spawnTranscode(inputPath, codec, bitrate, gainDb = null) {
+  // Optional ReplayGain volume adjustment via a simple volume= filter.
+  // A limiter (alimiter) prevents clipping after gain is applied.
+  // Only applied when gainDb is a finite non-zero number.
+  const afParts = [];
+  if (gainDb != null && isFinite(gainDb) && gainDb !== 0) {
+    const linearGain = Math.pow(10, gainDb / 20).toFixed(6);
+    afParts.push(`volume=${linearGain}`);
+    afParts.push('alimiter=level_in=1:level_out=1:limit=0.9998:attack=5:release=50');
+  }
+  const args = ['-i', inputPath, '-vn', '-f', codec, '-acodec', codecMap[codec].codec, '-ab', bitrate];
+  if (afParts.length) args.push('-af', afParts.join(','));
+  args.push('-');
+  return spawn(ffmpegBin(), args, { stdio: ['ignore', 'pipe', 'ignore'] });
 }
 
 export function setup(mstream) {

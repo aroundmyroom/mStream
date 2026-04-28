@@ -117,6 +117,9 @@ const S = {
   sleepEndsAt: 0,      // Date.now() ms timestamp when sleep fires
   // Playback quality
   rgEnabled: localStorage.getItem('ms2_rg_'       + _u) === '1',
+  rgMode:    localStorage.getItem('ms2_rg_mode_'   + _u) || 'track',
+  rgPreamp:  parseFloat(localStorage.getItem('ms2_rg_preamp_' + _u)) || 0,
+  rgClip:    localStorage.getItem('ms2_rg_clip_'   + _u) !== '0',  // default ON
   gapless:   localStorage.getItem('ms2_gapless_'  + _u) === '1',
   dynColor:  localStorage.getItem('ms2_dyn_color_' + _u) !== '0',  // default ON; stored as '0' when disabled
   barTop:    localStorage.getItem('ms2_bar_top_'   + _u) === '1',
@@ -728,6 +731,17 @@ let _homeAC = null;
 // Queue drag-and-drop state — module-scoped so _initQueueListeners (one-time) can close over it.
 let _qDragSrc  = null;
 let _qDragDisc = null; // disc label string when dragging an entire disc block
+
+// ── Queue virtual-scroll state ────────────────────────────────────────────────
+let _qvsRows = [];      // { type:'item'|'sep', qi?, s?, startOffset?, label? }
+let _qvsCumH = null;    // Float32Array of cumulative heights (length = rows.length + 1)
+let _qvsFIdx = -1;      // first rendered row index
+let _qvsLIdx = -1;      // last rendered row index
+let _qvsDrag = false;   // true while HTML5 DnD drag is active — freeze rendering
+let _qvsRafP = false;   // RAF pending flag
+const _QH_ITEM = 58;    // q-item row height px  (7+7 padding + 44 art)
+const _QH_SEP  = 28;    // q-disc-sep row height px
+const _QV_BUF  = 5;     // extra rows to render above/below viewport
 
 // ── API ───────────────────────────────────────────────────────
 async function api(method, path, body, signal) {
@@ -1739,6 +1753,78 @@ function _fetchMissingArt(songs, container, selector, rowAttr) {
 }
 
 // ── QUEUE UI ─────────────────────────────────────────────────
+// ── Queue virtual-scroll renderer ────────────────────────────────────────────
+// Called on scroll (via RAF), resize, and after every refreshQueueUI rebuild.
+// Only renders the rows within the viewport + _QV_BUF buffer rows, using two
+// padding spacer divs to maintain the correct total scroll height.
+// Drastically reduces the number of draggable="true" DOM nodes — fixing the
+// Firefox per-mousemove hit-test jank that scaled with queue length.
+function _qvsRender(list, force) {
+  if (_qvsDrag || !_qvsRows.length || !_qvsCumH) return;
+  const vH    = list.clientHeight;
+  const sTop  = list.scrollTop;
+  const total = _qvsCumH[_qvsRows.length];
+  if (!vH) return;
+
+  // Binary search: first row whose bottom edge is > sTop
+  let lo = 0, hi = _qvsRows.length - 1, fIdx = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (_qvsCumH[mid + 1] > sTop) { fIdx = mid; hi = mid - 1; }
+    else lo = mid + 1;
+  }
+  fIdx = Math.max(0, fIdx - _QV_BUF);
+
+  // Last row whose top edge is <= sTop + vH
+  let lIdx = fIdx;
+  while (lIdx < _qvsRows.length - 1 && _qvsCumH[lIdx + 1] <= sTop + vH) lIdx++;
+  lIdx = Math.min(_qvsRows.length - 1, lIdx + _QV_BUF);
+
+  if (!force && fIdx === _qvsFIdx && lIdx === _qvsLIdx) return;
+  _qvsFIdx = fIdx; _qvsLIdx = lIdx;
+
+  const padTop = _qvsCumH[fIdx];
+  const padBot = Math.max(0, total - _qvsCumH[lIdx + 1]);
+
+  const html = [`<div style="height:${padTop}px" aria-hidden="true"></div>`];
+  for (let r = fIdx; r <= lIdx; r++) {
+    const row = _qvsRows[r];
+    if (row.type === 'sep') {
+      html.push(`<div class="q-disc-sep" draggable="true" data-disc-label="${esc(row.label)}" title="${t('player.ctrl.queueDragDisc')}"><span>${esc(row.label)}</span></div>`);
+    } else {
+      const { qi: i, s, startOffset } = row;
+      const isActive = i === S.idx;
+      const estStart = (!isActive && startOffset > 0) ? ` title="~${fmt(startOffset)}"` : '';
+      html.push(`<div class="q-item${isActive ? ' q-active' : ''}${s._dj ? ' q-dj' : ''}" data-qi="${i}" draggable="true"${estStart}>
+        <div class="q-drag-handle" title="${t('player.ctrl.queueDragHandle')}">
+          <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" opacity=".7">
+            <circle cx="3" cy="2.5" r="1.2"/><circle cx="7" cy="2.5" r="1.2"/>
+            <circle cx="3" cy="7"   r="1.2"/><circle cx="7" cy="7"   r="1.2"/>
+            <circle cx="3" cy="11.5" r="1.2"/><circle cx="7" cy="11.5" r="1.2"/>
+          </svg>
+        </div>
+        <div class="q-num">${isActive
+          ? '<svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>'
+          : i + 1}
+        </div>
+        <div class="q-art">${artOrPlaceholder(s['album-art'], 's', 'no-art-sm')}</div>
+        <div class="q-info">
+          <div class="q-title">${esc(s.title || s.filepath?.split('/').pop() || '?')}</div>
+          <div class="q-artist">${esc(s.artist || '')}</div>
+        </div>
+        <div class="q-dj-slot">${s._dj ? '<span class="q-dj-tag">Auto&#8202;DJ</span>' : ''}</div>
+        ${s.duration ? `<div class="q-dur">${fmt(s.duration)}</div>` : ''}
+        <button class="q-remove" data-qi="${i}" title="${t('player.ctrl.queueRemove')}">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>`);
+    }
+  }
+  html.push(`<div style="height:${padBot}px" aria-hidden="true"></div>`);
+  list.innerHTML = html.join('');
+  _fetchMissingArt(S.queue, list, '.q-art', 'data-qi');
+}
+
 function refreshQueueUI() {
   const list   = document.getElementById('queue-list');
   const cnt    = document.getElementById('qp-count');
@@ -1806,47 +1892,35 @@ function refreshQueueUI() {
     return;
   }
 
-  list.innerHTML = S.queue.map((s, i) => {
-    const isActive = i === S.idx;
-    const prevLabel = i > 0 ? S.queue[i - 1]._discLabel : undefined;
-    const sep = (s._discLabel && s._discLabel !== prevLabel)
-      ? `<div class="q-disc-sep" draggable="true" data-disc-label="${esc(s._discLabel)}" title="${t('player.ctrl.queueDragDisc')}"><span>${esc(s._discLabel)}</span></div>`
-      : '';
-    const estStart = (!isActive && _startOffsets[i] > 0) ? ` title="~${fmt(_startOffsets[i])}"` : '';
-    return sep + `
-      <div class="q-item${isActive ? ' q-active' : ''}${s._dj ? ' q-dj' : ''}" data-qi="${i}" draggable="true"${estStart}>
-        <div class="q-drag-handle" title="${t('player.ctrl.queueDragHandle')}">
-          <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" opacity=".7">
-            <circle cx="3" cy="2.5" r="1.2"/><circle cx="7" cy="2.5" r="1.2"/>
-            <circle cx="3" cy="7"   r="1.2"/><circle cx="7" cy="7"   r="1.2"/>
-            <circle cx="3" cy="11.5" r="1.2"/><circle cx="7" cy="11.5" r="1.2"/>
-          </svg>
-        </div>
-        <div class="q-num">${isActive
-          ? `<svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`
-          : i + 1}
-        </div>
-        <div class="q-art">
-          ${artOrPlaceholder(s['album-art'], 's', 'no-art-sm')}
-        </div>
-        <div class="q-info">
-          <div class="q-title">${esc(s.title || s.filepath?.split('/').pop() || '?')}</div>
-          <div class="q-artist">${esc(s.artist || '')}</div>
-        </div>
-        <div class="q-dj-slot">${s._dj ? '<span class="q-dj-tag">Auto&#8202;DJ</span>' : ''}</div>
-        ${s.duration ? `<div class="q-dur">${fmt(s.duration)}</div>` : ''}
-        <button class="q-remove" data-qi="${i}" title="${t('player.ctrl.queueRemove')}">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>`;
-  }).join('');
+  // Queue items — build virtual-scroll row list
+  _qvsRows = [];
+  let prevLabel;
+  for (let i = 0; i < S.queue.length; i++) {
+    const s = S.queue[i];
+    if (s._discLabel && s._discLabel !== prevLabel) {
+      _qvsRows.push({ type: 'sep', label: s._discLabel });
+      prevLabel = s._discLabel;
+    }
+    _qvsRows.push({ type: 'item', qi: i, s, startOffset: _startOffsets[i] || 0 });
+  }
+  _qvsCumH = new Float32Array(_qvsRows.length + 1);
+  for (let r = 0; r < _qvsRows.length; r++) {
+    _qvsCumH[r + 1] = _qvsCumH[r] + (_qvsRows[r].type === 'sep' ? _QH_SEP : _QH_ITEM);
+  }
 
-  const active = list.querySelector('.q-active');
-  if (active) active.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  // Scroll to active item if it is outside the current viewport
+  const _aRow = _qvsRows.findIndex(r => r.type === 'item' && r.qi === S.idx);
+  if (_aRow >= 0) {
+    const _aTop = _qvsCumH[_aRow], _aBot = _qvsCumH[_aRow + 1];
+    const _sTop = list.scrollTop, _sBot = _sTop + list.clientHeight;
+    if (_aTop < _sTop || _aBot > _sBot) {
+      list.scrollTop = Math.max(0, _aTop - (list.clientHeight - _QH_ITEM) / 2);
+    }
+  }
+
+  _qvsFIdx = -1; _qvsLIdx = -1;
+  _qvsRender(list, true);
   _syncQueueLabel();
-
-  // Fetch art for any queued songs not yet scanned
-  _fetchMissingArt(S.queue, list, '.q-art', 'data-qi');
 }
 
 // ── One-time queue event-listener setup ──────────────────────────────────────
@@ -1855,6 +1929,18 @@ function refreshQueueUI() {
 function _initQueueListeners() {
   const list = document.getElementById('queue-list');
   if (!list) return;
+
+  // Virtual-scroll: re-render on scroll (RAF-throttled)
+  list.addEventListener('scroll', () => {
+    if (_qvsRafP) return;
+    _qvsRafP = true;
+    requestAnimationFrame(() => { _qvsRafP = false; _qvsRender(list, false); });
+  });
+  // Virtual-scroll: re-render when the panel is resized (e.g. window resize)
+  const _qvsRO = new ResizeObserver(() => {
+    requestAnimationFrame(() => { if (list.isConnected) { _qvsFIdx = -1; _qvsLIdx = -1; _qvsRender(list, true); } });
+  });
+  _qvsRO.observe(list);
 
   list.addEventListener('click', e => {
     const removeBtn = e.target.closest('.q-remove');
@@ -1874,6 +1960,7 @@ function _initQueueListeners() {
   });
 
   list.addEventListener('dragstart', e => {
+    _qvsDrag = true;  // freeze virtual-scroll while dragging
     const sep = e.target.closest('.q-disc-sep');
     if (sep) {
       _qDragDisc = sep.dataset.discLabel;
@@ -1892,6 +1979,7 @@ function _initQueueListeners() {
     setTimeout(() => item.classList.add('q-dragging'), 0);
   });
   list.addEventListener('dragend', e => {
+    _qvsDrag = false;
     const sep  = e.target.closest('.q-disc-sep');
     const item = e.target.closest('.q-item');
     if (sep)  sep.classList.remove('q-dragging');
@@ -1911,6 +1999,7 @@ function _initQueueListeners() {
     if (target && !target.contains(e.relatedTarget)) target.classList.remove('q-drag-over');
   });
   list.addEventListener('drop', e => {
+    _qvsDrag = false;
     e.preventDefault();
     list.querySelectorAll('.q-drag-over').forEach(el => el.classList.remove('q-drag-over'));
 
@@ -8721,7 +8810,6 @@ function renderFileExplorer(d) {
       <span id="fe-match-count" class="fe-match-count"></span>
       <button id="fe-filter-clear" class="fe-filter-clear hidden" title="${t('player.fe.filterClearTitle')}">✕</button>
       ${S.canUpload && curPath !== '/' ? `<button id="fe-upload-btn" class="fe-upload-btn" title="${t('player.fe.btnUploadTitle')}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16,16 12,12 8,16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg> ${t('player.fe.btnUpload')}</button>` : ''}
-      ${S.allowId3Edit && S.isAdmin && curPath !== '/' && (d.files?.length > 0) ? `<button id="fe-tw-btn" class="fe-tw-btn" title="${t('player.tw.btnOpenTitle')}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> ${t('player.tw.btnOpen')}</button>` : ''}
     </div>
     <div id="fe-grid" class="fe-grid">${dirs}${files}</div>`;
 
@@ -8757,8 +8845,6 @@ function renderFileExplorer(d) {
 
   // Upload button
   body.querySelector('#fe-upload-btn')?.addEventListener('click', () => openUploadModal(curPath));
-  // Tag Workshop button
-  body.querySelector('#fe-tw-btn')?.addEventListener('click', () => viewTagWorkshop(S.feDir, false));
 
   // Breadcrumb navigation
   body.querySelectorAll('.fe-crumb').forEach(el => {
@@ -8861,481 +8947,6 @@ function renderFileExplorer(d) {
     });
   }
 }
-
-// ── TAG WORKSHOP ──────────────────────────────────────────────
-// Folder-based bulk tag editor. Navigate to any folder, check the files
-// you want to update, fill in the shared fields (artist/album/year/genre),
-// and hit Apply — each file is rewritten via the existing tags/write API.
-// Individual files can also be edited inline (all fields incl. title/track).
-
-let _twFiles = []; // workshop session state — array of tag objects per file
-
-async function viewTagWorkshop(dir, addToStack) {
-  if (!S.isAdmin) return;
-  setNavActive('files'); S.view = 'tagworkshop';
-  if (addToStack !== false && S.feDir !== dir) S.feDirStack.push(S.feDir);
-  S.feDir = dir || '';
-  const sig = _navCancel();
-  setBody('<div class="loading-state"></div>');
-  document.getElementById('play-all-btn').onclick = null;
-  document.getElementById('add-all-btn').onclick  = null;
-  try {
-    const pathParam = (S.feDir || '').replace(/^\//, '');
-    const [dbData, feData] = await Promise.all([
-      api('GET', 'api/v1/tagworkshop/folder?path=' + encodeURIComponent(pathParam), undefined, sig),
-      api('POST', 'api/v1/file-explorer', { directory: S.feDir, sort: true }, sig),
-    ]);
-    renderTagWorkshop(dbData.files || [], feData.directories || [], feData.path || (S.feDir || '/'));
-  } catch(e) { if (e.name === 'AbortError') return; setBody(`<div class="empty-state">Error: ${esc(e.message)}</div>`); }
-}
-
-function renderTagWorkshop(dbFiles, dirs, curPath) {
-  const parts = (curPath || '/').replace(/^\/|\/$/g, '').split('/').filter(Boolean);
-
-  // Breadcrumb (stays in workshop on click)
-  let crumbs = `<span class="fe-crumb" data-dir="">${t('player.fe.rootCrumb')}</span>`;
-  let cumPath = '';
-  parts.forEach(p => {
-    crumbs += `<span class="fe-crumb-sep">/</span>`;
-    cumPath += (cumPath ? '/' : '') + p;
-    crumbs += `<span class="fe-crumb" data-dir="/${cumPath}">${esc(p)}</span>`;
-  });
-
-  // Subdirectory entries (navigate within workshop)
-  const dirsHtml = dirs.map(dir => `
-    <div class="fe-dir tw-nav-dir" data-dir="${esc(curPath + dir.name)}">
-      <svg class="fe-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-      <span class="fe-name">${esc(dir.name)}</span>
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--t3);flex-shrink:0"><polyline points="9,18 15,12 9,6"/></svg>
-    </div>`).join('');
-
-  // Build unified file list with MB data
-  _twFiles = dbFiles.map((f, i) => ({
-    i,
-    fp:      f.vpath + '/' + f.filepath,
-    filepath: f.filepath,
-    vpath:   f.vpath,
-    name:    f.filepath.split('/').pop(),
-    title:   String(f.title  ?? ''),
-    artist:  String(f.artist ?? ''),
-    album:   String(f.album  ?? ''),
-    year:    String(f.year   ?? ''),
-    track:   String(f.track  ?? ''),
-    disk:    String(f.disk   ?? ''),
-    genre:   String(f.genre  ?? ''),
-    mb_title:  f.mb_title  ?? null,
-    mb_artist: f.mb_artist ?? null,
-    mb_album:  f.mb_album  ?? null,
-    mb_year:   f.mb_year   != null ? String(f.mb_year) : null,
-    mb_track:  f.mb_track  != null ? String(f.mb_track) : null,
-    mb_release_id: f.mb_release_id ?? null,
-    tag_status: f.tag_status ?? null,
-    acoustid_status:      f.acoustid_status      ?? null,
-    mb_enrichment_status: f.mb_enrichment_status ?? null,
-    hasMb: f.mb_release_id != null,
-  }));
-
-  const mbFiles  = _twFiles.filter(f => f.hasMb);
-  const manFiles = _twFiles.filter(f => !f.hasMb);
-
-  // Build per-file diff (only fields that differ)
-  function getDiffs(f) {
-    const n = s => String(s ?? '').trim().toLowerCase();
-    const diffs = [];
-    if (f.mb_title  != null && n(f.mb_title)  !== n(f.title))  diffs.push({ field: t('metadata.title'),  cur: f.title,  mb: f.mb_title  });
-    if (f.mb_artist != null && n(f.mb_artist) !== n(f.artist)) diffs.push({ field: t('metadata.artist'), cur: f.artist, mb: f.mb_artist });
-    if (f.mb_album  != null && n(f.mb_album)  !== n(f.album))  diffs.push({ field: t('metadata.album'),  cur: f.album,  mb: f.mb_album  });
-    if (f.mb_year   != null && f.mb_year !== String(f.year ?? ''))   diffs.push({ field: t('metadata.year'),  cur: f.year,  mb: f.mb_year   });
-    if (f.mb_track  != null && f.mb_track !== String(f.track ?? '')) diffs.push({ field: t('metadata.track'), cur: f.track, mb: f.mb_track  });
-    return diffs;
-  }
-
-  // Inline edit form HTML (shared between MB and manual rows)
-  function inlineFormHtml(f) {
-    return `<div class="tw-inline-form hidden" data-idx="${f.i}">
-      <div class="tw-form-grid">
-        <div class="tw-form-row"><label>${t('metadata.title')}</label><input class="tw-inp" data-field="title" value="${esc(f.title)}"></div>
-        <div class="tw-form-row"><label>${t('metadata.artist')}</label><input class="tw-inp" data-field="artist" value="${esc(f.artist)}"></div>
-        <div class="tw-form-row"><label>${t('metadata.album')}</label><input class="tw-inp" data-field="album" value="${esc(f.album)}"></div>
-        <div class="tw-form-row"><label>${t('metadata.year')}</label><input class="tw-inp tw-inp-sm" data-field="year" value="${esc(f.year)}"></div>
-        <div class="tw-form-row"><label>${t('metadata.genre')}</label><input class="tw-inp" data-field="genre" value="${esc(f.genre)}"></div>
-        <div class="tw-form-row"><label>${t('metadata.track')}</label><input class="tw-inp tw-inp-sm" data-field="track" value="${esc(f.track)}"></div>
-        <div class="tw-form-row"><label>${t('metadata.disc')}</label><input class="tw-inp tw-inp-sm" data-field="disk" value="${esc(f.disk)}"></div>
-      </div>
-      <div class="tw-inline-btns">
-        <button class="tw-save-btn" data-idx="${f.i}">${t('player.tw.btnSave')}</button>
-        <button class="tw-cancel-btn" data-idx="${f.i}">${t('player.tw.btnCancel')}</button>
-        <span class="tw-inline-status"></span>
-      </div>
-    </div>`;
-  }
-
-  // ── MB section ──
-  let mbSectionHtml = '';
-  if (mbFiles.length > 0) {
-    const pendingCount = mbFiles.filter(f => f.tag_status !== 'accepted').length;
-    const mbRows = mbFiles.map(f => {
-      const diffs = getDiffs(f);
-      const isAccepted = f.tag_status === 'accepted';
-      const diffsHtml = diffs.length > 0
-        ? diffs.map(d => `<span class="tw-diff-item"><span class="tw-diff-field">${esc(d.field)}:</span> <span class="tw-diff-cur">${esc(d.cur || '—')}</span><span class="tw-diff-arrow">→</span><span class="tw-diff-mb">${esc(d.mb || '—')}</span></span>`).join('')
-        : `<span class="tw-mb-match">✓ ${t('player.tw.mbTagsOk')}</span>`;
-      const acceptBtn = isAccepted
-        ? `<span class="tw-accepted-tag">✓ ${t('player.tw.mbAccepted')}</span>`
-        : `<button class="tw-accept-mb-btn" data-idx="${f.i}">${t('player.tw.mbAcceptBtn')}</button>`;
-      return `<div class="tw-row" data-idx="${f.i}" data-mb="1">
-        <div class="tw-row-main">
-          <input type="checkbox" class="tw-check tw-mb-check" ${isAccepted ? 'disabled' : 'checked'}>
-          <div class="tw-row-info">
-            <div class="tw-row-title">${esc(f.title || f.name)}</div>
-            <div class="tw-row-path">${esc(f.name)}</div>
-            <div class="tw-diff-list">${diffsHtml}</div>
-          </div>
-          ${acceptBtn}
-          <button class="tw-edit-btn" title="${t('player.tw.btnEditTitle')}" data-idx="${f.i}">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-        </div>
-        ${inlineFormHtml(f)}
-      </div>`;
-    }).join('');
-
-    mbSectionHtml = `
-      <div class="tw-section-header">${t('player.tw.mbSection', { n: mbFiles.length })}</div>
-      <div class="tw-bulk-bar">
-        <div class="tw-bulk-actions">
-          <button class="tw-sel-btn" id="tw-mb-sel-all">${t('player.tw.btnSelectAll')}</button>
-          <button class="tw-sel-btn" id="tw-mb-sel-none">${t('player.tw.btnSelectNone')}</button>
-          <button class="btn-sm btn-primary-sm" id="tw-mb-accept-all" ${pendingCount === 0 ? 'disabled' : ''}>${t('player.tw.mbAcceptAll', { n: pendingCount })}</button>
-        </div>
-        <div id="tw-mb-progress" class="tw-progress hidden"></div>
-      </div>
-      <div class="tw-file-list">${mbRows}</div>`;
-  }
-
-  // ── Manual section ──
-  let manSectionHtml = '';
-  if (manFiles.length > 0) {
-    // Classify per file
-    const notFingerprinted = manFiles.filter(f => f.acoustid_status !== 'found');
-    const enrichEligible   = manFiles.filter(f => f.acoustid_status === 'found');
-    const totalCanEnrich   = enrichEligible.filter(f => !f.mb_enrichment_status || f.mb_enrichment_status === 'pending' || f.mb_enrichment_status === 'no_data' || f.mb_enrichment_status === 'error').length;
-    const totalCanScan     = notFingerprinted.length;
-
-    function enrichHint(f) {
-      if (f.acoustid_status !== 'found') return `<span class="tw-enrich-hint tw-enrich-none">${t('player.tw.enrichHintNoAcoustid')}</span>`;
-      if (f.mb_enrichment_status === 'no_data') return `<span class="tw-enrich-hint tw-enrich-warn">${t('player.tw.enrichHintNoData')}</span>`;
-      if (f.mb_enrichment_status === 'error')   return `<span class="tw-enrich-hint tw-enrich-warn">${t('player.tw.enrichHintError')}</span>`;
-      return `<span class="tw-enrich-hint tw-enrich-ok">${t('player.tw.enrichHintQueued')}</span>`;
-    }
-
-    const manRows = manFiles.map(f => {
-      const tagLine = [f.artist, f.album, f.year].filter(Boolean).join(' · ');
-      return `<div class="tw-row" data-idx="${f.i}">
-        <div class="tw-row-main">
-          <input type="checkbox" class="tw-check tw-man-check" checked>
-          <div class="tw-row-info">
-            <div class="tw-row-title">${esc(f.title || f.name)}</div>
-            <div class="tw-row-path">${esc(f.name)}</div>
-            ${tagLine ? `<div class="tw-row-tags">${esc(tagLine)}</div>` : ''}
-            ${enrichHint(f)}
-          </div>
-          <button class="tw-edit-btn" title="${t('player.tw.btnEditTitle')}" data-idx="${f.i}">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-        </div>
-        ${inlineFormHtml(f)}
-      </div>`;
-    }).join('');
-
-    const actionBtns = [
-      totalCanScan > 0
-        ? `<button class="btn-sm btn-accent-sm" id="tw-scan-btn">${t('player.tw.scanBtn', { n: totalCanScan })}</button>`
-        : '',
-      totalCanEnrich > 0
-        ? `<button class="btn-sm btn-accent-sm" id="tw-enrich-btn">${t('player.tw.enrichBtn', { n: totalCanEnrich })}</button>`
-        : '',
-    ].filter(Boolean).join('');
-
-    manSectionHtml = `
-      ${mbFiles.length > 0 ? `<div class="tw-section-header" style="margin-top:24px">${t('player.tw.manualSection', { n: manFiles.length })}</div>` : ''}
-      <div class="tw-bulk-bar">
-        <div class="tw-bulk-hint">${t('player.tw.bulkHint')}</div>
-        ${actionBtns ? `<div class="tw-enrich-bar">${actionBtns}<span class="tw-enrich-note" id="tw-enrich-note">${t('player.tw.enrichNote')}</span></div>` : ''}
-        <div class="tw-bulk-fields">
-          <div class="tw-form-row"><label>${t('metadata.artist')}</label><input class="tw-inp tw-inp-wide" id="tw-b-artist" placeholder="${t('player.tw.bulkBlankHint')}"></div>
-          <div class="tw-form-row"><label>${t('metadata.album')}</label><input class="tw-inp tw-inp-wide" id="tw-b-album" placeholder="${t('player.tw.bulkBlankHint')}"></div>
-          <div class="tw-form-row"><label>${t('metadata.year')}</label><input class="tw-inp tw-inp-sm" id="tw-b-year" placeholder="${t('player.tw.bulkBlankHint')}"></div>
-          <div class="tw-form-row"><label>${t('metadata.genre')}</label><input class="tw-inp tw-inp-wide" id="tw-b-genre" placeholder="${t('player.tw.bulkBlankHint')}"></div>
-        </div>
-        <div class="tw-bulk-actions">
-          <button class="tw-sel-btn" id="tw-sel-all">${t('player.tw.btnSelectAll')}</button>
-          <button class="tw-sel-btn" id="tw-sel-none">${t('player.tw.btnSelectNone')}</button>
-          <button class="btn-sm btn-primary-sm" id="tw-apply-btn">${t('player.tw.btnApply', { count: manFiles.length })}</button>
-        </div>
-        <div id="tw-bulk-progress" class="tw-progress hidden"></div>
-      </div>
-      <div class="tw-file-list">${manRows}</div>`;
-  }
-
-  const isEmpty = mbFiles.length === 0 && manFiles.length === 0;
-
-  const body = document.getElementById('content-body');
-  body.innerHTML = `
-    <div class="tw-header">
-      <button class="tw-back-btn">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg>
-        ${t('player.tw.btnBrowse')}
-      </button>
-      <div class="fe-breadcrumb" style="margin:0;padding:0;flex:1">${crumbs}</div>
-    </div>
-    ${dirsHtml ? `<div class="fe-grid" style="margin-bottom:14px">${dirsHtml}</div>` : ''}
-    ${isEmpty
-      ? `<div class="empty-state">${t('player.tw.emptyFolder')}</div>`
-      : mbSectionHtml + manSectionHtml}`;
-
-  setTitle(parts.length ? parts[parts.length - 1] : t('player.tw.title'));
-
-  // ── Wire events ──
-
-  body.querySelector('.tw-back-btn')?.addEventListener('click', () => viewFiles(S.feDir, false));
-  body.querySelectorAll('.fe-crumb').forEach(el =>
-    el.addEventListener('click', () => viewTagWorkshop(el.dataset.dir || '', false)));
-  body.querySelectorAll('.tw-nav-dir').forEach(el =>
-    el.addEventListener('click', () => viewTagWorkshop(el.dataset.dir, true)));
-
-  // MB: select all/none
-  function updateMbCount() {
-    const n = body.querySelectorAll('.tw-mb-check:checked').length;
-    const btn = body.querySelector('#tw-mb-accept-all');
-    if (btn) { btn.textContent = t('player.tw.mbAcceptAll', { n }); btn.disabled = n === 0; }
-  }
-  body.querySelectorAll('.tw-mb-check').forEach(cb => cb.addEventListener('change', updateMbCount));
-  body.querySelector('#tw-mb-sel-all')?.addEventListener('click', () => {
-    body.querySelectorAll('.tw-mb-check:not(:disabled)').forEach(cb => cb.checked = true); updateMbCount();
-  });
-  body.querySelector('#tw-mb-sel-none')?.addEventListener('click', () => {
-    body.querySelectorAll('.tw-mb-check:not(:disabled)').forEach(cb => cb.checked = false); updateMbCount();
-  });
-
-  // MB: bulk accept
-  body.querySelector('#tw-mb-accept-all')?.addEventListener('click', async () => {
-    const checked = [...body.querySelectorAll('.tw-row[data-mb]')]
-      .filter(row => row.querySelector('.tw-mb-check:checked'))
-      .map(row => parseInt(row.dataset.idx));
-    if (!checked.length) { toast(t('player.tw.toastNoneSelected')); return; }
-
-    const progressEl = body.querySelector('#tw-mb-progress');
-    const acceptAllBtn = body.querySelector('#tw-mb-accept-all');
-    acceptAllBtn.disabled = true;
-    progressEl.classList.remove('hidden');
-
-    let done = 0, errors = 0;
-    for (const idx of checked) {
-      const f = _twFiles[idx];
-      if (!f || !f.hasMb) continue;
-      progressEl.textContent = t('player.tw.progressSaving', { done, total: checked.length });
-      try {
-        await api('POST', 'api/v1/tagworkshop/accept-track', { filepath: f.filepath, vpath: f.vpath });
-        f.tag_status = 'accepted';
-        const row = body.querySelector(`.tw-row[data-idx="${idx}"]`);
-        if (row) {
-          const cb = row.querySelector('.tw-mb-check');
-          if (cb) { cb.checked = false; cb.disabled = true; }
-          const btn = row.querySelector('.tw-accept-mb-btn');
-          if (btn) btn.replaceWith(Object.assign(document.createElement('span'), { className: 'tw-accepted-tag', textContent: '✓ ' + t('player.tw.mbAccepted') }));
-        }
-        done++;
-      } catch(_) { errors++; done++; }
-    }
-
-    progressEl.textContent = errors
-      ? t('player.tw.progressDoneErrors', { done: done - errors, errors })
-      : t('player.tw.progressDone', { done });
-    updateMbCount();
-    toast(errors
-      ? t('player.tw.toastDoneErrors', { done: done - errors, errors })
-      : t('player.tw.toastDone', { done }));
-  });
-
-  // MB: per-file accept
-  body.querySelectorAll('.tw-accept-mb-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const idx = parseInt(btn.dataset.idx);
-      const f = _twFiles[idx];
-      if (!f || !f.hasMb) return;
-      btn.disabled = true;
-      try {
-        await api('POST', 'api/v1/tagworkshop/accept-track', { filepath: f.filepath, vpath: f.vpath });
-        f.tag_status = 'accepted';
-        const cb = body.querySelector(`.tw-row[data-idx="${idx}"] .tw-mb-check`);
-        if (cb) { cb.checked = false; cb.disabled = true; }
-        btn.replaceWith(Object.assign(document.createElement('span'), { className: 'tw-accepted-tag', textContent: '✓ ' + t('player.tw.mbAccepted') }));
-        updateMbCount();
-        toast(t('player.tw.toastDone', { done: 1 }));
-      } catch(e) {
-        btn.disabled = false;
-        toast('✗ ' + (e.message || 'Error'));
-      }
-    });
-  });
-
-  // Manual: select all/none
-  function updateManCount() {
-    const n = body.querySelectorAll('.tw-man-check:checked').length;
-    const btn = body.querySelector('#tw-apply-btn');
-    if (btn) btn.textContent = t('player.tw.btnApply', { count: n });
-  }
-  body.querySelectorAll('.tw-man-check').forEach(cb => cb.addEventListener('change', updateManCount));
-  body.querySelector('#tw-sel-all')?.addEventListener('click', () => {
-    body.querySelectorAll('.tw-man-check').forEach(cb => cb.checked = true); updateManCount();
-  });
-  body.querySelector('#tw-sel-none')?.addEventListener('click', () => {
-    body.querySelectorAll('.tw-man-check').forEach(cb => cb.checked = false); updateManCount();
-  });
-
-  // Manual: scan unfingerprinted files with AcoustID
-  body.querySelector('#tw-scan-btn')?.addEventListener('click', async () => {
-    const btn = body.querySelector('#tw-scan-btn');
-    const noteEl = body.querySelector('#tw-enrich-note');
-    btn.disabled = true;
-    const filesToScan = _twFiles.filter(f => !f.hasMb && f.acoustid_status !== 'found')
-      .map(f => ({ filepath: f.filepath, vpath: f.vpath }));
-    try {
-      const r = await api('POST', 'api/v1/acoustid/scan-files', { files: filesToScan });
-      if (noteEl) noteEl.textContent = t('player.tw.scanQueued', { n: r.queued });
-      toast(t('player.tw.scanToast', { n: r.queued }));
-    } catch(e) {
-      btn.disabled = false;
-      toast('✗ ' + (e.message || 'Error'));
-    }
-  });
-
-  // Manual: enrich with MusicBrainz
-  body.querySelector('#tw-enrich-btn')?.addEventListener('click', async () => {
-    const btn = body.querySelector('#tw-enrich-btn');
-    const noteEl = body.querySelector('#tw-enrich-note');
-    btn.disabled = true;
-    const filesToEnrich = _twFiles.filter(f => !f.hasMb && f.acoustid_status === 'found')
-      .map(f => ({ filepath: f.filepath, vpath: f.vpath }));
-    try {
-      const r = await api('POST', 'api/v1/tagworkshop/enrich/files', { files: filesToEnrich });
-      if (noteEl) noteEl.textContent = t('player.tw.enrichQueued', { n: r.queued });
-      toast(t('player.tw.enrichToast', { n: r.queued }));
-    } catch(e) {
-      btn.disabled = false;
-      toast('✗ ' + (e.message || 'Error'));
-    }
-  });
-
-  // Manual: bulk apply
-  body.querySelector('#tw-apply-btn')?.addEventListener('click', async () => {
-    const artist = body.querySelector('#tw-b-artist')?.value.trim() || '';
-    const album  = body.querySelector('#tw-b-album')?.value.trim()  || '';
-    const year   = body.querySelector('#tw-b-year')?.value.trim()   || '';
-    const genre  = body.querySelector('#tw-b-genre')?.value.trim()  || '';
-    if (!artist && !album && !year && !genre) { toast(t('player.tw.toastNothingToApply')); return; }
-
-    const checked = [...body.querySelectorAll('.tw-row:not([data-mb])')]
-      .filter(row => row.querySelector('.tw-man-check:checked'))
-      .map(row => parseInt(row.dataset.idx));
-    if (!checked.length) { toast(t('player.tw.toastNoneSelected')); return; }
-
-    const progressEl = body.querySelector('#tw-bulk-progress');
-    const applyBtn   = body.querySelector('#tw-apply-btn');
-    applyBtn.disabled = true;
-    progressEl.classList.remove('hidden');
-
-    let done = 0, errors = 0;
-    for (const idx of checked) {
-      const f = _twFiles[idx];
-      if (!f) continue;
-      progressEl.textContent = t('player.tw.progressSaving', { done, total: checked.length });
-      const data = { filepath: f.fp };
-      if (artist) data.artist = artist;
-      if (album)  data.album  = album;
-      if (year)   data.year   = year;
-      if (genre)  data.genre  = genre;
-      try {
-        await api('POST', 'api/v1/admin/tags/write', data);
-        if (artist) f.artist = artist;
-        if (album)  f.album  = album;
-        if (year)   f.year   = year;
-        if (genre)  f.genre  = genre;
-        const row = body.querySelector(`.tw-row[data-idx="${idx}"]`);
-        if (row) {
-          const gEl = row.querySelector('.tw-row-tags');
-          const tl  = [f.artist, f.album, f.year].filter(Boolean).join(' · ');
-          if (gEl) gEl.textContent = tl;
-        }
-        done++;
-      } catch(_) { errors++; done++; }
-    }
-    progressEl.textContent = errors
-      ? t('player.tw.progressDoneErrors', { done: done - errors, errors })
-      : t('player.tw.progressDone', { done });
-    applyBtn.disabled = false;
-    toast(errors
-      ? t('player.tw.toastDoneErrors', { done: done - errors, errors })
-      : t('player.tw.toastDone', { done }));
-  });
-
-  // Shared: inline edit toggle
-  body.querySelectorAll('.tw-edit-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      const idx  = parseInt(btn.dataset.idx);
-      const form = body.querySelector(`.tw-inline-form[data-idx="${idx}"]`);
-      if (!form) return;
-      const isOpen = !form.classList.contains('hidden');
-      body.querySelectorAll('.tw-inline-form').forEach(f => f.classList.add('hidden'));
-      body.querySelectorAll('.tw-edit-btn').forEach(b => b.classList.remove('tw-edit-active'));
-      if (!isOpen) { form.classList.remove('hidden'); btn.classList.add('tw-edit-active'); }
-    });
-  });
-
-  // Shared: inline save
-  body.querySelectorAll('.tw-save-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const idx  = parseInt(btn.dataset.idx);
-      const form = body.querySelector(`.tw-inline-form[data-idx="${idx}"]`);
-      const f    = _twFiles[idx];
-      if (!f || !form) return;
-      const statusEl = form.querySelector('.tw-inline-status');
-      btn.disabled = true;
-      if (statusEl) { statusEl.textContent = t('player.npId3.saving'); statusEl.className = 'tw-inline-status'; }
-      const data = { filepath: f.fp };
-      form.querySelectorAll('.tw-inp').forEach(inp => { data[inp.dataset.field] = inp.value; });
-      try {
-        await api('POST', 'api/v1/admin/tags/write', data);
-        ['title','artist','album','year','genre','track','disk'].forEach(k => { if (data[k] !== undefined) f[k] = data[k]; });
-        const row = body.querySelector(`.tw-row[data-idx="${idx}"]`);
-        if (row) {
-          const tEl = row.querySelector('.tw-row-title');
-          if (tEl && f.title) tEl.textContent = f.title;
-          const tl  = [f.artist, f.album, f.year].filter(Boolean).join(' · ');
-          const gEl = row.querySelector('.tw-row-tags');
-          if (gEl) gEl.textContent = tl;
-        }
-        if (statusEl) { statusEl.textContent = '✓ ' + t('player.tw.savedOk'); statusEl.className = 'tw-inline-status tw-status-ok'; }
-      } catch(e) {
-        if (statusEl) { statusEl.textContent = '✗ ' + (e.message || 'Error'); statusEl.className = 'tw-inline-status tw-status-err'; }
-      }
-      btn.disabled = false;
-    });
-  });
-
-  // Shared: inline cancel
-  body.querySelectorAll('.tw-cancel-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const idx  = parseInt(btn.dataset.idx);
-      const form = body.querySelector(`.tw-inline-form[data-idx="${idx}"]`);
-      if (form) form.classList.add('hidden');
-      body.querySelectorAll('.tw-edit-btn').forEach(b => b.classList.remove('tw-edit-active'));
-    });
-  });
-}
-
 
 // ── AUTO-DJ VIEW ──────────────────────────────────────────────
 async function viewAutoDJ() {
@@ -13045,53 +12656,6 @@ function viewPlayback() {
         </div>
       </div>
 
-      <!-- ── SLEEP TIMER ── -->
-      <div class="playback-section">
-        <div class="playback-section-hdr">
-          <div class="playback-section-icon">😴</div>
-          <div>
-            <div class="playback-section-title">Sleep Timer</div>
-            <div class="playback-section-desc">Playback fades out and stops automatically after the chosen time.</div>
-          </div>
-        </div>
-        ${sleepActive ? `
-        <div class="sleep-active-box" id="sleep-active-box">
-          <div class="sleep-active-info">
-            <span class="sleep-active-label">Timer active</span>
-            <span class="sleep-active-remaining" id="sleep-view-remaining">${sleepRemaining} min remaining</span>
-          </div>
-          <button class="sleep-cancel-btn" id="sleep-cancel-btn">Cancel</button>
-        </div>` : ''}
-        <div class="sleep-presets" id="sleep-presets">
-          <button class="sleep-preset" data-mins="15">15 min</button>
-          <button class="sleep-preset" data-mins="30">30 min</button>
-          <button class="sleep-preset" data-mins="60">60 min</button>
-          <button class="sleep-preset" data-mins="90">90 min</button>
-          <button class="sleep-preset" data-mins="-1">End of song</button>
-        </div>
-      </div>
-
-      <!-- ── REPLAYGAIN ── -->
-      <div class="playback-section">
-        <div class="playback-section-hdr">
-          <div class="playback-section-icon">🔊</div>
-          <div>
-            <div class="playback-section-title">ReplayGain Normalisation</div>
-            <div class="playback-section-desc">Equalise perceived loudness across tracks using embedded ReplayGain values (requires tagged files).</div>
-          </div>
-        </div>
-        <div class="playback-row">
-          <div class="playback-row-label">
-            <div class="playback-row-name">Loudness Normalisation</div>
-            <div class="playback-row-hint">Applies the track's ReplayGain value as a gain adjustment</div>
-          </div>
-          <label class="toggle-sw">
-            <input type="checkbox" id="rg-enable" ${S.rgEnabled ? 'checked' : ''}>
-            <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
-          </label>
-        </div>
-      </div>
-
       <!-- ── GAPLESS PLAYBACK ── -->
       <div class="playback-section">
         <div class="playback-section-hdr">
@@ -13108,27 +12672,6 @@ function viewPlayback() {
           </div>
           <label class="toggle-sw">
             <input type="checkbox" id="gapless-enable" ${S.gapless ? 'checked' : ''}>
-            <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
-          </label>
-        </div>
-      </div>
-
-      <!-- ── DYNAMIC COLOURS ── -->
-      <div class="playback-section">
-        <div class="playback-section-hdr">
-          <div class="playback-section-icon">🎨</div>
-          <div>
-            <div class="playback-section-title">Dynamic Colours</div>
-            <div class="playback-section-desc">Tints the interface with the dominant colour sampled from the current album art.</div>
-          </div>
-        </div>
-        <div class="playback-row">
-          <div class="playback-row-label">
-            <div class="playback-row-name">Dynamic Colours</div>
-            <div class="playback-row-hint">Stored in this browser's local storage — setting is per-browser for now</div>
-          </div>
-          <label class="toggle-sw">
-            <input type="checkbox" id="dyn-color-enable" ${S.dynColor ? 'checked' : ''}>
             <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
           </label>
         </div>
@@ -13155,6 +12698,98 @@ function viewPlayback() {
         </div>
       </div>
 
+      <!-- ── AUDIO OUTPUT ── -->
+      <div class="playback-section" id="audio-output-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">🔈</div>
+          <div>
+            <div class="playback-section-title">Audio Output Device</div>
+            <div class="playback-section-desc">Choose which speaker or audio device to use for playback.</div>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Output device</div>
+            <div class="playback-row-hint" id="audio-output-hint">Requires browser permission to list devices</div>
+          </div>
+          <select class="settings-select" id="audio-output-sel"><option value="">Default</option></select>
+          <button class="btn-sm" id="audio-perm-btn" style="display:none;margin-top:8px;">Allow devices</button>
+        </div>
+      </div>
+
+      <!-- ── REPLAYGAIN ── -->
+      <div class="playback-section" style="grid-column:span 2">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon">🔊</div>
+          <div>
+            <div class="playback-section-title">Loudness Normalisation</div>
+            <div class="playback-section-desc">Adjusts each track's volume to a consistent −18 LUFS level using measurements from the Normalisation Workshop, falling back to embedded ReplayGain or R128 tags.</div>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Enable normalisation</div>
+            <div class="playback-row-hint">When off, all tracks play at their original recorded level</div>
+          </div>
+          <label class="toggle-sw">
+            <input type="checkbox" id="rg-enable" ${S.rgEnabled ? 'checked' : ''}>
+            <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
+          </label>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Mode</div>
+            <div class="playback-row-hint">Track = each track independently · Album = preserve relative loudness within an album</div>
+          </div>
+          <select id="rg-mode" style="width:auto;padding:.25rem .5rem;">
+            <option value="track"${S.rgMode==='track'?' selected':''}>Track</option>
+            <option value="album"${S.rgMode==='album'?' selected':''}>Album</option>
+          </select>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Pre-amp</div>
+            <div class="playback-row-hint">Extra gain offset on top of normalisation · 0 dB = pure −18 LUFS reference</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:.5rem;">
+            <input type="range" id="rg-preamp" min="-10" max="10" step="0.5" value="${S.rgPreamp}" style="width:100px;">
+            <span id="rg-preamp-val" style="min-width:3.5em;text-align:right;">${S.rgPreamp > 0 ? '+' : ''}${S.rgPreamp} dB</span>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Clip Prevention</div>
+            <div class="playback-row-hint">Reduce gain if true peak would exceed 0 dBTP after normalisation</div>
+          </div>
+          <label class="toggle-sw">
+            <input type="checkbox" id="rg-clip" ${S.rgClip ? 'checked' : ''}>
+            <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
+          </label>
+        </div>
+      </div>
+
+      ${S.allowYoutubeDownload ? `
+      <!-- ── YOUTUBE DOWNLOAD ── -->
+      <div class="playback-section">
+        <div class="playback-section-hdr">
+          <div class="playback-section-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg></div>
+          <div>
+            <div class="playback-section-title">YouTube Download</div>
+            <div class="playback-section-desc">Default audio format when downloading from YouTube. Saved to your recordings folder alongside radio recordings.</div>
+          </div>
+        </div>
+        <div class="playback-row">
+          <div class="playback-row-label">
+            <div class="playback-row-name">Download format</div>
+            <div class="playback-row-hint">Opus = original stream, no re-encoding · MP3 = universal, requires ffmpeg</div>
+          </div>
+          <select class="settings-select" id="ytdl-format-sel">
+            <option value="opus" ${(localStorage.getItem(_uKey('ytdl_format')) || 'opus') === 'opus' ? 'selected' : ''}>Opus (original quality)</option>
+            <option value="mp3"  ${localStorage.getItem(_uKey('ytdl_format')) === 'mp3' ? 'selected' : ''}>MP3 (universal, re-encoded)</option>
+          </select>
+        </div>
+      </div>` : ''}
+
       <!-- ── INTERFACE ── -->
       <div class="playback-section">
         <div class="playback-section-hdr">
@@ -13177,7 +12812,7 @@ function viewPlayback() {
       </div>
 
       <!-- ── NAVIGATION ── -->
-      <div class="playback-section">
+      <div class="playback-section" style="grid-column:span 2">
         <div class="playback-section-hdr">
           <div class="playback-section-icon">🗂️</div>
           <div>
@@ -13207,46 +12842,52 @@ function viewPlayback() {
         </div>
       </div>
 
-      <!-- ── AUDIO OUTPUT ── -->
-      <div class="playback-section" id="audio-output-section">
+      <!-- ── DYNAMIC COLOURS ── -->
+      <div class="playback-section">
         <div class="playback-section-hdr">
-          <div class="playback-section-icon">🔈</div>
+          <div class="playback-section-icon">🎨</div>
           <div>
-            <div class="playback-section-title">Audio Output Device</div>
-            <div class="playback-section-desc">Choose which speaker or audio device to use for playback.</div>
+            <div class="playback-section-title">Dynamic Colours</div>
+            <div class="playback-section-desc">Tints the interface with the dominant colour sampled from the current album art.</div>
           </div>
         </div>
         <div class="playback-row">
           <div class="playback-row-label">
-            <div class="playback-row-name">Output device</div>
-            <div class="playback-row-hint" id="audio-output-hint">Requires browser permission to list devices</div>
+            <div class="playback-row-name">Dynamic Colours</div>
+            <div class="playback-row-hint">Stored in this browser's local storage — setting is per-browser for now</div>
           </div>
-          <select class="settings-select" id="audio-output-sel"><option value="">Default</option></select>
-          <button class="btn-sm" id="audio-perm-btn" style="display:none;margin-top:8px;">Allow devices</button>
+          <label class="toggle-sw">
+            <input type="checkbox" id="dyn-color-enable" ${S.dynColor ? 'checked' : ''}>
+            <span class="toggle-sw-track"><span class="toggle-sw-thumb"></span></span>
+          </label>
         </div>
       </div>
 
-      ${S.allowYoutubeDownload ? `
-      <!-- ── YOUTUBE DOWNLOAD ── -->
+      <!-- ── SLEEP TIMER ── -->
       <div class="playback-section">
         <div class="playback-section-hdr">
-          <div class="playback-section-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg></div>
+          <div class="playback-section-icon">😴</div>
           <div>
-            <div class="playback-section-title">YouTube Download</div>
-            <div class="playback-section-desc">Default audio format when downloading from YouTube. Saved to your recordings folder alongside radio recordings.</div>
+            <div class="playback-section-title">Sleep Timer</div>
+            <div class="playback-section-desc">Playback fades out and stops automatically after the chosen time.</div>
           </div>
         </div>
-        <div class="playback-row">
-          <div class="playback-row-label">
-            <div class="playback-row-name">Download format</div>
-            <div class="playback-row-hint">Opus = original stream, no re-encoding · MP3 = universal, requires ffmpeg</div>
+        ${sleepActive ? `
+        <div class="sleep-active-box" id="sleep-active-box">
+          <div class="sleep-active-info">
+            <span class="sleep-active-label">Timer active</span>
+            <span class="sleep-active-remaining" id="sleep-view-remaining">${sleepRemaining} min remaining</span>
           </div>
-          <select class="settings-select" id="ytdl-format-sel">
-            <option value="opus" ${(localStorage.getItem(_uKey('ytdl_format')) || 'opus') === 'opus' ? 'selected' : ''}>Opus (original quality)</option>
-            <option value="mp3"  ${localStorage.getItem(_uKey('ytdl_format')) === 'mp3' ? 'selected' : ''}>MP3 (universal, re-encoded)</option>
-          </select>
+          <button class="sleep-cancel-btn" id="sleep-cancel-btn">Cancel</button>
+        </div>` : ''}
+        <div class="sleep-presets" id="sleep-presets">
+          <button class="sleep-preset" data-mins="15">15 min</button>
+          <button class="sleep-preset" data-mins="30">30 min</button>
+          <button class="sleep-preset" data-mins="60">60 min</button>
+          <button class="sleep-preset" data-mins="90">90 min</button>
+          <button class="sleep-preset" data-mins="-1">End of song</button>
         </div>
-      </div>` : ''}
+      </div>
 
     </div>`)
 
@@ -13275,6 +12916,33 @@ function viewPlayback() {
     _syncPrefs();
     if (S.queue[S.idx]) _applyRGGain(S.queue[S.idx]);
     toast(t(S.rgEnabled ? 'player.toast.loudnessOn' : 'player.toast.loudnessOff'));
+  });
+
+  // ReplayGain mode (track/album)
+  document.getElementById('rg-mode').addEventListener('change', e => {
+    S.rgMode = e.target.value;
+    localStorage.setItem(_uKey('rg_mode'), S.rgMode);
+    _syncPrefs();
+    if (S.queue[S.idx]) _applyRGGain(S.queue[S.idx]);
+  });
+
+  // ReplayGain preamp slider
+  const rgPreampSlider = document.getElementById('rg-preamp');
+  const rgPreampVal    = document.getElementById('rg-preamp-val');
+  rgPreampSlider.addEventListener('input', () => {
+    S.rgPreamp = parseFloat(rgPreampSlider.value);
+    rgPreampVal.textContent = (S.rgPreamp > 0 ? '+' : '') + S.rgPreamp + ' dB';
+    localStorage.setItem(_uKey('rg_preamp'), String(S.rgPreamp));
+    _syncPrefs();
+    if (S.queue[S.idx]) _applyRGGain(S.queue[S.idx]);
+  });
+
+  // ReplayGain clipping prevention
+  document.getElementById('rg-clip').addEventListener('change', e => {
+    S.rgClip = e.target.checked;
+    S.rgClip ? localStorage.setItem(_uKey('rg_clip'), '1') : localStorage.setItem(_uKey('rg_clip'), '0');
+    _syncPrefs();
+    if (S.queue[S.idx]) _applyRGGain(S.queue[S.idx]);
   });
 
   // Gapless toggle
@@ -13948,10 +13616,51 @@ async function _stopRecording() {
 // ── REPLAYGAIN ────────────────────────────────────────────────
 function _applyRGGain(s) {
   if (!_rgGainNode) return;
-  if (S.rgEnabled && s && s.replaygain != null) {
-    _rgGainNode.gain.value = Math.pow(10, Number(s.replaygain) / 20);
-  } else {
+  const badge = document.getElementById('player-rg-badge');
+  if (!S.rgEnabled || !s) {
     _rgGainNode.gain.value = 1.0;
+    if (badge) { badge.textContent = ''; badge.classList.add('hidden'); }
+    return;
+  }
+  // Choose gain value: prefer server-measured values (s.rg), fall back to s.replaygain
+  let gainDb = null;
+  let peakDbtp = null;
+  let src = null;
+  if (s.rg) {
+    if (S.rgMode === 'album' && s.rg.albumGain != null) {
+      gainDb   = s.rg.albumGain;
+      peakDbtp = s.rg.albumPeak;
+    } else {
+      gainDb   = s.rg.trackGain;
+      peakDbtp = s.rg.truePeak;
+    }
+    src = s.rg.src || null;
+  }
+  if (gainDb == null) { gainDb = s.replaygain; src = gainDb != null ? 'tag' : null; }
+
+  if (gainDb == null) {
+    _rgGainNode.gain.value = 1.0;
+    if (badge) { badge.textContent = ''; badge.classList.add('hidden'); }
+    return;
+  }
+
+  let db = Number(gainDb) + (S.rgPreamp || 0);
+
+  // Clip prevention: reduce gain so true peak stays at or below 0 dBTP
+  if (S.rgClip && peakDbtp != null) {
+    const headroom = -peakDbtp;
+    if (db > headroom) db = headroom;
+  }
+
+  _rgGainNode.gain.value = Math.pow(10, db / 20);
+
+  // Update play bar badge
+  if (badge) {
+    const sign = db >= 0 ? '+' : '';
+    const label = src === 'measured' ? 'RG' : src === 'r128' ? 'R128' : 'RG tag';
+    badge.textContent = `${label} ${sign}${db.toFixed(1)} dB`;
+    badge.classList.toggle('rg-tag', src !== 'measured');
+    badge.classList.remove('hidden');
   }
 }
 

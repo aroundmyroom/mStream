@@ -70,7 +70,7 @@ const _getQueue = db.prepare(`
       acoustid_status IS NULL
       OR (acoustid_status = 'error' AND (acoustid_ts IS NULL OR acoustid_ts < ?))
     )
-  ORDER BY COALESCE(acoustid_priority, 0) DESC, ts ASC
+  ORDER BY ts ASC
   LIMIT ?
 `);
 
@@ -80,7 +80,7 @@ const _setPending = db.prepare(
 
 const _setResult = db.prepare(
   `UPDATE files SET acoustid_id = ?, mbid = ?, acoustid_score = ?, acoustid_status = ?, acoustid_ts = ?,
-                   mb_title = ?, mb_artist = ?, mb_artist_id = ?, acoustid_priority = 0
+                   mb_title = ?, mb_artist = ?, mb_artist_id = ?
    WHERE filepath = ? AND vpath = ?`
 );
 
@@ -222,7 +222,7 @@ async function dbWriteWithRetry(fn) {
 // Shorthand for null results (error/not_found paths — no MB data)
 async function _setResultNull(status, row) {
   await dbWriteWithRetry(() => _setResult.run(null, null, null, status, Math.floor(Date.now() / 1000),
-    null, null, null, 0, row.filepath, row.vpath));
+    null, null, null, row.filepath, row.vpath));
 }
 
 async function processFile(row) {

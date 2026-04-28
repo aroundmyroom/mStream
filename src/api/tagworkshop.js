@@ -166,6 +166,18 @@ function resolveAbsPath(vpath, filepath) {
 
 export function setup(mstream) {
 
+  // Auto-start the enrichment worker on server boot if there are files queued.
+  // Uses a 15-second delay to let the DB finish initialising before querying.
+  setTimeout(() => {
+    try {
+      const status = db.getTagWorkshopStatus();
+      if ((status?.mb?.queued ?? 0) > 0 && !_running) {
+        winston.info(`[tagworkshop] Auto-starting MB enrichment worker (${status.mb.queued} files queued)`);
+        _spawnWorker();
+      }
+    } catch (_e) { /* DB not ready — skip auto-start */ }
+  }, 15_000);
+
   // Guard — all endpoints are admin-only
   mstream.all('/api/v1/tagworkshop/{*path}', (req, res, next) => {
     if (req.user?.admin !== true) return res.status(403).json({ error: 'Admin only' });

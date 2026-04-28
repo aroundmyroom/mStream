@@ -4,23 +4,6 @@
 
 ## NOW — In Progress / Remaining
 
-### ReplayGain / Normalisation Workshop
-
-130,294 of 134,600 songs are missing a ReplayGain tag. Format breakdown: FLAC 70,541 · MP3 42,027 · WAV 17,384 · other ~342.
-
-**Recommended tool: `rsgain`** — bootstrap from GitHub releases (same static-binary pattern as ffmpeg). Single binary handles FLAC, MP3, WAV, OGG, M4A, Opus in-place. ~150–300× realtime per song; with 2 workers ≈ 12–24 h for the full library.
-
-- [ ] Bootstrap `rsgain` binary (Linux x64 + arm64) in `bin/rsgain/`, same pattern as `src/util/ffmpeg-bootstrap.js`
-- [ ] `src/api/rsgain.js` — job queue: iterate `WHERE replaygainTrackDb IS NULL`, spawn rsgain per song, parse output, update DB `replaygainTrackDb` directly (no rescan needed)
-- [ ] Concurrency: 2 workers default (configurable 1–4), with a global budget limiter shared with hydration
-- [ ] **Phase 1 — Analyse only (safe first milestone):** calculate gain and write to DB only, do not touch audio files; player already reads from DB so RG works immediately
-- [ ] **Phase 2 — Write to file:** embed `REPLAYGAIN_TRACK_GAIN` tag into the audio file via rsgain (for portability with other players)
-- [ ] Admin → Normalisation Workshop panel: status count, Start/Pause/Stop, concurrency slider, live SSE progress + ETA (same pattern as scan-progress), per-format breakdown, error log
-- [ ] Process order: FLAC first → MP3 → WAV (WAV last: BWF chunk write, skip gracefully if read-only/locked)
-- [ ] After job completes, re-expose updated `withReplaygain` stat in Admin → Stats
-
----
-
 ### Artist Image Moderation — Follow-ups
 
 - [ ] Admin Artists: add bulk actions (apply first Discogs candidate to selected rows)

@@ -1,72 +1,86 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.14.0-velvet — April 2026 — The Normalize Version (ReplayGain 2.0 / EBU R128)
+
+### feat: ReplayGain 2.0 / EBU R128 loudness normalisation
+- New background worker measures every audio file with **rsgain** (primary) or **ffmpeg** (fallback), storing per-file EBU R128 values (`rg_integrated_lufs`, `rg_true_peak_dbfs`, `rg_track_gain_db`, `rg_lra`, `rg_album_gain_db`, `rg_album_peak_dbfs`, `rg_measured_ts`, `rg_measurement_tool`)
+- Also stores existing ReplayGain tags from files (`rg_tag_track_gain`, `rg_tag_track_peak`, `rg_tag_album_gain`, `rg_tag_album_peak`) and R128 tags (`r128_track_gain_db`, `r128_album_gain_db`) for playback reference
+- 14 new DB columns added with migrations for fresh-install compatibility
+- Worker auto-starts 60 s after boot if unmeasured files exist; batch size 50, yield between batches 250 ms
+- Album gain computed after all tracks in a group are measured
+- `rsgain-bootstrap.js` downloads rsgain v3.7 automatically (x86_64; graceful fallback for arm64 to ffmpeg)
+- Dockerfile pre-downloads rsgain binary during image build for x86_64
+
+### feat: Normalisation Workshop (Admin)
+- New **Normalisation** tab in Admin → Tools
+- Shows measurement progress (total, measured, queued, failed), active file, rate (files/min), elapsed time
+- Start / Stop / Reset Failed / Reset All controls
+- Tool banner shows whether rsgain or ffmpeg is in use
+
+### feat: ReplayGain player integration
+- `_applyRGGain(s)` applies gain via Web Audio `GainNode` — no re-encode, no server round-trip
+- Player badge (`player-rg-badge`) shows current gain offset in dB
+- Four settings in Playback panel: Enable / Mode (track or album) / Pre-amp (−6 to +6 dB) / Clip prevention (hard limiter)
+- Gain priority chain: measured EBU R128 → R128 tag (+5 dB offset) → ReplayGain tag → disabled
+- Transcode (`src/api/transcode.js`) and MPV cast (`src/api/server-playback.js`) also apply gain server-side
+
+### fix: Queue virtual scroll — Firefox draggable jank
+- Every queue item previously had `draggable="true"`, causing Firefox to do hit-testing on every mousemove for every node in a large queue
+- Queue now renders only ~15 visible DOM nodes at a time using a virtual scroll implementation (`_qvsRender`, `Float32Array` cumulative heights, binary search for viewport window)
+- Drag-and-drop continues to work via `_qvsDrag` freeze pattern
+
+### fix: Worker priority columns removed (AcoustID + MB enrichment)
+- `acoustid_priority` and `mb_enrich_priority` columns are no longer written or read by workers
+- Simplifies queue ordering to insertion/timestamp order
+- `resetNotFoundForAcoustid()` / `resetFilesForAcoustid()` / `resetFilesForEnrichment()` still work without priority side-effects
+
+---
+
 ## v6.13.8-velvet — April 2026 — Tag Workshop, Scanner Mount Guard & AcoustID Improvements
 
-### feat: Scanner mount guard — protect DB from NFS/SMB unmount wipe
-- Before each scan, mStream Velvet checks for a hidden `.velvet.md` sentinel file in the vpath root directory
-- If the sentinel is missing (indicating the mount is absent) and the DB already has records for that vpath, the scan is **aborted** — the database is left untouched
-- **Upgrade safe**: if the sentinel has never been written (first scan after upgrading), mStream Velvet detects that the directory is accessible and allows the scan to proceed; the sentinel is written after the first successful scan, protecting all future scans
-- A second guard aborts the scan if the filesystem walk finds zero files but the DB has existing records
-- The sentinel file is written automatically after every successful scan
-- **Admin → Directories**: new **Reset mount guard** button (shown only for root vpaths) re-writes the sentinel if it was accidentally deleted; child vpaths correctly share the parent root's sentinel and show no button
-- New API endpoint: `POST /api/v1/admin/directory/reset-sentinel`
+### feat: Tag Workshop
+- New batch metadata editor accessible from the file explorer for admin users
+- MusicBrainz comparison panel: current tags vs. MB-suggested values with per-field diff highlighting
+- Accept single file or bulk-accept all checked files; tags written to disk immediately
+- Manual editor: bulk field editor + per-file inline editor
+- Breadcrumb navigation, subdirectory browsing, live progress counter, admin-only access
+- New API endpoints: `GET /api/v1/tagworkshop/folder`, `POST /api/v1/tagworkshop/enrich/files`
 
-### feat: AcoustID — Retry No Match
-- AcoustID stats table now shows `not_found` and `errors` as separate rows
-- New **Retry N No Match** button re-queues all `not_found` files for fingerprint scanning and starts the worker immediately
+### feat: Scanner mount guard (`.velvet.md` sentinel)
+- Writes `.velvet.md` sentinel file to music root after each successful scan
+- Aborts scan (preserving DB) if sentinel missing or filesystem walk finds 0 files when DB has records
+- First scan after upgrade proceeds without sentinel (zero-files guard still active), sentinel written at end
+- **Reset mount guard** button in Admin → Directories
+- New API endpoint: `POST /api/v1/admin/directory/reset-sentinel`; internal: `POST /api/v1/scanner/abort-scan`
+
+### feat: AcoustID Retry No Match
+- New **Retry N No Match** button re-queues all `not_found` files and starts the worker
 - New API endpoint: `POST /api/v1/acoustid/reset-not-found`
 
-### fix: Tag Workshop — admin-only access
-- `viewTagWorkshop()` in the player now returns early if the user is not an admin
-- Server-side admin guard already enforced on all tagworkshop endpoints
+### fix: Unknown artist placeholder image quality
+- Default placeholder image updated to higher-quality version
 
-### fix: Unknown artist placeholder image updated
-- Replaced `webapp/assets/img/unknownartist.webp` with a higher-quality image
-
-### feat: Tag Workshop — MusicBrainz comparison + bulk accept via file explorer
-- New view accessible from the file explorer: click **Tag Workshop** button in the filter bar (shown for admins with tag editing enabled, on any non-root folder)
-- **MusicBrainz section** (files with AcoustID + MB enrichment data): shows current tags vs MB-suggested tags side by side with per-field diff highlighting (current in strikethrough red → MB value in green); one-click **Accept MB** per file or **Accept MB for N checked** bulk button; accepted tracks are written to disk and marked in the DB
-- **Manual section** (files without MB data): bulk field editor (artist/album/year/genre with blank=keep) + per-file inline editor with all fields (title/artist/album/year/genre/track/disc)
-- **Filename shown on every row**: each file displays its filename below the title so you can identify files at a glance
-- **Per-file enrichment status badge** (manual section): shows whether a file is in the enrichment queue, has no AcoustID match, had a MusicBrainz error, or returned no data
-- **"Enrich N files with MusicBrainz" button**: appears in the manual section when at least one file has an AcoustID fingerprint; queues those files for background MB enrichment and starts the worker — come back to the folder to see results
-- **Folder navigation**: subdirectories are browsable within the workshop — clicking a subfolder stays in Tag Workshop
-- **Breadcrumb navigation**: full path shown at the top; click any segment to jump to that folder
-- **Progress feedback**: saving counter updates in real-time during bulk operations with final success/error summary
-- Back button returns to the file explorer at the same folder
-- New API endpoints: `GET /api/v1/tagworkshop/folder?path=<vpath/relative>` (also returns `acoustid_status`, `mb_enrichment_status`); `POST /api/v1/tagworkshop/enrich/files` — queue specific files for enrichment + start worker
-- Child vpath support: the folder endpoint correctly resolves files stored under a parent root vpath
-- i18n: all strings use `player.tw.*` keys (now 37 keys), all 12 locales updated
+---
 
 ## v6.13.7-velvet — April 2026 — Proxy Auth Fix, Log Retention & Persistence Fixes
 
-### fix: Auth failures behind reverse proxies that strip custom headers
-- Root cause: `httpOnly: true` was added to the `x-access-token` cookie in v6.13.5 for XSS hardening, but it broke the proxy recovery path that had worked since earlier versions
-- The client JS has a deliberate fallback: if the proxy strips the `x-access-token` request header and the call gets 401, it falls back to a bare `fetch()` (the browser auto-sends the cookie), then reads the token back from `document.cookie` to repopulate `S.token` for WebSocket connections and subsequent API calls
-- With `httpOnly: true`, `document.cookie` no longer includes the cookie, so `S.token` would stay empty — breaking WebSockets and all code paths that check `if (S.token)` (including proxy pre-auth scenarios)
-- `httpOnly` provides no actual security benefit here because the same JWT is already stored in `localStorage` (same XSS exposure), so it was removed with an explanatory comment
-- `Authorization: Bearer` server-side acceptance retained for programmatic/API clients
+### fix: Proxy authentication broken since v6.13.5
+- `httpOnly: true` on the auth cookie was blocking `document.cookie` proxy fallback recovery
+- Removed `httpOnly`; added `Authorization: Bearer <token>` support for programmatic clients
 
-### fix: `/api/v1/files/art` returns 500 for files missing from disk
-- When a song that was previously in the queue no longer exists on disk (moved, deleted, or unmounted drive), the art endpoint called `parseFile()` which threw `ENOENT`, propagating as a 500 to the browser
-- `src/api/download.js`: added an `existsSync` guard before `parseFile` — if the file is absent, returns `{ aaFile: null }` (no art) instead of crashing with a 500
-- Observed in `restoreQueue` → `_fetchMissingArt` call on page load with a stale queue
+### fix: Custom artist placeholder image lost after reinstall
+- Moved from `image-cache/artist-placeholder.jpg` to `save/conf/artist-placeholder.jpg`
+- Automatic migration on first boot if old path exists and new path does not
 
-### feat: Configurable log file retention with on-demand pruning
-- Admin → Logging now shows a **Keep logs for** dropdown: 1 day, 3 days, 7 days, 14 days (default), 30 days
-- Setting is persisted in `save/conf/default.json` as `logRetention` and applied immediately (file transport is recreated with the new `maxFiles` value)
-- New **Delete old logs now** button triggers immediate server-side deletion of log files older than the configured retention window — deleted 33 files on first run on the production server
-- `src/logger.js`: `addFileLogger(filepath, maxFiles)` now accepts a retention param instead of hardcoding `'14d'`
-- `src/util/admin.js`: added `editLogRetention()` and `pruneOldLogs()` helpers; the prune function parses dates from filenames (`mstream-YYYY-MM-DD-HH.log`) so it doesn't rely on mtime
-- New API endpoints: `POST /api/v1/admin/config/log-retention`, `POST /api/v1/admin/logs/prune`
-- `logRetention` exposed in `GET /api/v1/admin/config`
-- i18n: 13 new `admin.logs.*` keys across all 12 locale files
+### fix: Art endpoint crashing with 500 on missing files
+- `/api/v1/files/art` now returns `{ aaFile: null }` instead of 500 when file no longer exists on disk
 
-### fix: Custom artist placeholder image lost after reinstall or Docker container recreation
-- `artist-placeholder.jpg` was stored in `image-cache/` — a cache directory that is ephemeral on any install type (fresh clone, `git clean`, reinstall, or Docker container recreation without a persistent `image-cache` volume)
-- Moved to `save/conf/artist-placeholder.jpg` — `save/` is the designated persistent data directory for all installation types (bare-metal Linux and Docker alike)
-- One-time migration shim in `server.js` at boot: if the file exists in the old location and not the new one, it is automatically moved — existing installs are migrated transparently
-- Fixes the "placeholder reverts to default after upgrade/reinstall" bug for all users
+### feat: Configurable log file retention
+- New **Keep logs for** dropdown in Admin → Logging (1 / 3 / **14** / 30 days)
+- **Delete old logs now** button for immediate prune
+- Persisted as `logRetention` in `save/conf/default.json`
+
+---
 
 ## v6.13.6-velvet — April 2026 — Artist Fan Art + Scan Scheduler
 

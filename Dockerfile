@@ -50,6 +50,31 @@ RUN arch="$(uname -m)"; \
       fi; \
     fi
 
+# Pre-download rsgain (EBU R128 measurement, x86_64 only — no arm64 static build available).
+# Falls back to ffmpeg-based measurement at runtime when rsgain is absent.
+RUN arch="$(uname -m)"; \
+    if [ "$arch" = "x86_64" ]; then \
+      tag=$(wget -qO- "https://api.github.com/repos/complexlogic/rsgain/releases/latest" \
+            | grep '"tag_name"' | head -1 | sed 's/.*"v\([^"]*\)".*/\1/') && \
+      if [ -n "$tag" ]; then \
+        mkdir -p bin/rsgain && \
+        if wget -q -O /tmp/rsgain.tar.xz \
+             "https://github.com/complexlogic/rsgain/releases/download/v${tag}/rsgain-${tag}-Linux.tar.xz" && \
+           tar -xJf /tmp/rsgain.tar.xz -C bin/rsgain --strip-components=1 "rsgain-${tag}-Linux/rsgain" && \
+           chmod +x bin/rsgain/rsgain && \
+           rm -f /tmp/rsgain.tar.xz && \
+           bin/rsgain/rsgain --version; then \
+          echo "rsgain pre-download OK (v${tag})"; \
+        else \
+          rm -rf bin/rsgain && echo "rsgain pre-download failed (ffmpeg fallback will be used)"; \
+        fi; \
+      else \
+        echo "rsgain: could not resolve latest tag (ffmpeg fallback will be used)"; \
+      fi; \
+    else \
+      echo "rsgain: arch ${arch} not supported (ffmpeg fallback will be used)"; \
+    fi
+
 # Pre-create runtime directories so SQLite and the config writer
 # can initialise even when no volume is mounted on first start.
 RUN mkdir -p save/conf save/db save/logs save/sync image-cache waveform-cache

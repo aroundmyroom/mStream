@@ -1568,7 +1568,6 @@ const foldersView = Vue.component('folders-view', {
                     {{v.artistsOn !== false ? t('admin.folders.btnArtistsOn') : t('admin.folders.btnArtistsOff')}}
                   </button>
                   <button class="btn-small red" type="button" @click="removeFolder(k, v.root)">{{ t('admin.folders.btnRemove') }}</button>
-                  <button v-if="v.type !== 'excluded' && !isChildVpath(k)" class="btn-small" type="button" :title="t('admin.folders.btnResetSentinelTitle')" @click="resetSentinel(k)">{{ t('admin.folders.btnResetSentinel') }}</button>
                 </div>
               </div>
 
@@ -1929,22 +1928,6 @@ const foldersView = Vue.component('folders-view', {
           this.editingFolder = null;
         } else if (errors.length < 3) {
           iziToast.warning({ title: this.t('admin.folders.toastSomeChangesFailed', { fields: errors.join(', ') }), position: 'topCenter', timeout: 4000 });
-        }
-      },
-      isChildVpath: function(k) {
-        const myRoot = (this.folders[k].root || '').replace(/\/?$/, '/');
-        return Object.keys(this.folders).some(other => {
-          if (other === k) return false;
-          const otherRoot = (this.folders[other].root || '').replace(/\/?$/, '/');
-          return myRoot.startsWith(otherRoot);
-        });
-      },
-      resetSentinel: async function(vpath) {
-        try {
-          await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/directory/reset-sentinel`, data: { vpath } });
-          iziToast.success({ title: this.t('admin.folders.toastSentinelReset'), position: 'topCenter', timeout: 3000 });
-        } catch (_e) {
-          iziToast.error({ title: this.t('admin.folders.toastFailedUpdate'), position: 'topCenter', timeout: 3000 });
         }
       },
       removeFolder: async function(vpath, folder) {
@@ -4326,8 +4309,7 @@ const logsView = Vue.component('logs-view', {
   data() {
     return {
       params: ADMINDATA.serverParams,
-      paramsTS: ADMINDATA.serverParamsUpdated,
-      pruning: false
+      paramsTS: ADMINDATA.serverParamsUpdated
     };
   },
   template: `
@@ -4350,19 +4332,6 @@ const logsView = Vue.component('logs-view', {
                       </td>
                     </tr>
                     <tr>
-                      <td>
-                        <b>{{ t('admin.logs.labelRetention') }}</b>
-                        <select v-model="params.logRetention" v-on:change="saveRetention" style="display:inline-block;width:auto;margin-left:.5rem;padding:.15rem .4rem;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--t1);font-size:.9rem;">
-                          <option value="1d">{{ t('admin.logs.retention1d') }}</option>
-                          <option value="3d">{{ t('admin.logs.retention3d') }}</option>
-                          <option value="7d">{{ t('admin.logs.retention7d') }}</option>
-                          <option value="14d">{{ t('admin.logs.retention14d') }}</option>
-                          <option value="30d">{{ t('admin.logs.retention30d') }}</option>
-                        </select>
-                      </td>
-                      <td style="color:var(--t2);font-size:.82rem">{{ t('admin.logs.retentionHint') }}</td>
-                    </tr>
-                    <tr>
                       <td><b>{{ t('admin.logs.labelLogsDirectory') }}</b> {{params.storage.logsDirectory}}</td>
                       <td style="color:var(--t2);font-size:.82rem">{{ t('admin.settings.editInConfigHint') }}</td>
                     </tr>
@@ -4371,7 +4340,6 @@ const logsView = Vue.component('logs-view', {
               </div>
               <div class="card-action">
                 <a v-on:click="downloadLogs()" class="btn">{{ t('admin.logs.btnDownload') }}</a>
-                <a v-on:click="pruneNow()" class="btn" :class="pruning ? 'disabled' : ''">{{ pruning ? t('admin.logs.btnPruning') : t('admin.logs.btnPrune') }}</a>
               </div>
             </div>
           </div>
@@ -4424,48 +4392,6 @@ const logsView = Vue.component('logs-view', {
                         timeout: 3500
                       });
                     });
-      });
-    },
-    saveRetention: function() {
-      API.axios({
-        method: 'POST',
-        url: `${API.url()}/api/v1/admin/config/log-retention`,
-        data: { logRetention: this.params.logRetention }
-      }).then(() => {
-        iziToast.success({
-          title: this.t('admin.logs.toastRetentionSaved'),
-          position: 'topCenter',
-          timeout: 3000
-        });
-      }).catch(() => {
-        iziToast.error({
-          title: this.t('admin.logs.toastRetentionFailed'),
-          position: 'topCenter',
-          timeout: 3500
-        });
-      });
-    },
-    pruneNow: function() {
-      if (this.pruning) return;
-      this.pruning = true;
-      API.axios({
-        method: 'POST',
-        url: `${API.url()}/api/v1/admin/logs/prune`
-      }).then(r => {
-        const n = r.data && r.data.deleted != null ? r.data.deleted : '?';
-        iziToast.success({
-          title: this.t('admin.logs.toastPruneSuccess', { count: n }),
-          position: 'topCenter',
-          timeout: 4000
-        });
-      }).catch(() => {
-        iziToast.error({
-          title: this.t('admin.logs.toastPruneFailed'),
-          position: 'topCenter',
-          timeout: 3500
-        });
-      }).finally(() => {
-        this.pruning = false;
       });
     },
   }
@@ -5215,11 +5141,7 @@ const acoustidView = Vue.component('acoustid-view', {
                   </tr>
                   <tr>
                     <td style="padding:2px 12px 2px 0;color:#888;">{{ t('admin.acoustid.statsNotFound') }}</td>
-                    <td><b>{{ (stats.not_found||0).toLocaleString() }}</b></td>
-                  </tr>
-                  <tr v-if="stats.errors > 0">
-                    <td style="padding:2px 12px 2px 0;color:#e57373;">{{ t('admin.acoustid.statsErrors') }}</td>
-                    <td><b>{{ (stats.errors||0).toLocaleString() }}</b></td>
+                    <td><b>{{ noMatch.toLocaleString() }}</b></td>
                   </tr>
                   <tr>
                     <td style="padding:2px 12px 2px 0;color:#aaa;">{{ t('admin.acoustid.statsQueued') }}</td>
@@ -5245,9 +5167,6 @@ const acoustidView = Vue.component('acoustid-view', {
               </button>
               <button v-if="stats.errors > 0" class="btn btn-flat" v-on:click="resetErrors()" style="margin-left:0;border-color:#e57373;color:#e57373;">
                 {{ t('admin.acoustid.btnRetryErrors', { count: stats.errors }) }}
-              </button>
-              <button v-if="stats.not_found > 0" class="btn btn-flat" v-on:click="resetNotFound()" style="margin-left:0;border-color:#888;color:#aaa;">
-                {{ t('admin.acoustid.btnRetryNotFound', { count: (stats.not_found||0).toLocaleString() }) }}
               </button>
             </div>
           </div>
@@ -5333,16 +5252,203 @@ const acoustidView = Vue.component('acoustid-view', {
         iziToast.error({ title: err?.response?.data?.error || err.message || 'Failed', position: 'topCenter', timeout: 3000 });
       }
     },
-    async resetNotFound() {
-      try {
-        const res = await API.axios({ method: 'POST', url: `${API.url()}/api/v1/acoustid/reset-not-found` });
-        iziToast.success({ title: this.t('admin.acoustid.toastNotFoundReset', { count: res.data.reset || 0 }), position: 'topCenter', timeout: 3000 });
-        await this.loadStatus();
-      } catch(err) {
-        iziToast.error({ title: err?.response?.data?.error || err.message || 'Failed', position: 'topCenter', timeout: 3000 });
-      }
-    },
   }
+});
+
+// ── Normalisation Workshop ────────────────────────────────────────────────────
+const rgWorkshopView = Vue.component('rg-workshop-view', {
+  data() {
+    return {
+      running:     false,
+      stopping:    false,
+      startedAt:   null,
+      tool:        'ffmpeg',
+      currentFile: null,
+      rate:        0,
+      stats: {
+        total:           0,
+        measured:        0,
+        queued:          0,
+        failed:          0,
+        has_tags:        0,
+        measured_rsgain: 0,
+        measured_ffmpeg: 0,
+      },
+      msg: '',
+      _timer: null,
+    };
+  },
+  computed: {
+    statusLabel() {
+      if (this.stopping) return this.t('admin.rg.statusStopping');
+      if (this.running)  return this.t('admin.rg.statusRunning');
+      return this.t('admin.rg.statusIdle');
+    },
+    progressPct() {
+      if (!this.stats.total) return 0;
+      const p = (this.stats.measured / this.stats.total) * 100;
+      if (p < 1) return parseFloat(p.toFixed(2));
+      return parseFloat(p.toFixed(1));
+    },
+    unmeasured() {
+      return Math.max(0, (this.stats.total || 0) - (this.stats.measured || 0));
+    },
+  },
+  mounted() { this.loadStatus(); },
+  beforeUnmount() {
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+  },
+  methods: {
+    async loadStatus() {
+      try {
+        const res = await API.axios({ method: 'GET', url: `${API.url()}/api/v1/admin/rg/status` });
+        const d = res.data;
+        const wasRunning = this.running;
+        this.running     = d.running  || false;
+        this.stopping    = d.stopping || false;
+        this.startedAt   = d.startedAt || null;
+        this.tool        = d.tool     || 'ffmpeg';
+        this.currentFile = d.currentFile || null;
+        if (d.stats) {
+          if (this.running && wasRunning && this._prevMeasured != null) {
+            const delta = (d.stats.measured || 0) - this._prevMeasured;
+            const deltaSec = (Date.now() - this._prevTime) / 1000;
+            if (delta > 0 && deltaSec > 0) {
+              this.rate = Math.round(delta / deltaSec * 60);
+            }
+          }
+          if (!this.running) this.rate = 0;
+          this._prevMeasured = d.stats.measured || 0;
+          this._prevTime = Date.now();
+          Object.assign(this.stats, d.stats);
+        }
+      } catch (_) {}
+      this._timer = setTimeout(() => this.loadStatus(), this.running ? 3000 : 15000);
+    },
+    async start() {
+      this.msg = '';
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/rg/start` });
+        this.running = true; this.stopping = false;
+        this.msg = this.t('admin.rg.msgStarted');
+      } catch(e) { this.msg = e.message || 'Error'; }
+    },
+    async stop() {
+      this.msg = '';
+      try {
+        await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/rg/stop` });
+        this.stopping = true;
+        this.msg = this.t('admin.rg.msgStopping');
+      } catch(e) { this.msg = e.message || 'Error'; }
+    },
+    async resetFailed() {
+      this.msg = '';
+      try {
+        const res = await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/rg/reset-failed` });
+        this.msg = this.t('admin.rg.msgReset', { count: res.data.reset || 0 });
+        await this.loadStatus();
+      } catch(e) { this.msg = e.message || 'Error'; }
+    },
+    async resetAll() {
+      if (!window.confirm(this.t('admin.rg.confirmResetAll'))) return;
+      this.msg = '';
+      try {
+        const res = await API.axios({ method: 'POST', url: `${API.url()}/api/v1/admin/rg/reset-all` });
+        this.msg = this.t('admin.rg.msgResetAll', { count: res.data.reset || 0 });
+        await this.loadStatus();
+      } catch(e) { this.msg = e?.response?.data?.error || e.message || 'Error'; }
+    },
+    pct(n) { return this.stats.total ? ((n / this.stats.total) * 100).toFixed(1) : '0'; },
+  },
+  template: `
+    <div class="container">
+      <div class="row">
+        <div class="col s12">
+          <div class="card">
+            <div class="card-content">
+              <span class="card-title">{{ t('admin.rg.title') }}</span>
+              <p style="margin-bottom:0.75rem; color:#aaa; font-size:0.88rem;">{{ t('admin.rg.desc') }}</p>
+
+              <!-- Tool banner -->
+              <div style="background:rgba(255,255,255,0.04); border-left:3px solid var(--primary); border-radius:0 4px 4px 0; padding:0.5rem 0.75rem; margin-bottom:1rem; font-size:0.82rem; color:#bbb;">
+                <span v-if="tool === 'rsgain'">&#x2705; {{ t('admin.rg.toolRsgain') }}</span>
+                <span v-else>&#x26A1; {{ t('admin.rg.toolFfmpeg') }}</span>
+              </div>
+
+              <!-- Progress overview -->
+              <div style="background:var(--raised2); border-radius:8px; padding:1rem; margin-bottom:1rem;">
+                <b style="display:block; margin-bottom:0.5rem;">{{ t('admin.rg.overviewTitle') }}</b>
+                <div style="margin-bottom:0.5rem; font-size:0.88rem; color:#aaa;">
+                  {{ stats.measured.toLocaleString() }} / {{ stats.total.toLocaleString() }} {{ t('admin.rg.measured') }}
+                  &mdash; {{ progressPct }}%
+                  <span v-if="running && rate > 0" style="margin-left:0.5rem; color:#7986cb; font-size:0.82rem;">({{ rate }} files/min)</span>
+                </div>
+                <div style="background:rgba(255,255,255,0.08); border-radius:4px; height:6px; margin-bottom:1rem;">
+                  <div :style="'background:var(--primary);height:6px;border-radius:4px;width:'+progressPct+'%;transition:width .4s;'"></div>
+                </div>
+                <table style="font-size:0.85rem; border-collapse:collapse; width:100%;">
+                  <tr>
+                    <td style="padding:2px 12px 2px 0; color:#4caf50;">{{ t('admin.rg.statsMeasured') }}</td>
+                    <td style="padding:2px 12px 2px 0;"><b>{{ (stats.measured||0).toLocaleString() }}</b></td>
+                    <td style="color:#666; font-size:0.78rem;">{{ pct(stats.measured) }}%</td>
+                  </tr>
+                  <tr v-if="stats.measured_rsgain">
+                    <td style="padding:2px 12px 2px 0; color:#81c784; padding-left:1rem;">&#x21B3; rsgain</td>
+                    <td><b>{{ (stats.measured_rsgain||0).toLocaleString() }}</b></td>
+                    <td></td>
+                  </tr>
+                  <tr v-if="stats.measured_ffmpeg">
+                    <td style="padding:2px 12px 2px 0; color:#aaa; padding-left:1rem;">&#x21B3; ffmpeg</td>
+                    <td><b>{{ (stats.measured_ffmpeg||0).toLocaleString() }}</b></td>
+                    <td></td>
+                  </tr>
+                  <tr>
+                    <td style="padding:2px 12px 2px 0; color:#aaa;">{{ t('admin.rg.statsQueued') }}</td>
+                    <td><b>{{ (unmeasured).toLocaleString() }}</b></td>
+                    <td style="color:#666; font-size:0.78rem;">{{ pct(unmeasured) }}%</td>
+                  </tr>
+                  <tr v-if="stats.failed">
+                    <td style="padding:2px 12px 2px 0; color:#e57373;">{{ t('admin.rg.statsFailed') }}</td>
+                    <td><b>{{ (stats.failed||0).toLocaleString() }}</b></td>
+                    <td></td>
+                  </tr>
+                  <tr v-if="stats.has_tags">
+                    <td style="padding:2px 12px 2px 0; color:#7986cb;">{{ t('admin.rg.statsHasTags') }}</td>
+                    <td><b>{{ (stats.has_tags||0).toLocaleString() }}</b></td>
+                    <td></td>
+                  </tr>
+                </table>
+              </div>
+
+              <!-- Controls -->
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.75rem;">
+                <button class="btn btn-small" @click="start" :disabled="running || stopping">
+                  {{ t('admin.rg.btnStart') }}
+                </button>
+                <button class="btn btn-small btn-flat" @click="stop" :disabled="!running || stopping">
+                  {{ t('admin.rg.btnStop') }}
+                </button>
+                <button class="btn btn-small btn-flat" @click="resetFailed" :disabled="running || !stats.failed" style="margin-left:auto;">
+                  {{ t('admin.rg.btnResetFailed') }} ({{ stats.failed || 0 }})
+                </button>
+                <button class="btn btn-small btn-flat" @click="resetAll" :disabled="running" style="color:#e57373;">
+                  {{ t('admin.rg.btnResetAll') }}
+                </button>
+              </div>
+
+              <div v-if="running || stopping" style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem; font-size:0.85rem; color:#aaa;">
+                <span class="dot-spin"></span>
+                {{ statusLabel }}
+              </div>
+              <div v-if="running && currentFile" style="font-size:0.78rem; color:#777; margin-top:0.25rem; word-break:break-all; font-family:monospace;">&#x25B6; {{ currentFile }}</div>
+              <div v-if="msg" style="font-size:0.83rem; color:#aaa; margin-top:0.25rem;">{{ msg }}</div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `,
 });
 
 const tagWorkshopView = Vue.component('tagworkshop-view', {
@@ -6891,6 +6997,7 @@ const vm = new Vue({
     'radio-view': radioView,
     'acoustid-view': acoustidView,
     'tagworkshop-view': tagWorkshopView,
+    'rg-workshop-view': rgWorkshopView,
     'genre-groups-view': genreGroupsView,
     'artists-admin-view': artistsAdminView,
     'languages-view': languagesView,

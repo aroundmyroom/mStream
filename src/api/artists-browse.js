@@ -32,7 +32,7 @@ import { joiValidate } from '../util/validation.js';
 
 const CACHE_TTL              = 5 * 60 * 1000; // 5 minutes
 const ARTIST_IMG_DIR         = path.join(process.cwd(), 'image-cache', 'artists');
-const ARTIST_PLACEHOLDER_FILE = path.join(process.cwd(), 'save', 'conf', 'artist-placeholder.jpg');
+const ARTIST_PLACEHOLDER_FILE = path.join(process.cwd(), 'image-cache', 'artist-placeholder.jpg');
 const ARTIST_PLACEHOLDER_DEFAULT = path.join(process.cwd(), 'webapp', 'assets', 'img', 'unknownartist.webp');
 const ARTIST_IMG_SIZE        = 400; // square JPEG size for stored artist images
 const HYDRATE_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours

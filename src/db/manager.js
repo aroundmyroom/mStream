@@ -74,11 +74,11 @@ export function resetMbEnrichPending() { return backend.resetMbEnrichPending(); 
 export function getMbEnrichStats() { return backend.getMbEnrichStats(); }
 export function getMbEnrichErrors(limit) { return backend.getMbEnrichErrors(limit); }
 export function retryMbEnrichErrors() { return backend.retryMbEnrichErrors(); }
+export function getTagWorkshopFolderFiles(vpathName, filepathPrefix) { return backend.getTagWorkshopFolderFiles(vpathName, filepathPrefix); }
+export function resetFilesForEnrichment(files) { return backend.resetFilesForEnrichment(files); }
 export function getTagWorkshopStatus() { return backend.getTagWorkshopStatus(); }
 export function getTagWorkshopAlbums(filter, sort, page, search) { return backend.getTagWorkshopAlbums(filter, sort, page, search); }
 export function getTagWorkshopAlbumTracks(mb_release_id, album_dir) { return backend.getTagWorkshopAlbumTracks(mb_release_id, album_dir); }
-export function getTagWorkshopFolderFiles(vpathName, filepathPrefix) { return backend.getTagWorkshopFolderFiles(vpathName, filepathPrefix); }
-export function resetFilesForEnrichment(files) { return backend.resetFilesForEnrichment(files); }
 export function getTracksForAccept(mb_release_id, album_dir) { return backend.getTracksForAccept(mb_release_id, album_dir); }
 export function getTrackForAccept(filepath, vpath) { return backend.getTrackForAccept(filepath, vpath); }
 export function markTrackAccepted(filepath, vpath) { return backend.markTrackAccepted(filepath, vpath); }

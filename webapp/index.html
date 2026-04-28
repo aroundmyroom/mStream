@@ -494,6 +494,10 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
           <span data-i18n="player.nav.autoDj">Auto-DJ</span>
         </button>
+        <button class="nav-btn" data-view="playback">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span data-i18n="player.nav.settings">Audio Settings</span>
+        </button>
       </nav>
       </div>
 
@@ -600,10 +604,6 @@
       <div class="nav-section" data-section="tools">
       <div class="nav-label nav-toggle"><span data-i18n="player.nav.tools">Tools</span><svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg></div>
       <nav class="sidenav">
-        <button class="nav-btn" data-view="playback">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          <span data-i18n="player.nav.settings">Settings</span>
-        </button>
         <button class="nav-btn" data-view="shared-links">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
           <span data-i18n="player.nav.sharedLinks">Shared Links</span>
@@ -879,6 +879,7 @@
           </div>
         </div>
       </div>
+      <span id="player-rg-badge" class="player-rg-badge hidden"></span>
     </div>
 
     <!-- Right: volume + balance -->

@@ -21,6 +21,7 @@ import os from 'os';
 import winston from 'winston';
 import * as config from '../state/config.js';
 import * as db from '../db/manager.js';
+import { resolveTrackGain } from './db.js';
 
 // ── Socket path ────────────────────────────────────────────────────────────
 const sockPath = path.join(os.tmpdir(), `mpv-mstream-${process.pid}.sock`);
@@ -350,7 +351,7 @@ function handleIpcMessage(msg) {
     }
   }
 
-  // File has loaded and playback started — apply any pending seek position.
+  // File has loaded and playback started — apply any pending seek position and RG gain.
   // This replaces the old client-side hardcoded 2500 ms delay and fires at
   // exactly the right moment regardless of file size or network latency.
   if (msg.event === 'file-loaded') {
@@ -358,6 +359,17 @@ function handleIpcMessage(msg) {
     _pendingSeek = null;
     if (pos !== null && pos > 1) {
       ipcCommand(['seek', pos, 'absolute']).catch(() => {});
+    }
+    // Apply ReplayGain via mpv audio filter (af set volume=NdB)
+    // gainDb is stored per queue entry; use currentIndex from playlist-pos events.
+    const entry = serverQueue[currentIndex] ?? serverQueue[serverQueue.length - 1];
+    if (entry && entry.gainDb != null) {
+      // volume filter: multiply by linear gain factor
+      const linearGain = Math.pow(10, entry.gainDb / 20);
+      ipcCommand(['af', 'set', `volume=${linearGain}`]).catch(() => {});
+    } else {
+      // No gain data — clear any previously set filter so volume is neutral
+      ipcCommand(['af', 'set', '']).catch(() => {});
     }
   }
 }
@@ -461,7 +473,30 @@ export async function addToQueue(relPath, meta = {}) {
     bitrate,
     'sample-rate': sampleRate,
     channels,
+    gainDb:        null,  // resolved RG gain, applied via mpv af on file-loaded
   };
+
+  // Resolve ReplayGain gain from the DB row (same priority chain as browser player)
+  try {
+    const pathInfo = relPath.split('/');
+    const vpath    = pathInfo[0];
+    const filepath = pathInfo.slice(1).join('/');
+    const row      = db.findFileByPath(filepath, vpath);
+    if (row) {
+      const mode   = meta.rgMode  === 'album' ? 'album' : 'track';
+      const preamp = Number(meta.rgPreamp) || 0;
+      const clip   = meta.rgClip === true;
+      const rg     = resolveTrackGain(row, mode);
+      if (rg && rg.gain != null) {
+        let db_val = Number(rg.gain) + preamp;
+        if (clip && rg.peak != null) {
+          const headroom = -Number(rg.peak);
+          if (db_val > headroom) db_val = headroom;
+        }
+        entry.gainDb = db_val;
+      }
+    }
+  } catch (_e) { /* non-fatal — play without gain adjustment */ }
   serverQueue.push(entry);
 
   // Store seek position so handleIpcMessage can apply it on file-loaded.
@@ -527,12 +562,12 @@ export function setup(mstream) {
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // POST /api/v1/server-playback/queue/add  { filepath, title, artist, album, albumArt, seekTo }
+  // POST /api/v1/server-playback/queue/add  { filepath, title, artist, album, albumArt, seekTo, rgMode, rgPreamp, rgClip }
   mstream.post('/api/v1/server-playback/queue/add', async (req, res) => {
-    const { filepath, title, artist, album, albumArt, seekTo } = req.body;
+    const { filepath, title, artist, album, albumArt, seekTo, rgMode, rgPreamp, rgClip } = req.body;
     if (!filepath) return res.status(400).json({ error: 'filepath required' });
     try {
-      const index = await addToQueue(filepath, { title, artist, album, albumArt, seekTo: seekTo || 0 });
+      const index = await addToQueue(filepath, { title, artist, album, albumArt, seekTo: seekTo || 0, rgMode, rgPreamp, rgClip });
       _resetHeartbeat(); // a song was loaded — start the watchdog
       res.json({ index });
     } catch (e) { res.status(400).json({ error: e.message }); }
