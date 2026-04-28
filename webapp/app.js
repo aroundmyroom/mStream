@@ -4053,13 +4053,7 @@ const VIZ = (() => {
   // Frequency bands for beat detection and reactivity
   let _fwBassEnv = 0, _fwBassAvg = 0;
   let _fwMidEnv  = 0, _fwTrebEnv = 0;
-  // Text physics: bounces around the screen like a ball, spins + scales on beats
-  let _txX = 0.5, _txY = 0.5;   // 0..1 normalised position
-  let _txVx = 0.0018, _txVy = 0.0013;  // velocity (fraction of W/H per frame)
-  let _txAngle = 0;              // current rotation angle (radians)
-  let _txSpin = 0.002;           // current spin speed
-  let _txScale = 1.0;            // current scale (beats pulse it)
-  let _txScaleV = 0;             // scale velocity (springs back to 1)
+  // Text: fixed centre position, no movement
   const _fwRockets = [];   // { x, y, vy, hue, palette, energy, trail[] }
   const _fwSparks  = [];   // { x, y, vx, vy, hue, life, maxLife, size, isGlitter }
   const _fwRings   = [];   // expanding flash rings: { x, y, r, maxR, hue, alpha }
@@ -4210,54 +4204,17 @@ const VIZ = (() => {
     bctx.fillStyle = rg3;
     bctx.fillRect(0, 0, W, H);
 
-    // ── Launch rockets on beat + update text physics ──────────
+    // ── Launch rockets on beat ──────────────────────────────
     const bassRatio = _fwBassAvg > 0.01 ? _fwBassEnv / _fwBassAvg : 0;
     const isBeat    = bassRatio > 1.40 && _fwBassEnv > 0.18;
     const cooldown  = isBeat ? Math.max(220, 700 - 500 * _fwBassEnv) : 1800;
     if (now - _fwLastLaunch > cooldown) {
       const energy = Math.min(1, _fwBassEnv * 2.2);
-      // Beat: gentle boost in current direction
-      const boost = 1.2 + 1.2 * energy;
-      _txVx *= boost;
-      _txVy *= boost;
-      // Small random nudge so it doesn't stay perfectly straight
-      _txVx += (Math.random() - 0.5) * 0.008 * energy;
-      _txVy += (Math.random() - 0.5) * 0.008 * energy;
-      // Clamp max speed
-      const spd = Math.sqrt(_txVx*_txVx + _txVy*_txVy);
-      if (spd > 0.013) { _txVx = _txVx/spd*0.013; _txVy = _txVy/spd*0.013; }
-      // Gentle spin kick on beat
-      _txSpin = (0.008 + 0.014 * energy) * (Math.random() > 0.5 ? 1 : -1);
-      // Subtle scale spike
-      _txScaleV = 0.03 + 0.055 * energy;
       _fwLaunch(W, H, energy);
       if (energy > 0.55) _fwLaunch(W, H, energy * 0.85);
       if (energy > 0.80) _fwLaunch(W, H, energy * 0.70);
       _fwLastLaunch = now;
     }
-    // Continuous gentle speed modulation from mid
-    const midBoost = 1 + _fwMidEnv * 0.4;
-    const minSpd   = (0.0018 + 0.003 * _fwBassEnv) * midBoost;
-    const curSpd   = Math.sqrt(_txVx*_txVx + _txVy*_txVy);
-    if (curSpd < minSpd) { _txVx = _txVx/Math.max(curSpd,0.0001)*minSpd; _txVy = _txVy/Math.max(curSpd,0.0001)*minSpd; }
-    // Gentle friction — slows down between beats
-    _txVx *= 0.994;
-    _txVy *= 0.994;
-    // Move
-    _txX += _txVx;
-    _txY += _txVy;
-    // Bounce off walls (use text margin as padding)
-    const padX = 0.12, padY = 0.10;
-    if (_txX < padX) { _txX = padX; _txVx = Math.abs(_txVx) * (0.9 + Math.random()*0.2); _txSpin *= -1; }
-    if (_txX > 1-padX) { _txX = 1-padX; _txVx = -Math.abs(_txVx) * (0.9 + Math.random()*0.2); _txSpin *= -1; }
-    if (_txY < padY) { _txY = padY; _txVy = Math.abs(_txVy) * (0.9 + Math.random()*0.2); _txSpin *= -1; }
-    if (_txY > 1-padY) { _txY = 1-padY; _txVy = -Math.abs(_txVy) * (0.9 + Math.random()*0.2); _txSpin *= -1; }
-    // Spin + scale decay (slower spin decay = smoother rotation)
-    _txAngle += _txSpin;
-    _txSpin  *= 0.962;
-    _txScale += _txScaleV;
-    _txScaleV = (_txScaleV - (_txScale - 1.0) * 0.14) * 0.85; // spring back to 1
-    _txScale  = Math.max(0.75, Math.min(1.55, _txScale));
 
     // ── Flash rings ───────────────────────────────────────────
     for (let i = _fwRings.length - 1; i >= 0; i--) {
@@ -4329,14 +4286,14 @@ const VIZ = (() => {
       bctx.fill();
     }
 
-    // ── Text — bouncing + spinning ─────────────────────────────
+    // ── Text — static centre ────────────────────────────────
     const glow   = (12 + 28 * _fwBassEnv + 10 * _fwTrebEnv) * dpr;
     const alpha  = Math.min(0.95, 0.52 + 0.43 * _fwBassEnv + 0.15 * _fwMidEnv);
-    const mainSz = Math.max(12 * dpr, Math.floor(H * 0.058 * _txScale));
-    const subSz  = Math.max(8  * dpr, Math.floor(H * 0.026 * _txScale));
-    const thxSz  = Math.max(7  * dpr, Math.floor(H * 0.022 * _txScale));
-    const cx     = _txX * W;
-    const cy     = _txY * H;
+    const mainSz = Math.max(12 * dpr, Math.floor(H * 0.058));
+    const subSz  = Math.max(8  * dpr, Math.floor(H * 0.026));
+    const thxSz  = Math.max(7  * dpr, Math.floor(H * 0.022));
+    const cx     = W * 0.5;
+    const cy     = H * 0.5;
     const hue2   = (_brandHue + 55) % 360;
     const col1   = `hsl(${_brandHue},80%,68%)`;
     const col2   = `hsl(${hue2},80%,68%)`;
@@ -4345,8 +4302,6 @@ const VIZ = (() => {
     const grad2  = bctx.createLinearGradient(cx - W * 0.08, 0, cx + W * 0.08, 0);
     grad2.addColorStop(0, col2); grad2.addColorStop(1, col1);
     bctx.save();
-    bctx.translate(cx, cy);
-    bctx.rotate(_txAngle);
     bctx.globalAlpha  = alpha;
     bctx.textAlign    = 'center';
     bctx.textBaseline = 'middle';
@@ -4355,19 +4310,19 @@ const VIZ = (() => {
     bctx.shadowColor = col2;
     bctx.shadowBlur  = glow * 0.45;
     bctx.fillStyle   = grad2;
-    bctx.fillText('Thank you for using', 0, -mainSz * 0.80 - thxSz * 0.5);
+    bctx.fillText('Thank you for using', cx, cy - mainSz * 0.80 - thxSz * 0.5);
     // "mStream Velvet"
     bctx.shadowColor  = col1;
     bctx.shadowBlur   = glow;
     bctx.font         = `bold ${mainSz}px system-ui,sans-serif`;
     bctx.fillStyle    = grad1;
-    bctx.fillText('mStream Velvet', 0, 0);
+    bctx.fillText('mStream Velvet', cx, cy);
     // "AroundMyRoom"
     bctx.font         = `${subSz}px system-ui,sans-serif`;
     bctx.shadowColor  = col2;
     bctx.shadowBlur   = glow * 0.55;
     bctx.fillStyle    = grad2;
-    bctx.fillText('AroundMyRoom', 0, mainSz * 0.68 + subSz * 0.5);
+    bctx.fillText('AroundMyRoom', cx, cy + mainSz * 0.68 + subSz * 0.5);
     bctx.restore();
   }
 
