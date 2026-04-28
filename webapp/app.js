@@ -4173,33 +4173,30 @@ const VIZ = (() => {
     _fwBassAvg = 0.97 * _fwBassAvg + 0.03 * rawBass;
 
     // ── Dynamic background ────────────────────────────────────
-    // Deep dark base with slowly shifting hue nebula — never pure black
-    // Two radial gradients (bass-left, treble-right) + a dim overlay fill
+    // Transparent canvas — only semi-transparent nebula gradients are painted,
+    // so the Milkdrop/butterchurn underneath stays fully visible.
+    bctx.clearRect(0, 0, W, H);
     const bgHue1 = _brandHue;
     const bgHue2 = (_brandHue + 140) % 360;
     const bgHue3 = (_brandHue + 220) % 360;
-    // Base fill: very dark shifting colour (not black)
-    const baseLum = Math.round(4 + 7 * _fwBassEnv + 4 * _fwMidEnv);
-    bctx.fillStyle = `hsl(${bgHue1},55%,${baseLum}%)`;
-    bctx.fillRect(0, 0, W, H);
     // Bass nebula — lower-left radial pulse
     const bassR  = W * (0.55 + 0.45 * _fwBassEnv);
-    const bassA  = 0.10 + 0.22 * _fwBassEnv;
+    const bassA  = 0.08 + 0.20 * _fwBassEnv;
     const rg1 = bctx.createRadialGradient(W * 0.25, H * 0.70, 0, W * 0.25, H * 0.70, bassR);
     rg1.addColorStop(0, `hsla(${bgHue1},90%,${18 + 22 * _fwBassEnv}%,${bassA})`);
     rg1.addColorStop(1, 'hsla(0,0%,0%,0)');
     bctx.fillStyle = rg1;
     bctx.fillRect(0, 0, W, H);
-    // Treble nebula — upper-right, reacts to treble
+    // Treble nebula — upper-right
     const trebR  = W * (0.45 + 0.35 * _fwTrebEnv);
-    const trebA  = 0.08 + 0.20 * _fwTrebEnv;
+    const trebA  = 0.06 + 0.16 * _fwTrebEnv;
     const rg2 = bctx.createRadialGradient(W * 0.75, H * 0.30, 0, W * 0.75, H * 0.30, trebR);
     rg2.addColorStop(0, `hsla(${bgHue2},85%,${15 + 20 * _fwTrebEnv}%,${trebA})`);
     rg2.addColorStop(1, 'hsla(0,0%,0%,0)');
     bctx.fillStyle = rg2;
     bctx.fillRect(0, 0, W, H);
-    // Mid nebula — centre, subtle
-    const midA = 0.06 + 0.14 * _fwMidEnv;
+    // Mid nebula — centre
+    const midA = 0.05 + 0.12 * _fwMidEnv;
     const rg3 = bctx.createRadialGradient(W * 0.50, H * 0.50, 0, W * 0.50, H * 0.50, W * 0.40);
     rg3.addColorStop(0, `hsla(${bgHue3},80%,${12 + 16 * _fwMidEnv}%,${midA})`);
     rg3.addColorStop(1, 'hsla(0,0%,0%,0)');
