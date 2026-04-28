@@ -12,7 +12,7 @@ docker compose up -d         # recreate the container
 
 That's it — your `save/` folder (config, database, logs) and music volume are mounted from the host, so no data is lost.
 
-> **Pinned to a specific version?** Update the tag in `compose.yaml` (e.g. `v5.16.37-velvet`), then run the same three commands.
+> **Pinned to a specific version?** Update the tag in `compose.yaml` (e.g. `v6.14.1-velvet`), then run the same three commands.
 > Check [releases/](../releases/) or the [GitHub releases page](https://github.com/aroundmyroom/mStream/releases) for the latest tag.
 
 ---
@@ -47,6 +47,8 @@ services:
       - ./waveform-cache:/app/waveform-cache
       - ./image-cache:/app/image-cache
     environment:
+      PUID: 1000                    # UID of the user that owns your music files
+      PGID: 1000                    # GID of the user that owns your music files
       MSTREAM_MUSIC_DIR: /music     # triggers first-run auto-config (optional, see below)
 ```
 
