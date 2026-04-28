@@ -4293,7 +4293,7 @@ const VIZ = (() => {
     const subSz  = Math.max(8  * dpr, Math.floor(H * 0.026));
     const thxSz  = Math.max(7  * dpr, Math.floor(H * 0.022));
     const cx     = W * 0.5;
-    const cy     = H * 0.5;
+    const cy     = H * 0.78;
     const hue2   = (_brandHue + 55) % 360;
     const col1   = `hsl(${_brandHue},80%,68%)`;
     const col2   = `hsl(${hue2},80%,68%)`;
