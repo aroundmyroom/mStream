@@ -3990,7 +3990,19 @@ const VIZ = (() => {
   // analyserL, analyserR, audioCtx are module-scope (shared with MINI_SPEC)
   let presets = {}, presetKeys = [], presetHistory = [], presetIndex = 0;
   let cycleTimer = null, frameId = null;
+  let _cycleCount = 0;          // how many auto-cycles have happened since init
   const CYCLE_MS = 15000;
+
+  // Pick the next preset index: every 10th auto-cycle returns our branded preset.
+  // Manual next/prev never counts toward the 10-cycle cadence.
+  function _nextAutoIndex() {
+    _cycleCount++;
+    if (_cycleCount % 10 === 0) {
+      const vi = presetKeys.indexOf(_VELVET_PRESET_KEY);
+      if (vi >= 0) return vi;
+    }
+    return Math.floor(Math.random() * presetKeys.length);
+  }
 
   // ── aroundmyroom - mStream Velvet branded preset ───────────
   const _VELVET_PRESET_KEY = 'aroundmyroom - mStream Velvet';
@@ -4249,11 +4261,11 @@ const VIZ = (() => {
     const _firstCycleMs = presetKeys[presetIndex] === _VELVET_PRESET_KEY ? 40000 : CYCLE_MS;
     cycleTimer = setTimeout(function _firstCycle() {
       presetHistory.push(presetIndex);
-      presetIndex = Math.floor(Math.random() * presetKeys.length);
+      presetIndex = _nextAutoIndex();
       loadPreset(2.7);
       cycleTimer = setInterval(() => {
         presetHistory.push(presetIndex);
-        presetIndex = Math.floor(Math.random() * presetKeys.length);
+        presetIndex = _nextAutoIndex();
         loadPreset(2.7);
       }, CYCLE_MS);
     }, _firstCycleMs);
