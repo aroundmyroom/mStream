@@ -4055,9 +4055,9 @@ const VIZ = (() => {
   let _fwMidEnv  = 0, _fwTrebEnv = 0;
   // Text physics: bounces around the screen like a ball, spins + scales on beats
   let _txX = 0.5, _txY = 0.5;   // 0..1 normalised position
-  let _txVx = 0.0028, _txVy = 0.0019;  // velocity (fraction of W/H per frame)
+  let _txVx = 0.0018, _txVy = 0.0013;  // velocity (fraction of W/H per frame)
   let _txAngle = 0;              // current rotation angle (radians)
-  let _txSpin = 0.004;           // current spin speed
+  let _txSpin = 0.002;           // current spin speed
   let _txScale = 1.0;            // current scale (beats pulse it)
   let _txScaleV = 0;             // scale velocity (springs back to 1)
   const _fwRockets = [];   // { x, y, vy, hue, palette, energy, trail[] }
@@ -4216,30 +4216,33 @@ const VIZ = (() => {
     const cooldown  = isBeat ? Math.max(220, 700 - 500 * _fwBassEnv) : 1800;
     if (now - _fwLastLaunch > cooldown) {
       const energy = Math.min(1, _fwBassEnv * 2.2);
-      // Beat: boost velocity in current direction (varies with energy)
-      const boost = 1.4 + 2.8 * energy;
+      // Beat: gentle boost in current direction
+      const boost = 1.2 + 1.2 * energy;
       _txVx *= boost;
       _txVy *= boost;
-      // Also add a random component so it doesn't stay perfectly predictable
-      _txVx += (Math.random() - 0.5) * 0.018 * energy;
-      _txVy += (Math.random() - 0.5) * 0.018 * energy;
+      // Small random nudge so it doesn't stay perfectly straight
+      _txVx += (Math.random() - 0.5) * 0.008 * energy;
+      _txVy += (Math.random() - 0.5) * 0.008 * energy;
       // Clamp max speed
       const spd = Math.sqrt(_txVx*_txVx + _txVy*_txVy);
-      if (spd > 0.022) { _txVx = _txVx/spd*0.022; _txVy = _txVy/spd*0.022; }
-      // Spin kicks on beat (direction changes with mid)
-      _txSpin = (0.018 + 0.045 * energy) * (Math.random() > 0.5 ? 1 : -1);
-      // Scale spike
-      _txScaleV = 0.06 + 0.12 * energy;
+      if (spd > 0.013) { _txVx = _txVx/spd*0.013; _txVy = _txVy/spd*0.013; }
+      // Gentle spin kick on beat
+      _txSpin = (0.008 + 0.014 * energy) * (Math.random() > 0.5 ? 1 : -1);
+      // Subtle scale spike
+      _txScaleV = 0.03 + 0.055 * energy;
       _fwLaunch(W, H, energy);
       if (energy > 0.55) _fwLaunch(W, H, energy * 0.85);
       if (energy > 0.80) _fwLaunch(W, H, energy * 0.70);
       _fwLastLaunch = now;
     }
-    // Continuous speed modulation from mid (keeps moving fast with music)
-    const midBoost = 1 + _fwMidEnv * 0.8;
-    const minSpd   = (0.004 + 0.006 * _fwBassEnv) * midBoost;
+    // Continuous gentle speed modulation from mid
+    const midBoost = 1 + _fwMidEnv * 0.4;
+    const minSpd   = (0.0018 + 0.003 * _fwBassEnv) * midBoost;
     const curSpd   = Math.sqrt(_txVx*_txVx + _txVy*_txVy);
     if (curSpd < minSpd) { _txVx = _txVx/Math.max(curSpd,0.0001)*minSpd; _txVy = _txVy/Math.max(curSpd,0.0001)*minSpd; }
+    // Gentle friction — slows down between beats
+    _txVx *= 0.994;
+    _txVy *= 0.994;
     // Move
     _txX += _txVx;
     _txY += _txVy;
@@ -4249,12 +4252,12 @@ const VIZ = (() => {
     if (_txX > 1-padX) { _txX = 1-padX; _txVx = -Math.abs(_txVx) * (0.9 + Math.random()*0.2); _txSpin *= -1; }
     if (_txY < padY) { _txY = padY; _txVy = Math.abs(_txVy) * (0.9 + Math.random()*0.2); _txSpin *= -1; }
     if (_txY > 1-padY) { _txY = 1-padY; _txVy = -Math.abs(_txVy) * (0.9 + Math.random()*0.2); _txSpin *= -1; }
-    // Spin + scale decay
+    // Spin + scale decay (slower spin decay = smoother rotation)
     _txAngle += _txSpin;
-    _txSpin  *= 0.975;
+    _txSpin  *= 0.962;
     _txScale += _txScaleV;
-    _txScaleV = (_txScaleV - (_txScale - 1.0) * 0.18) * 0.82; // spring back to 1
-    _txScale  = Math.max(0.55, Math.min(2.0, _txScale));
+    _txScaleV = (_txScaleV - (_txScale - 1.0) * 0.14) * 0.85; // spring back to 1
+    _txScale  = Math.max(0.75, Math.min(1.55, _txScale));
 
     // ── Flash rings ───────────────────────────────────────────
     for (let i = _fwRings.length - 1; i >= 0; i--) {
