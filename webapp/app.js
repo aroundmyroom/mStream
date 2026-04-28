@@ -4012,8 +4012,10 @@ const VIZ = (() => {
     frame_eqs_str: 'a.q1+=0.006*(1+0.3*a.bass_att);a.q2+=0.015*(1+0.5*a.treb_att);a.q3=0.85*a.q3+0.15*a.bass;a.q4=0.8*a.q4+0.2*a.treb;a.zoom=1+0.05*a.q3;a.rot=0.0015*Math.sin(a.time*0.2)+0.0005*a.mid_att;a.warp=0.25+0.4*a.q4;a.decay=0.975-0.015*a.q3;a.wave_r=0.45+0.45*Math.sin(a.q1);a.wave_g=0.1+0.15*Math.sin(a.q1+1.7);a.wave_b=0.75+0.25*Math.sin(a.q1+3.2);a.mv_r=a.wave_r;a.mv_g=a.wave_g;a.mv_b=a.wave_b;a.ob_r=a.wave_r*0.7;a.ob_g=a.wave_g*0.5;a.ob_b=a.wave_b*0.9;a.ob_a=0.3+0.4*a.q3;',
     pixel_eqs_str: 'a.zoom=1.003+0.04*a.q3*(1-a.rad*0.7);',
     shapes: [
-      { baseVals: { enabled: 0 } }, { baseVals: { enabled: 0 } },
-      { baseVals: { enabled: 0 } }, { baseVals: { enabled: 0 } },
+      { baseVals: { enabled: 0 }, init_eqs_str: '', frame_eqs_str: '' },
+      { baseVals: { enabled: 0 }, init_eqs_str: '', frame_eqs_str: '' },
+      { baseVals: { enabled: 0 }, init_eqs_str: '', frame_eqs_str: '' },
+      { baseVals: { enabled: 0 }, init_eqs_str: '', frame_eqs_str: '' },
     ],
     waves: [
       {
@@ -4022,8 +4024,12 @@ const VIZ = (() => {
         frame_eqs_str: 'a.r=0.45+0.45*Math.sin(a.q1);a.g=0.1+0.15*Math.sin(a.q1+1.7);a.b=0.75+0.25*Math.sin(a.q1+3.2);a.a=0.5+0.4*a.q3;a.scaling=0.6+0.3*a.bass_att;',
         point_eqs_str: '',
       },
-      { baseVals: { enabled: 0 } }, { baseVals: { enabled: 0 } }, { baseVals: { enabled: 0 } },
+      { baseVals: { enabled: 0 }, init_eqs_str: '', frame_eqs_str: '', point_eqs_str: '' },
+      { baseVals: { enabled: 0 }, init_eqs_str: '', frame_eqs_str: '', point_eqs_str: '' },
+      { baseVals: { enabled: 0 }, init_eqs_str: '', frame_eqs_str: '', point_eqs_str: '' },
     ],
+    warp: '',
+    comp: '',
   };
   // Brand text overlay state (active only when velvet preset is running)
   let _brandActive = false, _brandHue = 250, _brandBass = 0;
