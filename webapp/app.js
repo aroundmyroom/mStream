@@ -4053,11 +4053,13 @@ const VIZ = (() => {
   // Frequency bands for beat detection and reactivity
   let _fwBassEnv = 0, _fwBassAvg = 0;
   let _fwMidEnv  = 0, _fwTrebEnv = 0;
-  // Text wander: position expressed as 0..1 fractions of W/H
-  // Built from 4 overlapping sine waves at different speeds + music push
-  // px1/py1 = slow drift, px2/py2 = medium circle, px3/py3 = fast wobble
-  // _txVx/_txVy = velocity kicked by each beat, decays each frame
-  let _txVx = 0, _txVy = 0;
+  // Text physics: bounces around the screen like a ball, spins + scales on beats
+  let _txX = 0.5, _txY = 0.5;   // 0..1 normalised position
+  let _txVx = 0.0028, _txVy = 0.0019;  // velocity (fraction of W/H per frame)
+  let _txAngle = 0;              // current rotation angle (radians)
+  let _txSpin = 0.004;           // current spin speed
+  let _txScale = 1.0;            // current scale (beats pulse it)
+  let _txScaleV = 0;             // scale velocity (springs back to 1)
   const _fwRockets = [];   // { x, y, vy, hue, palette, energy, trail[] }
   const _fwSparks  = [];   // { x, y, vx, vy, hue, life, maxLife, size, isGlitter }
   const _fwRings   = [];   // expanding flash rings: { x, y, r, maxR, hue, alpha }
@@ -4208,25 +4210,51 @@ const VIZ = (() => {
     bctx.fillStyle = rg3;
     bctx.fillRect(0, 0, W, H);
 
-    // ── Launch rockets on beat ────────────────────────────────
+    // ── Launch rockets on beat + update text physics ──────────
     const bassRatio = _fwBassAvg > 0.01 ? _fwBassEnv / _fwBassAvg : 0;
     const isBeat    = bassRatio > 1.40 && _fwBassEnv > 0.18;
     const cooldown  = isBeat ? Math.max(220, 700 - 500 * _fwBassEnv) : 1800;
     if (now - _fwLastLaunch > cooldown) {
       const energy = Math.min(1, _fwBassEnv * 2.2);
-      // Kick the text in a random direction with beat-scaled strength
-      const kickAngle = Math.random() * Math.PI * 2;
-      const kickMag   = 0.012 + 0.025 * energy;  // fraction of screen per frame
-      _txVx += Math.cos(kickAngle) * kickMag;
-      _txVy += Math.sin(kickAngle) * kickMag;
+      // Beat: boost velocity in current direction (varies with energy)
+      const boost = 1.4 + 2.8 * energy;
+      _txVx *= boost;
+      _txVy *= boost;
+      // Also add a random component so it doesn't stay perfectly predictable
+      _txVx += (Math.random() - 0.5) * 0.018 * energy;
+      _txVy += (Math.random() - 0.5) * 0.018 * energy;
+      // Clamp max speed
+      const spd = Math.sqrt(_txVx*_txVx + _txVy*_txVy);
+      if (spd > 0.022) { _txVx = _txVx/spd*0.022; _txVy = _txVy/spd*0.022; }
+      // Spin kicks on beat (direction changes with mid)
+      _txSpin = (0.018 + 0.045 * energy) * (Math.random() > 0.5 ? 1 : -1);
+      // Scale spike
+      _txScaleV = 0.06 + 0.12 * energy;
       _fwLaunch(W, H, energy);
       if (energy > 0.55) _fwLaunch(W, H, energy * 0.85);
       if (energy > 0.80) _fwLaunch(W, H, energy * 0.70);
       _fwLastLaunch = now;
     }
-    // Decay velocity each frame (friction)
-    _txVx *= 0.88;
-    _txVy *= 0.88;
+    // Continuous speed modulation from mid (keeps moving fast with music)
+    const midBoost = 1 + _fwMidEnv * 0.8;
+    const minSpd   = (0.004 + 0.006 * _fwBassEnv) * midBoost;
+    const curSpd   = Math.sqrt(_txVx*_txVx + _txVy*_txVy);
+    if (curSpd < minSpd) { _txVx = _txVx/Math.max(curSpd,0.0001)*minSpd; _txVy = _txVy/Math.max(curSpd,0.0001)*minSpd; }
+    // Move
+    _txX += _txVx;
+    _txY += _txVy;
+    // Bounce off walls (use text margin as padding)
+    const padX = 0.12, padY = 0.10;
+    if (_txX < padX) { _txX = padX; _txVx = Math.abs(_txVx) * (0.9 + Math.random()*0.2); _txSpin *= -1; }
+    if (_txX > 1-padX) { _txX = 1-padX; _txVx = -Math.abs(_txVx) * (0.9 + Math.random()*0.2); _txSpin *= -1; }
+    if (_txY < padY) { _txY = padY; _txVy = Math.abs(_txVy) * (0.9 + Math.random()*0.2); _txSpin *= -1; }
+    if (_txY > 1-padY) { _txY = 1-padY; _txVy = -Math.abs(_txVy) * (0.9 + Math.random()*0.2); _txSpin *= -1; }
+    // Spin + scale decay
+    _txAngle += _txSpin;
+    _txSpin  *= 0.975;
+    _txScale += _txScaleV;
+    _txScaleV = (_txScaleV - (_txScale - 1.0) * 0.18) * 0.82; // spring back to 1
+    _txScale  = Math.max(0.55, Math.min(2.0, _txScale));
 
     // ── Flash rings ───────────────────────────────────────────
     for (let i = _fwRings.length - 1; i >= 0; i--) {
@@ -4298,37 +4326,14 @@ const VIZ = (() => {
       bctx.fill();
     }
 
-    // ── Text — wanders across the full screen ─────────────────
+    // ── Text — bouncing + spinning ─────────────────────────────
     const glow   = (12 + 28 * _fwBassEnv + 10 * _fwTrebEnv) * dpr;
-    const alpha  = Math.min(0.95, 0.50 + 0.45 * _fwBassEnv + 0.15 * _fwMidEnv);
-    const mainSz = Math.max(12 * dpr, Math.floor(H * 0.058));
-    const subSz  = Math.max(8  * dpr, Math.floor(H * 0.026));
-    const thxSz  = Math.max(7  * dpr, Math.floor(H * 0.022));
-    const t0 = now * 0.001;
-    // Four overlapping waves at different speeds/phases → continuous wander
-    // X: slow drift + medium circle + fast wobble + beat velocity
-    const wanderX =
-      0.38 * Math.sin(t0 * 0.13 + 1.1) +         // slow left-right
-      0.22 * Math.cos(t0 * 0.29 + 2.3) +          // medium circle X
-      0.10 * Math.sin(t0 * 0.71 + 0.7) +          // fast wobble
-      0.09 * Math.sin(t0 * 0.47);                  // second drift
-    // Y: different phases so it doesn't just go horizontal
-    const wanderY =
-      0.28 * Math.cos(t0 * 0.17 + 0.5) +          // slow up-down
-      0.18 * Math.sin(t0 * 0.31 + 1.9) +          // medium circle Y
-      0.08 * Math.cos(t0 * 0.63 + 3.1) +          // fast wobble
-      0.07 * Math.cos(t0 * 0.43 + 0.2);           // second drift
-    // Music energy widens the wander range
-    const energy = _fwBassEnv + _fwMidEnv * 0.5;
-    const rangeX = W * (0.30 + 0.18 * energy);
-    const rangeY = H * (0.22 + 0.14 * energy);
-    // Beat velocity pushes text on top of the wander (in pixels)
-    const bvX = _txVx * W;
-    const bvY = _txVy * H;
-    // Final position: centred + wander + beat push, clamped to safe margins
-    const margin = mainSz * 1.2;
-    const cx = Math.max(margin, Math.min(W - margin, W * 0.5 + wanderX * rangeX + bvX));
-    const cy = Math.max(margin, Math.min(H - margin, H * 0.5 + wanderY * rangeY + bvY));
+    const alpha  = Math.min(0.95, 0.52 + 0.43 * _fwBassEnv + 0.15 * _fwMidEnv);
+    const mainSz = Math.max(12 * dpr, Math.floor(H * 0.058 * _txScale));
+    const subSz  = Math.max(8  * dpr, Math.floor(H * 0.026 * _txScale));
+    const thxSz  = Math.max(7  * dpr, Math.floor(H * 0.022 * _txScale));
+    const cx     = _txX * W;
+    const cy     = _txY * H;
     const hue2   = (_brandHue + 55) % 360;
     const col1   = `hsl(${_brandHue},80%,68%)`;
     const col2   = `hsl(${hue2},80%,68%)`;
@@ -4337,27 +4342,29 @@ const VIZ = (() => {
     const grad2  = bctx.createLinearGradient(cx - W * 0.08, 0, cx + W * 0.08, 0);
     grad2.addColorStop(0, col2); grad2.addColorStop(1, col1);
     bctx.save();
+    bctx.translate(cx, cy);
+    bctx.rotate(_txAngle);
     bctx.globalAlpha  = alpha;
     bctx.textAlign    = 'center';
     bctx.textBaseline = 'middle';
-    // "Thank you for using" — small, above the main title
+    // "Thank you for using"
     bctx.font        = `${thxSz}px system-ui,sans-serif`;
     bctx.shadowColor = col2;
     bctx.shadowBlur  = glow * 0.45;
     bctx.fillStyle   = grad2;
-    bctx.fillText('Thank you for using', cx, cy - mainSz * 0.80 - thxSz * 0.5);
-    // "mStream Velvet" — main title
+    bctx.fillText('Thank you for using', 0, -mainSz * 0.80 - thxSz * 0.5);
+    // "mStream Velvet"
     bctx.shadowColor  = col1;
     bctx.shadowBlur   = glow;
     bctx.font         = `bold ${mainSz}px system-ui,sans-serif`;
     bctx.fillStyle    = grad1;
-    bctx.fillText('mStream Velvet', cx, cy);
-    // "AroundMyRoom" — subtitle below
+    bctx.fillText('mStream Velvet', 0, 0);
+    // "AroundMyRoom"
     bctx.font         = `${subSz}px system-ui,sans-serif`;
     bctx.shadowColor  = col2;
     bctx.shadowBlur   = glow * 0.55;
     bctx.fillStyle    = grad2;
-    bctx.fillText('AroundMyRoom', cx, cy + mainSz * 0.68 + subSz * 0.5);
+    bctx.fillText('AroundMyRoom', 0, mainSz * 0.68 + subSz * 0.5);
     bctx.restore();
   }
 
