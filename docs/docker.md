@@ -163,6 +163,8 @@ services:
       - ./waveform-cache:/app/waveform-cache
       - ./image-cache:/app/image-cache
     environment:
+      PUID: 1000                    # UID of the user that owns your music files (run: id <user>)
+      PGID: 1000                    # GID of the user that owns your music files
       MSTREAM_MUSIC_DIR: /music     # must match the volume target above
 
       # Admin account (optional).
