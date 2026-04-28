@@ -4053,6 +4053,7 @@ const VIZ = (() => {
   // Frequency bands for beat detection and reactivity
   let _fwBassEnv = 0, _fwBassAvg = 0;
   let _fwMidEnv  = 0, _fwTrebEnv = 0;
+  let _fwBeatJump = 0;   // upward kick applied to text on each beat
   const _fwRockets = [];   // { x, y, vy, hue, palette, energy, trail[] }
   const _fwSparks  = [];   // { x, y, vx, vy, hue, life, maxLife, size, isGlitter }
   const _fwRings   = [];   // expanding flash rings: { x, y, r, maxR, hue, alpha }
@@ -4209,11 +4210,15 @@ const VIZ = (() => {
     const cooldown  = isBeat ? Math.max(220, 700 - 500 * _fwBassEnv) : 1800;
     if (now - _fwLastLaunch > cooldown) {
       const energy = Math.min(1, _fwBassEnv * 2.2);
+      // Kick the text upward — harder hit = bigger jump
+      _fwBeatJump = -(H * (0.018 + 0.032 * energy));
       _fwLaunch(W, H, energy);
       if (energy > 0.55) _fwLaunch(W, H, energy * 0.85);
       if (energy > 0.80) _fwLaunch(W, H, energy * 0.70);
       _fwLastLaunch = now;
     }
+    // Decay the beat jump (spring back down)
+    _fwBeatJump *= 0.82;
 
     // ── Flash rings ───────────────────────────────────────────
     for (let i = _fwRings.length - 1; i >= 0; i--) {
@@ -4288,7 +4293,7 @@ const VIZ = (() => {
     // ── Text ──────────────────────────────────────────────────
     const glow   = (12 + 28 * _fwBassEnv + 10 * _fwTrebEnv) * dpr;
     const alpha  = Math.min(0.95, 0.50 + 0.45 * _fwBassEnv + 0.15 * _fwMidEnv);
-    const floatY = H * 0.005 * Math.sin(now * 0.0006) + H * 0.003 * Math.sin(now * 0.0011);
+    const floatY = H * 0.004 * Math.sin(now * 0.0006) + H * 0.002 * Math.sin(now * 0.0011) + _fwBeatJump;
     const mainSz = Math.max(12 * dpr, Math.floor(H * 0.058));
     const subSz  = Math.max(8  * dpr, Math.floor(H * 0.026));
     const cx     = W * 0.5;
