@@ -4048,8 +4048,36 @@ const VIZ = (() => {
     warp: '',
     comp: '',
   };
-  // Brand text + disco floor overlay state (active only when velvet preset is running)
-  let _brandActive = false, _brandHue = 250, _brandBass = 0;
+  // Brand overlay + fireworks state (active only when velvet preset is running)
+  let _brandActive = false, _brandHue = 250, _brandBass = 0, _brandPrevBass = 0;
+  const _fwRockets = [];   // rising rockets: { x, y, vy, hue, trail[] }
+  const _fwSparks  = [];   // explosion sparks: { x, y, vx, vy, hue, life, maxLife, size }
+  let _fwLastLaunch = 0;
+  function _fwLaunch(W, H) {
+    _fwRockets.push({
+      x: W * (0.1 + Math.random() * 0.80),
+      y: H,
+      vy: -(H * (0.012 + Math.random() * 0.009)),
+      hue: Math.random() * 360,
+      trail: [],
+    });
+  }
+  function _fwExplode(r, W) {
+    const count = 55 + Math.floor(Math.random() * 40);
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.18;
+      const speed = W * 0.004 * (0.5 + Math.random() * 0.7);
+      const life  = 55 + Math.floor(Math.random() * 35);
+      _fwSparks.push({
+        x: r.x, y: r.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        hue: (r.hue + Math.random() * 40 - 20 + 360) % 360,
+        life, maxLife: life,
+        size: Math.max(1.2, W * 0.0018 * (0.6 + Math.random() * 0.8)),
+      });
+    }
+  }
   function _drawBrand() {
     const bc = document.getElementById('viz-brand-canvas');
     if (!bc || !_brandActive) return;
@@ -4060,63 +4088,73 @@ const VIZ = (() => {
     if (bc.width !== W || bc.height !== H) { bc.width = W; bc.height = H; }
     bctx.clearRect(0, 0, W, H);
     _brandHue = (_brandHue + 0.35) % 360;
+    const now = performance.now();
 
     // ── Frequency data ────────────────────────────────────────
-    const BINS = analyserL ? analyserL.frequencyBinCount : 128;
-    const freqData = new Uint8Array(BINS);
-    if (analyserL) analyserL.getByteFrequencyData(freqData);
-    // Smoothed bass for text glow (bins 1-4 = sub-bass)
-    const rawBass = (freqData[1] + freqData[2] + freqData[3] + freqData[4]) / (4 * 255);
-    _brandBass = 0.86 * _brandBass + 0.14 * rawBass;
-
-    // ── Disco dance floor ─────────────────────────────────────
-    const COLS = 10, ROWS = 5;
-    const floorH  = H * 0.30;
-    const floorTop = H * 0.685;
-    const gap = Math.max(2, Math.round(3 * dpr));
-    const tileW = (W - gap * (COLS + 1)) / COLS;
-    const tileH = (floorH - gap * (ROWS + 1)) / ROWS;
-
-    // Logarithmic frequency mapping → 10 bands (bass-heavy on left, treble on right)
-    const bandEnergy = [];
-    for (let c = 0; c < COLS; c++) {
-      const lo = Math.floor(Math.pow(c       / COLS, 1.6) * BINS * 0.75);
-      const hi = Math.floor(Math.pow((c + 1) / COLS, 1.6) * BINS * 0.75) + 1;
-      let sum = 0;
-      for (let i = lo; i < hi; i++) sum += freqData[i] || 0;
-      bandEnergy.push(sum / ((hi - lo) * 255));
+    if (analyserL) {
+      const d = new Uint8Array(analyserL.frequencyBinCount);
+      analyserL.getByteFrequencyData(d);
+      const rawBass = (d[1] + d[2] + d[3] + d[4]) / (4 * 255);
+      _brandPrevBass = _brandBass;
+      _brandBass = 0.80 * _brandBass + 0.20 * rawBass;
     }
 
-    for (let col = 0; col < COLS; col++) {
-      const energy = Math.min(1, bandEnergy[col] * 1.3);
-      const x = gap + col * (tileW + gap);
-      for (let row = 0; row < ROWS; row++) {
-        const y = floorTop + gap + row * (tileH + gap);
-        // Each tile has unique hue: column spreads across spectrum, rows offset slightly
-        const hue = (_brandHue + col * 36 + row * 8) % 360;
-        // Brightness: tiles are always visible (min 18%); energy boosts to 90%
-        // Bottom rows glow more to bass, top rows to treble
-        const rowFactor = 0.55 + 0.45 * (1 - row / (ROWS - 1));
-        const bright = 0.18 + 0.72 * Math.min(1, energy * rowFactor * 1.2);
-        const sat = 75 + 22 * Math.min(1, energy);
-        bctx.fillStyle = `hsl(${hue},${Math.round(sat)}%,${Math.round(bright * 100)}%)`;
-        bctx.fillRect(Math.round(x), Math.round(y), Math.ceil(tileW), Math.ceil(tileH));
-        // Inner highlight on energetic tiles
-        if (energy > 0.35) {
-          bctx.fillStyle = `hsla(${hue},100%,90%,${0.18 * energy})`;
-          bctx.fillRect(Math.round(x) + 1, Math.round(y) + 1, Math.ceil(tileW) - 2, Math.ceil(tileH) * 0.35);
-        }
+    // ── Launch fireworks ──────────────────────────────────────
+    const beatHit = _brandBass > 0.45 && _brandBass > _brandPrevBass * 1.35;
+    if (now - _fwLastLaunch > 1800 || (beatHit && now - _fwLastLaunch > 600)) {
+      _fwLaunch(W, H);
+      if (_brandBass > 0.7) _fwLaunch(W, H); // big beat = double launch
+      _fwLastLaunch = now;
+    }
+
+    // ── Rockets ───────────────────────────────────────────────
+    for (let i = _fwRockets.length - 1; i >= 0; i--) {
+      const r = _fwRockets[i];
+      r.trail.push({ x: r.x, y: r.y });
+      if (r.trail.length > 14) r.trail.shift();
+      r.y += r.vy;
+      r.vy *= 0.985;
+      if (Math.abs(r.vy) < H * 0.0018 || r.y < H * 0.12) {
+        _fwExplode(r, W);
+        _fwRockets.splice(i, 1);
+        continue;
       }
+      for (let t = 0; t < r.trail.length; t++) {
+        bctx.beginPath();
+        bctx.arc(r.trail[t].x, r.trail[t].y, Math.max(1, W * 0.0014), 0, Math.PI * 2);
+        bctx.fillStyle = `hsla(${r.hue},100%,85%,${(t / r.trail.length) * 0.7})`;
+        bctx.fill();
+      }
+      bctx.beginPath();
+      bctx.arc(r.x, r.y, Math.max(2, W * 0.002), 0, Math.PI * 2);
+      bctx.fillStyle = `hsl(${r.hue},100%,95%)`;
+      bctx.fill();
     }
 
-    // ── Text (centred above the floor) ───────────────────────
+    // ── Sparks ────────────────────────────────────────────────
+    const gravity = H * 0.00028;
+    for (let i = _fwSparks.length - 1; i >= 0; i--) {
+      const s = _fwSparks[i];
+      s.x += s.vx; s.y += s.vy;
+      s.vy += gravity;
+      s.vx *= 0.975; s.vy *= 0.975;
+      s.life--;
+      if (s.life <= 0) { _fwSparks.splice(i, 1); continue; }
+      const t = s.life / s.maxLife;
+      bctx.beginPath();
+      bctx.arc(s.x, s.y, s.size * t, 0, Math.PI * 2);
+      bctx.fillStyle = `hsla(${s.hue},100%,${60 + 30 * t}%,${t * 0.9})`;
+      bctx.fill();
+    }
+
+    // ── Text ──────────────────────────────────────────────────
     const glow   = (14 + 22 * _brandBass) * dpr;
     const alpha  = 0.55 + 0.35 * _brandBass;
-    const floatY = H * 0.004 * Math.sin(performance.now() * 0.0006);
+    const floatY = H * 0.004 * Math.sin(now * 0.0006);
     const mainSz = Math.max(12 * dpr, Math.floor(H * 0.058));
     const subSz  = Math.max(8  * dpr, Math.floor(H * 0.026));
     const cx     = W * 0.5;
-    const cy     = H * 0.595 + floatY;
+    const cy     = H * 0.81 + floatY;
     const hue2   = (_brandHue + 55) % 360;
     const col1   = `hsl(${_brandHue},80%,68%)`;
     const col2   = `hsl(${hue2},80%,68%)`;
