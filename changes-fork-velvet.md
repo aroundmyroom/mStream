@@ -8,6 +8,12 @@
 - `_applyRGGain` now lazy-fetches metadata when `rg` is absent (e.g. queue restored from localStorage); result is cached on the song object to avoid repeat requests
 - RG badge moved to below the Auto-DJ button (`dj-rg-wrap` flex-column layout) for cleaner placement in the player controls row
 
+### fix: Tag Workshop regression — restored from v6.13.8
+- `viewTagWorkshop` function (475 lines), `renderTagWorkshop`, and all `_twFiles` state lost during v6.14.0 merge; fully restored
+- Tag Workshop button (`#fe-tw-btn`) in File Explorer toolbar restored
+- All 38 `player.tw.*` locale keys restored across all 12 locale files
+- Tag Workshop CSS (64 rules) restored in `style.css`
+
 ### feat: ReplayGain 2.0 / EBU R128 loudness normalisation
 - New background worker measures every audio file with **rsgain** (primary) or **ffmpeg** (fallback), storing per-file EBU R128 values (`rg_integrated_lufs`, `rg_true_peak_dbfs`, `rg_track_gain_db`, `rg_lra`, `rg_album_gain_db`, `rg_album_peak_dbfs`, `rg_measured_ts`, `rg_measurement_tool`)
 - Also stores existing ReplayGain tags from files (`rg_tag_track_gain`, `rg_tag_track_peak`, `rg_tag_album_gain`, `rg_tag_album_peak`) and R128 tags (`r128_track_gain_db`, `r128_album_gain_db`) for playback reference
