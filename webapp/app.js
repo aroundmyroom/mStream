@@ -4008,21 +4008,26 @@ const VIZ = (() => {
   const _VELVET_PRESET_KEY = 'aroundmyroom - mStream Velvet';
   const _VELVET_PRESET = {
     baseVals: {
-      rating: 5, gammaadj: 1.8, decay: 0.975, echo_zoom: 1.0, echo_orient: 0,
-      wave_mode: 0, additivewave: 1, wave_brighten: 0, wrap: 0,
-      darken_center: 0, darken: 0, wave_a: 0.85, wave_scale: 0.8,
-      wave_smoothing: 0.7, modwavealphastart: 0.4, modwavealphaend: 1.5,
-      warpanimspeed: 0.8, warpscale: 1.5, zoomexp: 1.0, zoom: 1.0, rot: 0, warp: 0.3,
+      rating: 5,
+      // gammaadj 1.0 = neutral (1.8 was causing white washout)
+      gammaadj: 1.0, decay: 0.952, echo_zoom: 1.0, echo_orient: 0,
+      wave_mode: 5, additivewave: 1, wave_brighten: 0, wrap: 1,
+      darken_center: 1, darken: 0, wave_a: 0.6, wave_scale: 0.72,
+      wave_smoothing: 0.75, modwavealphastart: 0.5, modwavealphaend: 1.2,
+      warpanimspeed: 0.65, warpscale: 1.3, zoomexp: 1.0, zoom: 0.999, rot: 0, warp: 0.35,
       cx: 0.5, cy: 0.5, dx: 0, dy: 0, sx: 1, sy: 1,
-      wave_r: 0.6, wave_g: 0.0, wave_b: 1.0,
-      ob_size: 0.007, ob_r: 0.5, ob_g: 0.0, ob_b: 0.8, ob_a: 0.5,
-      ib_size: 0.003, ib_r: 0.3, ib_g: 0.0, ib_b: 0.5, ib_a: 0.3,
-      mv_x: 24, mv_y: 18, mv_dx: 0, mv_dy: 0, mv_l: 0.85,
-      mv_r: 0.5, mv_g: 0.0, mv_b: 0.9, mv_a: 0.25,
+      wave_r: 0.4, wave_g: 0.1, wave_b: 0.85,
+      ob_size: 0.006, ob_r: 0.35, ob_g: 0.0, ob_b: 0.65, ob_a: 0.4,
+      ib_size: 0.002, ib_r: 0.15, ib_g: 0.0, ib_b: 0.35, ib_a: 0.2,
+      mv_x: 16, mv_y: 12, mv_dx: 0, mv_dy: 0, mv_l: 0.75,
+      mv_r: 0.35, mv_g: 0.0, mv_b: 0.75, mv_a: 0.18,
     },
-    init_eqs_str: 'a.q1=0;a.q2=0;a.q3=0.3;a.q4=0;',
-    frame_eqs_str: 'a.q1+=0.006*(1+0.3*a.bass_att);a.q2+=0.015*(1+0.5*a.treb_att);a.q3=0.85*a.q3+0.15*a.bass;a.q4=0.8*a.q4+0.2*a.treb;a.zoom=1+0.05*a.q3;a.rot=0.0015*Math.sin(a.time*0.2)+0.0005*a.mid_att;a.warp=0.25+0.4*a.q4;a.decay=0.975-0.015*a.q3;a.wave_r=0.45+0.45*Math.sin(a.q1);a.wave_g=0.1+0.15*Math.sin(a.q1+1.7);a.wave_b=0.75+0.25*Math.sin(a.q1+3.2);a.mv_r=a.wave_r;a.mv_g=a.wave_g;a.mv_b=a.wave_b;a.ob_r=a.wave_r*0.7;a.ob_g=a.wave_g*0.5;a.ob_b=a.wave_b*0.9;a.ob_a=0.3+0.4*a.q3;',
-    pixel_eqs_str: 'a.zoom=1.003+0.04*a.q3*(1-a.rad*0.7);',
+    init_eqs_str: 'a.q1=0;a.q2=0;a.q3=0;a.q4=0;a.q5=0;',
+    // 3-phase RGB cycling (offset 120°= 2.094 rad): creates full color-wheel rotation
+    // — purple → magenta → red → orange → yellow → green → cyan → blue → back
+    // gammaadj kept at 1.0 so colors stay saturated without blowing to white
+    frame_eqs_str: 'a.q1+=0.007*(1+0.4*a.bass_att);a.q2+=0.018*(1+0.6*a.treb_att);a.q3=0.87*a.q3+0.13*a.bass;a.q4=0.84*a.q4+0.16*a.treb;a.q5+=0.004*(1+0.2*a.mid_att);a.zoom=1+0.06*a.q3;a.rot=0.0012*Math.sin(a.time*0.14)+0.0003*a.mid_att;a.warp=0.28+0.52*a.q4;a.decay=0.952-0.018*a.q3;a.wave_r=0.35+0.38*Math.sin(a.q1);a.wave_g=0.2+0.28*Math.sin(a.q1+2.094);a.wave_b=0.45+0.45*Math.sin(a.q1+4.189);a.mv_r=a.wave_r*0.8;a.mv_g=a.wave_g*0.8;a.mv_b=a.wave_b*0.9;a.ob_r=a.wave_r*0.7;a.ob_g=a.wave_g*0.6;a.ob_b=a.wave_b*0.85;a.ob_a=0.25+0.3*a.q3;',
+    pixel_eqs_str: 'a.zoom=1.002+0.05*a.q3*(1-a.rad*0.55);',
     shapes: [
       { baseVals: { enabled: 0 }, init_eqs_str: '', frame_eqs_str: '' },
       { baseVals: { enabled: 0 }, init_eqs_str: '', frame_eqs_str: '' },
@@ -4031,9 +4036,9 @@ const VIZ = (() => {
     ],
     waves: [
       {
-        baseVals: { enabled: 1, usedots: 0, thick: 1, additive: 1, r: 0.6, g: 0.0, b: 1.0, a: 0.7 },
+        baseVals: { enabled: 1, usedots: 0, thick: 1, additive: 1, r: 0.4, g: 0.1, b: 0.85, a: 0.6 },
         init_eqs_str: '',
-        frame_eqs_str: 'a.r=0.45+0.45*Math.sin(a.q1);a.g=0.1+0.15*Math.sin(a.q1+1.7);a.b=0.75+0.25*Math.sin(a.q1+3.2);a.a=0.5+0.4*a.q3;a.scaling=0.6+0.3*a.bass_att;',
+        frame_eqs_str: 'a.r=0.35+0.38*Math.sin(a.q1);a.g=0.2+0.28*Math.sin(a.q1+2.094);a.b=0.45+0.45*Math.sin(a.q1+4.189);a.a=0.45+0.35*a.q3;a.scaling=0.55+0.35*a.bass_att;',
         point_eqs_str: '',
       },
       { baseVals: { enabled: 0 }, init_eqs_str: '', frame_eqs_str: '', point_eqs_str: '' },
@@ -4043,7 +4048,7 @@ const VIZ = (() => {
     warp: '',
     comp: '',
   };
-  // Brand text overlay state (active only when velvet preset is running)
+  // Brand text + disco floor overlay state (active only when velvet preset is running)
   let _brandActive = false, _brandHue = 250, _brandBass = 0;
   function _drawBrand() {
     const bc = document.getElementById('viz-brand-canvas');
@@ -4054,41 +4059,84 @@ const VIZ = (() => {
     const H = (bc.clientHeight || window.innerHeight) * dpr;
     if (bc.width !== W || bc.height !== H) { bc.width = W; bc.height = H; }
     bctx.clearRect(0, 0, W, H);
-    _brandHue = (_brandHue + 0.25) % 360;
-    // Smoothed bass level for reactivity
-    if (analyserL) {
-      const d = new Uint8Array(analyserL.frequencyBinCount);
-      analyserL.getByteFrequencyData(d);
-      let sum = 0; for (let i = 0; i < 14; i++) sum += d[i];
-      _brandBass = 0.88 * _brandBass + 0.12 * (sum / (14 * 255));
+    _brandHue = (_brandHue + 0.35) % 360;
+
+    // ── Frequency data ────────────────────────────────────────
+    const BINS = analyserL ? analyserL.frequencyBinCount : 128;
+    const freqData = new Uint8Array(BINS);
+    if (analyserL) analyserL.getByteFrequencyData(freqData);
+    // Smoothed bass for text glow (bins 1-4 = sub-bass)
+    const rawBass = (freqData[1] + freqData[2] + freqData[3] + freqData[4]) / (4 * 255);
+    _brandBass = 0.86 * _brandBass + 0.14 * rawBass;
+
+    // ── Disco dance floor ─────────────────────────────────────
+    const COLS = 10, ROWS = 5;
+    const floorH  = H * 0.30;
+    const floorTop = H * 0.685;
+    const gap = Math.max(2, Math.round(3 * dpr));
+    const tileW = (W - gap * (COLS + 1)) / COLS;
+    const tileH = (floorH - gap * (ROWS + 1)) / ROWS;
+
+    // Logarithmic frequency mapping → 10 bands (bass-heavy on left, treble on right)
+    const bandEnergy = [];
+    for (let c = 0; c < COLS; c++) {
+      const lo = Math.floor(Math.pow(c       / COLS, 1.6) * BINS * 0.75);
+      const hi = Math.floor(Math.pow((c + 1) / COLS, 1.6) * BINS * 0.75) + 1;
+      let sum = 0;
+      for (let i = lo; i < hi; i++) sum += freqData[i] || 0;
+      bandEnergy.push(sum / ((hi - lo) * 255));
     }
-    const glow   = (18 + 28 * _brandBass) * dpr;
-    const alpha  = 0.42 + 0.38 * _brandBass;
+
+    for (let col = 0; col < COLS; col++) {
+      const energy = Math.min(1, bandEnergy[col] * 1.3);
+      const x = gap + col * (tileW + gap);
+      for (let row = 0; row < ROWS; row++) {
+        const y = floorTop + gap + row * (tileH + gap);
+        // Each tile has unique hue: column spreads across spectrum, rows offset slightly
+        const hue = (_brandHue + col * 36 + row * 8) % 360;
+        // Brightness: tiles are always visible (min 18%); energy boosts to 90%
+        // Bottom rows glow more to bass, top rows to treble
+        const rowFactor = 0.55 + 0.45 * (1 - row / (ROWS - 1));
+        const bright = 0.18 + 0.72 * Math.min(1, energy * rowFactor * 1.2);
+        const sat = 75 + 22 * Math.min(1, energy);
+        bctx.fillStyle = `hsl(${hue},${Math.round(sat)}%,${Math.round(bright * 100)}%)`;
+        bctx.fillRect(Math.round(x), Math.round(y), Math.ceil(tileW), Math.ceil(tileH));
+        // Inner highlight on energetic tiles
+        if (energy > 0.35) {
+          bctx.fillStyle = `hsla(${hue},100%,90%,${0.18 * energy})`;
+          bctx.fillRect(Math.round(x) + 1, Math.round(y) + 1, Math.ceil(tileW) - 2, Math.ceil(tileH) * 0.35);
+        }
+      }
+    }
+
+    // ── Text (centred above the floor) ───────────────────────
+    const glow   = (14 + 22 * _brandBass) * dpr;
+    const alpha  = 0.55 + 0.35 * _brandBass;
     const floatY = H * 0.004 * Math.sin(performance.now() * 0.0006);
-    const mainSz = Math.max(12 * dpr, Math.floor(H * 0.06));
-    const subSz  = Math.max(8  * dpr, Math.floor(H * 0.028));
+    const mainSz = Math.max(12 * dpr, Math.floor(H * 0.058));
+    const subSz  = Math.max(8  * dpr, Math.floor(H * 0.026));
     const cx     = W * 0.5;
-    const cy     = H * 0.81 + floatY;
-    const hue2   = (_brandHue + 50) % 360;
-    const col1   = `hsl(${_brandHue},78%,68%)`;
-    const col2   = `hsl(${hue2},78%,68%)`;
+    const cy     = H * 0.595 + floatY;
+    const hue2   = (_brandHue + 55) % 360;
+    const col1   = `hsl(${_brandHue},80%,68%)`;
+    const col2   = `hsl(${hue2},80%,68%)`;
     const grad1  = bctx.createLinearGradient(cx - W * 0.14, 0, cx + W * 0.14, 0);
     grad1.addColorStop(0, col1); grad1.addColorStop(1, col2);
     const grad2  = bctx.createLinearGradient(cx - W * 0.08, 0, cx + W * 0.08, 0);
     grad2.addColorStop(0, col2); grad2.addColorStop(1, col1);
     bctx.save();
-    bctx.globalAlpha    = alpha;
-    bctx.textAlign      = 'center';
-    bctx.textBaseline   = 'middle';
-    bctx.shadowColor    = col1;
-    bctx.shadowBlur     = glow;
-    bctx.font           = `bold ${mainSz}px system-ui,sans-serif`;
-    bctx.fillStyle      = grad1;
+    bctx.globalAlpha  = alpha;
+    bctx.textAlign    = 'center';
+    bctx.textBaseline = 'middle';
+    bctx.shadowColor  = col1;
+    bctx.shadowBlur   = glow;
+    bctx.font         = `bold ${mainSz}px system-ui,sans-serif`;
+    bctx.fillStyle    = grad1;
     bctx.fillText('mStream Velvet', cx, cy);
-    bctx.font           = `${subSz}px system-ui,sans-serif`;
-    bctx.shadowColor    = col2;
-    bctx.shadowBlur     = glow * 0.55;
-    bctx.fillStyle      = grad2;
+    bctx.font         = `${subSz}px system-ui,sans-serif`;
+    bctx.shadowColor  = col2;
+    bctx.shadowBlur   = glow * 0.55;
+    bctx.fillStyle    = grad2;
     bctx.fillText('AroundMyRoom', cx, cy + mainSz * 0.68 + subSz * 0.5);
     bctx.restore();
   }
