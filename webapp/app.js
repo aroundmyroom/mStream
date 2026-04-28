@@ -4077,7 +4077,7 @@ const VIZ = (() => {
     bctx.shadowColor    = col2;
     bctx.shadowBlur     = glow * 0.55;
     bctx.fillStyle      = grad2;
-    bctx.fillText('aroundmyroom', cx, cy + mainSz * 0.68 + subSz * 0.5);
+    bctx.fillText('AroundMyRoom', cx, cy + mainSz * 0.68 + subSz * 0.5);
     bctx.restore();
   }
 
@@ -4245,11 +4245,18 @@ const VIZ = (() => {
     visualizer.connectAudio(analyserNode);
     loadPreset(0);
     startRender();
-    cycleTimer = setInterval(() => {
+    // Give the branded velvet preset a longer first display (40 s) before auto-cycling
+    const _firstCycleMs = presetKeys[presetIndex] === _VELVET_PRESET_KEY ? 40000 : CYCLE_MS;
+    cycleTimer = setTimeout(function _firstCycle() {
       presetHistory.push(presetIndex);
       presetIndex = Math.floor(Math.random() * presetKeys.length);
       loadPreset(2.7);
-    }, CYCLE_MS);
+      cycleTimer = setInterval(() => {
+        presetHistory.push(presetIndex);
+        presetIndex = Math.floor(Math.random() * presetKeys.length);
+        loadPreset(2.7);
+      }, CYCLE_MS);
+    }, _firstCycleMs);
   }
 
   // ── SPECTRUM RENDERER — 7 modes, click canvas to cycle ────
