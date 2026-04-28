@@ -1,5 +1,22 @@
 # mStream Velvet Fork — Combined Change Log
 
+## v6.14.2-velvet — April 2026 — Butterchurn Brand Overlay: Fireworks, Nebula & Text
+
+### feat: fireworks system on the brand overlay canvas
+- Music-reactive fireworks fire on every bass beat (BPM-synced onset detection, fast EMA vs slow EMA)
+- Rockets climb from the bottom with coloured particle trails; each explosion creates 12–35 sparks + 1–2 expanding flash rings + a glitter burst of tiny dots
+- Multi-palette colour system: mono (tight hue band), duo (complementary pair), rainbow (full spectrum spread), triadic (3 hues 120° apart) — picked randomly per rocket
+- Explosion intensity scales with bass energy: bigger sparks, wider spread, extra rockets on hard hits
+- Sub-bass, mid, and treble frequency bands each drive separate visual channels
+
+### feat: nebula background behind the fireworks
+- Three transparent radial gradients (bass lower-left, treble upper-right, mid centre) pulse with the music on the brand canvas
+- Milkdrop visualiser remains fully visible through the transparent-only overlay — no solid fills used
+
+### feat: brand text — "Thank you for using / mStream Velvet / AroundMyRoom"
+- Three-line text stack in subtitle position (lower third): "Thank you for using" (small), "mStream Velvet" (bold large), "AroundMyRoom" (medium)
+- Animated hue-cycling gradient text; glow shadow pulses with bass
+
 ## v6.14.1-velvet — April 2026 — Tag Workshop Fixes & Docker User Mapping
 
 ### fix: RG badge not showing — rg object missing from metadata response; lazy-fetch for restored queue
