@@ -4292,6 +4292,7 @@ const VIZ = (() => {
     const mainSz = Math.max(12 * dpr, Math.floor(H * 0.058));
     const subSz  = Math.max(8  * dpr, Math.floor(H * 0.026));
     const cx     = W * 0.5;
+    const thxSz  = Math.max(7  * dpr, Math.floor(H * 0.022));
     const cy     = H * 0.81 + floatY;
     const hue2   = (_brandHue + 55) % 360;
     const col1   = `hsl(${_brandHue},80%,68%)`;
@@ -4304,11 +4305,19 @@ const VIZ = (() => {
     bctx.globalAlpha  = alpha;
     bctx.textAlign    = 'center';
     bctx.textBaseline = 'middle';
+    // "Thank you for using" — small, above the main title
+    bctx.font        = `${thxSz}px system-ui,sans-serif`;
+    bctx.shadowColor = col2;
+    bctx.shadowBlur  = glow * 0.45;
+    bctx.fillStyle   = grad2;
+    bctx.fillText('Thank you for using', cx, cy - mainSz * 0.80 - thxSz * 0.5);
+    // "mStream Velvet" — main title
     bctx.shadowColor  = col1;
     bctx.shadowBlur   = glow;
     bctx.font         = `bold ${mainSz}px system-ui,sans-serif`;
     bctx.fillStyle    = grad1;
     bctx.fillText('mStream Velvet', cx, cy);
+    // "AroundMyRoom" — subtitle below
     bctx.font         = `${subSz}px system-ui,sans-serif`;
     bctx.shadowColor  = col2;
     bctx.shadowBlur   = glow * 0.55;
