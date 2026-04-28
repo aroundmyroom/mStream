@@ -5388,33 +5388,33 @@ const rgWorkshopView = Vue.component('rg-workshop-view', {
                 </div>
                 <table style="font-size:0.85rem; border-collapse:collapse; width:100%;">
                   <tr>
-                    <td style="padding:2px 12px 2px 0; color:#4caf50;">{{ t('admin.rg.statsMeasured') }}</td>
-                    <td style="padding:2px 12px 2px 0;"><b>{{ (stats.measured||0).toLocaleString() }}</b></td>
-                    <td style="color:#666; font-size:0.78rem;">{{ pct(stats.measured) }}%</td>
+                    <td style="padding:2px 0 2px 0; color:#4caf50; min-width:160px;">{{ t('admin.rg.statsMeasured') }}</td>
+                    <td style="padding:2px 12px 2px 0; text-align:right; font-variant-numeric:tabular-nums;"><b>{{ (stats.measured||0).toLocaleString() }}</b></td>
+                    <td style="color:#666; font-size:0.78rem; text-align:right; min-width:46px;">{{ pct(stats.measured) }}%</td>
                   </tr>
                   <tr v-if="stats.measured_rsgain">
-                    <td style="padding:2px 12px 2px 0; color:#81c784; padding-left:1rem;">&#x21B3; rsgain</td>
-                    <td><b>{{ (stats.measured_rsgain||0).toLocaleString() }}</b></td>
+                    <td style="padding:2px 0 2px 1rem; color:#81c784;">&#x21B3; rsgain</td>
+                    <td style="text-align:right; font-variant-numeric:tabular-nums;"><b>{{ (stats.measured_rsgain||0).toLocaleString() }}</b></td>
                     <td></td>
                   </tr>
                   <tr v-if="stats.measured_ffmpeg">
-                    <td style="padding:2px 12px 2px 0; color:#aaa; padding-left:1rem;">&#x21B3; ffmpeg</td>
-                    <td><b>{{ (stats.measured_ffmpeg||0).toLocaleString() }}</b></td>
+                    <td style="padding:2px 0 2px 1rem; color:#aaa;">&#x21B3; ffmpeg</td>
+                    <td style="text-align:right; font-variant-numeric:tabular-nums;"><b>{{ (stats.measured_ffmpeg||0).toLocaleString() }}</b></td>
                     <td></td>
                   </tr>
                   <tr>
-                    <td style="padding:2px 12px 2px 0; color:#aaa;">{{ t('admin.rg.statsQueued') }}</td>
-                    <td><b>{{ (unmeasured).toLocaleString() }}</b></td>
-                    <td style="color:#666; font-size:0.78rem;">{{ pct(unmeasured) }}%</td>
+                    <td style="padding:2px 0 2px 0; color:#aaa;">{{ t('admin.rg.statsQueued') }}</td>
+                    <td style="padding:2px 12px 2px 0; text-align:right; font-variant-numeric:tabular-nums;"><b>{{ (unmeasured).toLocaleString() }}</b></td>
+                    <td style="color:#666; font-size:0.78rem; text-align:right;">{{ pct(unmeasured) }}%</td>
                   </tr>
                   <tr v-if="stats.failed">
-                    <td style="padding:2px 12px 2px 0; color:#e57373;">{{ t('admin.rg.statsFailed') }}</td>
-                    <td><b>{{ (stats.failed||0).toLocaleString() }}</b></td>
+                    <td style="padding:2px 0 2px 0; color:#e57373;">{{ t('admin.rg.statsFailed') }}</td>
+                    <td style="text-align:right; font-variant-numeric:tabular-nums;"><b>{{ (stats.failed||0).toLocaleString() }}</b></td>
                     <td></td>
                   </tr>
                   <tr v-if="stats.has_tags">
-                    <td style="padding:2px 12px 2px 0; color:#7986cb;">{{ t('admin.rg.statsHasTags') }}</td>
-                    <td><b>{{ (stats.has_tags||0).toLocaleString() }}</b></td>
+                    <td style="padding:2px 0 2px 0; color:#7986cb;">{{ t('admin.rg.statsHasTags') }}</td>
+                    <td style="text-align:right; font-variant-numeric:tabular-nums;"><b>{{ (stats.has_tags||0).toLocaleString() }}</b></td>
                     <td></td>
                   </tr>
                 </table>
