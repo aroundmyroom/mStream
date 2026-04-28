@@ -52,6 +52,7 @@ RUN arch="$(uname -m)"; \
 
 # Pre-download rsgain (EBU R128 measurement, x86_64 only — no arm64 static build available).
 # Falls back to ffmpeg-based measurement at runtime when rsgain is absent.
+# hadolint ignore=DL4006
 RUN arch="$(uname -m)"; \
     if [ "$arch" = "x86_64" ]; then \
       tag=$(wget -qO- "https://api.github.com/repos/complexlogic/rsgain/releases/latest" \
