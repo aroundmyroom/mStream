@@ -4152,7 +4152,6 @@ const VIZ = (() => {
     const W = (bc.clientWidth  || window.innerWidth)  * dpr;
     const H = (bc.clientHeight || window.innerHeight) * dpr;
     if (bc.width !== W || bc.height !== H) { bc.width = W; bc.height = H; }
-    bctx.clearRect(0, 0, W, H);
     _brandHue = (_brandHue + 0.35) % 360;
     const now = performance.now();
 
@@ -4172,6 +4171,40 @@ const VIZ = (() => {
     _fwMidEnv  = 0.60 * _fwMidEnv  + 0.40 * rawMid;
     _fwTrebEnv = 0.50 * _fwTrebEnv + 0.50 * rawTreb;
     _fwBassAvg = 0.97 * _fwBassAvg + 0.03 * rawBass;
+
+    // ── Dynamic background ────────────────────────────────────
+    // Deep dark base with slowly shifting hue nebula — never pure black
+    // Two radial gradients (bass-left, treble-right) + a dim overlay fill
+    const bgHue1 = _brandHue;
+    const bgHue2 = (_brandHue + 140) % 360;
+    const bgHue3 = (_brandHue + 220) % 360;
+    // Base fill: very dark shifting colour (not black)
+    const baseLum = Math.round(4 + 7 * _fwBassEnv + 4 * _fwMidEnv);
+    bctx.fillStyle = `hsl(${bgHue1},55%,${baseLum}%)`;
+    bctx.fillRect(0, 0, W, H);
+    // Bass nebula — lower-left radial pulse
+    const bassR  = W * (0.55 + 0.45 * _fwBassEnv);
+    const bassA  = 0.10 + 0.22 * _fwBassEnv;
+    const rg1 = bctx.createRadialGradient(W * 0.25, H * 0.70, 0, W * 0.25, H * 0.70, bassR);
+    rg1.addColorStop(0, `hsla(${bgHue1},90%,${18 + 22 * _fwBassEnv}%,${bassA})`);
+    rg1.addColorStop(1, 'hsla(0,0%,0%,0)');
+    bctx.fillStyle = rg1;
+    bctx.fillRect(0, 0, W, H);
+    // Treble nebula — upper-right, reacts to treble
+    const trebR  = W * (0.45 + 0.35 * _fwTrebEnv);
+    const trebA  = 0.08 + 0.20 * _fwTrebEnv;
+    const rg2 = bctx.createRadialGradient(W * 0.75, H * 0.30, 0, W * 0.75, H * 0.30, trebR);
+    rg2.addColorStop(0, `hsla(${bgHue2},85%,${15 + 20 * _fwTrebEnv}%,${trebA})`);
+    rg2.addColorStop(1, 'hsla(0,0%,0%,0)');
+    bctx.fillStyle = rg2;
+    bctx.fillRect(0, 0, W, H);
+    // Mid nebula — centre, subtle
+    const midA = 0.06 + 0.14 * _fwMidEnv;
+    const rg3 = bctx.createRadialGradient(W * 0.50, H * 0.50, 0, W * 0.50, H * 0.50, W * 0.40);
+    rg3.addColorStop(0, `hsla(${bgHue3},80%,${12 + 16 * _fwMidEnv}%,${midA})`);
+    rg3.addColorStop(1, 'hsla(0,0%,0%,0)');
+    bctx.fillStyle = rg3;
+    bctx.fillRect(0, 0, W, H);
 
     // ── Launch rockets on beat ────────────────────────────────
     const bassRatio = _fwBassAvg > 0.01 ? _fwBassEnv / _fwBassAvg : 0;
