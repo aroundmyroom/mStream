@@ -5,6 +5,27 @@ import * as config from '../state/config.js';
 import * as scanProgress from '../state/scan-progress.js';
 import * as dlnaApi from './dlna.js';
 
+// Returns true when the directory cover image has been replaced since it was
+// last scanned. Two cases:
+//   1. The stored cover_file no longer exists — user renamed or replaced it
+//   2. The stored cover_file still exists but its mtime is newer than last scan
+function _dirCoverChanged(dbFileInfo, vpathRoot) {
+  try {
+    if (dbFileInfo.art_source !== 'directory') return false;
+    const audioDir = path.join(vpathRoot, path.dirname(dbFileInfo.filepath));
+
+    // Case 1: stored cover_file is gone — art was likely replaced with a new file
+    if (dbFileInfo.cover_file) {
+      const oldCoverPath = path.join(audioDir, dbFileInfo.cover_file);
+      if (!fs.existsSync(oldCoverPath)) return true;
+      // Case 2: cover_file still exists but was modified after last audio scan
+      const coverMtimeMs = fs.statSync(oldCoverPath).mtimeMs;
+      if (coverMtimeMs > (dbFileInfo.modified || 0)) return true;
+    }
+    return false;
+  } catch (_) { return false; }
+}
+
 export function setup(mstream) {
   mstream.all('/api/v1/scanner/{*path}', (req, res, next) => {
     if (req.scanApproved !== true) { return res.status(403).json({ error: 'Access Denied' }); }
@@ -40,11 +61,15 @@ export function setup(mstream) {
     const flags = {};
     // signal art-only update if aaFile is missing (null = never attempted; '' = checked, none found)
     // OR if aaFile is set but the cached file no longer exists on disk (e.g. image-cache was cleared)
+    // OR if art came from a directory cover.jpg that has since been replaced on disk
     if (dbFileInfo.aaFile === null || dbFileInfo.aaFile === undefined) {
       flags._needsArt = true;
     } else if (dbFileInfo.aaFile && !fs.existsSync(path.join(config.program.storage.albumArtDirectory, dbFileInfo.aaFile))) {
       flags._needsArt = true;
       // Clear the stale aaFile ref so the scanner inserts the freshly-extracted filename
+      db.updateFileArt(dbFileInfo.filepath, dbFileInfo.vpath, null, req.body.scanId, null);
+    } else if (_dirCoverChanged(dbFileInfo, config.program.folders[req.body.vpath]?.root || '')) {
+      flags._needsArt = true;
       db.updateFileArt(dbFileInfo.filepath, dbFileInfo.vpath, null, req.body.scanId, null);
     }
     // signal cue-only update if cuepoints has never been checked (NULL)
@@ -124,6 +149,9 @@ export function setup(mstream) {
         if (dbFileInfo.aaFile === null || dbFileInfo.aaFile === undefined) {
           flags._needsArt = true;
         } else if (dbFileInfo.aaFile && !fs.existsSync(path.join(config.program.storage.albumArtDirectory, dbFileInfo.aaFile))) {
+          flags._needsArt = true;
+          db.updateFileArt(dbFileInfo.filepath, dbFileInfo.vpath, null, scanId, null);
+        } else if (_dirCoverChanged(dbFileInfo, config.program.folders[vpath]?.root || '')) {
           flags._needsArt = true;
           db.updateFileArt(dbFileInfo.filepath, dbFileInfo.vpath, null, scanId, null);
         }

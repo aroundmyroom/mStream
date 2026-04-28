@@ -5644,12 +5644,18 @@ async function viewRecent() {
         wrap.querySelectorAll('.album-card[data-recent-idx]').forEach(card => {
           const g = groups[+card.dataset.recentIdx];
           if (!g) return;
-          // Click card → show the songs we already have (no DB re-query)
           card.addEventListener('click', () => {
             const title = g.single ? (g.title || g.artist || '') : (g.album || '');
-            setTitle(title);
             setBack(() => viewRecent());
-            showSongs(g.songs, title);
+            // For album groups, load the full album from DB so all tracks show —
+            // g.songs may only contain the subset returned by the recent-added API
+            // (e.g. when a single new track was added to an existing album folder).
+            if (!g.single && g.album) {
+              viewAlbumSongs(g.album, g.artist, () => viewRecent(), { skipAOFilter: true });
+            } else {
+              setTitle(title);
+              showSongs(g.songs, title);
+            }
           });
         });
 
@@ -8240,10 +8246,16 @@ async function viewHome() {
       card.addEventListener('click', () => {
         const g = _recentAlbumGroups[parseInt(card.dataset.groupIdx, 10)];
         if (!g) return;
-        const sorted = [...g.songs].sort((a, b) => (a.track || 999) - (b.track || 999));
-        setTitle(g.album || t('player.home.recentlyAdded'));
         setBack(viewHome);
-        showSongs(sorted, null, g.album || null);
+        // Load full album from DB — g.songs may be partial if only some tracks
+        // were recently added to an existing album folder.
+        if (g.album) {
+          viewAlbumSongs(g.album, g.artist, viewHome, { skipAOFilter: true });
+        } else {
+          const sorted = [...g.songs].sort((a, b) => (a.track || 999) - (b.track || 999));
+          setTitle(t('player.home.recentlyAdded'));
+          showSongs(sorted, null, null);
+        }
       });
     });
   }

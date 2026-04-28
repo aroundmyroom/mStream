@@ -21,6 +21,15 @@
 - Percentage column right-aligned; label column given `min-width:160px`
 - Fixed double-padding on the ↳ rsgain/ffmpeg sub-rows
 
+### fix: Recently Added / Home shelf album card shows only partial track list
+- Clicking an album card in Recently Added (or the Home shelf) called `showSongs(g.songs)` which only contains the tracks returned by the recent-added API — if a single new track was added to an existing album folder, only that 1 track showed instead of the full album
+- Fixed: album card click now calls `viewAlbumSongs()` to load the complete album from DB; `showSongs` fallback retained for singles/no-album cards
+
+### fix: scanner ignores updated directory cover art (cover.jpg replaced on disk)
+- When `art_source = 'directory'`, the scanner only re-extracted art when `aaFile` was NULL or the cache file was deleted — it never detected when a `cover.jpg` was replaced with a newer file while audio files remained unchanged
+- Two new cases now trigger `_needsArt`: (1) the stored `cover_file` no longer exists on disk (renamed/replaced), (2) the stored `cover_file` mtime is newer than the audio file's last-scanned `modified` timestamp
+- Both the single-file (`get-file`) and batch (`batch-get-file`) scanner endpoints updated
+
 ### fix: Tag Workshop regression — restored from v6.13.8
 - `viewTagWorkshop` function (475 lines), `renderTagWorkshop`, and all `_twFiles` state lost during v6.14.0 merge; fully restored
 - Tag Workshop button (`#fe-tw-btn`) in File Explorer toolbar restored
