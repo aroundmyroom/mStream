@@ -30,6 +30,12 @@
 - Two new cases now trigger `_needsArt`: (1) the stored `cover_file` no longer exists on disk (renamed/replaced), (2) the stored `cover_file` mtime is newer than the audio file's last-scanned `modified` timestamp
 - Both the single-file (`get-file`) and batch (`batch-get-file`) scanner endpoints updated
 
+### feat: branded Milkdrop preset + text overlay — "aroundmyroom - mStream Velvet"
+- New Butterchurn preset injected directly into the preset list: `aroundmyroom - mStream Velvet`
+- Purple/violet/magenta color palette cycling through the mStream Velvet brand hues; bass-reactive zoom pulse, treble-reactive warp, gentle auto-rotation, audio-reactive wave with hue-matching color
+- First preset shown when the visualizer is opened (user can cycle to others with Next/Prev)
+- When this preset is active a 2D canvas overlay renders "mStream Velvet" (large, bold) + "aroundmyroom" (smaller) at the bottom of the screen in animated hue-cycling gradient text with glow that pulses with bass; overlay hides automatically when switching to a different preset
+
 ### fix: Tag Workshop regression — restored from v6.13.8
 - `viewTagWorkshop` function (475 lines), `renderTagWorkshop`, and all `_twFiles` state lost during v6.14.0 merge; fully restored
 - Tag Workshop button (`#fe-tw-btn`) in File Explorer toolbar restored

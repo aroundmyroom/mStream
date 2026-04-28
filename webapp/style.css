@@ -1791,8 +1791,10 @@ body.vu-needle-mode .eq-panel{bottom:calc(var(--player) + 8px);}
   display:flex;flex-direction:column;
 }
 .viz-canvas{flex:1;display:block;width:100%;min-height:0;}
-.spec-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;background:#000;z-index:1;}
-.am-container{position:absolute;inset:0;width:100%;height:100%;z-index:1;background:#000;cursor:pointer;}
+/* Brand text overlay: sits above WebGL canvas, below toolbar/song info; pointer-events:none so it never blocks interaction */
+.viz-brand-canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;}
+.spec-canvas{position:absolute;inset:0;width:100%;height:100%;display:block;background:#000;z-index:2;}
+.am-container{position:absolute;inset:0;width:100%;height:100%;z-index:2;background:#000;cursor:pointer;}
 .am-container canvas{width:100%!important;height:100%!important;}
 /* When spec-canvas is active it overlays the butterchurn canvas */
 .viz-bar{

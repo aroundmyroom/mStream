@@ -3992,6 +3992,89 @@ const VIZ = (() => {
   let cycleTimer = null, frameId = null;
   const CYCLE_MS = 15000;
 
+  // ── aroundmyroom - mStream Velvet branded preset ───────────
+  const _VELVET_PRESET_KEY = 'aroundmyroom - mStream Velvet';
+  const _VELVET_PRESET = {
+    baseVals: {
+      rating: 5, gammaadj: 1.8, decay: 0.975, echo_zoom: 1.0, echo_orient: 0,
+      wave_mode: 0, additivewave: 1, wave_brighten: 0, wrap: 0,
+      darken_center: 0, darken: 0, wave_a: 0.85, wave_scale: 0.8,
+      wave_smoothing: 0.7, modwavealphastart: 0.4, modwavealphaend: 1.5,
+      warpanimspeed: 0.8, warpscale: 1.5, zoomexp: 1.0, zoom: 1.0, rot: 0, warp: 0.3,
+      cx: 0.5, cy: 0.5, dx: 0, dy: 0, sx: 1, sy: 1,
+      wave_r: 0.6, wave_g: 0.0, wave_b: 1.0,
+      ob_size: 0.007, ob_r: 0.5, ob_g: 0.0, ob_b: 0.8, ob_a: 0.5,
+      ib_size: 0.003, ib_r: 0.3, ib_g: 0.0, ib_b: 0.5, ib_a: 0.3,
+      mv_x: 24, mv_y: 18, mv_dx: 0, mv_dy: 0, mv_l: 0.85,
+      mv_r: 0.5, mv_g: 0.0, mv_b: 0.9, mv_a: 0.25,
+    },
+    init_eqs_str: 'a.q1=0;a.q2=0;a.q3=0.3;a.q4=0;',
+    frame_eqs_str: 'a.q1+=0.006*(1+0.3*a.bass_att);a.q2+=0.015*(1+0.5*a.treb_att);a.q3=0.85*a.q3+0.15*a.bass;a.q4=0.8*a.q4+0.2*a.treb;a.zoom=1+0.05*a.q3;a.rot=0.0015*Math.sin(a.time*0.2)+0.0005*a.mid_att;a.warp=0.25+0.4*a.q4;a.decay=0.975-0.015*a.q3;a.wave_r=0.45+0.45*Math.sin(a.q1);a.wave_g=0.1+0.15*Math.sin(a.q1+1.7);a.wave_b=0.75+0.25*Math.sin(a.q1+3.2);a.mv_r=a.wave_r;a.mv_g=a.wave_g;a.mv_b=a.wave_b;a.ob_r=a.wave_r*0.7;a.ob_g=a.wave_g*0.5;a.ob_b=a.wave_b*0.9;a.ob_a=0.3+0.4*a.q3;',
+    pixel_eqs_str: 'a.zoom=1.003+0.04*a.q3*(1-a.rad*0.7);',
+    shapes: [
+      { baseVals: { enabled: 0 } }, { baseVals: { enabled: 0 } },
+      { baseVals: { enabled: 0 } }, { baseVals: { enabled: 0 } },
+    ],
+    waves: [
+      {
+        baseVals: { enabled: 1, usedots: 0, thick: 1, additive: 1, r: 0.6, g: 0.0, b: 1.0, a: 0.7 },
+        init_eqs_str: '',
+        frame_eqs_str: 'a.r=0.45+0.45*Math.sin(a.q1);a.g=0.1+0.15*Math.sin(a.q1+1.7);a.b=0.75+0.25*Math.sin(a.q1+3.2);a.a=0.5+0.4*a.q3;a.scaling=0.6+0.3*a.bass_att;',
+        point_eqs_str: '',
+      },
+      { baseVals: { enabled: 0 } }, { baseVals: { enabled: 0 } }, { baseVals: { enabled: 0 } },
+    ],
+  };
+  // Brand text overlay state (active only when velvet preset is running)
+  let _brandActive = false, _brandHue = 250, _brandBass = 0;
+  function _drawBrand() {
+    const bc = document.getElementById('viz-brand-canvas');
+    if (!bc || !_brandActive) return;
+    const bctx = bc.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const W = (bc.clientWidth  || window.innerWidth)  * dpr;
+    const H = (bc.clientHeight || window.innerHeight) * dpr;
+    if (bc.width !== W || bc.height !== H) { bc.width = W; bc.height = H; }
+    bctx.clearRect(0, 0, W, H);
+    _brandHue = (_brandHue + 0.25) % 360;
+    // Smoothed bass level for reactivity
+    if (analyserL) {
+      const d = new Uint8Array(analyserL.frequencyBinCount);
+      analyserL.getByteFrequencyData(d);
+      let sum = 0; for (let i = 0; i < 14; i++) sum += d[i];
+      _brandBass = 0.88 * _brandBass + 0.12 * (sum / (14 * 255));
+    }
+    const glow   = (18 + 28 * _brandBass) * dpr;
+    const alpha  = 0.42 + 0.38 * _brandBass;
+    const floatY = H * 0.004 * Math.sin(performance.now() * 0.0006);
+    const mainSz = Math.max(12 * dpr, Math.floor(H * 0.06));
+    const subSz  = Math.max(8  * dpr, Math.floor(H * 0.028));
+    const cx     = W * 0.5;
+    const cy     = H * 0.81 + floatY;
+    const hue2   = (_brandHue + 50) % 360;
+    const col1   = `hsl(${_brandHue},78%,68%)`;
+    const col2   = `hsl(${hue2},78%,68%)`;
+    const grad1  = bctx.createLinearGradient(cx - W * 0.14, 0, cx + W * 0.14, 0);
+    grad1.addColorStop(0, col1); grad1.addColorStop(1, col2);
+    const grad2  = bctx.createLinearGradient(cx - W * 0.08, 0, cx + W * 0.08, 0);
+    grad2.addColorStop(0, col2); grad2.addColorStop(1, col1);
+    bctx.save();
+    bctx.globalAlpha    = alpha;
+    bctx.textAlign      = 'center';
+    bctx.textBaseline   = 'middle';
+    bctx.shadowColor    = col1;
+    bctx.shadowBlur     = glow;
+    bctx.font           = `bold ${mainSz}px system-ui,sans-serif`;
+    bctx.fillStyle      = grad1;
+    bctx.fillText('mStream Velvet', cx, cy);
+    bctx.font           = `${subSz}px system-ui,sans-serif`;
+    bctx.shadowColor    = col2;
+    bctx.shadowBlur     = glow * 0.55;
+    bctx.fillStyle      = grad2;
+    bctx.fillText('aroundmyroom', cx, cy + mainSz * 0.68 + subSz * 0.5);
+    bctx.restore();
+  }
+
   // Top-level mode: 0 = Milkdrop/butterchurn, 1 = custom spectrum, 2 = AudioMotion
   let vizTopMode = 0;
 
@@ -4124,20 +4207,29 @@ const VIZ = (() => {
     if (!visualizer || !presetKeys.length) return;
     visualizer.loadPreset(presets[presetKeys[presetIndex]], blend ?? 5.7);
     setPresetLabel();
+    // Show brand text overlay only when the velvet preset is active
+    _brandActive = (presetKeys[presetIndex] === _VELVET_PRESET_KEY);
+    if (!_brandActive) {
+      const bc = document.getElementById('viz-brand-canvas');
+      if (bc) { const bctx = bc.getContext('2d'); bctx.clearRect(0, 0, bc.width, bc.height); }
+    }
   }
 
   function startRender() {
-    function frame() { frameId = requestAnimationFrame(frame); visualizer.render(); }
+    function frame() { frameId = requestAnimationFrame(frame); visualizer.render(); _drawBrand(); }
     frameId = requestAnimationFrame(frame);
   }
 
   function initViz(canvas) {
     if (!window.butterchurn) { toast(t('player.toast.visualizerLoading')); return; }
     presets = {};
+    presets[_VELVET_PRESET_KEY] = _VELVET_PRESET;   // inject branded preset first
     if (window.butterchurnPresets)      Object.assign(presets, butterchurnPresets.getPresets());
     if (window.butterchurnPresetsExtra) Object.assign(presets, butterchurnPresetsExtra.getPresets());
     presetKeys  = Object.keys(presets);
-    presetIndex = Math.floor(Math.random() * presetKeys.length);
+    // Start with the branded velvet preset; fall back to random if not found
+    presetIndex = presetKeys.indexOf(_VELVET_PRESET_KEY);
+    if (presetIndex < 0) presetIndex = Math.floor(Math.random() * presetKeys.length);
     canvas.width  = canvas.clientWidth  || window.innerWidth;
     canvas.height = canvas.clientHeight || window.innerHeight;
     visualizer = butterchurn.default.createVisualizer(audioCtx, canvas, {
@@ -5109,6 +5201,7 @@ const VIZ = (() => {
       document.getElementById('viz-open-btn').blur();
       if (frameId)    { cancelAnimationFrame(frameId);    frameId    = null; }
       if (specFrameId){ cancelAnimationFrame(specFrameId); specFrameId = null; }
+      _brandActive = false;
       stopAudioMotion();
       stopLyricRaf();
       lyricLines = []; lyricActiveIdx = -1;
