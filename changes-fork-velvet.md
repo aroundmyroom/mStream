@@ -18,6 +18,14 @@
 - `getTrackForAccept` and `getTracksForAccept` only matched `tag_status IN ('needs_review', 'confirmed')` — tracks the user had previously skipped returned `{ok: true, skipped: true}` without writing any tags to disk
 - Both queries now also include `'skipped'` so previously-skipped tracks can be re-accepted and written
 
+### feat: Docker PUID/PGID user mapping
+- Container now supports `PUID` / `PGID` environment variables to run mStream as the correct OS user
+- `docker-entrypoint.sh` creates the matching user/group inside the container and uses `gosu` to drop privileges before starting Node.js
+- Solves tag edits, recordings, and downloads being written as `root:root` on NAS volumes
+- Default is `PUID=0 PGID=0` (root) for full backward compatibility — existing deployments need no changes unless they want correct ownership
+- Migration: `chown -R PUID:PGID` on `save/`, `image-cache/`, `waveform-cache/` then add `PUID`/`PGID` to `compose.yaml`
+- `compose.yaml` and `docs/docker.md` updated with full instructions
+
 ### feat: ReplayGain 2.0 / EBU R128 loudness normalisation
 - New background worker measures every audio file with **rsgain** (primary) or **ffmpeg** (fallback), storing per-file EBU R128 values (`rg_integrated_lufs`, `rg_true_peak_dbfs`, `rg_track_gain_db`, `rg_lra`, `rg_album_gain_db`, `rg_album_peak_dbfs`, `rg_measured_ts`, `rg_measurement_tool`)
 - Also stores existing ReplayGain tags from files (`rg_tag_track_gain`, `rg_tag_track_peak`, `rg_tag_album_gain`, `rg_tag_album_peak`) and R128 tags (`r128_track_gain_db`, `r128_album_gain_db`) for playback reference

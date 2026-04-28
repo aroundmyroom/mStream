@@ -92,6 +92,51 @@ No manual steps are needed — tagging a release is enough.
 
 ---
 
+## User / permission mapping (PUID / PGID)
+
+By default the container runs as **root**. This means any files mStream writes — tag edits, recordings, downloaded YouTube tracks — will be owned by `root` on your host. On a NAS or shared volume that is usually wrong.
+
+Set `PUID` and `PGID` to the UID and GID of the user that owns your music files. mStream Velvet will drop privileges to that user before starting.
+
+### Find your UID / GID
+
+On the host (or in the NAS shell):
+
+```shell
+id <your-music-user>
+# example output:  uid=1000(soulseek) gid=1000(soulseek)
+```
+
+### Set them in compose.yaml
+
+```yaml
+    environment:
+      PUID: 1000   # replace with your UID
+      PGID: 1000   # replace with your GID
+```
+
+That's all — the entrypoint creates the matching user inside the container and runs Node.js as that user.
+
+### Migration from a root container
+
+If you previously ran without PUID/PGID, the `save/`, `image-cache/`, and `waveform-cache/` directories on your host will be owned by root. Fix them before restarting:
+
+```shell
+docker compose down
+
+# Replace 1000:1000 with your actual PUID:PGID
+chown -R 1000:1000 /path/to/save \
+                   /path/to/image-cache \
+                   /path/to/waveform-cache
+
+# Add PUID/PGID to compose.yaml, then:
+docker compose up -d
+```
+
+Your **music files** are already owned by your NAS user — do **not** chown those.
+
+---
+
 ## First run — adding your music library
 
 On first start mStream creates a blank config at `save/conf/default.json`.

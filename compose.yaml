@@ -22,6 +22,33 @@ services:
       - /home/mStream/image-cache:/app/image-cache
     environment:
       # ===========================================================================
+      # USER / PERMISSION MAPPING  (PUID / PGID)
+      # ===========================================================================
+      #
+      # Set PUID and PGID to the UID and GID of the user that owns your music files.
+      # mStream Velvet will run as that user so tag edits, recordings, and downloads
+      # are written with the correct ownership — essential on NAS setups.
+      #
+      # How to find the right values:
+      #   On the host (or NAS shell):  id <your-music-user>
+      #   Example output:  uid=1000(soulseek) gid=1000(soulseek)
+      #   → set PUID: 1000 and PGID: 1000
+      #
+      # If you omit these (or set them to 0) the container runs as root —
+      # this is the legacy default and still works, but files written by mStream
+      # (tag edits, artwork, recordings) will be owned by root on your host.
+      #
+      # MIGRATION from root to PUID/PGID:
+      #   1. Stop the container:  docker compose down
+      #   2. Fix ownership of mStream's own data volumes on the host:
+      #        chown -R 1000:1000 /path/to/save /path/to/image-cache /path/to/waveform-cache
+      #      (Your music files are already owned by the right user — do NOT chown those.)
+      #   3. Add PUID/PGID below and restart:  docker compose up -d
+      # ---------------------------------------------------------------------------
+      PUID: 1000
+      PGID: 1000
+
+      # ===========================================================================
       # FIRST-RUN AUTO-CONFIG  (env vars are OPTIONAL - read the note below first)
       # ===========================================================================
       #

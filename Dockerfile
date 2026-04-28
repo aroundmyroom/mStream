@@ -2,7 +2,7 @@ FROM node:24-slim
 
 # Build tools needed for npm native modules on Debian slim
 # hadolint ignore=DL3008
-RUN apt-get update && apt-get install -y --no-install-recommends wget xz-utils && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends wget xz-utils gosu && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -79,6 +79,10 @@ RUN arch="$(uname -m)"; \
 # can initialise even when no volume is mounted on first start.
 RUN mkdir -p save/conf save/db save/logs save/sync image-cache waveform-cache
 
+# Entrypoint script for PUID/PGID privilege drop
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # First-run auto-config env vars - ALL OPTIONAL, see compose.yaml for full docs.
 # These are a convenience for simple single-library setups only.
 # For multiple volumes, child-vpaths, albumsOnly, or any advanced config,
@@ -94,6 +98,13 @@ ENV MSTREAM_AUDIOBOOKS_SUBDIR=""
 ENV MSTREAM_RECORDINGS_SUBDIR=""
 ENV MSTREAM_YOUTUBE_SUBDIR=""
 
+# PUID/PGID — set to match the owner of your music files so tag writes,
+# recordings and downloads use the correct file ownership.
+# Default 0 = run as root (legacy behaviour, backward compatible).
+ENV PUID=0
+ENV PGID=0
+
 EXPOSE 3000
 
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "cli-boot-wrapper.js"]
