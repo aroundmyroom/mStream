@@ -4053,7 +4053,11 @@ const VIZ = (() => {
   // Frequency bands for beat detection and reactivity
   let _fwBassEnv = 0, _fwBassAvg = 0;
   let _fwMidEnv  = 0, _fwTrebEnv = 0;
-  let _fwBeatJump = 0;   // upward kick applied to text on each beat
+  // Text wander: position expressed as 0..1 fractions of W/H
+  // Built from 4 overlapping sine waves at different speeds + music push
+  // px1/py1 = slow drift, px2/py2 = medium circle, px3/py3 = fast wobble
+  // _txVx/_txVy = velocity kicked by each beat, decays each frame
+  let _txVx = 0, _txVy = 0;
   const _fwRockets = [];   // { x, y, vy, hue, palette, energy, trail[] }
   const _fwSparks  = [];   // { x, y, vx, vy, hue, life, maxLife, size, isGlitter }
   const _fwRings   = [];   // expanding flash rings: { x, y, r, maxR, hue, alpha }
@@ -4210,15 +4214,19 @@ const VIZ = (() => {
     const cooldown  = isBeat ? Math.max(220, 700 - 500 * _fwBassEnv) : 1800;
     if (now - _fwLastLaunch > cooldown) {
       const energy = Math.min(1, _fwBassEnv * 2.2);
-      // Kick the text upward — harder hit = bigger jump
-      _fwBeatJump = -(H * (0.018 + 0.032 * energy));
+      // Kick the text in a random direction with beat-scaled strength
+      const kickAngle = Math.random() * Math.PI * 2;
+      const kickMag   = 0.012 + 0.025 * energy;  // fraction of screen per frame
+      _txVx += Math.cos(kickAngle) * kickMag;
+      _txVy += Math.sin(kickAngle) * kickMag;
       _fwLaunch(W, H, energy);
       if (energy > 0.55) _fwLaunch(W, H, energy * 0.85);
       if (energy > 0.80) _fwLaunch(W, H, energy * 0.70);
       _fwLastLaunch = now;
     }
-    // Decay the beat jump (spring back down)
-    _fwBeatJump *= 0.82;
+    // Decay velocity each frame (friction)
+    _txVx *= 0.88;
+    _txVy *= 0.88;
 
     // ── Flash rings ───────────────────────────────────────────
     for (let i = _fwRings.length - 1; i >= 0; i--) {
@@ -4290,15 +4298,37 @@ const VIZ = (() => {
       bctx.fill();
     }
 
-    // ── Text ──────────────────────────────────────────────────
+    // ── Text — wanders across the full screen ─────────────────
     const glow   = (12 + 28 * _fwBassEnv + 10 * _fwTrebEnv) * dpr;
     const alpha  = Math.min(0.95, 0.50 + 0.45 * _fwBassEnv + 0.15 * _fwMidEnv);
-    const floatY = H * 0.004 * Math.sin(now * 0.0006) + H * 0.002 * Math.sin(now * 0.0011) + _fwBeatJump;
     const mainSz = Math.max(12 * dpr, Math.floor(H * 0.058));
     const subSz  = Math.max(8  * dpr, Math.floor(H * 0.026));
-    const cx     = W * 0.5;
     const thxSz  = Math.max(7  * dpr, Math.floor(H * 0.022));
-    const cy     = H * 0.81 + floatY;
+    const t0 = now * 0.001;
+    // Four overlapping waves at different speeds/phases → continuous wander
+    // X: slow drift + medium circle + fast wobble + beat velocity
+    const wanderX =
+      0.38 * Math.sin(t0 * 0.13 + 1.1) +         // slow left-right
+      0.22 * Math.cos(t0 * 0.29 + 2.3) +          // medium circle X
+      0.10 * Math.sin(t0 * 0.71 + 0.7) +          // fast wobble
+      0.09 * Math.sin(t0 * 0.47);                  // second drift
+    // Y: different phases so it doesn't just go horizontal
+    const wanderY =
+      0.28 * Math.cos(t0 * 0.17 + 0.5) +          // slow up-down
+      0.18 * Math.sin(t0 * 0.31 + 1.9) +          // medium circle Y
+      0.08 * Math.cos(t0 * 0.63 + 3.1) +          // fast wobble
+      0.07 * Math.cos(t0 * 0.43 + 0.2);           // second drift
+    // Music energy widens the wander range
+    const energy = _fwBassEnv + _fwMidEnv * 0.5;
+    const rangeX = W * (0.30 + 0.18 * energy);
+    const rangeY = H * (0.22 + 0.14 * energy);
+    // Beat velocity pushes text on top of the wander (in pixels)
+    const bvX = _txVx * W;
+    const bvY = _txVy * H;
+    // Final position: centred + wander + beat push, clamped to safe margins
+    const margin = mainSz * 1.2;
+    const cx = Math.max(margin, Math.min(W - margin, W * 0.5 + wanderX * rangeX + bvX));
+    const cy = Math.max(margin, Math.min(H - margin, H * 0.5 + wanderY * rangeY + bvY));
     const hue2   = (_brandHue + 55) % 360;
     const col1   = `hsl(${_brandHue},80%,68%)`;
     const col2   = `hsl(${hue2},80%,68%)`;
