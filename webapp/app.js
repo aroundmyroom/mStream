@@ -4050,32 +4050,84 @@ const VIZ = (() => {
   };
   // Brand overlay + fireworks state (active only when velvet preset is running)
   let _brandActive = false, _brandHue = 250;
-  // Separate frequency bands for beat detection
-  let _fwBassEnv = 0, _fwBassAvg = 0;   // fast/slow EMA of bass → onset detection
-  let _fwMidEnv  = 0, _fwTrebEnv = 0;   // mid + treble for colour / spark FX
-  const _fwRockets = [];   // rising rockets: { x, y, vy, hue, energy, trail[] }
-  const _fwSparks  = [];   // explosion sparks: { x, y, vx, vy, hue, life, maxLife, size, treb }
+  // Frequency bands for beat detection and reactivity
+  let _fwBassEnv = 0, _fwBassAvg = 0;
+  let _fwMidEnv  = 0, _fwTrebEnv = 0;
+  const _fwRockets = [];   // { x, y, vy, hue, palette, energy, trail[] }
+  const _fwSparks  = [];   // { x, y, vx, vy, hue, life, maxLife, size, isGlitter }
+  const _fwRings   = [];   // expanding flash rings: { x, y, r, maxR, hue, alpha }
   let _fwLastLaunch = 0;
 
+  // Colour palette types: mono=tight hue band, duo=complementary pair,
+  // rainbow=full spectrum spread, triadic=3 hues 120° apart
+  const _FW_PALETTES = ['mono', 'mono', 'duo', 'rainbow', 'triadic', 'rainbow'];
+
+  function _fwSparkHue(baseHue, palette, i, count) {
+    switch (palette) {
+      case 'duo':
+        return i % 2 === 0
+          ? (baseHue + Math.random() * 28 - 14 + 360) % 360
+          : (baseHue + 180 + Math.random() * 28 - 14 + 360) % 360;
+      case 'rainbow':
+        return (i / count * 360 + Math.random() * 15) % 360;
+      case 'triadic':
+        return (baseHue + [0, 120, 240][i % 3] + Math.random() * 22 - 11 + 360) % 360;
+      default: // 'mono'
+        return (baseHue + Math.random() * 65 - 32 + 360) % 360;
+    }
+  }
+
   function _fwLaunch(W, H, energy) {
-    // Rocket speed, target height, and hue all scale with energy
-    const spd  = H * (0.010 + 0.014 * energy);
-    const hue  = Math.random() * 360;
+    const hue     = Math.random() * 360;
+    const palette = _FW_PALETTES[Math.floor(Math.random() * _FW_PALETTES.length)];
     _fwRockets.push({
       x: W * (0.08 + Math.random() * 0.84),
       y: H,
-      vy: -spd,
-      hue, energy,
+      vy: -(H * (0.010 + 0.014 * energy)),
+      hue, palette, energy,
       trail: [],
     });
   }
 
   function _fwExplode(r, W, H) {
-    // Stronger beat → more sparks, faster, bigger, longer life
-    const e     = r.energy;
-    const count = Math.floor(45 + 90 * e + Math.random() * 20);
-    const spMul = 0.7 + 1.4 * e;
-    const lifeMul = 0.7 + 0.7 * e;
+    const e       = r.energy;
+    const count   = Math.floor(55 + 100 * e + Math.random() * 25);
+    const spMul   = 0.7 + 1.5 * e;
+    const lifeMul = 0.7 + 0.8 * e;
+
+    // Flash ring expanding outward from explosion point
+    _fwRings.push({
+      x: r.x, y: r.y, r: W * 0.005,
+      maxR: W * (0.042 + 0.085 * e),
+      hue: r.hue, alpha: 0.92,
+    });
+    // Second, slightly offset ring on big hits for a double-ring effect
+    if (e > 0.55) {
+      _fwRings.push({
+        x: r.x, y: r.y, r: W * 0.003,
+        maxR: W * (0.025 + 0.055 * e),
+        hue: (r.hue + 40) % 360, alpha: 0.70,
+      });
+    }
+
+    // Glitter burst — very short-lived bright dots (the initial flash pop)
+    const glCount = Math.floor(12 + 22 * e);
+    for (let i = 0; i < glCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = W * 0.006 * (0.3 + Math.random() * 0.8);
+      const gl    = Math.floor(7 + Math.random() * 11);
+      _fwSparks.push({
+        x: r.x, y: r.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        hue: (r.hue + Math.random() * 45) % 360,
+        life: gl, maxLife: gl,
+        size: Math.max(0.8, W * 0.0014),
+        isGlitter: true,
+      });
+    }
+
+    // Main coloured sparks — hue assigned by palette type
     for (let i = 0; i < count; i++) {
       const angle = (Math.PI * 2 * i) / count + Math.random() * 0.22;
       const speed = W * 0.0038 * spMul * (0.4 + Math.random() * 0.9);
@@ -4084,10 +4136,10 @@ const VIZ = (() => {
         x: r.x, y: r.y,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
-        hue: (r.hue + Math.random() * 50 - 25 + 360) % 360,
+        hue: _fwSparkHue(r.hue, r.palette, i, count),
         life, maxLife: life,
         size: Math.max(1.2, W * 0.002 * spMul * (0.5 + Math.random() * 0.8)),
-        treb: _fwTrebEnv,
+        isGlitter: false,
       });
     }
   }
@@ -4105,41 +4157,45 @@ const VIZ = (() => {
     const now = performance.now();
 
     // ── Frequency analysis ────────────────────────────────────
-    // Read full spectrum; derive 3 bands: sub-bass, mid, treble
     let rawBass = 0, rawMid = 0, rawTreb = 0;
     if (analyserL) {
       const BINS = analyserL.frequencyBinCount;
       const d = new Uint8Array(BINS);
       analyserL.getByteFrequencyData(d);
-      // Sub-bass: bins 1–5 (~20–120 Hz)
       rawBass = (d[1]+d[2]+d[3]+d[4]+d[5]) / (5 * 255);
-      // Mid: bins 15–45 (~350–1100 Hz)
       let ms = 0; for (let i = 15; i < 45; i++) ms += d[i];
       rawMid = ms / (30 * 255);
-      // Treble: bins 70–110 (~1700–2600 Hz)
       let ts = 0; for (let i = 70; i < 110; i++) ts += d[i];
       rawTreb = ts / (40 * 255);
     }
-    // Fast EMA (reacts quickly to beats)
     _fwBassEnv = 0.55 * _fwBassEnv + 0.45 * rawBass;
     _fwMidEnv  = 0.60 * _fwMidEnv  + 0.40 * rawMid;
     _fwTrebEnv = 0.50 * _fwTrebEnv + 0.50 * rawTreb;
-    // Slow EMA (background average — used for onset detection)
     _fwBassAvg = 0.97 * _fwBassAvg + 0.03 * rawBass;
 
-    // ── Beat / onset detection → launch rockets ───────────────
-    // A beat is when the fast env spikes above the slow average by ≥40%
-    const bassRatio  = _fwBassAvg > 0.01 ? _fwBassEnv / _fwBassAvg : 0;
-    const isBeat     = bassRatio > 1.40 && _fwBassEnv > 0.18;
-    // Cooldown: shorter on heavy music so more rockets fly
-    const cooldown   = isBeat ? Math.max(220, 700 - 500 * _fwBassEnv) : 1800;
+    // ── Launch rockets on beat ────────────────────────────────
+    const bassRatio = _fwBassAvg > 0.01 ? _fwBassEnv / _fwBassAvg : 0;
+    const isBeat    = bassRatio > 1.40 && _fwBassEnv > 0.18;
+    const cooldown  = isBeat ? Math.max(220, 700 - 500 * _fwBassEnv) : 1800;
     if (now - _fwLastLaunch > cooldown) {
-      const energy = Math.min(1, _fwBassEnv * 2.2); // normalise to 0-1
+      const energy = Math.min(1, _fwBassEnv * 2.2);
       _fwLaunch(W, H, energy);
-      // Strong beats fire 2–3 rockets simultaneously
       if (energy > 0.55) _fwLaunch(W, H, energy * 0.85);
       if (energy > 0.80) _fwLaunch(W, H, energy * 0.70);
       _fwLastLaunch = now;
+    }
+
+    // ── Flash rings ───────────────────────────────────────────
+    for (let i = _fwRings.length - 1; i >= 0; i--) {
+      const rg = _fwRings[i];
+      rg.r    += (rg.maxR - rg.r) * 0.11;
+      rg.alpha *= 0.87;
+      if (rg.alpha < 0.02) { _fwRings.splice(i, 1); continue; }
+      bctx.beginPath();
+      bctx.arc(rg.x, rg.y, rg.r, 0, Math.PI * 2);
+      bctx.strokeStyle = `hsla(${rg.hue},100%,90%,${rg.alpha})`;
+      bctx.lineWidth   = Math.max(1, W * 0.0022 * rg.alpha);
+      bctx.stroke();
     }
 
     // ── Rockets ───────────────────────────────────────────────
@@ -4149,13 +4205,11 @@ const VIZ = (() => {
       if (r.trail.length > 16) r.trail.shift();
       r.y += r.vy;
       r.vy *= 0.984;
-      // Explode at top of arc or if it leaves the upper 12% of screen
       if (Math.abs(r.vy) < H * 0.0016 || r.y < H * 0.10) {
         _fwExplode(r, W, H);
         _fwRockets.splice(i, 1);
         continue;
       }
-      // Trail — brightness pulses with mid energy
       for (let t = 0; t < r.trail.length; t++) {
         const ta = (t / r.trail.length) * (0.55 + 0.35 * _fwMidEnv);
         bctx.beginPath();
@@ -4163,7 +4217,6 @@ const VIZ = (() => {
         bctx.fillStyle = `hsla(${r.hue},100%,85%,${ta})`;
         bctx.fill();
       }
-      // Head — size pulses with bass
       const headR = Math.max(2, W * 0.0022 * (1 + 0.5 * _fwBassEnv));
       bctx.beginPath();
       bctx.arc(r.x, r.y, headR, 0, Math.PI * 2);
@@ -4172,19 +4225,29 @@ const VIZ = (() => {
     }
 
     // ── Sparks ────────────────────────────────────────────────
-    // Gravity lightens with bass (music "lifts" the sparks)
     const gravity = H * (0.00032 - 0.00010 * _fwBassEnv);
     for (let i = _fwSparks.length - 1; i >= 0; i--) {
       const s = _fwSparks[i];
+      if (s.isGlitter) {
+        // Glitter: tiny bright flash, no gravity, just fades fast
+        s.x += s.vx * 0.7; s.y += s.vy * 0.7;
+        s.vx *= 0.82; s.vy *= 0.82;
+        s.life--;
+        if (s.life <= 0) { _fwSparks.splice(i, 1); continue; }
+        const t = s.life / s.maxLife;
+        bctx.beginPath();
+        bctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        bctx.fillStyle = `hsla(${s.hue},60%,98%,${t})`;
+        bctx.fill();
+        continue;
+      }
       s.x += s.vx; s.y += s.vy;
       s.vy += gravity;
-      // Drag eases with treble — sparks fly farther on bright hits
       const drag = 0.976 - 0.012 * _fwTrebEnv;
       s.vx *= drag; s.vy *= drag;
       s.life--;
       if (s.life <= 0) { _fwSparks.splice(i, 1); continue; }
-      const t = s.life / s.maxLife;
-      // Brightness spikes on treble hits
+      const t   = s.life / s.maxLife;
       const lum = Math.min(95, 55 + 35 * t + 25 * _fwTrebEnv);
       bctx.beginPath();
       bctx.arc(s.x, s.y, s.size * (0.6 + 0.4 * t), 0, Math.PI * 2);
@@ -4192,7 +4255,7 @@ const VIZ = (() => {
       bctx.fill();
     }
 
-    // ── Text — glows on bass, shimmers on treble ──────────────
+    // ── Text ──────────────────────────────────────────────────
     const glow   = (12 + 28 * _fwBassEnv + 10 * _fwTrebEnv) * dpr;
     const alpha  = Math.min(0.95, 0.50 + 0.45 * _fwBassEnv + 0.15 * _fwMidEnv);
     const floatY = H * 0.005 * Math.sin(now * 0.0006) + H * 0.003 * Math.sin(now * 0.0011);
