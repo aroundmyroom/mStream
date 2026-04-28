@@ -4088,6 +4088,11 @@ const VIZ = (() => {
     splitter.connect(analyserR, 1);       // right channel (balance-aware)
     // Apply stored audio output device now that the AudioContext exists
     if (S.outputDeviceId) _applyOutputDevice().catch(() => {});
+    // Apply RG gain + badge for the current song now that _rgGainNode exists.
+    // This handles the page-refresh case: rg data is in localStorage (on the
+    // song object) but _applyRGGain returned early on restore because _rgGainNode
+    // was null. Now that the AudioContext is live, catch up immediately.
+    if (S.queue[S.idx]) _applyRGGain(S.queue[S.idx]);
     } catch (e) {
       console.warn('[mStream] AudioContext init failed — VU meters hidden:', e);
       audioCtx = null;

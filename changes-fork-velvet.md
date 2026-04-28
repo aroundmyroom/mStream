@@ -11,6 +11,11 @@
 - `dj-rg-wrap` was `flex-direction:column` — when the RG badge appeared it added height below the button, causing the Auto-DJ icon to shift upward in the player controls row
 - Badge is now `position:absolute; top:100%` so it floats below the button without affecting its layout position
 
+### fix: RG badge disappears after browser refresh
+- `_applyRGGain` returns early when `_rgGainNode` is `null` (AudioContext not yet created — blocked until first user gesture)
+- After restore from localStorage the badge stayed blank because `_applyRGGain` was never re-called once `_rgGainNode` was finally created
+- Now: `ensureAudio()` calls `_applyRGGain(S.queue[S.idx])` immediately after creating `_rgGainNode`, so the badge (and gain) are applied on first interaction using the `rg` data already present on the song object from localStorage
+
 ### fix: Tag Workshop regression — restored from v6.13.8
 - `viewTagWorkshop` function (475 lines), `renderTagWorkshop`, and all `_twFiles` state lost during v6.14.0 merge; fully restored
 - Tag Workshop button (`#fe-tw-btn`) in File Explorer toolbar restored
