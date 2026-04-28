@@ -7,6 +7,9 @@
 - `norm()` (client) now carries `rg` through to every queue entry
 - `_applyRGGain` now lazy-fetches metadata when `rg` is absent (e.g. queue restored from localStorage); result is cached on the song object to avoid repeat requests
 - RG badge moved to below the Auto-DJ button (`dj-rg-wrap` flex-column layout) for cleaner placement in the player controls row
+### fix: RG badge pushing Auto-DJ icon upward
+- `dj-rg-wrap` was `flex-direction:column` — when the RG badge appeared it added height below the button, causing the Auto-DJ icon to shift upward in the player controls row
+- Badge is now `position:absolute; top:100%` so it floats below the button without affecting its layout position
 
 ### fix: Tag Workshop regression — restored from v6.13.8
 - `viewTagWorkshop` function (475 lines), `renderTagWorkshop`, and all `_twFiles` state lost during v6.14.0 merge; fully restored
