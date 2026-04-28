@@ -1,6 +1,6 @@
 # mStream Velvet Fork — Combined Change Log
 
-## v6.14.0-velvet — April 2026 — The Normalize Version (ReplayGain 2.0 / EBU R128)
+## v6.14.1-velvet — April 2026 — Tag Workshop Fixes & Docker User Mapping
 
 ### fix: RG badge not showing — rg object missing from metadata response; lazy-fetch for restored queue
 - `renderMetadataObj` (server) now includes an `rg` object in every metadata response: `{ trackGain, truePeak, albumGain, albumPeak, src }`; priority chain: measured → R128 tag+5 dB → ReplayGain tag
