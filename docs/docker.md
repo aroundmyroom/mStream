@@ -1,5 +1,42 @@
 # Running mStream Velvet with Docker
 
+> ### ⚠️ Upgrading from v6.14.0 or earlier — action required
+>
+> **v6.14.1 introduces PUID/PGID user mapping.** Before restarting your container after pulling the new image you must:
+>
+> **1. Find your UID/GID** (the user that should own the files mStream writes):
+> ```shell
+> id <your-username>
+> # example output: uid=1000(jan) gid=1000(jan)
+> ```
+>
+> **2. Fix ownership of the mStream data directories on your host** (they were written as root before):
+> ```shell
+> # Replace 1000:1000 with your actual UID:GID
+> chown -R 1000:1000 /path/to/save \
+>                    /path/to/image-cache \
+>                    /path/to/waveform-cache
+> ```
+> Do **not** chown your music library — those files are already owned correctly.
+>
+> **3. Add PUID/PGID to your `compose.yaml`** under `environment:`:
+> ```yaml
+> environment:
+>   PUID: 1000   # replace with your UID
+>   PGID: 1000   # replace with your GID
+> ```
+>
+> **4. Then pull and restart:**
+> ```shell
+> docker compose pull
+> docker compose down
+> docker compose up -d
+> ```
+>
+> If you skip steps 2–3 the container will still start (it falls back to root), but new files created by mStream will be owned by root on your host.
+
+---
+
 ## Updating to the latest release
 
 If you installed via `compose.yaml` with `image: ghcr.io/aroundmyroom/mstream-velvet:latest`:
